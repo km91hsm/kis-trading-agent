@@ -45,6 +45,9 @@ class DaemonDeps:
     stop_event: threading.Event
     dry_run: bool
     notifier: Any = None
+    secrets: Any = None
+    registry: Any = None
+    hooks: Any = None
 
 
 class _DropMaxInstances(logging.Filter):
@@ -228,11 +231,25 @@ class Daemon:
                     self._scheduler.shutdown(wait=wait)
                 except Exception:  # noqa: BLE001 - 종료 중 오류는 무시
                     logger.exception("스케줄러 종료 실패")
+            self._run_teardowns()
             if self._started:
                 self._hb.stop()
         finally:
             self._restore_signals()
             self._lock.release()
+
+    def _run_teardowns(self) -> None:
+        """등록된 잡의 spec.teardown 을 spec 단위로 한 번씩 부른다(per_market 로 펼쳐져도 1회)."""
+        seen: set[int] = set()
+        for job in self._jobs:
+            spec = job.spec
+            if spec.teardown is None or id(spec) in seen:
+                continue
+            seen.add(id(spec))
+            try:
+                spec.teardown(self.deps)
+            except Exception:  # noqa: BLE001 - 정리 실패가 다른 정리·잠금 해제를 막지 않는다
+                logger.exception("teardown 실패 %s", spec.id)
 
     def _restore_signals(self) -> None:
         for sig, old in self._old_handlers.items():

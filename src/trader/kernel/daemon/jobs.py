@@ -76,6 +76,25 @@ def _cron_kwargs(schedule: Any, key: str) -> dict[str, Any]:
     return {"hour": int(m.group(1)), "minute": int(m.group(2)), "timezone": zone}
 
 
+def _interval_seconds(spec: JobSpec, schedule: Any) -> int:
+    """interval 잡 주기(초). schedule_key 가 가리키는 값(정수 ≥ 1)을 우선하고, 키가 없거나 값이
+    None 이면 spec.interval_s 로 폴백한다. 둘 다 없으면 ConfigError."""
+    if spec.schedule_key:
+        try:
+            value = _lookup(schedule, spec.schedule_key)
+        except ConfigError:
+            value = None
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ConfigError(
+                    f"schedule '{spec.schedule_key}' 은 1 이상의 정수(초)여야 합니다: {value!r}"
+                )
+            return value
+    if not spec.interval_s:
+        raise ConfigError(f"잡 {spec.id}: interval 잡에는 interval_s 가 필요합니다")
+    return int(spec.interval_s)
+
+
 def build(
     features: list[Feature], *, schedule: Any, settings: Any, markets: list[str], ctx: Any
 ) -> list[ScheduledJob]:
@@ -105,8 +124,6 @@ def build(
                     )
                     kwargs = _cron_kwargs(schedule, key)
                 else:
-                    if not spec.interval_s:
-                        raise ConfigError(f"잡 {spec.id}: interval 잡에는 interval_s 가 필요합니다")
-                    kwargs = {"seconds": int(spec.interval_s)}
+                    kwargs = {"seconds": _interval_seconds(spec, schedule)}
                 out.append(ScheduledJob(ident, spec, market, kwargs))
     return out

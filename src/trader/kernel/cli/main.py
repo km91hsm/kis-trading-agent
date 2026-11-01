@@ -21,7 +21,7 @@ from trader.kernel.notify import NullNotifier
 from trader.kernel.notify.commands import CommandContext, poll_once
 from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_receiver
 from trader.kernel.platform import paths
-from trader.kernel.registry import discover
+from trader.kernel.registry import discover, hooks
 from trader.kernel.registry.types import Feature
 from trader.kernel.web.app import create_app
 from trader.kernel.web.deps import WebDeps
@@ -46,6 +46,7 @@ class TraderApp(typer.Typer):
 
 
 def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
+    secrets = boot_.secrets or load_secrets()
     return DaemonDeps(
         settings=boot_.settings,
         schedule=boot_.schedule,
@@ -56,9 +57,10 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         gates={},
         stop_event=threading.Event(),
         dry_run=dry_run,
-        notifier=make_notifier(
-            boot_.secrets or load_secrets(), enabled=boot_.settings.notify.enabled
-        ),
+        notifier=make_notifier(secrets, enabled=boot_.settings.notify.enabled),
+        secrets=secrets,
+        registry=boot_.registry,
+        hooks=hooks.by_point(boot_.features),
     )
 
 

@@ -34,7 +34,7 @@ def cli_executable() -> Path:
     return cli.resolve() if cli.exists() else exe
 
 
-def _app_bundle_dir() -> Path | None:
+def app_bundle_dir() -> Path | None:
     """macOS `.app` 안에서 돌고 있으면 그 `.app` 경로 (Contents/MacOS 아래 실행파일일 때),
     아니면 None."""
     if not is_frozen():
@@ -50,7 +50,7 @@ def bundle_root() -> Path:
     """TRADER_HOME: `.app` 이면 그 부모 폴더(config/secrets/state 가 .app 옆), 아니면 실행파일 폴더,
     개발 환경은 저장소 루트."""
     if is_frozen():
-        app = _app_bundle_dir()
+        app = app_bundle_dir()
         return app.parent if app is not None else executable().parent
     from trader.kernel.platform import paths
 

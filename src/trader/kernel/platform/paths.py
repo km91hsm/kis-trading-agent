@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -65,3 +66,14 @@ def agents_dir() -> Path:
     if bundle.is_frozen():
         return bundle.resource_dir() / "agents"
     return project_root() / ".claude" / "agents"
+
+
+def playwright_browsers_dir() -> Path:
+    """Playwright 가 브라우저를 내려받는 기본 캐시 디렉터리(OS 별)."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / "ms-playwright"
+    return Path.home() / ".cache" / "ms-playwright"

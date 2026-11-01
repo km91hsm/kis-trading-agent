@@ -78,7 +78,7 @@ def rows(conn):
 def test_deps_is_frozen_with_exact_field_order(deps):
     assert [f.name for f in fields(DaemonDeps)] == [
         "settings", "schedule", "conn_factory", "state", "now", "markets", "gates", "stop_event",
-        "dry_run", "notifier",
+        "dry_run", "notifier", "secrets", "registry", "hooks",
     ]  # fmt: skip
     with pytest.raises(FrozenInstanceError):
         deps.dry_run = True  # type: ignore[misc]
@@ -345,3 +345,39 @@ def test_start_failure_after_scheduler_start_cleans_up(project, monkeypatch):
     assert created and not created[0].running
     assert not (d.state / "daemon.lock").exists()
     assert daemon._lock.held() is False
+
+
+def _teardown_daemon(project, teardown, markets=("KR", "US")):
+    s = spec(id="j_{market}", per_market=True, schedule_key="at", teardown=teardown)
+    d = Daemon([Feature(id="f", tier="lane", jobs=(s,))], make_deps(project, markets=list(markets)))
+    d._jobs = build(
+        d.features, schedule=d.deps.schedule, settings=d.deps.settings,
+        markets=d.deps.markets, ctx=d.deps,
+    )  # fmt: skip
+    return d
+
+
+def test_shutdown_calls_teardown_once_per_spec(project):
+    calls = []
+    d = _teardown_daemon(project, lambda ctx: calls.append(ctx))
+    assert len(d._jobs) == 2
+    d.shutdown()
+    d.shutdown()
+    assert calls == [d.deps]
+
+
+def test_shutdown_continues_when_teardown_raises(project):
+    calls = []
+
+    def boom(ctx):
+        raise RuntimeError("터짐")
+
+    s1 = spec(id="a", teardown=boom)
+    s2 = spec(id="b", teardown=lambda ctx: calls.append("b"))
+    d = Daemon([Feature(id="f", tier="lane", jobs=(s1, s2))], make_deps(project))
+    d._jobs = build(
+        d.features, schedule=d.deps.schedule, settings=d.deps.settings,
+        markets=d.deps.markets, ctx=d.deps,
+    )  # fmt: skip
+    d.shutdown()
+    assert calls == ["b"]

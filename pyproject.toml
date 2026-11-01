@@ -5,14 +5,20 @@ description = "LLM 멀티 에이전트 + ML 주식 자동매매 (KIS)"
 requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.10,<4",
+    "beautifulsoup4>=4.12",
     "fastapi",
     "httpx",
+    "pandas>=2",
+    "playwright>=1.56,<2",
     "pydantic>=2",
+    "pypdf>=6,<7",
     "python-dotenv",
     "pyyaml",
+    "requests>=2",
     "typer",
     "tzdata",
     "uvicorn[standard]",
+    "youtube-transcript-api>=1",
 ]
 
 [project.scripts]
