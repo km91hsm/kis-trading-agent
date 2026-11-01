@@ -18,3 +18,18 @@ def test_broker_account_defaults_and_forbid():
     assert (a.markets, a.asset, a.acnt_prdt_cd) == (["KR"], "stock", "01")
     with pytest.raises(ValidationError):
         BrokerAccount(id="x", env="paper", cano="00000000", mode="auto")
+
+
+def test_token_cache_ignores_token_of_other_app_key(project):
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from trader.kernel.broker.auth import KisAuth
+
+    old = KisAuth("real", "old-key", "s", name="real")
+    exp = (datetime.now(UTC) + timedelta(hours=10)).isoformat()
+    payload = {"access_token": "OLD", "expires_at": exp, "key": key_fingerprint("old-key")}
+    old.cache_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert old._read_cache().get("token") == "OLD"
+    new = KisAuth("real", "new-key", "s", name="real")  # 같은 파일, 키만 바뀜
+    assert new._read_cache() == {}

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from trader.kernel.broker import models, tr_ids
+from trader.kernel.broker.auth import APPROVAL_TTL, FAIL_BACKOFF, REFRESH_MARGIN, KisAuth
 from trader.kernel.broker.creds import KisCreds, key_fingerprint
 from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
 from trader.kernel.broker.models import *  # noqa: F403
@@ -21,8 +22,12 @@ from trader.kernel.broker.ticks import (
 
 __all__ = [
     *models.__all__,
+    "APPROVAL_TTL",
+    "FAIL_BACKOFF",
+    "REFRESH_MARGIN",
     "UNKNOWN_RESPONSE_CODE",
     "KisApiError",
+    "KisAuth",
     "KisCreds",
     "is_on_tick",
     "is_on_tick_table",
