@@ -29,11 +29,15 @@ _clients: dict[tuple[str, str], KisClient] = {}
 
 
 def shared_state_dir() -> Path:
-    """토큰 캐시·레이트 DB 디렉터리: 환경변수 경로(없으면 생성), 없으면 state_dir()."""
-    raw = os.environ.get(SHARED_DIR_ENV)
+    """토큰 캐시·레이트 DB 디렉터리: 환경변수 경로(없으면 생성), 없으면 state_dir().
+    상대경로는 작업 폴더마다 다른 곳을 가리켜 공유가 깨지므로 거부한다(`~` 는 펼친다)."""
+    raw = os.environ.get(SHARED_DIR_ENV, "").strip()
     if not raw:
         return paths.state_dir()
-    d = Path(raw).expanduser().resolve()
+    d = Path(raw).expanduser()
+    if not d.is_absolute():
+        raise ValueError(f"{SHARED_DIR_ENV} 는 절대경로여야 합니다: {raw!r}")
+    d = d.resolve()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -46,6 +50,8 @@ def client_for(creds: KisCreds) -> KisClient:
     cache_key = (creds.env, creds.app_key)
     if cache_key not in _clients:
         base = shared_state_dir()
+        shared = bool(os.environ.get(SHARED_DIR_ENV, "").strip())
+        logger.info("KIS 토큰·레이트 디렉터리: %s (%s)", base, "공유" if shared else "state")
         # 데몬·세션 도구 서브프로세스가 같은 1초 창을 나눠 쓴다(교차 프로세스 한도, 앱키별)
         limiter = SharedRateLimiter(RATE_PER_SEC[creds.env], base / "kis_rate.db", creds.bucket)
         auth = KisAuth(creds.env, creds.app_key, creds.app_secret, state=base, name=creds.bucket)

@@ -71,3 +71,13 @@ def make_account(id: str, env: str, markets: list[str] | None = None):
     from trader.kernel.broker.models import BrokerAccount
 
     return BrokerAccount(id=id, env=env, cano="00000000", markets=markets or ["KR"])
+
+
+@pytest.fixture(autouse=True)
+def _reset_factory_clients():
+    """factory 의 프로세스 캐시가 테스트 사이로 새지 않게 앞뒤로 비운다."""
+    from trader.kernel.broker.factory import reset_clients
+
+    reset_clients()
+    yield
+    reset_clients()

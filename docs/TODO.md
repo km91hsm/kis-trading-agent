@@ -34,6 +34,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 ## M2 — features/accounts + notify
 계좌 yaml·모드·LIVE 확인·키·추가삭제, `kernel/notify` 전송·outbox. 완료 기준: 옛 `control/*`·`notify` 테스트 이식 통과.
 - [ ] 착수 전
+- [ ] yaml→BrokerAccount 변환 때 markets 기본 [KR, US] 를 M2 설정 모델이 채운다(M1 DTO 기본은 [KR]); 키 없는 계좌 skip 경고·ConfigError 감싸기 이관
 - 이연(M0 리뷰):
   - `contracts._default_roots` 동적 import 를 discover 경유로
   - `import_violations` 루트 추론을 명시 키워드로

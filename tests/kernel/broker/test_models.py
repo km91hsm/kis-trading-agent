@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from trader.kernel.broker.models import Candle, OrderRequest, Position, Quote
+from trader.kernel.broker.models import BrokerAccount, Candle, OrderRequest, Position, Quote
 
 
 def test_quote_decimal_roundtrip():
@@ -51,3 +51,12 @@ def test_order_request_requires_explicit_exchange():
         exchange=None,
     )
     assert o.exchange is None
+
+
+def test_broker_account_fo_requires_kr_only():
+    with pytest.raises(ValidationError):
+        BrokerAccount(id="pf", env="paper", cano="00000000", asset="fo", markets=["US"])
+    with pytest.raises(ValidationError):
+        BrokerAccount(id="pf", env="paper", cano="00000000", asset="fo", markets=["KR", "US"])
+    ok = BrokerAccount(id="pf", env="paper", cano="00000000", asset="fo", markets=["KR"])
+    assert ok.markets == ["KR"]

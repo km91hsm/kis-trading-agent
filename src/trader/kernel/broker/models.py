@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from trader.kernel.config import Env, Market
 
@@ -343,6 +343,12 @@ class BrokerAccount(BaseModel):
     acnt_prdt_cd: str = "01"
     markets: list[Market] = Field(default_factory=lambda: ["KR"])
     asset: Literal["stock", "fo"] = "stock"
+
+    @model_validator(mode="after")
+    def _fo_markets(self) -> BrokerAccount:
+        if self.asset == "fo" and self.markets != ["KR"]:
+            raise ValueError(f"asset fo 계좌 {self.id!r} 의 markets 는 [KR] 만 가능합니다")
+        return self
 
 
 class FoProduct(BaseModel):
