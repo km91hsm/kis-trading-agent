@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
+ET = ZoneInfo("America/New_York")
+
+MARKET_TZ: dict[Literal["KR", "US"], ZoneInfo] = {"KR": KST, "US": ET}
