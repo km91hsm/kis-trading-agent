@@ -1,8 +1,12 @@
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from trader.features.saveticker import automation, chromium
 from trader.features.saveticker.paths import home as st_home
 
 
@@ -106,3 +110,172 @@ def test_prune_keeps_last_good_capture_and_latest_files(tmp_path):
     latest = json.loads((tmp_path / "latest" / "news_all.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["title"] == "더 옛 성공"
     assert store.status()["streams"]["news_all"]["status"] == "error"
+
+
+class FakeInstall:
+    def __init__(self, code, *, hang=False):
+        self.code, self.hang, self.terminated = code, hang, False
+
+    def wait(self, timeout=None):
+        if self.hang and not self.terminated:
+            raise chromium.subprocess.TimeoutExpired("install", timeout)
+        return self.code
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.terminated = True
+
+
+def test_chromium_ensure_installs_only_when_missing(monkeypatch):
+    calls = []
+    monkeypatch.setattr(chromium, "installed", lambda: bool(calls))
+
+    def popen(argv, **kw):
+        calls.append((argv, kw))
+        return FakeInstall(0)
+
+    monkeypatch.setattr(chromium.subprocess, "Popen", popen)
+    assert chromium.ensure() is True
+    argv, kw = calls[0]
+    assert argv[-2:] == ["install", "chromium"] and kw["shell"] is False
+    assert kw["env"]["PW_LANG_NAME"] == "python"
+    assert chromium.ensure() is True and len(calls) == 1  # 이미 있으면 설치하지 않는다
+
+
+def test_install_and_workers_share_browser_dir(monkeypatch, tmp_path):
+    """번들 Playwright 는 PLAYWRIGHT_BROWSERS_PATH 가 없으면 패키지 안을 본다 → 설치 전에 OS 캐시로
+    명시해 설치·확인·수집 작업(env 상속)이 같은 곳을 본다. 사용자가 정한 값은 존중."""
+    from trader.kernel.platform import paths
+
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    seen = []
+    monkeypatch.setattr(chromium, "installed", lambda: False)
+
+    def popen(argv, **kw):
+        seen.append(kw["env"].get("PLAYWRIGHT_BROWSERS_PATH"))
+        return FakeInstall(0)
+
+    monkeypatch.setattr(chromium.subprocess, "Popen", popen)
+    chromium.ensure()
+    assert seen == [str(paths.playwright_browsers_dir())]
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == seen[0]
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    chromium.prepare_env()
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(tmp_path)
+
+
+def test_chromium_ensure_reports_failure(monkeypatch):
+    monkeypatch.setattr(chromium, "installed", lambda: False)
+    monkeypatch.setattr(chromium.subprocess, "Popen", lambda argv, **kw: FakeInstall(1))
+    assert chromium.ensure() is False
+
+
+def test_chromium_install_stops_with_service(monkeypatch):
+    """설치 중 서비스가 종료되면 설치 프로세스도 끝낸다(고아 방지, Codex 리뷰)."""
+    import threading
+
+    proc = FakeInstall(0, hang=True)
+    stop = threading.Event()
+    stop.set()
+    monkeypatch.setattr(chromium, "installed", lambda: False)
+    monkeypatch.setattr(chromium.subprocess, "Popen", lambda argv, **kw: proc)
+    assert chromium.ensure(stop) is False and proc.terminated
+
+
+def test_kill_leftovers_targets_live_collector_lanes(tmp_path, monkeypatch):
+    """서비스가 강제 종료되면 각자 세션인 수집 작업·브라우저가 남는다 → 러너 pid 그룹을 끝낸다."""
+    from trader.kernel.platform import procs
+
+    (tmp_path / "runtime").mkdir()
+    rows = {
+        "runner-news": {"pid": 501, "proc_start": "s501"},
+        "runner-market": {"pid": 502, "proc_start": "s502"},  # 수집기 아님
+        "runner": {"pid": 503, "proc_start": "old"},  # 재부팅 뒤 다른 프로그램이 같은 pid
+        "runner-community": {"pid": 504},  # 시작 시각 기록 없음 → 확인 불가, 건드리지 않음
+        "runner-background": {"pid": 505, "proc_start": "s505"},
+    }
+    for name, row in rows.items():
+        (tmp_path / "runtime" / f"{name}.json").write_text(json.dumps(row), "utf-8")
+    monkeypatch.setattr(automation, "collector_alive", lambda pid: pid != 502)
+    monkeypatch.setattr(procs, "process_start", lambda pid: f"s{pid}")
+    killed = []
+    monkeypatch.setattr(procs, "kill_group", killed.append)
+    assert automation.kill_leftovers(tmp_path) == 2 and sorted(killed) == [501, 505]
+
+
+def _service_state(home, value):
+    (home / "runtime").mkdir(parents=True, exist_ok=True)
+    (home / "runtime" / "service.json").write_text(json.dumps(value), encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows 는 프로세스 목록을 보지 않는다(항상 False)")
+def test_service_elsewhere_reads_process_list(monkeypatch):
+    rows = f"  1 /sbin/launchd\n{os.getpid()} python -m trader saveticker service\n"
+    monkeypatch.setattr(
+        automation.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=rows, returncode=0)
+    )
+    assert automation.service_elsewhere() is False  # 자기 자신은 빼고
+    rows += "  77 /opt/trader/trader saveticker service\n"
+    assert automation.service_elsewhere() is True
+
+
+def test_should_start_rules(tmp_path, monkeypatch):
+    monkeypatch.setattr(automation, "service_elsewhere", lambda: False)
+    now = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
+    home = tmp_path / "st"
+    creds = tmp_path / "saveticker.env"
+    assert automation.should_start(home, creds, now=now) == (False, "계정 파일 없음")
+    creds.write_text("x", encoding="utf-8")
+    assert automation.should_start(home, creds, now=now) == (True, "")
+    # 인증 실패로 멈췄으면 계정 파일이 바뀔 때까지 다시 띄우지 않는다(계정 잠김 방지)
+    _service_state(
+        home,
+        {"state": "blocked", "reason": "authentication_or_stopped", "at": now.isoformat()},
+    )
+    os.utime(creds, (now.timestamp() - 60, now.timestamp() - 60))
+    assert automation.should_start(home, creds, now=now)[0] is False
+    os.utime(creds, (now.timestamp() + 60, now.timestamp() + 60))
+    assert automation.should_start(home, creds, now=now)[0] is True
+    # 재기동 한도는 1시간 뒤 다시 시도
+    _service_state(home, {"state": "blocked", "reason": "restart_limit", "at": now.isoformat()})
+    os.utime(creds, (now.timestamp() - 60, now.timestamp() - 60))
+    assert automation.should_start(home, creds, now=now + timedelta(minutes=30))[0] is False
+    assert automation.should_start(home, creds, now=now + timedelta(minutes=61))[0] is True
+    # 다른 프로세스(예: launchd 서비스)가 서비스 잠금을 쥐고 있으면 띄우지 않는다
+    lock = home / "runtime" / "service.lock"
+    lock.write_text(json.dumps({"pid": os.getpid(), "proc_start": None}), encoding="utf-8")
+    assert automation.should_start(home, creds, now=now + timedelta(hours=2)) == (
+        False,
+        "이미 실행 중",
+    )
+    lock.unlink()
+    # 다른 폴더의 서비스(예: 저장소 쪽 launchd)가 같은 PC 에서 돌면 같은 계정 이중 로그인을 피한다
+    monkeypatch.setattr(automation, "service_elsewhere", lambda: True)
+    assert automation.should_start(home, creds, now=now + timedelta(hours=2))[0] is False
+
+
+def test_service_blocks_when_chromium_install_fails(tmp_path, monkeypatch):
+    """Chromium 을 받지 못하면(오프라인 등) 수집 프로세스를 띄우지 않고 1시간 뒤 다시 시도한다."""
+    monkeypatch.setattr(chromium, "ensure", lambda stop=None: False)
+    automation.service(tmp_path)
+    state = automation.read(tmp_path / "runtime" / "service.json")
+    assert state["state"] == "blocked" and state["reason"] == "chromium_install_failed"
+    assert not (tmp_path / "runtime" / "service.lock").exists()  # 잠금은 풀어 둔다
+
+
+def test_should_start_retries_auth_block_after_six_hours(tmp_path, monkeypatch):
+    """인증 실패 정지도 계정 파일 변경만 기다리지 않고 6시간마다 1회 다시 시도(1분 반복은 안 함)."""
+    monkeypatch.setattr(automation, "service_elsewhere", lambda: False)
+    now = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
+    home = tmp_path / "st"
+    creds = tmp_path / "saveticker.env"
+    creds.write_text("x", encoding="utf-8")
+    os.utime(creds, (now.timestamp() - 60, now.timestamp() - 60))
+    for reason in ("authentication", "authentication_or_stopped"):
+        _service_state(home, {"state": "blocked", "reason": reason, "at": now.isoformat()})
+        assert automation.should_start(home, creds, now=now + timedelta(hours=5))[0] is False
+        assert (
+            automation.should_start(home, creds, now=now + timedelta(hours=6, minutes=1))[0] is True
+        )

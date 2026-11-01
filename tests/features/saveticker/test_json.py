@@ -128,3 +128,29 @@ def test_empty_translation_keeps_available_original_body():
         "translations": {"translated": {"ko_KR": {"content": [{"content": ""}]}}},
     }
     assert jsonfeed.news_item(row, detail=True).body == "Original body"
+
+
+def test_browser_uses_only_current_json_and_rejects_denied_response():
+    import pytest
+
+    from trader.features.saveticker.browser import AccessDenied, Browser
+    from trader.features.saveticker.service import View
+
+    class Page:
+        def on(self, *_):
+            pass
+
+    class Response:
+        url = "https://www.saveticker.com/api/stocks/api/v1/tickers/popular"
+        status = 200
+
+        def json(self):
+            return {"items": [{"symbol": "AAA", "price": 2}]}
+
+    adapter = Browser(Page(), ("unused", "unused"))
+    adapter._json_response(Response())
+    assert adapter._json_rows(View("market_gain_live", "market"))[0].tickers == ["AAA"]
+    assert adapter._json_rows(View("community_top5", "community")) == []
+    adapter.json_responses[-1].status = 403
+    with pytest.raises(AccessDenied):
+        adapter._json_rows(View("market_gain_live", "market"))
