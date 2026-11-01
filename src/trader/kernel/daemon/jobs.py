@@ -91,6 +91,8 @@ def build(
                 continue
             if spec.gate and spec.gate != "none" and spec.gate not in gates:
                 raise ConfigError(f"잡 {spec.id}: 게이트 '{spec.gate}' 가 등록되지 않았습니다")
+            if spec.per_market and "{market}" not in spec.id:
+                raise ConfigError(f"잡 {spec.id}: per_market 잡의 id 에 {{market}} 가 필요합니다")
             for market in markets if spec.per_market else [None]:
                 ident = spec.id.format(market=market) if spec.per_market else spec.id
                 if spec.trigger == "cron":

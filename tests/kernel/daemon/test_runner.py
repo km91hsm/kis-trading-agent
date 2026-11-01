@@ -159,6 +159,44 @@ def test_run_job_gate_reason_records_skipped_without_running_body(project):
     c.close()
 
 
+def test_run_job_raising_gate_is_recorded_as_error(project):
+    def bad_gate(job):
+        raise RuntimeError("gate boom")
+
+    d = make_deps(project, gates={"market": bad_gate})
+    c = d.conn_factory()
+    out = run_job(c, job_of(d, gate="market"), d, stop_event=d.stop_event)
+    assert "gate boom" in out["error"]
+    (r,) = rows(c)
+    assert r["status"] == "error" and "gate boom" in r["error"]
+    c.close()
+
+
+def test_tick_records_exception_in_heartbeat(project, monkeypatch):
+    from trader.kernel.daemon import runner as runner_mod
+
+    d = make_deps(project)
+    job = job_of(d)
+    daemon = Daemon([], d)
+    seen = []
+    monkeypatch.setattr(
+        daemon,
+        "_hb",
+        SimpleNamespace(
+            job_started=lambda i: None,
+            job_finished=lambda i, s, e: seen.append((s, e)),
+            set_next=lambda *a: None,
+        ),
+    )
+    monkeypatch.setattr(daemon, "_sync_next", lambda i: None)
+    monkeypatch.setattr(
+        runner_mod, "run_job", lambda *a, **k: (_ for _ in ()).throw(ValueError("zz"))
+    )
+    with pytest.raises(ValueError):
+        daemon._tick(job)
+    assert seen[0][0] == "error" and "zz" in seen[0][1]
+
+
 def test_run_job_gate_none_result_runs_body(project):
     d = make_deps(project, gates={"market": lambda job: None})
     c = d.conn_factory()

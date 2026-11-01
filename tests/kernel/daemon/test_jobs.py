@@ -98,3 +98,8 @@ def test_out_of_scope_attributes_pass_through_untouched():
     s = spec(per_market=False, schedule_key="reflect", heavy=True, misfire="scan", catch_up="queue")
     (job,) = run_build([feat(s)])
     assert job.spec.heavy is True and job.spec.misfire == "scan" and job.spec.catch_up == "queue"
+
+
+def test_per_market_id_without_market_placeholder_raises():
+    with pytest.raises(ConfigError, match="scan"):
+        run_build([feat(spec(id="scan"))])

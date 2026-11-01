@@ -84,17 +84,18 @@ def run_job(
         return {"skipped": "데몬 종료 중"}
     interval = spec.trigger == "interval"
 
-    gate = getattr(ctx, "gates", {}).get(spec.gate) if spec.gate else None
-    if gate is not None:
-        reason = gate(job)
-        if reason:
-            result = {"skipped": reason}
-            if not interval:
-                _record(conn, None, job, "skipped", None, result)
-            return result
-
-    run_id = None if interval else runs.start(conn, job.kind, job.market)
+    run_id = None
     try:
+        gate = getattr(ctx, "gates", {}).get(spec.gate) if spec.gate else None
+        if gate is not None:
+            reason = gate(job)
+            if reason:
+                result = {"skipped": reason}
+                if not interval:
+                    _record(conn, None, job, "skipped", None, result)
+                return result
+
+        run_id = None if interval else runs.start(conn, job.kind, job.market)
         raw = spec.body(ctx, job)
     except Exception as e:  # noqa: BLE001 - 잡 하나의 실패가 데몬을 죽이지 않는다
         logger.exception("잡 실패 %s", job.id)
@@ -188,6 +189,9 @@ class Daemon:
             out = run_job(conn, job, self.deps, stop_event=self.deps.stop_event)
             error = str(out["error"]) if out.get("error") else None
             status = "error" if error else ("skipped" if "skipped" in out else "ok")
+        except BaseException as e:
+            error = repr(e)
+            raise
         finally:
             conn.close()
             self._hb.job_finished(job.id, status, error)
