@@ -32,8 +32,12 @@ _SHARED_LOCK = threading.Lock()
 
 def _daemon_fp(deps: WebDeps) -> dict:
     """데몬 지문: 생존 여부 + 하트비트 갱신 '분'. 틱이 몇 초마다 파일을 써도 change 는 분당 1회."""
-    status = read_status(deps.state, deps.now(), [])
-    return {"alive": bool(status["alive"]), "minute": (status.get("updated_at") or "")[:16]}
+    try:
+        status = read_status(deps.state, deps.now(), [])
+        return {"alive": bool(status["alive"]), "minute": (status.get("updated_at") or "")[:16]}
+    except Exception:
+        logger.warning("SSE daemon 지문 실패", exc_info=True)
+        return {"alive": False, "minute": ""}
 
 
 def snapshot(deps: WebDeps) -> dict:

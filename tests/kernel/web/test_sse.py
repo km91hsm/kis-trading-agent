@@ -32,6 +32,13 @@ def test_daemon_key_reduced_to_alive_and_minute(deps):
     assert set(snap["daemon"]) == {"alive", "minute"}
 
 
+def test_daemon_fp_bad_heartbeat_falls_back(deps):
+    (deps.state / "daemon_heartbeat.json").write_text(
+        json.dumps({"pid": 1, "updated_at": 123}), encoding="utf-8"
+    )
+    assert sse.snapshot(deps)["daemon"] == {"alive": False, "minute": ""}
+
+
 def test_probe_exception_is_isolated(deps):
     def boom(_deps):
         raise RuntimeError("x")

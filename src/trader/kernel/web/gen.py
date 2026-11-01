@@ -24,7 +24,7 @@ def sse_keys_ts(features: list[Feature]) -> str:
             if k.noisy:
                 noisy.append(k.key)
     return (
-        "// 자동 생성 파일 — 수정 금지. `uv run python -m trader.kernel.web.gen` 로 다시 만든다.\n"
+        "// 자동 생성 파일 — 수정 금지. `uv run trader dev gen-sse-keys` 로 다시 만든다.\n"
         f"export const SSE_KEYS = {_ts_list(keys)} as const;\n"
         "export type SseKey = (typeof SSE_KEYS)[number];\n"
         f"export const NOISY_KEYS: SseKey[] = {_ts_list(noisy)};\n"
