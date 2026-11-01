@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from trader.kernel.daemon import heartbeat as hb_mod
 from trader.kernel.daemon.jobs import build
@@ -213,6 +214,9 @@ def test_daemon_second_start_fails_on_lock(project):
         assert first.start(install_signals=False) is True
         assert second.start(install_signals=False) is False
         assert second._scheduler is None
+        second.shutdown(wait=False)  # 못 잡은 인스턴스의 종료는 first 의 잠금을 건드리지 않는다
+        assert (d.state / "daemon.lock").exists()
+        assert first._lock.held() is True
     finally:
         first.shutdown(wait=False)
         second.shutdown(wait=False)
@@ -280,3 +284,26 @@ def test_second_sigterm_ignored_while_waiting(project):
         assert d.stop_event.is_set()
     finally:
         daemon.shutdown(wait=False)
+
+
+def test_start_failure_after_scheduler_start_cleans_up(project, monkeypatch):
+    d = make_deps(project)
+    daemon = make_daemon(d, spec(id="a"))
+
+    def boom(*a, **k):
+        raise RuntimeError("설치 실패")
+
+    monkeypatch.setattr(daemon, "_install_signals", boom)
+    created = []
+    real_start = BackgroundScheduler.start
+
+    def spy(self, *a, **k):
+        created.append(self)
+        return real_start(self, *a, **k)
+
+    monkeypatch.setattr(BackgroundScheduler, "start", spy)
+    with pytest.raises(RuntimeError, match="설치 실패"):
+        daemon.start()
+    assert created and not created[0].running
+    assert not (d.state / "daemon.lock").exists()
+    assert daemon._lock.held() is False

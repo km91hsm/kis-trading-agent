@@ -142,9 +142,9 @@ class Daemon:
         )  # fmt: skip
         if not self._lock.acquire():
             return False
+        sched = BackgroundScheduler(timezone=KST)
         try:
             _quiet_scheduler()
-            sched = BackgroundScheduler(timezone=KST)
             for job in self._jobs:
                 sched.add_job(
                     self._tick, _trigger(job), args=[job], id=job.id, name=job.id,
@@ -163,6 +163,11 @@ class Daemon:
             if install_signals:
                 self._install_signals()
         except BaseException:
+            if sched.running:
+                sched.shutdown(wait=False)
+            self._scheduler = None
+            self._started = False
+            self._restore_signals()
             self._lock.release()
             raise
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
@@ -221,10 +226,13 @@ class Daemon:
             if self._started:
                 self._hb.stop()
         finally:
-            for sig, old in self._old_handlers.items():
-                try:
-                    signal.signal(sig, old)
-                except (ValueError, OSError):
-                    pass
-            self._old_handlers.clear()
+            self._restore_signals()
             self._lock.release()
+
+    def _restore_signals(self) -> None:
+        for sig, old in self._old_handlers.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                pass
+        self._old_handlers.clear()

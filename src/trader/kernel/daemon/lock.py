@@ -105,7 +105,9 @@ class Lock:
             tmp.unlink(missing_ok=True)
 
     def release(self) -> None:
-        """내 pid 의 잠금 파일만 지우고 OS 잠금을 놓는다."""
+        """내 pid 의 잠금 파일만 지우고 OS 잠금을 놓는다. 못 잡은 인스턴스는 건드리지 않는다."""
+        if self._hold is None:
+            return
         try:
             if self.path.exists():
                 data = json.loads(self.path.read_text(encoding="utf-8"))
