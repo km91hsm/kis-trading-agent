@@ -19,7 +19,7 @@ def test_connect_wal_row_factory_default_path(project):
         assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
         assert c.row_factory is sqlite3.Row
-        assert (project / "state" / "ledger.db").exists()
+        assert (project / "state" / "trader.db").exists()
     finally:
         c.close()
 

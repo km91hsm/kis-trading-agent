@@ -24,11 +24,11 @@ def now_iso() -> str:
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    """원장 DB 연결을 연다. 기본 경로는 state_dir()/ledger.db.
+    """원장 DB 연결을 연다. 기본 경로는 state_dir()/trader.db.
 
     check_same_thread=False 는 웹 서버(스레드 풀)가 같은 연결 팩토리를 쓰기 위한 것이다.
     """
-    db_path = path if path is not None else paths.state_dir() / "ledger.db"
+    db_path = path if path is not None else paths.state_dir() / "trader.db"
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
