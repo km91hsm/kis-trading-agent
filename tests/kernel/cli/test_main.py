@@ -52,7 +52,7 @@ def test_boot_loads_settings_and_conn(project):
     try:
         assert b.settings.markets == ["KR", "US"]
         assert b.conn is not None
-        assert [f.id for f in b.features] == ["accounts"]
+        assert [f.id for f in b.features] == ["accounts", "saveticker"]
     finally:
         b.conn.close()
 
