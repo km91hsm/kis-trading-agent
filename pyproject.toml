@@ -41,3 +41,4 @@ select = ["E", "F", "I", "W", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
