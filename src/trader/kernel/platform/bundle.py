@@ -80,9 +80,9 @@ def cli_argv() -> list[str]:
 
 
 def templates_dir() -> Path:
-    """첫 실행 템플릿(config yaml·.env.example). 번들 `_internal/templates`, 개발 `templates/`."""
+    """첫 실행 템플릿(config yaml·.env.example).
+
+    번들은 `_internal/templates`, 개발은 소스 트리 `templates/`(TRADER_HOME 과 무관)."""
     if is_frozen():
         return resource_dir() / "templates"
-    from trader.kernel.platform import paths
-
-    return paths.project_root() / "templates"
+    return Path(__file__).resolve().parents[4] / "templates"

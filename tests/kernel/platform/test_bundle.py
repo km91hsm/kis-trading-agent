@@ -20,7 +20,9 @@ def test_not_frozen_defaults(project):
     assert bundle.is_frozen() is False
     assert bundle.tool_command() == "python -m trader tool"
     assert bundle.cli_argv() == [sys.executable, "-m", "trader"]
-    assert bundle.templates_dir() == project / "templates"
+    # 템플릿은 소스 트리 기준이라 TRADER_HOME(project)과 무관하다
+    assert bundle.templates_dir().joinpath("config", "settings.yaml").is_file()
+    assert bundle.templates_dir() != project / "templates"
     assert paths.web_dist() == project / "web" / "dist"
     assert paths.agents_dir() == project / ".claude" / "agents"
 
