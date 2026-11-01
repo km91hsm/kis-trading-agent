@@ -1,0 +1,677 @@
+"""애널리스트 입력 00_inputs.json 조립: 모든 수집기를 Section 단위로 묶는다.
+
+키 배치(Phase 3 애널리스트가 읽는 구조):
+  technical{quote, daily, minute, orderbook, indicators}
+  fundamental{ratios, disclosures}
+  news_macro{news, macro(항목별 Section dict)}
+  sentiment{investor_flow, short_interest, community, trends, manual_inputs}
+  + meta + errors
+저장 전에 Decimal → 문자열, 날짜 → ISO 로 바꾼다. 구조를 바꾸면 SCHEMA_VERSION 을 올린다.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import httpx
+from pydantic import BaseModel
+
+from trader.features.ingest import indicators, manual_inputs, news_store
+from trader.features.ingest.base import MAX_PAST as _MAX_PAST
+from trader.features.ingest.base import SKIP_REASONS, Section, run_section, skipped_section
+from trader.features.ingest.community import collect_channels, collect_community  # noqa: F401
+from trader.features.ingest.dart import ratios_kr
+from trader.features.ingest.edgar import financial_history_us, ratios_from_facts
+from trader.features.ingest.macro import collect_macro
+from trader.features.ingest.news import collect_news
+from trader.features.ingest.settings import SourcesConfig
+from trader.features.ingest.universe import load_sectors
+from trader.features.saveticker import api as saveticker
+from trader.kernel.broker.models import drop_incomplete_tail
+from trader.kernel.config import ConfigError, Market
+from trader.kernel.config.secrets import Secrets
+from trader.kernel.config.time import KST, MARKET_TZ
+from trader.kernel.session.run_store import (
+    read_checkpoint,
+    run_date_for,
+    run_dir,
+    write_checkpoint,
+)
+
+SECTION_TIMEOUT_S = 180.0  # 절(fundamental·news_macro·sentiment) 하나의 최대 대기
+# 시간 초과 뒤에도 끝나지 않은 절 작업 수(절 이름별). 이만큼 쌓이면 그 절은 새로 띄우지 않고
+# 오류 절로 둔다 — 멈춘 네트워크 호출이 종목마다 스레드를 하나씩 계속 쌓지 않게(Codex 리뷰)
+MAX_STUCK_PER_SECTION = 2
+_STUCK: dict[str, int] = {}
+_STUCK_LOCK = threading.Lock()
+
+
+def _stuck_done(key: str) -> Callable[[Any], None]:
+    def done(_fut: Any) -> None:
+        with _STUCK_LOCK:
+            _STUCK[key] = max(0, _STUCK.get(key, 0) - 1)
+
+    return done
+
+
+logger = logging.getLogger("trader.sources")
+
+# v2: fundamental.history (3개년 + 최근 분기), v3: fundamental.peer (동종업 중앙값)
+SCHEMA_VERSION = 3
+MAX_PAST = _MAX_PAST  # 정본은 ingest/base
+MAX_FUTURE = timedelta(hours=24)  # 과거와 대칭. 연도 오타 같은 먼 미래만 거부
+
+
+@dataclass
+class InputDeps:
+    """수집에 쓰는 외부 클라이언트 묶음. None 이면 해당 절은 건너뛴다."""
+
+    market: Any | None
+    dart: Any | None
+    edgar: Any | None
+    http: httpx.Client | None = None
+    now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    # 시장 전체 뉴스 저장소(원장 news_items) 읽기용. None 이면 종목별 수집만
+    conn_factory: Callable[[], Any] | None = None
+    # 동종업 중앙값 계산 함수 `peer_fn(market=, ticker=, asof_date=, sectors=) -> dict | None`.
+    # 피처 스토어(M7)가 주입한다. None 이면 peer 절은 건너뜀
+    peer_fn: Callable[..., dict | None] | None = None
+
+
+def jsonable(obj: Any) -> Any:
+    if isinstance(obj, BaseModel):
+        return jsonable(obj.model_dump(mode="json"))
+    if isinstance(obj, Decimal):
+        return str(obj)
+    if isinstance(obj, date | datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {str(k): jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [jsonable(v) for v in obj]
+    return obj
+
+
+_jsonable = jsonable  # 옛 이름 별칭
+
+
+def _is_section(v: Any) -> bool:
+    return isinstance(v, dict) and set(v) == {"data", "received_at", "error"}
+
+
+_SUB_SOURCE_OK = frozenset({"ok", "not available for KR", "not available for US"})
+
+
+def _collect_errors(inputs: dict) -> list[str]:
+    """error 가 있는 절을 '<역할>.<키>: <오류>' 목록으로 모은다 (SKIP_REASONS 제외).
+
+    뉴스·커뮤니티처럼 절 안에 소스별 결과(`data.sources`)가 있으면 그 하위 실패도
+    '<역할>.<키>.<소스>: <오류>' 로 덧붙인다 (네이버 401, Reddit 429 등).
+    """
+    out: list[str] = []
+
+    def visit(path: str, v: Any) -> None:
+        if _is_section(v):
+            if v["error"] is not None and v["error"] not in SKIP_REASONS:
+                out.append(f"{path}: {v['error']}")
+            elif isinstance(v["data"], dict) and isinstance(v["data"].get("sources"), dict):
+                for src, status in v["data"]["sources"].items():
+                    if status not in _SUB_SOURCE_OK:
+                        out.append(f"{path}.{src}: {status}")
+        elif isinstance(v, dict):
+            for k, sub in v.items():
+                visit(f"{path}.{k}", sub)
+
+    for role in ("technical", "fundamental", "news_macro", "sentiment"):
+        r = inputs[role]
+        # 절 전체가 실패(시간 초과·멈춘 작업 상한)면 역할 자리에 Section 하나(+ events)
+        if isinstance(r, dict) and {"data", "received_at", "error"} <= set(r) and r["error"]:
+            if r["error"] not in SKIP_REASONS:
+                out.append(f"{role}: {r['error']}")
+            continue
+        for key, val in inputs[role].items():
+            visit(f"{role}.{key}", val)
+    return out
+
+
+def _dump(items: list) -> list[dict]:
+    return [i.model_dump(mode="json") for i in items]
+
+
+def _quote_or_raise(q: Any) -> dict:
+    if q.price is None or Decimal(str(q.price)) <= 0:
+        raise ValueError(f"가격이 0 이거나 없습니다: {q.ticker}")
+    return q.model_dump(mode="json")
+
+
+def _asof_date(market: str, asof: datetime) -> date:
+    """룩어헤드 컷오프: asof 의 시장 현지 날짜. 이 날짜 뒤의 봉·수급은 수집에서 뺀다."""
+    return asof.astimezone(MARKET_TZ.get(market, KST)).date()
+
+
+def _technical(ticker, market, exchange, cfg, deps, asof: datetime) -> dict[str, Section]:
+    now = deps.now
+    m = deps.market
+    keys = ("quote", "daily", "minute", "orderbook", "indicators")
+    if m is None:
+        return {k: skipped_section("no market client", now=now) for k in keys}
+    kr = market == "KR"
+    cutoff = _asof_date(market, asof)
+    candles: list = []
+
+    def daily() -> list[dict]:
+        nonlocal candles
+        got = (
+            m.get_daily_kr(ticker, days=cfg.kis.daily_days)
+            if kr
+            else m.get_daily_us(ticker, exchange, days=cfg.kis.daily_days)
+        )
+        # 과거 asof 재수집(24시간 안)이면 KIS 는 현재 기준 봉을 주므로 asof 뒤 봉을 잘라 낸다.
+        # 개장 전 거래량 0 스텁 봉은 지표(이동평균·RSI)를 가짜 종가로 틀어 놓으므로 버린다
+        candles = drop_incomplete_tail([c for c in got if c.date <= cutoff])
+        if not candles:
+            raise ValueError("일봉이 비어 있습니다")
+        return _dump(candles)
+
+    def minute() -> list[dict]:
+        got = m.get_minute_kr(ticker) if kr else m.get_minute_us(ticker, exchange)
+        return _dump([c for c in got if c.date <= cutoff])
+
+    out: dict[str, Section] = {
+        "quote": run_section(
+            lambda: _quote_or_raise(
+                m.get_price_kr(ticker) if kr else m.get_price_us(ticker, exchange)
+            ),
+            now=now,
+        ),
+        "daily": run_section(daily, now=now),
+        "minute": run_section(minute, now=now),
+        "orderbook": run_section(
+            lambda: (
+                m.get_orderbook_kr(ticker) if kr else m.get_orderbook_us(ticker, exchange)
+            ).model_dump(mode="json"),
+            now=now,
+        ),
+    }
+    out["indicators"] = (
+        run_section(lambda: indicators.latest(candles), now=now)
+        if out["daily"]["error"] is None
+        else skipped_section("no daily candles", now=now)
+    )
+    return out
+
+
+def _peer_section(ticker: str, market: Market, asof: datetime, deps: InputDeps) -> Section:
+    """스펙 §3 '동종업 중앙값 대비'. 계산은 주입된 `peer_fn`(피처 스토어, M7)이 맡는다.
+
+    peer_fn 이 없거나 섹터를 모르거나 구성원이 3개 미만(None 반환)이면 `no sector peers` 로
+    건너뛴다 (errors 집계 제외)."""
+    now = deps.now
+    if deps.peer_fn is None:
+        return skipped_section("no sector peers", now=now)
+    day = run_date_for(market, asof)  # 룩어헤드 규칙은 시장 현지 날짜 (US 는 뉴욕)
+
+    def peer() -> dict | None:
+        return deps.peer_fn(market=market, ticker=ticker, asof_date=day, sectors=load_sectors())
+
+    sec = run_section(peer, now=now)
+    if sec["error"] is None and sec["data"] is None:
+        return skipped_section("no sector peers", now=now)
+    return sec
+
+
+def _fundamental(ticker, market, asof, cfg, deps, technical) -> dict[str, Section]:
+    now = deps.now
+    quote = technical["quote"]["data"]
+    price = Decimal(str(quote["price"])) if quote else None
+    day = asof.astimezone(KST).date()
+    keys = ("ratios", "history", "disclosures")
+    peer = _peer_section(ticker, market, asof, deps)
+    if market == "KR":
+        if not cfg.dart.enabled:
+            return {k: skipped_section("disabled", now=now) for k in keys} | {"peer": peer}
+        if deps.dart is None:
+            return {k: skipped_section("no dart client", now=now) for k in keys} | {"peer": peer}
+
+        def history() -> dict:
+            code = deps.dart.corp_code(ticker)
+            if not code:
+                raise ValueError(f"DART 고유번호 없음: {ticker}")
+            return deps.dart.financial_history(code, day)
+
+        def disclosures() -> list[dict]:
+            code = deps.dart.corp_code(ticker)
+            return deps.dart.disclosures(code, asof, days=30) if code else []
+
+        return {
+            "ratios": run_section(lambda: ratios_kr(deps.dart, ticker, day, price), now=now),
+            "history": run_section(history, now=now),
+            "disclosures": run_section(disclosures, now=now),
+            "peer": peer,
+        }
+    if not cfg.edgar.enabled:
+        ratios = history = skipped_section("disabled", now=now)
+    elif deps.edgar is None:
+        ratios = history = skipped_section("no edgar client", now=now)
+    else:
+        cache: dict[str, dict] = {}
+
+        def facts() -> dict:
+            # companyfacts 는 이 수집 안에서 1회 (클라이언트에 프로세스 수명 메모를 두지 않는다)
+            if "f" not in cache:
+                cik = deps.edgar.cik(ticker)
+                if not cik:
+                    raise ValueError(f"EDGAR CIK 없음: {ticker}")
+                cache["f"] = deps.edgar.companyfacts(cik)
+            return cache["f"]
+
+        ratios = run_section(lambda: ratios_from_facts(facts(), day, price), now=now)
+        history = run_section(lambda: financial_history_us(facts(), day), now=now)
+    return {
+        "ratios": ratios,
+        "history": history,
+        "disclosures": skipped_section("phase6", now=now),
+        "peer": peer,
+    }
+
+
+def _news_macro(ticker, market, name, asof, cfg, secrets, deps) -> dict[str, Any]:
+    now = deps.now
+    news = run_section(
+        lambda: _with_store_news(
+            collect_news(
+                cfg.news,
+                secrets,
+                ticker=ticker,
+                name=name,
+                market=market,
+                asof=asof,
+                http=deps.http,
+                now=now,
+            ),
+            ticker,
+            market,
+            asof,
+            cfg,
+            deps,
+        ),
+        enabled=cfg.news.enabled,
+        now=now,
+    )
+    macro: Any
+    if cfg.macro.enabled:
+        macro = _macro_memoized(cfg, secrets, market, asof, deps, now)
+    else:
+        macro = skipped_section("disabled", now=now)
+    return {"news": news, "macro": macro}
+
+
+def _with_store_news(news: dict, ticker: str, market: str, asof, cfg, deps) -> dict:
+    """저장소(news_items)에서 이 종목으로 태그된 최근 뉴스를 종목 뉴스에 합친다(URL 중복 제거).
+    저장소가 없거나 읽기에 실패하면 수집 결과 그대로."""
+    if deps.conn_factory is None:
+        return news
+    try:
+        conn = deps.conn_factory()
+        try:
+            items = news_store.recent(
+                conn,
+                market,
+                asof=asof,
+                hours=cfg.news.store_hours,
+                limit=cfg.news.max_items,
+                ticker=ticker,
+            )
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - 저장소는 보조 입력
+        logger.debug("뉴스 저장소 읽기 실패 %s %s: %s", market, ticker, e)
+        return news
+    if not items:
+        return news
+    seen = {i.get("url") for i in news.get("stock") or []}
+    extra = [
+        {
+            "title": i["title"],
+            "summary": i.get("summary") or "",
+            "source": f"store:{i.get('source')}",
+            "published_at": i.get("published_at"),
+            "url": i["url"],
+            "received_at": i.get("received_at"),
+        }
+        for i in items
+        if i.get("url") not in seen
+    ]
+    out = dict(news)
+    merged = [*(news.get("stock") or []), *extra]
+    merged.sort(key=lambda i: i.get("published_at") or "", reverse=True)
+    out["stock"] = merged[: cfg.news.max_items]
+    out["sources"] = {**(news.get("sources") or {}), "store": f"{len(extra)}건 합침"}
+    return out
+
+
+MACRO_MEMO_TTL = timedelta(minutes=15)
+_MACRO_MEMO: dict[tuple[str, str], tuple[datetime, dict[str, Any]]] = {}
+_MACRO_MEMO_LOCK = threading.Lock()
+
+
+def _macro_memoized(cfg, secrets, market: str, asof: datetime, deps, now) -> dict[str, Any]:
+    """거시 지표(FRED·ECOS·지수)는 종목과 무관하다 — 같은 시장·운영일의 수집은 15분 동안 재사용해
+    종목마다 8회씩 외부 API 를 다시 부르지 않는다. 전부 실패한 결과는 메모하지 않는다."""
+    key = (market, asof.astimezone(UTC).date().isoformat())
+    t = now()
+    with _MACRO_MEMO_LOCK:
+        hit = _MACRO_MEMO.get(key)
+        if hit is not None and t - hit[0] < MACRO_MEMO_TTL:
+            return hit[1]
+    macro = collect_macro(
+        cfg.macro, secrets, market_client=deps.market, asof=asof, http=deps.http, now=now
+    )
+    if isinstance(macro, dict) and any(
+        (s.get("error") if isinstance(s, dict) else getattr(s, "error", None)) is None
+        for s in macro.values()
+    ):
+        with _MACRO_MEMO_LOCK:
+            _MACRO_MEMO[key] = (t, macro)
+    return macro
+
+
+_EVENT_KINDS = (
+    ("실적", "earnings"),
+    ("배당", "dividend"),
+    ("유상증자", "offering"),
+    ("무상증자", "bonus"),
+    ("자기주식", "buyback"),
+    ("합병", "merger"),
+    ("분할", "split"),
+    ("소송", "lawsuit"),
+)
+
+
+def _events(fundamental: dict, asof: datetime, now, upcoming: list[dict] | None = None) -> Section:
+    """최근 7일 공시를 이벤트 종류로 분류한다. `upcoming` 은 세이브티커 캘린더(asof ~ +7일 경제
+    일정, Phase 21)이고 폴더가 없으면 빈 목록(종목 실적일·배당락 소스는 아직 없다)."""
+
+    def build() -> dict:
+        disc = fundamental.get("disclosures") or {}
+        items = disc.get("data") or []  # Section 은 TypedDict(dict)
+        since = (asof - timedelta(days=7)).date().isoformat()
+        recent = []
+        for it in items:
+            # DART disclosures() 는 rcept_dt, EDGAR 는 filed 를 준다
+            d = str(it.get("date") or it.get("rcept_dt") or it.get("filed") or "")[:10]
+            if d and d < since:
+                continue
+            title = str(it.get("title") or "")
+            kind = next((k for word, k in _EVENT_KINDS if word in title), "other")
+            recent.append({"date": d, "kind": kind, "title": title, "source": it.get("source")})
+        note = (
+            "upcoming 은 세이브티커 경제 일정(7일); 종목 실적일·배당락 소스는 미확정"
+            if upcoming
+            else "예정 이벤트(실적일·배당락) 소스 미확정"
+        )
+        return {"recent": recent, "upcoming": list(upcoming or []), "note": note}
+
+    return run_section(build, now=now)
+
+
+def _sentiment(
+    ticker, market, name, asof, cfg, deps, secrets=None, saveticker_cfg=None
+) -> dict[str, Section]:
+    now = deps.now
+    if market != "KR":
+        flow = skipped_section("not available for US", now=now)
+    elif deps.market is None:
+        flow = skipped_section("no market client", now=now)
+    else:
+        cutoff = _asof_date(market, asof)
+        flow = run_section(
+            lambda: _dump(
+                [
+                    f
+                    for f in deps.market.get_investor_kr(ticker, days=cfg.kis.investor_days)
+                    if f.date <= cutoff
+                ]
+            ),
+            now=now,
+        )
+    return {
+        "investor_flow": flow,
+        "short_interest": skipped_section("phase6", now=now),
+        "community": run_section(
+            lambda: collect_community(
+                cfg.community,
+                ticker=ticker,
+                name=name,
+                market=market,
+                asof=asof,
+                http=deps.http,
+                now=now,
+                reddit_auth=_reddit_auth(secrets),
+                channels=cfg.channels,
+            ),
+            enabled=cfg.community.enabled,
+            now=now,
+        ),
+        "trends": skipped_section("phase8", now=now),
+        "manual_inputs": _manual(ticker, market, asof, now),
+        "saveticker": _saveticker_section(ticker, asof, saveticker_cfg, now),
+    }
+
+
+def _saveticker_root(saveticker_cfg: Any | None):
+    return saveticker.resolve_dir(getattr(saveticker_cfg, "dir", None))
+
+
+def _upcoming(asof: datetime, saveticker_cfg: Any | None) -> list[dict]:
+    """세이브티커 캘린더의 7일 경제 일정(없으면 빈 목록, 실패도 빈 목록 — 보조 입력)."""
+    try:
+        root = _saveticker_root(saveticker_cfg)
+        if root is None:
+            return []
+        return saveticker.upcoming(root, asof=asof)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("세이브티커 일정 읽기 실패: %s", e)
+        return []
+
+
+def _saveticker_section(ticker: str, asof: datetime, saveticker_cfg: Any | None, now) -> Section:
+    """세이브티커 로컬 폴더(사용자 수집기)의 커뮤니티·시세 상위에서 이 종목 언급 + 시장 트렌드."""
+    root = _saveticker_root(saveticker_cfg)
+    if root is None or not saveticker.available(root):
+        return skipped_section("no saveticker dir", now=now)
+    return run_section(
+        lambda: saveticker.for_ticker(saveticker.snapshot(root, asof=asof), ticker), now=now
+    )
+
+
+def _reddit_auth(secrets: Secrets | None) -> tuple[str, str, str] | None:
+    if secrets and secrets.REDDIT_CLIENT_ID and secrets.REDDIT_CLIENT_SECRET:
+        return (secrets.REDDIT_CLIENT_ID, secrets.REDDIT_CLIENT_SECRET, secrets.REDDIT_USER or "")
+    return None
+
+
+def _manual(ticker: str, market: str, asof: datetime, now) -> Section:
+    """종목 파일 + 시장 공통 파일(`_market_<시장>.md`, asof 이전 항목만). 둘 다 없으면 건너뜀."""
+    data = manual_inputs.read(ticker)
+    notes = manual_inputs.read_market(market, asof=asof)
+    if data is None and not notes:
+        return skipped_section("no manual input", now=now)
+    if data is not None and data.get("error"):
+        return Section(data=None, received_at=now().isoformat(), error=data["error"])
+    merged = dict(data or {"format": "market"})
+    merged["market_notes"] = notes
+    return Section(data=merged, received_at=now().isoformat(), error=None)
+
+
+def _name(ticker: str, market: Market, deps: InputDeps) -> str:
+    """종목명. KR 은 DART → KIS 순, US 는 EDGAR 티커 맵. 전부 실패하면 ticker.
+
+    DART 는 점검(800)이 잦아 KIS 폴백이 상시 경로다 (실기 확인).
+    """
+    lookups: list[Callable[[], str | None]] = []
+    if market == "KR":
+        if deps.dart is not None:
+            lookups.append(lambda: deps.dart.corp_name(ticker))
+        if deps.market is not None and hasattr(deps.market, "get_name_kr"):
+            lookups.append(lambda: deps.market.get_name_kr(ticker))
+    elif deps.edgar is not None and hasattr(deps.edgar, "company_name"):
+        lookups.append(lambda: deps.edgar.company_name(ticker))
+    for fn in lookups:
+        try:
+            name = fn()
+        except Exception as e:  # noqa: BLE001 - 이름 조회 실패는 다음 소스로
+            logger.warning("종목명 조회 실패 %s: %s", ticker, type(e).__name__)
+            continue
+        if name:
+            return str(name).strip()
+    return ticker
+
+
+def build_inputs(
+    *,
+    ticker: str,
+    market: Market,
+    exchange: str | None,
+    asof: datetime,
+    cfg: SourcesConfig,
+    secrets: Secrets,
+    deps: InputDeps,
+    saveticker_cfg: Any | None = None,
+) -> dict:
+    """종목 하나의 00_inputs 구조를 조립한다. 절 실패는 error 로 기록하고 계속한다."""
+    if market == "US" and not exchange:
+        raise ConfigError("미국 종목은 exchange(거래소 코드, NAS/NYS/AMS)가 필요합니다")
+    name = _name(ticker, market, deps)
+    technical = _technical(ticker, market, exchange, cfg, deps, asof)
+    daily_rows = technical["daily"]["data"] or []
+    result: dict[str, Any] = {
+        "meta": {
+            "ticker": ticker,
+            "market": market,
+            "exchange": exchange,
+            "name": name,
+            "asof": asof.astimezone(UTC).isoformat(),
+            # 마지막 일봉 날짜 (장중이면 당일 미완성 봉). 읽는 쪽이 부분 봉 여부를 판단한다
+            "last_candle_date": daily_rows[-1]["date"] if daily_rows else None,
+            "generated_at": deps.now().isoformat(),
+            "schema_version": SCHEMA_VERSION,
+        },
+        "technical": technical,
+    }
+    # 세 절은 서로 독립(fundamental 만 technical 의 현재가를 쓴다)이고 네트워크 대기가 대부분이라
+    # 동시에 돈다. KIS 클라이언트는 RateLimiter 락, httpx.Client 는 스레드 안전, DART 지연 초기화는
+    # 자체 락. 각 절은 run_section 이 예외를 절 안에 가두므로 결과 조립은 그대로다.
+    # 기한은 세 절 공통(시작부터 SECTION_TIMEOUT_S): 절마다 따로 기다리면 최악 3배가 되고, `with`
+    # 블록은 닫힐 때 멈춘 스레드를 끝까지 기다려 기한이 무의미했다(전체 검토 P7) → 기한이 지나면
+    # 결과를 오류 절로 적고 풀은 기다리지 않고 닫는다(멈춘 스레드는 끝날 때까지 뒤에 남는다)
+    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="collect")
+    try:
+        calls = {
+            "fundamental": (_fundamental, (ticker, market, asof, cfg, deps, technical)),
+            "news_macro": (_news_macro, (ticker, market, name, asof, cfg, secrets, deps)),
+            "sentiment": (
+                _sentiment,
+                (ticker, market, name, asof, cfg, deps, secrets, saveticker_cfg),
+            ),
+        }
+        futures = {}
+        for key, (fn, args) in calls.items():
+            with _STUCK_LOCK:
+                stuck = _STUCK.get(key, 0)
+            if stuck >= MAX_STUCK_PER_SECTION:
+                logger.warning(
+                    "수집 절 %s: 이전 시간 초과 작업 %d개가 아직 실행 중 → 생략", key, stuck
+                )
+                result[key] = Section(
+                    data=None,
+                    received_at=deps.now().isoformat(),
+                    error=f"skipped: 이전 시간 초과 작업 {stuck}개 실행 중",
+                )
+                continue
+            futures[key] = pool.submit(fn, *args)
+        deadline = time.monotonic() + SECTION_TIMEOUT_S
+        for key, fut in futures.items():
+            try:
+                result[key] = fut.result(timeout=max(0.0, deadline - time.monotonic()))
+            except FuturesTimeout:
+                # 한 절이 멈춰도(네트워크 TLS 교착 등) 수집 전체·세션을 막지 않는다
+                logger.warning("수집 절 %s 시간 초과(%ss) %s", key, SECTION_TIMEOUT_S, ticker)
+                if not fut.cancel():  # 이미 실행 중이면 끝날 때까지 '멈춘 작업' 으로 센다
+                    with _STUCK_LOCK:
+                        _STUCK[key] = _STUCK.get(key, 0) + 1
+                    fut.add_done_callback(_stuck_done(key))
+                result[key] = Section(
+                    data=None,
+                    received_at=deps.now().isoformat(),
+                    error=f"timeout after {SECTION_TIMEOUT_S}s",
+                )
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    result["news_macro"]["events"] = _events(
+        result["fundamental"], asof, deps.now, upcoming=_upcoming(asof, saveticker_cfg)
+    )
+    result = jsonable(result)
+    result["errors"] = _collect_errors(result)
+    return result
+
+
+def collect_and_save(
+    *,
+    ticker: str,
+    market: Market,
+    exchange: str | None,
+    asof: datetime,
+    cfg: SourcesConfig,
+    secrets: Secrets,
+    deps: InputDeps,
+    state: Path | None = None,
+    force: bool = False,
+    saveticker_cfg: Any | None = None,
+) -> Path:
+    """00_inputs 체크포인트를 만든다. 있으면 force 가 아닌 한 건너뛴다.
+
+    수집기는 현재 시점 데이터만 주므로 now 보다 24시간 넘게 과거인 asof 는 거부한다(룩어헤드).
+    """
+    if market == "US" and not exchange:
+        raise ConfigError("미국 종목은 exchange(거래소 코드, NAS/NYS/AMS)가 필요합니다")
+    if deps.now() - asof > MAX_PAST:
+        raise ConfigError(
+            f"과거 asof 재수집은 Phase 7 백테스트에서 지원합니다 (asof={asof.isoformat()})"
+        )
+    if asof - deps.now() > MAX_FUTURE:
+        raise ConfigError(f"미래 asof 는 허용하지 않습니다 (asof={asof.isoformat()})")
+    # 디렉터리 날짜는 시장 운영일(US 는 뉴욕 날짜): 데몬 monitor·재평가와 같은 runs/<date> 를 본다
+    d = run_dir(run_date_for(market, asof), market, ticker, state)
+    if not force and read_checkpoint(d, "00_inputs") is not None:
+        logger.info("00_inputs 이미 존재, 건너뜀: %s", d)
+        return d / "00_inputs.json"
+    data = build_inputs(
+        ticker=ticker,
+        market=market,
+        exchange=exchange,
+        asof=asof,
+        cfg=cfg,
+        secrets=secrets,
+        deps=deps,
+        saveticker_cfg=saveticker_cfg,
+    )
+    return write_checkpoint(d, "00_inputs", data)
+
+
+def reset_memo() -> None:
+    """프로세스 전역 상태(거시 메모·멈춘 절 수)를 비운다 — 테스트용."""
+    with _MACRO_MEMO_LOCK:
+        _MACRO_MEMO.clear()
+    with _STUCK_LOCK:
+        _STUCK.clear()
