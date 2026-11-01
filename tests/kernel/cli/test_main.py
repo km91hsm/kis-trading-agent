@@ -18,7 +18,7 @@ from trader.kernel.registry.types import Feature
 def test_help_lists_core_commands():
     r = CliRunner().invoke(app, ["--help"])
     assert r.exit_code == 0
-    names = ("init", "selfcheck", "daemon", "web", "dev", "notify-test", "telegram")
+    names = ("init", "selfcheck", "daemon", "web", "dev", "notify-test", "telegram", "accounts")
     assert all(c in r.stdout for c in names)
 
 
