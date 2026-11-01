@@ -27,6 +27,7 @@ from trader.kernel.broker.client import (
 )
 from trader.kernel.broker.creds import KisCreds, key_fingerprint
 from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
+from trader.kernel.broker.fake import FakeBroker, FakeMarket
 from trader.kernel.broker.market import HOLIDAY_CACHE_DAYS, PAGE_SIZE, KisMarket
 from trader.kernel.broker.models import *  # noqa: F403
 from trader.kernel.broker.rate_store import SharedRateLimiter, disabled_status
@@ -39,9 +40,45 @@ from trader.kernel.broker.ticks import (
     tick_size,
     tick_table_for,
 )
+from trader.kernel.broker.ws import (
+    BOOK_LEVELS,
+    INDEX_CODES,
+    MAX_SUBSCRIPTIONS,
+    TR_BOOK,
+    TR_INDEX,
+    TR_NOTICE,
+    TR_PINGPONG,
+    TR_TRADE,
+    TRADE_FIELD_COUNT,
+    TRADE_FIELDS,
+    control_problem,
+    is_appkey_in_use,
+    is_notice,
+    is_pingpong,
+    parse_frame,
+    subscribe_message,
+)
 
 __all__ = [
     *models.__all__,
+    "BOOK_LEVELS",
+    "INDEX_CODES",
+    "MAX_SUBSCRIPTIONS",
+    "TR_BOOK",
+    "TR_INDEX",
+    "TR_NOTICE",
+    "TR_PINGPONG",
+    "TR_TRADE",
+    "TRADE_FIELD_COUNT",
+    "TRADE_FIELDS",
+    "control_problem",
+    "is_appkey_in_use",
+    "is_notice",
+    "is_pingpong",
+    "parse_frame",
+    "subscribe_message",
+    "FakeBroker",
+    "FakeMarket",
     "APPROVAL_TTL",
     "HOLIDAY_CACHE_DAYS",
     "PAGE_SIZE",
