@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { maintainMinimized } from '../minimized.js';
+const TOKEN='a'.repeat(32),NOW=2000000;
+function fixture(){const calls=[],state={keepMinimized:true,backend:'api',apiWindowId:9},tab={id:7,windowId:9,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN};let active=true,windowState='normal';const d={state,token:TOKEN,healthyAt:NOW,now:NOW,active:()=>active,store:async v=>{Object.assign(state,v);calls.push({type:'store',value:v})},chrome:{tabs:{query:async()=>[tab],get:async()=>tab},windows:{get:async()=>({id:9,state:windowState}),update:async(id,v)=>{calls.push({type:'update',id,value:v});windowState=v.state}}}};return{state,calls,d,run:()=>maintainMinimized(d),cancel:()=>active=false};}
+test('only the exact healthy owned window is minimized, without focus or activation',async()=>{const f=fixture();await f.run();assert.deepEqual(f.calls.find(x=>x.type==='update'),{type:'update',id:9,value:{state:'minimized'}});assert.equal(f.state.ownedWindowState,'minimized');await f.run();assert.equal(f.calls.filter(x=>x.type==='update').length,1);});
+test('off, auth block, stale health, ambiguous owner and challenge URL never change windows',async()=>{for(const change of [f=>f.state.keepMinimized=false,f=>f.state.hostBlocked=true,f=>f.d.healthyAt=NOW-120001,f=>f.d.chrome.tabs.query=async()=>[],f=>f.d.chrome.tabs.query=async()=>[{id:7,windowId:9,url:'https://www.saveticker.com/news?challenge=1#trader-saveticker-api='+TOKEN}]]){const f=fixture();change(f);await f.run();assert.ok(!f.calls.some(x=>x.type==='update'));}});
+test('Stop or ownership change while inspecting prevents minimization',async()=>{for(const point of ['stop','owner']){const f=fixture();if(point==='stop')f.d.chrome.windows.get=async()=>{f.cancel();return{state:'normal'}};else f.d.chrome.tabs.get=async()=>({id:7,windowId:10,url:'https://www.saveticker.com/news#personal'});await f.run();assert.ok(!f.calls.some(x=>x.type==='update'));}});
+
+test('a moved owned tab or personal tabs in the owned window cannot minimize personal windows',async()=>{
+ const moved=fixture();moved.state.apiWindowId=10;await moved.run();assert.ok(!moved.calls.some(x=>x.type==='update'));
+ const mixed=fixture();mixed.d.chrome.tabs.query=async q=>q.windowId?[{id:7,windowId:9,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN},{id:8,windowId:9,url:'https://personal.invalid/'}]:[{id:7,windowId:9,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}];await mixed.run();assert.ok(!mixed.calls.some(x=>x.type==='update'));
+});

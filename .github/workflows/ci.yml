@@ -40,3 +40,6 @@ jobs:
           npm run typecheck
           npm test -- --run
           npm run build
+      - name: Chrome 수집 확장 테스트
+        if: runner.os == 'Linux' && hashFiles('web/package.json') != ''
+        run: node --test extensions/saveticker/tests/*.test.js
