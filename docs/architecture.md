@@ -37,6 +37,34 @@
   - 커널은 `control`·`runs` 외의 도메인 테이블을 모른다. 기능이 자기 마이그레이션으로 만든다.
 - 테스트: `tests/kernel/ledger/`
 
+## broker
+
+- 책임: KIS Open API 접근 전체. 인증·HTTP 클라이언트(레이트·재시도)·시세·주문/잔고·파생·웹소켓 프레임·가짜 구현·점검(`ping`)·클라이언트 조립. 주문 판단은 모른다.
+- 공개면: `errors`(`KisApiError`·`UNKNOWN_RESPONSE_CODE`), `models`(DTO 전부, `BrokerAccount`·`FoProduct` 포함), `creds`(`KisCreds`·`key_fingerprint`), `auth`(`KisAuth`), `client`(`KisClient`·`RateLimiter`·`RateLimitBusy`), `rate_store`(`SharedRateLimiter`), `market`(`KisMarket`)·`market_fo`(`FoMarketMixin`), `broker`(`KisBroker`), `fo`(`KisFoBroker`)·`fo_master`·`fo_codes`, `ws`(프레임 파서·구독 메시지), `fake`(`FakeMarket`·`FakeBroker`·`FakeFoBroker`), `factory`(`client_for`·`build_market`·`build_broker`·`shared_state_dir`·`reset_clients`), `ping`(`run_checks`·`failures`·`Check`), `tr_ids`, `ticks`(`quantize_price` 등), `_parse`(`dec`·`to_int`·`rows`).
+- 규약:
+  - **KIS 실패는 전부 `KisApiError(msg_cd, msg1, tr_id)`.** KIS 응답이 아닌 실패는 합성 코드 `AUTH/NETWORK/NETWORK_UNKNOWN/HTTP<status>/INVALID_JSON/UNSUPPORTED`. `NETWORK` 는 보내지도 못함, `NETWORK_UNKNOWN` 은 보낸 뒤 응답 없음(주문이 살아 있을 수 있어 호출자가 구분한다). `rt_cd≠0` 도 `KisApiError`.
+  - **시세·수급은 실전 env 클라이언트만, 주문·잔고는 계좌의 env.** 모의 서버는 시세류를 주지 않는다. `tr_ids.py` 가 tr_id·경로의 유일한 출처이고 모의 미지원 API 는 paper 값이 None. 세 겹: `KisAuth(env)` → `KisClient(env, auth)` → `KisMarket(client)`(실전만) / `KisBroker(account, client)`(env 일치 요구).
+  - **브로커 주문.** KR 은 `order-cash`(지정가 00·시장가 01), US 는 `order`(지정가만, 거래소 코드는 시세 EXCD 와 다른 `NASD|NYSE|AMEX`), 취소는 `order-rvsecncl`(KR 은 접수 응답의 `KRX_FWDG_ORD_ORGNO` 가 `OrderResult.org_no` 로 필요). `FakeBroker` 는 `orders`·`cancelled` 에 기록한다.
+  - **계좌별 키.** 앱키는 계좌마다 발급되므로 계좌마다 키 묶음(`KisCreds`)을 고른다. `client_for` 가 앱키마다 `KisClient` 하나를 캐시한다(캐시 키 `(env, app_key)`). 토큰 캐시·레이트 버킷은 앱키 단위(`KisCreds.bucket` = `<env>-<앱키 지문 12자>`)라 키끼리 덮어쓰거나 한도를 나눠 먹지 않는다. 캐시 파일에 앱키 지문을 남겨 다른 키의 토큰은 읽지 않는다(지문 없는 옛 파일은 사용).
+  - `build_broker` 가 `asset` 으로 `KisBroker`/`KisFoBroker` 를 가른다(fo 는 `fo_product` 필수).
+  - 토큰: 만료 1시간 전 갱신, 실패 후 60초 재발급 금지, 접속키 20시간. 실패 기록은 다시 읽은 파일에 덧붙여 다른 프로세스가 막 쓴 토큰을 지우지 않는다.
+  - 레이트: `RATE_PER_SEC = {"real": 20, "paper": 2}`. `EGW00201`(초당 한도)은 HTTP 200 뿐 아니라 HTTP 500 본문으로도 오므로 상태코드와 무관하게 0.5·1.0·2.0초로 최대 3회 재시도한다. 교차 프로세스 한도는 `kis_rate.db`(`SharedRateLimiter`).
+  - US 예수금은 `inquire-present-balance`(통화별 행). 일봉·수급 목록은 항상 날짜 오름차순(마지막이 최신). 금액은 `Decimal`. `OrderRequest.exchange` 는 기본값이 없어 KR 도 `None` 을 명시한다.
+  - `TRADER_KIS_SHARED_DIR` 는 토큰 캐시(`kis_token_<env>-<지문12>.json`)·레이트 DB(`kis_rate.db`)만 옮긴다. 휴장일 캐시 `cache/holiday_YYYYMM.json` 은 `state/` 에 남는다.
+  - 로거 이름 `trader.broker`. 커널 모듈이라 `features` 를 import 하지 않는다.
+- 알려진 차이(옛 저장소 대비, 동작은 보존하고 여기에만 적는다):
+  - ① `kis ping` CLI 는 M2 로 미룬다(코드 경로 `ping.run_checks`·`failures` 만 M1).
+  - ② `_market_creds`(시세 키 선택)와 같은 키 묶음 경고는 M2.
+  - ③ 웹소켓 I/O(연결·재접속·구독 관리)는 M5·M11. M1 은 `ws` 의 순수 프레임 파서·구독 메시지만 둔다.
+  - ④ 옛 「미확인」 승계(실기 확인 전까지 추정): US 잔고·예수금은 `OVRS_EXCG_CD=NASD` 고정이라 NYS/AMS 보유분이 같이 조회되는지; 순위 API 3종(`VOLUME_RANK` FHPST01710000·`FLUCT_RANK` FHPST01700000·`FRGN_INST_TOTAL` FHPTJ04400000)의 요청 파라미터와 응답 필드명은 공개 예제 기준 추정(파서는 후보 키를 순서대로 보고 코드가 없으면 행을 버린다); 체결통보(H0STCNI0/H0GSCNI0)를 HTS ID 로 구독하면 같은 명의 계좌 전부의 체결이 어느 앱키 세션으로든 오는지; FO `PRDT_TYPE` 301/302/303 은 추정.
+  - ④-실기 2(보유 행이 있어야 확인, 확정 전 해당 수단은 신규 거부): 잔고 output1 의 방향 필드(`sll_buy_dvsn_cd` 유무·값)와 `prdt_type_cd` 값 · `prsm_dpast_amt` 가 NAV 인지 · 체결 응답 `pdno` 가 표준 12자리인지 단축 코드인지 · 취소 행의 필드명(`rvse_cncl_dvsn_cd` 02 / `*_name` '취소') · 미니옵션 승수 5만 · 옵션 매도 `ord_psbl_qty` 의 증거금 반영 · `margin_rate` 의 보수성 · KIS 선물 `basis` 가 시장 베이시스인지 · `hts_rmnn_dynu` 잔존일 단위(달력/영업일) · 만기 정산이 체결 조회에 실리는지 · 감액 다리 재시도 중 손절 우선.
+  - ⑤ `KisBroker` 생성자가 `asset != "stock"` 을 `ValueError` 로 거부한다(옛 `_build_brokers` 의 분기를 생성자가 이어받음).
+  - ⑥ 로거 이름 `trader.kis` → `trader.broker`.
+  - ⑦ 옛 `kis_market.py` 하단 attach 블록 → `market_fo.FoMarketMixin`(본문 동일).
+  - ⑧ `rate_store` 는 자체 SQLite 설정(`timeout=5`, autocommit, WAL)을 쓰고 `ledger.connect` 를 쓰지 않는다.
+  - ⑨ `BrokerAccount.markets` 기본값은 `["KR"]`(옛 `AccountConfig` 는 `["KR","US"]`) — yaml 의 기본 채움은 M2 설정 모델 몫; 옛 `_build_brokers` 의 "키 없는 계좌는 경고 후 건너뜀"·`ConfigError` 감싸기도 M2(`client_for` 는 `ValueError`).
+- 테스트: `tests/kernel/broker/` (HTTP 는 respx, fixture JSON 은 합성 응답)
+
 ## registry
 
 - 책임: 기능 계약(`Feature`)과 그 타입, 기능 발견, 계약·import 경계 검사.

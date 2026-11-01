@@ -11,6 +11,8 @@ from trader.kernel.config.loader import load, memo_load
 from trader.kernel.config.sections import ConfigFile, Section, SectionRegistry
 from trader.kernel.config.time import KST
 
+Env = Literal["paper", "real"]
+
 Market = Literal["KR", "US"]
 
 
@@ -40,6 +42,7 @@ __all__ = [
     "KST",
     "ConfigError",
     "ConfigFile",
+    "Env",
     "Market",
     "Section",
     "SectionRegistry",

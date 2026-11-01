@@ -1,0 +1,275 @@
+import httpx
+import pytest
+import respx
+
+from trader.kernel.broker.client import RateLimiter
+from trader.kernel.broker.errors import KisApiError
+
+REAL = "https://openapi.koreainvestment.com:9443"
+PAPER = "https://openapivts.koreainvestment.com:29443"
+PRICE = "/uapi/domestic-stock/v1/quotations/inquire-price"
+
+
+def ok(output: dict) -> httpx.Response:
+    return httpx.Response(
+        200, json={"rt_cd": "0", "msg_cd": "MCA00000", "msg1": "정상", "output": output}
+    )
+
+
+def test_headers_include_tr_id(real_client, respx_mock):
+    route = respx_mock.get(REAL + PRICE).mock(return_value=ok({"stck_prpr": "71500"}))
+    data = real_client.get(PRICE, "DOM_PRICE", {"FID_INPUT_ISCD": "005930"})
+    assert data["output"]["stck_prpr"] == "71500"
+    h = route.calls[0].request.headers
+    assert h["tr_id"] == "FHKST01010100" and h["authorization"] == "Bearer tok"
+    assert h["appkey"] == "key" and h["custtype"] == "P"
+    assert route.calls[0].request.url.params["FID_INPUT_ISCD"] == "005930"
+
+
+def test_paper_uses_paper_domain_and_tr_id(paper_client, respx_mock):
+    route = respx_mock.get(PAPER + "/uapi/domestic-stock/v1/trading/inquire-balance").mock(
+        return_value=ok({})
+    )
+    paper_client.get("/uapi/domestic-stock/v1/trading/inquire-balance", "DOM_BALANCE", {})
+    assert route.calls[0].request.headers["tr_id"] == "VTTC8434R"
+
+
+def test_business_error_and_http_error(real_client, respx_mock):
+    respx_mock.get(REAL + PRICE).mock(
+        side_effect=[
+            httpx.Response(200, json={"rt_cd": "1", "msg_cd": "OPSQ0001", "msg1": "없는 종목"}),
+            httpx.Response(500, text="oops"),
+        ]
+    )
+    with pytest.raises(KisApiError) as e1:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert (e1.value.msg_cd, e1.value.tr_id) == ("OPSQ0001", "FHKST01010100")
+    with pytest.raises(KisApiError) as e2:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e2.value.msg_cd == "HTTP500" and "secret" not in str(e2.value)
+
+
+def test_invalid_json(real_client, respx_mock):
+    respx_mock.get(REAL + PRICE).mock(return_value=httpx.Response(200, text="<html>"))
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "INVALID_JSON"
+
+
+def test_network_error(real_client, respx_mock):
+    respx_mock.get(REAL + PRICE).mock(side_effect=httpx.ConnectError("x"))
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "NETWORK"
+
+
+def test_egw00201_retry_once(real_client, respx_mock, monkeypatch):
+    slept = []
+    monkeypatch.setattr(real_client, "_sleep", lambda s: slept.append(s))
+    route = respx_mock.get(REAL + PRICE).mock(
+        side_effect=[
+            httpx.Response(
+                200, json={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수 초과"}
+            ),
+            ok({"stck_prpr": "1"}),
+        ]
+    )
+    assert real_client.get(PRICE, "DOM_PRICE", {})["output"]["stck_prpr"] == "1"
+    assert route.call_count == 2 and slept == [0.5]
+
+
+def test_egw00201_as_http500_retries_once(paper_client, respx_mock, monkeypatch):
+    """실기 확인: KIS 는 초당 한도 초과를 HTTP 500 + JSON 본문으로도 돌려준다."""
+    slept = []
+    monkeypatch.setattr(paper_client, "_sleep", lambda s: slept.append(s))
+    url = PAPER + "/uapi/domestic-stock/v1/trading/inquire-balance"
+    route = respx_mock.get(url).mock(
+        side_effect=[
+            httpx.Response(
+                500,
+                json={
+                    "rt_cd": "1",
+                    "msg1": "초당 거래건수를 초과하였습니다.",
+                    "msg_cd": "EGW00201",
+                },
+            ),
+            ok({"x": "1"}),
+        ]
+    )
+    data = paper_client.get("/uapi/domestic-stock/v1/trading/inquire-balance", "DOM_BALANCE", {})
+    assert data["output"]["x"] == "1" and route.call_count == 2 and slept == [0.5]
+
+
+def test_http500_with_kis_code_keeps_code(real_client, respx_mock, monkeypatch):
+    """HTTP≠200 이라도 KIS 본문의 msg_cd 를 유지한다. EGW00201 이 재시도 상한(3회)을 넘겨 계속되면
+    그 코드로 끝난다."""
+    monkeypatch.setattr(real_client, "_sleep", lambda s: None)
+    limited = httpx.Response(500, json={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초과"})
+    respx_mock.get(REAL + PRICE).mock(side_effect=[limited, limited, limited, limited])
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "EGW00201"
+
+
+def test_token_error_invalidates_and_retries(real_client, respx_mock, monkeypatch):
+    """만료 토큰(EGW00123)이면 캐시를 지우고 재발급 후 1회 재시도한다 (리뷰 Important 3)."""
+    invalidated = []
+    monkeypatch.setattr(real_client._auth, "invalidate", lambda: invalidated.append(1))
+    route = respx_mock.get(REAL + PRICE).mock(
+        side_effect=[
+            httpx.Response(500, json={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "만료"}),
+            ok({"stck_prpr": "1"}),
+        ]
+    )
+    assert real_client.get(PRICE, "DOM_PRICE", {})["output"]["stck_prpr"] == "1"
+    assert invalidated == [1] and route.call_count == 2
+
+
+def test_missing_rt_cd_is_invalid(real_client, respx_mock):
+    respx_mock.get(REAL + PRICE).mock(
+        return_value=httpx.Response(200, json={"error_code": "EGW00103", "error_description": "x"})
+    )
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "EGW00103"
+
+
+def test_post_sends_json_body(paper_client, respx_mock):
+    route = respx_mock.post(PAPER + "/uapi/domestic-stock/v1/trading/order-cash").mock(
+        return_value=ok({"ODNO": "1"})
+    )
+    paper_client.post(
+        "/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {"PDNO": "005930"}
+    )
+    assert route.calls[0].request.headers["tr_id"] == "VTTC0012U"
+    assert b'"PDNO"' in route.calls[0].request.content
+
+
+def test_rate_limit_spacing():
+    now = [0.0]
+    slept = []
+
+    def sleep(s):
+        slept.append(s)
+        now[0] += s
+
+    rl = RateLimiter(20, clock=lambda: now[0], sleep=sleep)
+    for _ in range(21):
+        rl.acquire()
+    assert slept and min(slept) > 0  # 21번째 호출은 1초 창을 넘길 때까지 대기
+    assert now[0] >= 1.0 - 1e-6
+
+
+@respx.mock
+def test_paper_client_rejects_unsupported_tr(paper_client):
+    with pytest.raises(KisApiError) as e:
+        paper_client.get("/x", "HOLIDAY", {})
+    assert e.value.msg_cd == "UNSUPPORTED"
+
+
+def test_timeout_after_send_is_unknown_response_not_network(real_client, respx_mock):
+    """요청이 나간 뒤 응답을 못 받은 경우(ReadTimeout)는 주문이 살아 있을 수 있어
+    '보내지도 못한' ConnectError(NETWORK)와 구분한다."""
+    respx_mock.post(REAL + "/uapi/domestic-stock/v1/trading/order-cash").mock(
+        side_effect=[httpx.ReadTimeout("slow"), httpx.ConnectError("down")]
+    )
+    with pytest.raises(KisApiError) as e1:
+        real_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
+    assert e1.value.msg_cd == "NETWORK_UNKNOWN"
+    with pytest.raises(KisApiError) as e2:
+        real_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
+    assert e2.value.msg_cd == "NETWORK"
+
+
+def test_egw00201_backs_off_up_to_three_times(real_client, respx_mock, monkeypatch):
+    """백필(실전 20/s)에서 한 번 재시도로는 모자라 종목이 통째로 빠졌다(실기 10-20: 034730·AMZN).
+    0.5 → 1.0 → 2.0 초로 최대 3회 물러난 뒤에도 초과면 그때 올린다."""
+    slept = []
+    monkeypatch.setattr(real_client, "_sleep", lambda s: slept.append(s))
+    limited = httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초과"})
+    route = respx_mock.get(REAL + PRICE).mock(
+        side_effect=[limited, limited, limited, ok({"stck_prpr": "1"})]
+    )
+    assert real_client.get(PRICE, "DOM_PRICE", {})["output"]["stck_prpr"] == "1"
+    assert route.call_count == 4 and slept == [0.5, 1.0, 2.0]
+    respx_mock.get(REAL + PRICE).mock(side_effect=[limited, limited, limited, limited])
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "EGW00201"
+
+
+def test_rate_limiter_max_wait_raises_busy_instead_of_sleeping():
+    """웹 요청은 리미터에서 오래 기다리지 않고 RateLimitBusy(→503) 로 바로 실패한다."""
+    from trader.kernel.broker.client import RateLimitBusy, RateLimiter
+
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        clock["t"] += s
+
+    lim = RateLimiter(1, clock=lambda: clock["t"], sleep=sleep)
+    lim.acquire()  # 1/s 를 다 썼다
+    with lim.max_wait(0.5), pytest.raises(RateLimitBusy):
+        lim.acquire()
+    assert slept == []  # 상한을 넘기는 대기는 시작도 하지 않는다
+    with lim.max_wait(2.0):
+        lim.acquire()  # 1초 대기는 상한 안
+    assert len(slept) == 1 and slept[0] <= 1.0
+    lim.acquire()  # 상한 밖(기본)에서는 평소처럼 기다린다
+    assert len(slept) == 2
+
+
+def test_get_pages_follows_tr_cont(real_client, respx_mock):
+    """응답 헤더 tr_cont 가 F/M 이면 tr_cont:N + ctx_area_* 로 다음 페이지를 받아 output1 을
+    잇는다."""
+    bal = "/uapi/domestic-stock/v1/trading/inquire-balance"
+
+    def page(rows, more, fk="", nk=""):
+        return httpx.Response(
+            200,
+            headers={"tr_cont": "M" if more else "D"},
+            json={
+                "rt_cd": "0",
+                "msg_cd": "x",
+                "msg1": "",
+                "output1": rows,
+                "output2": [{"tot": "1"}],
+                "ctx_area_fk100": fk,
+                "ctx_area_nk100": nk,
+            },
+        )
+
+    route = respx_mock.get(REAL + bal).mock(
+        side_effect=[page([{"a": 1}], True, "FK1", "NK1"), page([{"a": 2}], False)]
+    )
+    data = real_client.get_pages(bal, "DOM_BALANCE", {"CANO": "1", "CTX_AREA_FK100": ""})
+    assert [r["a"] for r in data["output1"]] == [1, 2] and data["output2"] == [{"tot": "1"}]
+    second = route.calls[1].request
+    assert second.headers["tr_cont"] == "N"
+    assert second.url.params["CTX_AREA_FK100"] == "FK1"
+    assert second.url.params["CTX_AREA_NK100"] == "NK1"
+    assert "tr_cont" not in route.calls[0].request.headers
+
+
+def test_post_gateway_5xx_or_non_json_is_unknown_not_failure(paper_client, respx_mock):
+    """전체 검토 O4: 주문 POST 의 게이트웨이 5xx(비JSON)·rt_cd 없는 본문은 '응답 없음'(unknown)."""
+    from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE
+
+    route = respx_mock.post(PAPER + "/uapi/domestic-stock/v1/trading/order-cash")
+    route.mock(return_value=httpx.Response(502, text="<html>Bad Gateway</html>"))
+    with pytest.raises(KisApiError) as e:
+        paper_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
+    assert e.value.msg_cd == UNKNOWN_RESPONSE_CODE
+    route.mock(return_value=httpx.Response(200, json={"output": {}}))
+    with pytest.raises(KisApiError) as e:
+        paper_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
+    assert e.value.msg_cd == UNKNOWN_RESPONSE_CODE
+    # KIS 가 본문으로 준 거부는 그대로(진짜 실패)
+    route.mock(
+        return_value=httpx.Response(200, json={"rt_cd": "1", "msg_cd": "APBK0013", "msg1": "거부"})
+    )
+    with pytest.raises(KisApiError) as e:
+        paper_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
+    assert e.value.msg_cd == "APBK0013"

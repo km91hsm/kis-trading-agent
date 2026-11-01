@@ -14,15 +14,27 @@
 - [x] Task 8 `web/` Vite 스캐폴드
 - [x] Task 9 `kernel/cli`(`init`·`selfcheck`·`daemon`·`web`·`dev`)
 - [x] Task 10 문서(`CLAUDE.md`·`docs/TODO.md`·`docs/architecture.md`·`README.md`)
-- [ ] Task 11 저장소 공개·PR·CI·머지
+- [x] Task 11 저장소 공개·PR·CI·머지
 
 ## M1 — kernel/broker
 KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트리미터. 완료 기준: `kis ping` 코드 경로 테스트 통과.
-- [ ] 착수 전
+- [x] Task 1 커널 전제 — `Env`·`MARKET_TZ`·`fsutil.atomic_replace` (2e58fc9)
+- [x] Task 2 `errors`·`_parse`·`tr_ids`·`ticks`·`models`·`creds` (cd5be40)
+- [x] Task 3 `auth.py` — 토큰 캐시·접속키 (d94c203)
+- [x] Task 4 `client.py`·`rate_store.py` + 테스트 공용 fixture (dc58a3f)
+- [x] Task 5 `market.py` — 현물 시세·순위·휴장일·종목명 (6eddc8c)
+- [x] Task 6 `broker.py` — `KisBroker` 잔고·주문·체결 (8667224)
+- [x] Task 7 `ws.py` 프레임 헬퍼 + `fake.py`(현물) (fea6eb4)
+- [x] Task 8 선물옵션 — `fo_codes`·`fo_master`·`fo.py`·`market_fo.py`·`FakeFoBroker` (2ce0719)
+- [x] Task 9 `factory.py`·`ping.py` — 공유 디렉터리 override·클라이언트 캐시·점검 (8feb446, 7a1c743)
+- [x] Task 10 문서·체크리스트·공개면 점검
+- [ ] PR·CI(ubuntu+windows)·머지
+- 이관: `kis ping` CLI(`--account` 필터 테스트 `test_kis_ping_account_filter` 포함)·`_market_creds`·같은 키 경고 → M2
 
 ## M2 — features/accounts + notify
 계좌 yaml·모드·LIVE 확인·키·추가삭제, `kernel/notify` 전송·outbox. 완료 기준: 옛 `control/*`·`notify` 테스트 이식 통과.
 - [ ] 착수 전
+- [ ] yaml→BrokerAccount 변환 때 markets 기본 [KR, US] 를 M2 설정 모델이 채운다(M1 DTO 기본은 [KR]); 키 없는 계좌 skip 경고·ConfigError 감싸기 이관
 - 이연(M0 리뷰):
   - `contracts._default_roots` 동적 import 를 discover 경유로
   - `import_violations` 루트 추론을 명시 키워드로
@@ -69,6 +81,7 @@ quant·screener·discovery·유니버스 PIT, 피처·학습·레지스트리·�
 ## M10 — features/fo
 파생 Lane(`LegStore`, 커널 executor 코어 위). 완료 기준: 옛 `fo/*` 계열 테스트 이식 통과.
 - [ ] 착수 전
+- [ ] 옛 tests/broker/test_fo_market.py::test_option_quote_iv_is_percent_and_reprice_converts 이식(trader.fo.pricing 의존, M1 에서 이월)
 
 ## M11 — features/quotes + 웹 API 12 자원 (백엔드만)
 웹 API 12 자원·SSE 키 생성·계약 테스트. 완료 기준: 모든 자원 엔드포인트 테스트 통과, 옛 엔드포인트 대응표 100%. (M11b: 새 웹 UI 구현은 별도 브레인스토밍·플랜)
