@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: 의존성
+        run: uv sync
+      - name: 린트
+        run: uv run ruff check src tests
+      - name: 테스트
+        run: uv run pytest -q
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux' && hashFiles('web/package.json') != ''
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 웹 타입검사·테스트·빌드
+        if: runner.os == 'Linux' && hashFiles('web/package.json') != ''
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm test -- --run
+          npm run build

@@ -1,0 +1,14 @@
+config/
+secrets/
+state/
+dist/
+build/
+web/dist/
+web/node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.superpowers/
