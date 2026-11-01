@@ -59,7 +59,7 @@ def quiet_httpx() -> None:
 def configure(state_dir: Path, level: str = "INFO", *, name: str | None = None) -> None:
     """루트 로거에 파일·콘솔 핸들러를 붙인다. 여러 번 호출해도 핸들러가 중복되지 않는다.
 
-    name 을 주면 `<name>.log` 에 쓴다 — 오래 사는 프로세스끼리 같은 파일을 두고 회전·뒤섞임을
+    name 을 주면 `trader-<name>.log` 에 쓴다 — 오래 사는 프로세스끼리 같은 파일을 두고 회전·뒤섞임을
     겪지 않도록. 기본은 trader.log."""
     root = logging.getLogger()
     root.setLevel(level)
@@ -68,7 +68,7 @@ def configure(state_dir: Path, level: str = "INFO", *, name: str | None = None) 
     log_dir = Path(state_dir) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter(_FORMAT)
-    fname = f"{name or 'trader'}.log"
+    fname = f"trader-{name}.log" if name else "trader.log"
     handlers: list[logging.Handler] = [file_handler(log_dir / fname)]
     if sys.stderr is not None:  # 창 없는 실행파일(TraderApp)은 stderr 가 None — 파일 핸들러만
         console = logging.StreamHandler()

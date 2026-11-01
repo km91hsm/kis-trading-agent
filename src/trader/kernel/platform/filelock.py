@@ -10,7 +10,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-logger = logging.getLogger("trader.kernel")
+logger = logging.getLogger("trader.platform")
 
 
 class LockTimeout(TimeoutError):

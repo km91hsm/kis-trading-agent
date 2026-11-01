@@ -66,11 +66,11 @@ def test_rotation_by_another_process_reopens_stream(project):
 
 
 def test_configure_with_name_uses_separate_file(project):
-    """name 을 주면 `<name>.log` 에 쓴다. 기본은 trader.log."""
+    """name 을 주면 `trader-<name>.log` 에 쓴다. 기본은 trader.log."""
     logging_setup.configure(project / "state", name="web")
     logging.getLogger("trader.test").info("웹 로그")
     _flush()
-    assert "웹 로그" in (project / "state" / "logs" / "web.log").read_text(encoding="utf-8")
+    assert "웹 로그" in (project / "state" / "logs" / "trader-web.log").read_text(encoding="utf-8")
     assert not (project / "state" / "logs" / "trader.log").exists()
 
 
