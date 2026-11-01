@@ -78,7 +78,7 @@ def rows(conn):
 def test_deps_is_frozen_with_exact_field_order(deps):
     assert [f.name for f in fields(DaemonDeps)] == [
         "settings", "schedule", "conn_factory", "state", "now", "markets", "gates", "stop_event",
-        "dry_run",
+        "dry_run", "notifier",
     ]  # fmt: skip
     with pytest.raises(FrozenInstanceError):
         deps.dry_run = True  # type: ignore[misc]

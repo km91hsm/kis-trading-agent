@@ -10,6 +10,7 @@ from trader.kernel.cli import boot as boot_mod
 from trader.kernel.cli import main as main_mod
 from trader.kernel.cli.main import app
 from trader.kernel.config import ConfigError
+from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.platform.paths import ProjectRootNotFound
 from trader.kernel.registry.types import Feature
 
@@ -83,6 +84,7 @@ def test_build_daemon_deps(project):
         assert isinstance(deps.stop_event, threading.Event)
         assert deps.state == project.resolve() / "state"
         assert deps.now().tzinfo is not None
+        assert isinstance(deps.notifier, NullNotifier)  # 시크릿 없음
     finally:
         b.conn.close()
 

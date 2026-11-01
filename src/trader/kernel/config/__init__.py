@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from trader.kernel.config.errors import ConfigError
 from trader.kernel.config.loader import load, memo_load
@@ -24,9 +24,17 @@ class WebSettings(BaseModel):
     port: int = 8787
 
 
+class NotifySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    poll_interval_s: int = Field(30, ge=5, le=600)
+
+
 KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "markets", list[Market], lambda: ["KR", "US"]),
     Section("settings", "web", WebSettings, WebSettings),
+    Section("settings", "notify", NotifySettings, NotifySettings),
 )
 
 
@@ -45,6 +53,7 @@ __all__ = [
     "ConfigFile",
     "Env",
     "Market",
+    "NotifySettings",
     "Section",
     "SectionRegistry",
     "Secrets",

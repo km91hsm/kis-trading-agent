@@ -4,3 +4,6 @@ markets: [KR, US]
 web:
   bind: 127.0.0.1
   port: 8787
+
+notify:
+  enabled: true

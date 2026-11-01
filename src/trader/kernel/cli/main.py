@@ -16,6 +16,7 @@ from trader.kernel.cli.dev import dev_app
 from trader.kernel.config import load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
+from trader.kernel.notify.telegram import make_notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover
 from trader.kernel.registry.types import Feature
@@ -52,6 +53,9 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         gates={},
         stop_event=threading.Event(),
         dry_run=dry_run,
+        notifier=make_notifier(
+            boot_.secrets or load_secrets(), enabled=boot_.settings.notify.enabled
+        ),
     )
 
 

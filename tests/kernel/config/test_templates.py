@@ -24,6 +24,7 @@ def test_kernel_defaults():
     )
     assert cfg.markets == ["KR", "US"]
     assert (cfg.web.bind, cfg.web.port) == ("127.0.0.1", 8787)
+    assert cfg.notify.enabled is True
 
 
 def test_accounts_template_is_placeholder_only():
