@@ -72,6 +72,27 @@ def test_contracts_reject_duplicate_migration_version():
     assert any("마이그레이션" in m and "2" in m for m in msgs)
 
 
+def test_interleaved_migration_versions_across_features_are_accepted():
+    alpha, beta = _ok()
+    alpha = replace(
+        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(4, "a4", owner="alpha"))
+    )
+    beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
+    msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
+    assert not any("마이그레이션" in m for m in msgs)
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == [1, 2, 3, 4]
+
+
+def test_duplicate_version_still_reported_with_interleaving():
+    alpha, beta = _ok()
+    alpha = replace(
+        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(3, "a3", owner="alpha"))
+    )
+    beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
+    msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
+    assert any("마이그레이션" in m and "3" in m for m in msgs)
+
+
 def test_contracts_require_readme(tmp_path):
     (tmp_path / "alpha").mkdir()
     (tmp_path / "beta").mkdir()

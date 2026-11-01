@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from trader.kernel.ledger.db import LedgerError
-from trader.kernel.ledger.migrations import KERNEL
+from trader.kernel.ledger.migrations import KERNEL, Migration
 from trader.kernel.ledger.migrations import check as check_migrations
 from trader.kernel.registry.types import Feature
 
@@ -23,6 +23,13 @@ KERNEL_EXEMPT = Path("registry") / "discover.py"
 
 def _dups(items: Iterable[str]) -> list[str]:
     return sorted(k for k, n in Counter(items).items() if n > 1)
+
+
+def all_migrations(features: Iterable[Feature]) -> list[Migration]:
+    """커널 + 모든 기능 마이그레이션을 버전순으로 합친다 (기능 간 버전 교차 배치 허용)."""
+    return sorted(
+        [*KERNEL, *(m for f in features for m in f.migrations)], key=lambda m: m.version
+    )
 
 
 def _default_roots() -> list[Path]:
@@ -42,7 +49,7 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
     try:
-        check_migrations([*KERNEL, *(m for f in features for m in f.migrations)])
+        check_migrations(all_migrations(features))
     except LedgerError as exc:
         msgs.append(str(exc))
     search = list(roots) if roots is not None else _default_roots()
