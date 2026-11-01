@@ -279,3 +279,13 @@ def test_should_start_retries_auth_block_after_six_hours(tmp_path, monkeypatch):
         assert (
             automation.should_start(home, creds, now=now + timedelta(hours=6, minutes=1))[0] is True
         )
+
+
+def test_calendar_range_rolls_and_views_follow():
+    from trader.features.saveticker.cli import rolling_range, select_views
+    from trader.kernel.config import KST
+
+    assert rolling_range(datetime(2026, 10, 27, tzinfo=KST)) == ("2026-09", "2027-01")
+    assert rolling_range(datetime(2027, 1, 31, tzinfo=KST)) == ("2026-12", "2027-04")
+    views = select_views("2026-12", "2027-04", [], only=None, lane="background")
+    assert "calendar_2027-04" in {v.stream for v in views}

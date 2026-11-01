@@ -251,3 +251,22 @@ def test_partial_registry_install_is_rolled_back(prepared, tmp_path, monkeypatch
     assert registry.value is None
     assert not (tmp_path / "native.json").exists()
     assert (project / "secrets/saveticker.env").exists()
+
+
+def test_cli_prepare_does_not_activate_backend(project):
+    import sys
+
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    result = CliRunner().invoke(
+        app, ["saveticker", "extension", "prepare", "--destination", str(project / "package")]
+    )
+    if sys.platform == "win32":
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error"] == "windows_source_requires_bundle"
+        return
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["extension_id"] == EXTENSION_ID
+    assert not (project / "state/external/saveticker/runtime/bridge-config.json").exists()
