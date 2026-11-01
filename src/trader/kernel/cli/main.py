@@ -80,7 +80,9 @@ def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 
         b.conn.close()
         raise
     try:
-        d.deps.stop_event.wait()
+        # 타임아웃 없는 wait 는 Windows 에서 SIGINT 로 깨지 않는다
+        while not d.deps.stop_event.wait(1.0):
+            pass
     finally:
         d.shutdown()
         b.conn.close()
@@ -88,11 +90,13 @@ def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 
 
 @config_errors
 def web(
-    host: str = typer.Option("127.0.0.1", "--host", help="바인드 주소"),
-    port: int = typer.Option(8787, "--port", help="포트"),
+    host: str | None = typer.Option(None, "--host", help="바인드 주소 (기본: settings.web.bind)"),
+    port: int | None = typer.Option(None, "--port", help="포트 (기본: settings.web.port)"),
 ) -> None:
     """웹 UI·API 서버를 띄운다."""
     b = boot(settings=True, conn=True, log_name="web")
+    host = host or b.settings.web.bind
+    port = port or b.settings.web.port
     try:
         uvicorn.run(create_app(build_web_deps(b)), host=host, port=port, log_config=None)
     finally:

@@ -160,3 +160,41 @@ def test_app_call_forces_utf8(monkeypatch):
     with pytest.raises(SystemExit):
         app(["--help"])
     assert calls == [1]
+
+
+def test_web_uses_settings_web_port_and_flag_wins(project, monkeypatch):
+    (project / "config" / "settings.yaml").write_text("web:\n  port: 9999\n", encoding="utf-8")
+    seen = {}
+    monkeypatch.setattr(main_mod.uvicorn, "run", lambda a, **kw: seen.update(kw))
+    assert CliRunner().invoke(app, ["web"]).exit_code == 0
+    assert seen["port"] == 9999 and seen["host"] == "127.0.0.1"
+    assert CliRunner().invoke(app, ["web", "--port", "8000"]).exit_code == 0
+    assert seen["port"] == 8000
+
+
+def test_registry_error_exits_1_with_korean_prefix(project, monkeypatch):
+    from trader.kernel.registry import RegistryError
+
+    def bad():
+        raise RegistryError("x")
+
+    monkeypatch.setattr(boot_mod, "discover", bad)
+    r = CliRunner().invoke(app, ["web"])
+    assert r.exit_code == 1 and "오류: x" in r.output
+
+
+def test_boot_default_log_file_names(project):
+    from trader.kernel.platform import logging_setup
+
+    logs = project / "state" / "logs"
+    try:
+        boot_mod.boot()
+        assert (logs / "trader.log").exists() and not (logs / "trader-trader.log").exists()
+        boot_mod.boot(log_name="web")
+        assert (logs / "trader-web.log").exists()
+    finally:
+        logging_setup.reset()
+
+
+def test_build_registry_includes_feature_sections():
+    assert boot_mod.build_registry([]) is not None
