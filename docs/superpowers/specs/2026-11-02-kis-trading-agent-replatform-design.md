@@ -20,7 +20,7 @@
 | 항목 | 결정 |
 |---|---|
 | 성격 | 파이썬 데몬·게이트·executor·원장 구조 **유지**. 그 위에 (a) 소스 구조 재설계 (b) 웹 UI 재설계 (c) 트레이딩뷰 MCP·브리핑·복기 보강 |
-| 저장소 | **새 저장소** `km91hsm/kis-trading-agent`, 로컬 `/Users/ohhyeonseok/LLM/kis-trading-agent`, **public**, GitHub Actions CI |
+| 저장소 | **새 저장소** `km91hsm/kis-trading-agent`, 로컬 `<repo>`, **public**, GitHub Actions CI |
 | 이식 범위 | **전량**(fo·scalp·RL 포함), 기능 동등 |
 | 데이터 | 모의 운영 **0일부터** → 원장 **새 스키마 v1**, 옛 데이터 이전 코드 없음. 옛 `state/` 는 참고용 보존 |
 | 스택 | 그대로: Python 3.12 + uv + pydantic + FastAPI/uvicorn + SQLite(WAL) + APScheduler / React + Vite + TS / `claude -p` + `.claude/agents/*.md` / PyInstaller |

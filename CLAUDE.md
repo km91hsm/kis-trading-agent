@@ -25,7 +25,7 @@
 - **기능 등록은 한 곳**: `features/<x>/feature.py` 의 `FEATURE`. 잡·라우터·CLI·설정 섹션·마이그레이션·SSE 키는 모두 거기서 선언하고 커널이 수집한다. (`registry.contracts.check`)
 - **마이그레이션**: 기능별 파일에 두되 버전은 전역 오름차순, 추가만(기존 항목 수정·삭제·중간 삽입 금지). 위반은 `ledger.migrations.check` 가 막는다.
 - **설정 섹션**: yaml 키는 `config` 의 섹션 레지스트리에 등록한 pydantic 모델(`extra="forbid"`)로만 읽는다. yaml 키를 더하면 모델과 `templates/config/*.yaml` 을 같이 바꾼다(`tests/kernel/config/test_templates.py` 가 강제).
-- **SSE 키**: `web/src/generated/sse-keys.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys` 로 만든다. `--check` 가 CI 게이트다.
+- **SSE 키**: `web/src/generated/sse-keys.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
 - **데몬 잡 설정**: 잡 시각은 `schedule.yaml` 의 점 경로 키(`JobSpec.schedule_key`)로 가리킨다. 시각을 코드에 박지 않는다.
 - **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (M4 에서 구현, 스펙 §2.3)
 - **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. (M4 에서 구현, 스펙 §2.1)
@@ -58,7 +58,7 @@
 
 ## 기능을 더하는 법
 
-`features/<x>/` 에 `feature.py settings.py migrations.py cli.py routes.py jobs.py messages.py health.py README.md api.py` 골격을 두고(필요한 것만), `feature.py` 의 `FEATURE` 한 곳에서 선언한다. 다른 파일을 고칠 필요가 없어야 하며, 고쳐야 한다면 커널 결함으로 본다(커널을 고치거나 이슈로 올린다). 다른 기능이 쓸 공개면은 `api.py` 에만 둔다.
+`features/<x>/` 에 `feature.py settings.py migrations.py cli.py routes.py jobs.py messages.py health.py README.md api.py` 골격을 두고(필요한 것만), `feature.py` 의 `FEATURE` 한 곳에서 선언한다. 다른 파일을 고칠 필요가 없어야 하며(예외 둘: 새 설정 키는 `templates/config/*.yaml` 에 더하고, SSE 키를 더하면 `dev gen-sse-keys` 로 `web/src/generated/sse-keys.ts` 를 다시 만든다), 고쳐야 한다면 커널 결함으로 본다(커널을 고치거나 이슈로 올린다). 다른 기능이 쓸 공개면은 `api.py` 에만 둔다.
 
 ## 포인터
 

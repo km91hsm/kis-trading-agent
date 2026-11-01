@@ -23,14 +23,28 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 ## M2 — features/accounts + notify
 계좌 yaml·모드·LIVE 확인·키·추가삭제, `kernel/notify` 전송·outbox. 완료 기준: 옛 `control/*`·`notify` 테스트 이식 통과.
 - [ ] 착수 전
+- 이연(M0 리뷰):
+  - `contracts._default_roots` 동적 import 를 discover 경유로
+  - `import_violations` 루트 추론을 명시 키워드로
+  - bare `import trader.features.a` 가 서비스 기능 간에 허용되는 구멍 막기(+테스트)
+  - `test_discover_real_package…` 실제 목록 단언
+  - WEB_TOKEN 을 `secrets/.env` 에서도 읽기(python-dotenv)
 
 ## M3 — features/ingest + saveticker
 수집(KIS·DART·EDGAR·뉴스·커뮤니티·거시)과 saveticker 수집기·리더·데몬 잡. 완료 기준: 옛 `sources/*`·`saveticker/*` 테스트 이식 통과.
 - [ ] 착수 전
+- 이연(M0 리뷰):
+  - TODO 승계 `EDGAR_USER_AGENT` 입력 항목
 
 ## M4 — kernel/session + kernel/execution + spot analyze
 SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경로(가장 큼, 골든 회귀 1회 재기준). 완료 기준: `FAKE_CLAUDE=1 trader analyze --dry-run` 체크포인트 일치.
 - [ ] 착수 전
+- 이연(M0 리뷰):
+  - 계약 테스트 2종 이연: agents 공통 규칙 패리티, `allowedTools==tool_command()`
+  - `Feature.tier=="lane"` ↔ `LANES` 교차 검증
+  - `runs.finish` 실패로 남는 `running` 행 기동 시 정리
+  - 두 번째 시그널 테스트 `wait=True` 실동작
+  - 게이트 공급 경로(`Feature` 에 gates 필드 또는 deps 주입) 설계
 
 ## M5 — spot 운영 경로
 monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기준: 옛 테스트 이식 통과.
@@ -59,10 +73,28 @@ quant·screener·discovery·유니버스 PIT, 피처·학습·레지스트리·�
 ## M11 — features/quotes + 웹 API 12 자원 (백엔드만)
 웹 API 12 자원·SSE 키 생성·계약 테스트. 완료 기준: 모든 자원 엔드포인트 테스트 통과, 옛 엔드포인트 대응표 100%. (M11b: 새 웹 UI 구현은 별도 브레인스토밍·플랜)
 - [ ] 착수 전
+- 이연(M0 리뷰):
+  - `_hostname`/`_host_of` 중복 정리
+  - Host userinfo 거부
+  - `/api` catch-all 전 메서드 + 베어 `/api`
+  - `dist` 존재 지연 검사
+  - 웹 테스트 공백(경로 탈출·same-origin 포트·`_SHARED`)
+  - `gen-sse-keys` 대상 경로·`web_dist()` 를 소스 트리 기준으로 정리
+  - 비루프백 바인드 경고·`extra_hosts` 설정 연결
 
 ## M12 — kernel/ops + 번들 + 전환
 health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체.
 - [ ] 착수 전
+- 이연(M0 리뷰):
+  - `Lock` 주입 clock
+  - 실제 시그널 핸들러 테스트 격리
+  - `start()` 실패 시 `_hb.stop()`
+  - `daemon` 명령 흐름 정리
+  - `uvicorn` 지연 import
+  - `test_bundle` 단언 보강
+  - `selfcheck` 가 DB 를 만드는 점
+  - CLAUDE.md 금지 명령 "(M<N> 이후)" 표기·"WAL+30초" 중복
+  - Windows `install` 로그온 확인(승계)
 
 ## 사용자 확인 대기 (옛 저장소 승계)
 
@@ -74,7 +106,3 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
 - [ ] 실기(사용자 확인 대기): 번들 zip 을 풀어 더블클릭 → 웹 UI → `kis ping` (macOS 우클릭 열기·Windows SmartScreen 1회) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
-
-## 이연/추후
-
-- SDD 리뷰에서 이연한 Minor 항목은 `.superpowers/sdd/2026-11-02-m0-skeleton/progress.md` 의 각 Task "minor (deferred)" 줄에 있다. M0 최종 리뷰에서 일괄 판단한다.
