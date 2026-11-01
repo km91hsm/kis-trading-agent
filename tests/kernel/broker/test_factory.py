@@ -18,6 +18,16 @@ def test_shared_dir_env_creates_and_routes_token_and_rate_db(project, monkeypatc
     assert c.auth.cache_path.parent == shared
     assert c.limiter.path == shared / "kis_rate.db"
     assert not (project / "state" / "kis_rate.db").exists()
+    # SharedRateLimiter 는 첫 사용 때 DB 를 만들므로 한 번 쓴 뒤 존재를 확인한다
+    c.limiter.acquire()
+    assert (shared / "kis_rate.db").exists()
+    # 휴장일 캐시는 공유 디렉터리가 아니라 state/ 아래에 남는다
+    from trader.kernel.broker.factory import build_market
+
+    market = build_market(KisCreds(env="real", prefix="KIS_REAL_", app_key="k", app_secret="s"))
+    cache_dir = market._cache_dir()
+    assert cache_dir == project / "state" / "cache"
+    assert shared not in cache_dir.parents
 
 
 def test_without_env_uses_state_dir(project, monkeypatch):
@@ -32,6 +42,11 @@ def test_same_app_key_shares_client(project):
     a = KisCreds(env="paper", prefix="KIS_PAPER_", app_key="k", app_secret="s")
     b = KisCreds(env="paper", prefix="KIS_X_", app_key="k", app_secret="s")
     assert client_for(a) is client_for(b)
+    assert client_for(a).limiter is client_for(b).limiter
+    other_key = KisCreds(env="paper", prefix="KIS_PAPER_", app_key="k2", app_secret="s")
+    assert client_for(other_key) is not client_for(a)
+    other_env = KisCreds(env="real", prefix="KIS_REAL_", app_key="k", app_secret="s")
+    assert client_for(other_env) is not client_for(a)
 
 
 def test_missing_key_raises(project):
