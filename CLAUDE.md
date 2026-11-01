@@ -44,7 +44,7 @@
 - `state/` 파일을 직접 편집하지 않는다.
 - 저장소는 공개다. 외부 사이트에서 수집한 원문(기사 제목·본문·리포트 텍스트)을 테스트 fixture 로 커밋하지 않는다. 구조만 본뜬 합성 데이터를 쓴다.
 - `templates/` 에는 자리표시자(`00000000` 등)만 커밋한다. `config/ secrets/ state/` 는 `.gitignore` 대상이다.
-- 같은 헬퍼를 모듈마다 다시 쓰지 않는다. 먼저 `kernel/` 에서 찾는다(경로 `platform.paths`, 시각 `config.KST`, 연결 `ledger.connect`).
+- 같은 헬퍼를 모듈마다 다시 쓰지 않는다. 먼저 `kernel/` 에서 찾는다(경로 `platform.paths`, 시각 `config.KST`, 연결 `ledger.connect`, KIS 응답 파싱 `broker._parse`(dec·to_int·rows), 호가단위 `broker.ticks.quantize_price`, KIS 클라이언트 조립 `broker.factory.client_for/build_market/build_broker`).
 
 ## 코딩 규칙
 
