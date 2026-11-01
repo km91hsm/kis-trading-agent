@@ -20,6 +20,7 @@ from trader.kernel.broker.client import (
 )
 from trader.kernel.broker.creds import KisCreds, key_fingerprint
 from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
+from trader.kernel.broker.market import HOLIDAY_CACHE_DAYS, PAGE_SIZE, KisMarket
 from trader.kernel.broker.models import *  # noqa: F403
 from trader.kernel.broker.rate_store import SharedRateLimiter, disabled_status
 from trader.kernel.broker.ticks import (
@@ -35,6 +36,8 @@ from trader.kernel.broker.ticks import (
 __all__ = [
     *models.__all__,
     "APPROVAL_TTL",
+    "HOLIDAY_CACHE_DAYS",
+    "PAGE_SIZE",
     "MAX_PAGES",
     "RATE_PER_SEC",
     "RETRY_CODE",
@@ -48,6 +51,7 @@ __all__ = [
     "KisAuth",
     "KisClient",
     "KisCreds",
+    "KisMarket",
     "RateLimitBusy",
     "RateLimiter",
     "SharedRateLimiter",
