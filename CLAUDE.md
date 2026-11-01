@@ -13,6 +13,9 @@
 | `uv run trader selfcheck` | 환경·원장 버전·기능 목록을 JSON 1줄로 출력 (세션 시작 때 먼저 실행) |
 | `uv run trader daemon [--dry-run]` | 스케줄러 데몬 (사용자 전용 — 금지사항 참고) |
 | `uv run trader web [--host] [--port]` | 웹 UI·API 서버 |
+| `uv run trader accounts show\|mode\|pause\|resume\|ping\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·추가삭제·키 가져오기 (모드 변경·`ping` 은 사용자 전용) |
+| `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
+| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
 
@@ -30,7 +33,7 @@
 - **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (M4 에서 구현, 스펙 §2.3)
 - **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. (M4 에서 구현, 스펙 §2.1)
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (M4 에서 구현, 스펙 §2.6)
-- **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (M2 에서 구현, 스펙 §2.1 `features/accounts`)
+- **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
 - **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (M7·M8 에서 구현)
 - **paused**: `control` 의 `paused` 가 켜지면 신규 주문 경로는 모두 멈춘다. (M4 에서 구현)
 
@@ -44,7 +47,7 @@
 - `state/` 파일을 직접 편집하지 않는다.
 - 저장소는 공개다. 외부 사이트에서 수집한 원문(기사 제목·본문·리포트 텍스트)을 테스트 fixture 로 커밋하지 않는다. 구조만 본뜬 합성 데이터를 쓴다.
 - `templates/` 에는 자리표시자(`00000000` 등)만 커밋한다. `config/ secrets/ state/` 는 `.gitignore` 대상이다.
-- 같은 헬퍼를 모듈마다 다시 쓰지 않는다. 먼저 `kernel/` 에서 찾는다(경로 `platform.paths`, 시각 `config.KST`, 연결 `ledger.connect`, KIS 응답 파싱 `broker._parse`(dec·to_int·rows), 호가단위 `broker.ticks.quantize_price`, KIS 클라이언트 조립 `broker.factory.client_for/build_market/build_broker`).
+- 같은 헬퍼를 모듈마다 다시 쓰지 않는다. 먼저 `kernel/` 에서 찾는다(경로 `platform.paths`, 시각 `config.KST`, 연결 `ledger.connect`, 시크릿 `config.secrets.load_secrets`, 알림 문구 `notify.messages`, KIS 응답 파싱 `broker._parse`(dec·to_int·rows), 호가단위 `broker.ticks.quantize_price`, KIS 클라이언트 조립 `broker.factory.client_for/build_market/build_broker`).
 
 ## 코딩 규칙
 

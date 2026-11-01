@@ -28,19 +28,30 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - [x] Task 8 선물옵션 — `fo_codes`·`fo_master`·`fo.py`·`market_fo.py`·`FakeFoBroker` (2ce0719)
 - [x] Task 9 `factory.py`·`ping.py` — 공유 디렉터리 override·클라이언트 캐시·점검 (8feb446, 7a1c743)
 - [x] Task 10 문서·체크리스트·공개면 점검
-- [ ] PR·CI(ubuntu+windows)·머지
-- 이관: `kis ping` CLI(`--account` 필터 테스트 `test_kis_ping_account_filter` 포함)·`_market_creds`·같은 키 경고 → M2
+- [x] PR·CI(ubuntu+windows)·머지
 
 ## M2 — features/accounts + notify
 계좌 yaml·모드·LIVE 확인·키·추가삭제, `kernel/notify` 전송·outbox. 완료 기준: 옛 `control/*`·`notify` 테스트 이식 통과.
-- [ ] 착수 전
-- [ ] yaml→BrokerAccount 변환 때 markets 기본 [KR, US] 를 M2 설정 모델이 채운다(M1 DTO 기본은 [KR]); 키 없는 계좌 skip 경고·ConfigError 감싸기 이관
+- [x] Task 1 `kernel/config` secrets 공개면
+- [x] Task 2 `accounts` 설정 모델·템플릿
+- [x] Task 3 `kernel/notify` telegram·messages
+- [x] Task 4 `notify.commands` 디스패처·`DaemonDeps.notifier`
+- [x] Task 5 `accounts` 마이그레이션·모드
+- [x] Task 6 `notify-test`·`telegram poll|loop`
+- [x] Task 7 `accounts.brokers`
+- [x] Task 8 `accounts` CLI (show·mode·pause·resume·ping)
+- [x] Task 9 `accounts_io`·`secrets_io`·add·remove·secrets import
+- [x] Task 10 텔레그램 명령 `/pause /resume /mode`
+- [x] Task 11 문서·체크리스트·공개면 점검
+- [ ] PR·CI(ubuntu+windows)·머지
 - 이연(M0 리뷰):
   - `contracts._default_roots` 동적 import 를 discover 경유로
   - `import_violations` 루트 추론을 명시 키워드로
   - bare `import trader.features.a` 가 서비스 기능 간에 허용되는 구멍 막기(+테스트)
   - `test_discover_real_package…` 실제 목록 단언
   - WEB_TOKEN 을 `secrets/.env` 에서도 읽기(python-dotenv)
+- 이연(M2 리뷰, minor): `Boot.secrets` 타입 `Secrets | None`·`build_web_deps` 재읽기 제거; `settings.py` 자리표시자 판정 헬퍼화; `commands.py` echo 예외 집계(try/else)·미인식 명령 도움말 블록 중복; `notify.enabled=false` 와 토큰 없음 문구 구분; `modes.py` docstring; `telegram.py` 미사용 `logger`·`ctx: Any`; 핸들러가 컨텍스트의 accounts/secrets 를 쓰도록
+  - 상세 차이는 `features/accounts/README.md`·`docs/architecture.md` 「notify」 의 "알려진 차이"
 
 ## M3 — features/ingest + saveticker
 수집(KIS·DART·EDGAR·뉴스·커뮤니티·거시)과 saveticker 수집기·리더·데몬 잡. 완료 기준: 옛 `sources/*`·`saveticker/*` 테스트 이식 통과.
@@ -57,10 +68,12 @@ SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경�
   - `runs.finish` 실패로 남는 `running` 행 기동 시 정리
   - 두 번째 시그널 테스트 `wait=True` 실동작
   - 게이트 공급 경로(`Feature` 에 gates 필드 또는 deps 주입) 설계
+- 이연(M2): `expire_approvals` 훅·데몬 `telegram_poll` 잡·outbox flush 잡·`exec-key` CLI·`DEAD_STATUSES` 커널 이동·`accounts_io.blockers` 실제 스키마; 옛 `SCALP_EXIT` 표·`DecisionBrief` 를 `notify.messages` 에(M4/M5/M9)
 
 ## M5 — spot 운영 경로
 monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기준: 옛 테스트 이식 통과.
 - [ ] 착수 전
+- 이연(M2): 체결통보 리스너(`_notice_listeners`)
 
 ## M6 — features/regime + 의도 생산자
 국면·stance·시장 세션·킬스위치·블랙아웃, hedge·cash_park·rebalance, scan 의 테마·사건. 완료 기준: 옛 테스트 이식 통과.
@@ -69,6 +82,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 ## M7 — features/scan + ml + jobs
 quant·screener·discovery·유니버스 PIT, 피처·학습·레지스트리·랭커·rl, 작업 큐. 완료 기준: 옛 테스트 이식 통과.
 - [ ] 착수 전
+- 이연(M2): watchlist·`/watch`(옛 `test_control` watchlist 2건)
 
 ## M8 — features/evaluation + briefing
 메모리·보정·reflect·섀도·성과·readiness·backtest·paper_review·일일 리포트, 아침 브리핑. 완료 기준: 옛 테스트 이식 통과.
@@ -94,6 +108,7 @@ quant·screener·discovery·유니버스 PIT, 피처·학습·레지스트리·�
   - 웹 테스트 공백(경로 탈출·same-origin 포트·`_SHARED`)
   - `gen-sse-keys` 대상 경로·`web_dist()` 를 소스 트리 기준으로 정리
   - 비루프백 바인드 경고·`extra_hosts` 설정 연결
+- 이연(M2): `ensure_web_token` 연결·`/api/accounts`·연결 키 라우트
 
 ## M12 — kernel/ops + 번들 + 전환
 health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체.
