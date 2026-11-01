@@ -10,6 +10,7 @@ from trader.kernel.cli import boot as boot_mod
 from trader.kernel.cli import main as main_mod
 from trader.kernel.cli.main import app
 from trader.kernel.config import ConfigError
+from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.platform.paths import ProjectRootNotFound
 from trader.kernel.registry.types import Feature
 
@@ -17,7 +18,8 @@ from trader.kernel.registry.types import Feature
 def test_help_lists_core_commands():
     r = CliRunner().invoke(app, ["--help"])
     assert r.exit_code == 0
-    assert all(c in r.stdout for c in ("init", "selfcheck", "daemon", "web", "dev"))
+    names = ("init", "selfcheck", "daemon", "web", "dev", "notify-test", "telegram", "accounts")
+    assert all(c in r.stdout for c in names)
 
 
 def test_config_error_exits_1_with_korean_prefix(project):
@@ -50,7 +52,7 @@ def test_boot_loads_settings_and_conn(project):
     try:
         assert b.settings.markets == ["KR", "US"]
         assert b.conn is not None
-        assert b.features == []
+        assert [f.id for f in b.features] == ["accounts"]
     finally:
         b.conn.close()
 
@@ -83,6 +85,7 @@ def test_build_daemon_deps(project):
         assert isinstance(deps.stop_event, threading.Event)
         assert deps.state == project.resolve() / "state"
         assert deps.now().tzinfo is not None
+        assert isinstance(deps.notifier, NullNotifier)  # 시크릿 없음
     finally:
         b.conn.close()
 
@@ -198,3 +201,19 @@ def test_boot_default_log_file_names(project):
 
 def test_build_registry_includes_feature_sections():
     assert boot_mod.build_registry([]) is not None
+
+
+def test_build_web_deps_reads_token_from_env_file(project, monkeypatch):
+    monkeypatch.delenv("WEB_TOKEN", raising=False)
+    (project / "secrets" / ".env").write_text("WEB_TOKEN=from-file\n", encoding="utf-8")
+    b = boot_mod.boot(settings=True, conn=True)
+    try:
+        assert main_mod.build_web_deps(b).token == "from-file"
+    finally:
+        b.conn.close()
+
+
+def test_boot_secrets(project):
+    (project / "secrets" / ".env").write_text("DART_API_KEY=x\n", encoding="utf-8")
+    b = boot_mod.boot(secrets=True)
+    assert b.secrets is not None and b.secrets.DART_API_KEY == "x"

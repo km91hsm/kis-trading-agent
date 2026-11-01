@@ -5,7 +5,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from trader.kernel.cli.main import app
-from trader.kernel.ledger.migrations import KERNEL
+from trader.kernel.registry import discover
+from trader.kernel.registry.contracts import all_migrations
 
 
 def test_selfcheck_json_has_version_and_features(project):
@@ -17,6 +18,6 @@ def test_selfcheck_json_has_version_and_features(project):
     assert list(data) == ["python", "root", "ledger_version", "features", "web_dist"]
     assert data["python"] == ".".join(str(x) for x in sys.version_info[:3])
     assert Path(data["root"]) == project.resolve()
-    assert data["ledger_version"] == max(m.version for m in KERNEL)
-    assert data["features"] == []
+    assert data["ledger_version"] == max(m.version for m in all_migrations(discover()))
+    assert data["features"] == ["accounts"]
     assert data["web_dist"] is False

@@ -93,6 +93,7 @@ class TelegramCommand:
     name: str
     untrusted_ok: bool
     help_line: str
+    # (CommandContext, arg: str | None) -> str — 돌려준 문자열을 디스패처가 보낸다
     handler: Callable[..., Any]
 
 
@@ -120,6 +121,7 @@ class HealthArea:
 @dataclass(frozen=True)
 class StatusSection:
     title: str
+    # (CommandContext) -> list[str] — /status 본문 줄
     render: Callable[..., Any]
 
 

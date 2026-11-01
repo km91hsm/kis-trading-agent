@@ -14,5 +14,5 @@ def test_discover_without_feature_module_raises():
         discover("tests.fixtures.features_nofeature")
 
 
-def test_discover_real_package_is_empty_list_ok():
-    assert isinstance(discover(), list)
+def test_discover_real_package_lists_accounts():
+    assert [f.id for f in discover()] == ["accounts"]

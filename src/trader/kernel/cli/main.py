@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
+import time
 from datetime import UTC, datetime
 
 import typer
@@ -14,8 +14,12 @@ import uvicorn
 from trader.kernel.cli import init_cmd, selfcheck
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
+from trader.kernel.config import KST, load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
+from trader.kernel.notify import NullNotifier
+from trader.kernel.notify.commands import CommandContext, poll_once
+from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_receiver
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover
 from trader.kernel.registry.types import Feature
@@ -52,6 +56,9 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         gates={},
         stop_event=threading.Event(),
         dry_run=dry_run,
+        notifier=make_notifier(
+            boot_.secrets or load_secrets(), enabled=boot_.settings.notify.enabled
+        ),
     )
 
 
@@ -60,7 +67,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         settings=boot_.settings,
         conn_factory=db.connect,
         state=paths.state_dir(),
-        token=os.environ.get("WEB_TOKEN"),
+        token=load_secrets().WEB_TOKEN,
         dist=paths.web_dist(),
         now=lambda: datetime.now(UTC),
         features=boot_.features,
@@ -103,12 +110,87 @@ def web(
         b.conn.close()
 
 
+def build_command_ctx(boot_: Boot, *, echo) -> CommandContext:
+    return CommandContext(
+        conn=boot_.conn,
+        settings=boot_.settings,
+        state=paths.state_dir(),
+        now=lambda: datetime.now(UTC),
+        notifier=make_notifier(boot_.secrets, enabled=boot_.settings.notify.enabled),
+        features=boot_.features,
+        echo=echo,
+    )
+
+
+@config_errors
+def notify_test() -> None:
+    """텔레그램 테스트 메시지를 1건 보낸다."""
+    b = boot(settings=True, secrets=True)
+    notifier = make_notifier(b.secrets, enabled=b.settings.notify.enabled)
+    stamp = datetime.now(KST).strftime("%H:%M:%S")
+    if notifier.send(f"trader 알림 테스트 {stamp}"):
+        null = isinstance(notifier, NullNotifier)
+        note = " (텔레그램 미설정·꺼짐 — 실제 전송 없음)" if null else ""
+        typer.echo("전송 성공" + note)
+    else:
+        typer.echo("전송 실패", err=True)
+        raise typer.Exit(code=1)
+
+
+telegram_app = typer.Typer(help="텔레그램 수신 (승인 명령 폴링)")
+
+
+def _telegram_run(*, interval: int | None, max_iterations: int | None) -> None:
+    b = boot(settings=True, secrets=True, conn=True, log_name="telegram")
+    try:
+        receiver = make_receiver(b.secrets, enabled=b.settings.notify.enabled)
+        if receiver is None:
+            typer.echo("오류: 텔레그램 토큰·chat_id 가 없습니다", err=True)
+            raise typer.Exit(code=1)
+        wait = b.settings.notify.poll_interval_s if interval is None else interval
+        ctx = build_command_ctx(b, echo=typer.echo)
+        n = 0
+        while True:
+            poll_once(ctx, receiver)
+            if isinstance(ctx.notifier, TelegramNotifier):
+                ctx.notifier.flush_outbox()
+            n += 1
+            if max_iterations is not None and n >= max_iterations:
+                break
+            time.sleep(wait)
+    finally:
+        b.conn.close()
+
+
+@config_errors
+def telegram_poll() -> None:
+    """getUpdates 1회: 텔레그램 명령을 처리하고 오프셋을 저장한다."""
+    _telegram_run(interval=0, max_iterations=1)
+
+
+@config_errors
+def telegram_loop(
+    interval: int | None = typer.Option(
+        None, "--interval", help="폴링 주기(초, 기본: settings.notify.poll_interval_s)"
+    ),
+    max_iterations: int | None = typer.Option(None, "--max-iterations", hidden=True),
+) -> None:
+    """텔레그램 명령을 주기적으로 처리한다 (데몬 밖에서 단독 실행용)."""
+    _telegram_run(interval=interval, max_iterations=max_iterations)
+
+
+telegram_app.command("poll")(telegram_poll)
+telegram_app.command("loop")(telegram_loop)
+
+
 def build_app(features: list[Feature]) -> typer.Typer:
     root = TraderApp(help="KIS 자동매매 에이전트", no_args_is_help=True)
     root.command("init")(init_cmd.init)
     root.command("selfcheck")(selfcheck.selfcheck)
     root.command("daemon")(daemon)
     root.command("web")(web)
+    root.command("notify-test")(notify_test)
+    root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")
     for f in features:
         if f.cli is not None:

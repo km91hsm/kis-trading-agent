@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from trader.kernel.config.errors import ConfigError
 
-ConfigFile = Literal["settings", "schedule", "ml", "sources", "events", "universe", "sectors"]
+ConfigFile = Literal[
+    "settings", "schedule", "ml", "sources", "events", "universe", "sectors", "accounts"
+]
 
 
 @dataclass(frozen=True)

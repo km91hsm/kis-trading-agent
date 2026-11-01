@@ -16,7 +16,7 @@
 ## config
 
 - 책임: yaml 설정 로더와 섹션 레지스트리. 커널 자체 섹션(`settings.markets`·`settings.web`)만 여기서 등록하고, 기능 섹션은 부트가 더한다.
-- 공개면: `load`·`memo_load`, `Section`·`SectionRegistry`·`ConfigFile`, `kernel_registry`·`KERNEL_SECTIONS`, `ConfigError`, `KST`, `Market`, `WebSettings`.
+- 공개면: `load`·`memo_load`, `Section`·`SectionRegistry`·`ConfigFile`, `kernel_registry`·`KERNEL_SECTIONS`, `ConfigError`, `KST`, `Market`, `WebSettings`, `NotifySettings`, `secrets`(`load_secrets`·`Secrets`).
 - 규약:
   - `Section.model` 은 pydantic **필드 주석**이다(`list[Market]` 같은 타입도 허용). RootModel `.root` 를 강요하지 않는다.
   - 모든 섹션 모델은 `extra="forbid"`. 알 수 없는 키는 `ConfigError`.
@@ -103,7 +103,7 @@
 
 ## cli
 
-- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev` 를 둔다.
+- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 을 둔다.
 - 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`).
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
@@ -113,6 +113,27 @@
   - 콘솔 UTF-8 강제는 `TraderApp` 진입점에서 한다.
 - 테스트: `tests/kernel/cli/`
 
-## features 층 (예정)
+## notify
 
-`src/trader/features/<x>/` 는 M1 이후 마일스톤마다 하나씩 채운다. 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+- 책임: 텔레그램 발신(outbox 포함)·수신·명령 디스패처·문구 베이스. 기능 이름을 모른다. 기능은 `registry` 에 명령과 `/status` 절을 더한다.
+- 공개면: `kernel.notify.__all__` — `Notifier`·`NullNotifier`·`TelegramNotifier`·`TelegramReceiver`·`Update`·`parse_command`·`make_notifier`·`make_receiver`·`CommandContext`·`poll_once`·`messages`(`money`·`pct`·`first_sentences`·`kst_hhmm`·`render`·`event`·`failure`·`mode_changed`). `commands.registry`·`help_line`·`status_message` 는 모듈 경로로 쓴다. 설정 섹션 `settings.notify`(`enabled`, `poll_interval_s` 5..600), `DaemonDeps.notifier`. CLI `trader notify-test`, `trader telegram poll|loop [--interval]`.
+- 규약:
+  - 토큰은 URL 에 들어가므로 URL·예외 메시지를 로그에 남기지 않는다(`trader.notify`).
+  - 메시지는 4000자(`MAX_LEN`)로 분할하고 HTML 이스케이프한다.
+  - 발신 실패 시 outbox 에 보관하고 `True` 를 돌려준다. `flush_outbox` 가 재전송하며 보관 24h(`OUTBOX_TTL`), 한 번에 10건(`OUTBOX_FLUSH_MAX`).
+  - 수신: 설정된 chat_id 가 아닌 채팅의 메시지는 버린다.
+  - 신뢰 판정: `TELEGRAM_ALLOWED_USERS` 가 있으면 그 목록의 발신자만, 없으면 1:1(private) 채팅만 신뢰한다. 신뢰 밖 발신자는 `/status` 와 `untrusted_ok` 명령만 쓸 수 있고 나머지는 "명령 거부" 로 답한다(`commands.poll_once`).
+  - 오프셋(`telegram_offset`)은 업데이트마다 전진한다.
+  - 모르는 명령은 분당 1회(`HELP_EVERY_S=60`, 플래그 `telegram_help_at`)만 도움말을 보낸다.
+  - `/status` 는 내장이고 기능이 `status_sections` 로 절을 더한다. 명령 이름 `status` 는 예약이다.
+  - `notify.enabled=false` 면 `NullNotifier` 이고 수신기는 없다(리허설).
+- 테스트: `tests/kernel/notify/`
+- 알려진 차이:
+  - 옛 `expire_approvals` 훅은 M4 가 더한다.
+  - 데몬 `telegram_poll`·outbox flush 잡은 M4.
+  - 옛 `telegram` 로거 이름은 `trader.notify` 로 바뀌었다.
+  - `/status` 는 절 하나가 실패하면 전체가 실패한다. `SCALP_EXIT` 표·`DecisionBrief` 는 이식하지 않았다(M4/M5/M9).
+
+## features 층
+
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.

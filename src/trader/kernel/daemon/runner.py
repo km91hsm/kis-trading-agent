@@ -44,6 +44,7 @@ class DaemonDeps:
     gates: dict[str, Callable[..., str | None]]
     stop_event: threading.Event
     dry_run: bool
+    notifier: Any = None
 
 
 class _DropMaxInstances(logging.Filter):
