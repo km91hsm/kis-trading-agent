@@ -18,7 +18,8 @@ from trader.kernel.registry.types import Feature
 def test_help_lists_core_commands():
     r = CliRunner().invoke(app, ["--help"])
     assert r.exit_code == 0
-    assert all(c in r.stdout for c in ("init", "selfcheck", "daemon", "web", "dev"))
+    names = ("init", "selfcheck", "daemon", "web", "dev", "notify-test", "telegram")
+    assert all(c in r.stdout for c in names)
 
 
 def test_config_error_exits_1_with_korean_prefix(project):
