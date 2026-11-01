@@ -198,3 +198,19 @@ def test_boot_default_log_file_names(project):
 
 def test_build_registry_includes_feature_sections():
     assert boot_mod.build_registry([]) is not None
+
+
+def test_build_web_deps_reads_token_from_env_file(project, monkeypatch):
+    monkeypatch.delenv("WEB_TOKEN", raising=False)
+    (project / "secrets" / ".env").write_text("WEB_TOKEN=from-file\n", encoding="utf-8")
+    b = boot_mod.boot(settings=True, conn=True)
+    try:
+        assert main_mod.build_web_deps(b).token == "from-file"
+    finally:
+        b.conn.close()
+
+
+def test_boot_secrets(project):
+    (project / "secrets" / ".env").write_text("DART_API_KEY=x\n", encoding="utf-8")
+    b = boot_mod.boot(secrets=True)
+    assert b.secrets is not None and b.secrets.DART_API_KEY == "x"

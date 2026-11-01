@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from trader.kernel.config.errors import ConfigError
 from trader.kernel.config.loader import load, memo_load
+from trader.kernel.config.secrets import Secrets, account_prefix, load_secrets
 from trader.kernel.config.sections import ConfigFile, Section, SectionRegistry
 from trader.kernel.config.time import KST
 
@@ -46,8 +47,11 @@ __all__ = [
     "Market",
     "Section",
     "SectionRegistry",
+    "Secrets",
     "WebSettings",
+    "account_prefix",
     "kernel_registry",
     "load",
+    "load_secrets",
     "memo_load",
 ]

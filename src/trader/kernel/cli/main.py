@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 from datetime import UTC, datetime
@@ -14,6 +13,7 @@ import uvicorn
 from trader.kernel.cli import init_cmd, selfcheck
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
+from trader.kernel.config import load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
 from trader.kernel.platform import paths
@@ -60,7 +60,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         settings=boot_.settings,
         conn_factory=db.connect,
         state=paths.state_dir(),
-        token=os.environ.get("WEB_TOKEN"),
+        token=load_secrets().WEB_TOKEN,
         dist=paths.web_dist(),
         now=lambda: datetime.now(UTC),
         features=boot_.features,
