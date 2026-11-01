@@ -29,6 +29,33 @@ def _capture(items, when, stream="news_all"):
     )
 
 
+def test_news_views_change_is_not_a_new_revision(tmp_path):
+    """뉴스는 조회수만 바뀐 행을 새 버전으로 쓰지 않는다(하루 1만 줄 중 대부분이 조회수 변경이었다).
+    커뮤니티·순위는 그대로 새 버전."""
+    from trader.features.saveticker.store import Store
+
+    store = Store(tmp_path)
+    item = {"id": "n1", "title": "제목", "views": "10"}
+    assert store.save(_capture([item], "2026-10-25T00:00:00+00:00"))["changed"] == 1
+    assert (
+        store.save(_capture([item | {"views": "99"}], "2026-10-25T00:01:00+00:00"))["changed"] == 0
+    )
+    assert (
+        store.save(_capture([item | {"title": "정정"}], "2026-10-25T00:02:00+00:00"))["changed"]
+        == 1
+    )
+    row = {"id": "c1", "title": "QQQ", "views": "1"}
+    assert (
+        store.save(_capture([row], "2026-10-25T00:00:00+00:00", "community_top5"))["changed"] == 1
+    )
+    assert (
+        store.save(_capture([row | {"views": "2"}], "2026-10-25T00:01:00+00:00", "community_top5"))[
+            "changed"
+        ]
+        == 1
+    )
+
+
 def test_prune_keeps_latest_and_recent(tmp_path):
     from trader.features.saveticker.store import Store
 
