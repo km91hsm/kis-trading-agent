@@ -6,12 +6,17 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from trader.kernel.broker.errors import KisApiError
+from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
 from trader.kernel.broker.models import (
     BrokerAccount,
     Candle,
     Cash,
     Fill,
+    FoBalance,
+    FoFill,
+    FoOrderable,
+    FoOrderRequest,
+    FoOrderState,
     FoQuote,
     Market,
     OrderBook,
@@ -220,3 +225,108 @@ class FakeBroker:
         self._record("cancel_order")
         self.cancelled.append(order_no)
         return OrderResult(order_no=order_no, accepted=True, message="가짜 취소")
+
+
+class FakeFoBroker:
+    """파생 계좌 가짜 브로커(Phase 26). `fail` 에 메서드 이름이 있으면 KisApiError,
+    `place_order:unknown` 이면 요청을 기록한 뒤 응답 없음(UNKNOWN_RESPONSE_CODE).
+    `scenario(name, *args)` 훅으로 부분체결·취소 중 체결 같은 시나리오를 주입할 수 있다
+    (반환값이 None 이 아니면 그것을 돌려준다)."""
+
+    def __init__(
+        self,
+        account: BrokerAccount,
+        *,
+        balance: FoBalance,
+        fail: set[str] | None = None,
+        fills: dict[date, list[FoFill]] | None = None,
+        states: dict[str, FoOrderState] | None = None,
+        orderable: FoOrderable | None = None,
+        scenario: Callable[..., object] | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self.account = account
+        self.balance = balance
+        self.fail = fail or set()
+        self.fills = fills or {}
+        self.states = states or {}
+        self.orderable_result = orderable or FoOrderable(
+            tot_qty=10, lqd_qty=0, ord_qty=10, cash=None, bass_idx=None
+        )
+        self.scenario = scenario
+        self.calls: list[str] = []
+        self.orders: list[FoOrderRequest] = []
+        self.cancelled: list[tuple[str, int]] = []
+        self._now = now
+
+    def _record(self, name: str) -> None:
+        self.calls.append(name)
+        if name in self.fail:
+            raise KisApiError("FAKE", f"가짜 실패 주입: {name}")
+
+    def _hook(self, name: str, *args: object):
+        if self.scenario is None:
+            return None
+        return self.scenario(name, *args)
+
+    def get_balance(self, **_: object) -> FoBalance:
+        self._record("get_balance")
+        r = self._hook("get_balance")
+        if r is not None:
+            return r  # type: ignore[return-value]
+        t = self._now()
+        return self.balance.model_copy(
+            update={
+                "cash": self.balance.cash.model_copy(update={"requested_at": t, "received_at": t})
+            }
+        )
+
+    def orderable(self, code: str, side: str, price, order_type: str) -> FoOrderable:
+        self._record("orderable")
+        r = self._hook("orderable", code, side, price, order_type)
+        return r if r is not None else self.orderable_result  # type: ignore[return-value]
+
+    def place_order(self, req: FoOrderRequest, *, night: bool = False) -> OrderResult:
+        self.calls.append("place_order")
+        self.orders.append(req)
+        if "place_order:unknown" in self.fail:
+            raise KisApiError(UNKNOWN_RESPONSE_CODE, "가짜 응답 없음")
+        if "place_order" in self.fail:
+            raise KisApiError("FAKE", "가짜 실패 주입: place_order")
+        r = self._hook("place_order", req)
+        if r is not None:
+            return r  # type: ignore[return-value]
+        return OrderResult(order_no=f"FAKE-{len(self.orders)}", accepted=True, message="가짜 접수")
+
+    def cancel_order(self, order_no: str, *, qty: int = 0, night: bool = False) -> OrderResult:
+        self._record("cancel_order")
+        self.cancelled.append((order_no, qty))
+        r = self._hook("cancel_order", order_no, qty)
+        if r is not None:
+            return r  # type: ignore[return-value]
+        return OrderResult(order_no=order_no, accepted=True, message="가짜 취소 접수")
+
+    def get_fills(self, d: date) -> list[FoFill]:
+        self._record("get_fills")
+        r = self._hook("get_fills", d)
+        if r is not None:
+            return r  # type: ignore[return-value]
+        return list(self.fills.get(d, []))
+
+    def get_order_state(self, order_no: str, d: date) -> FoOrderState:
+        self._record("get_order_state")
+        r = self._hook("get_order_state", order_no, d)
+        if r is not None:
+            return r  # type: ignore[return-value]
+        if order_no in self.states:
+            return self.states[order_no]
+        return FoOrderState(
+            order_no=order_no,
+            order_qty=0,
+            filled_qty=0,
+            remaining_qty=0,
+            rejected_qty=0,
+            cancelled_qty=0,
+            terminal=False,
+            state="open",
+        )
