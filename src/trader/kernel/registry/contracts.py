@@ -139,7 +139,12 @@ def import_violations(src_root: Path, package: str = "trader") -> list[str]:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             module = _module_name(path, kernel_root, f"{package}.kernel")
-            for target, _ in _targets(tree, module, path.name == "__init__.py"):
-                if target == features_pkg or target.startswith(features_pkg + "."):
+            for target, names in _targets(tree, module, path.name == "__init__.py"):
+                # `from pkg import features` 는 target 이 package 이고 names 에 features 가 있다.
+                hit = target == features_pkg or target.startswith(features_pkg + ".")
+                if not hit and target == package and "features" in names:
+                    target = features_pkg
+                    hit = True
+                if hit:
                     msgs.append(f"{module}: kernel 이 {target} 를 import 합니다 (금지)")
     return msgs

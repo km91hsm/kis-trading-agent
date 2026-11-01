@@ -62,3 +62,24 @@ def test_kernel_may_not_import_features(tmp_path):
 
 def test_real_tree_has_no_violations():
     assert import_violations(SRC / "trader") == []
+
+
+def _kernel_violations(tmp_path, rel: str, code: str) -> list[str]:
+    _write(tmp_path / "features" / "a" / "__init__.py", "")
+    _write(tmp_path / "kernel" / rel, code)
+    return import_violations(tmp_path, package="pkg")
+
+
+def test_kernel_from_package_import_features_flagged(tmp_path):
+    v = _kernel_violations(tmp_path, "web/x.py", "from pkg import features\n")
+    assert len(v) == 1 and "kernel" in v[0]
+
+
+def test_kernel_relative_import_features_flagged(tmp_path):
+    v = _kernel_violations(tmp_path, "x.py", "from .. import features\n")
+    assert len(v) == 1 and "kernel" in v[0]
+
+
+def test_kernel_plain_import_features_flagged(tmp_path):
+    v = _kernel_violations(tmp_path, "web/x.py", "import pkg.features.a\n")
+    assert len(v) == 1 and "kernel" in v[0]
