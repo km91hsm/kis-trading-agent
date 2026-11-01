@@ -42,3 +42,9 @@ def paper_client(project, respx_mock):
 @pytest.fixture
 def real_client(project, respx_mock):
     return _client("real", project)
+
+
+def make_account(id: str, env: str, markets: list[str] | None = None):
+    from trader.kernel.broker.models import BrokerAccount
+
+    return BrokerAccount(id=id, env=env, cano="00000000", markets=markets or ["KR"])

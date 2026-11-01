@@ -1,0 +1,203 @@
+from decimal import Decimal
+
+import httpx
+import pytest
+
+from trader.kernel.broker.broker import KisBroker
+
+from .conftest import make_account
+
+PAPER = "https://openapivts.koreainvestment.com:29443"
+
+
+def _route(respx_mock, path, fixture, load):
+    return respx_mock.get(PAPER + path).mock(return_value=httpx.Response(200, json=load(fixture)))
+
+
+def test_env_mismatch_rejected(paper_client):
+    with pytest.raises(ValueError, match="env"):
+        KisBroker(make_account("real-main", "real"), paper_client)
+
+
+def test_positions_kr_parsed(paper_client, respx_mock):
+    from .conftest import load
+
+    route = _route(
+        respx_mock, "/uapi/domestic-stock/v1/trading/inquire-balance", "balance_kr.json", load
+    )
+    broker = KisBroker(make_account("paper-main", "paper"), paper_client)
+    positions = broker.get_positions("KR")
+    assert [p.ticker for p in positions] == ["005930"]  # 수량 0 은 제외
+    p = positions[0]
+    assert (
+        p.qty == 10 and p.avg_price == Decimal("70000.0000") and p.eval_amount == Decimal("715000")
+    )
+    assert p.pnl_pct == pytest.approx(0.0214)
+    params = route.calls[0].request.url.params
+    assert params["CANO"] == "00000000" and params["ACNT_PRDT_CD"] == "01"
+    assert params["INQR_DVSN"] == "02"
+
+
+def test_cash_kr_parsed(paper_client, respx_mock):
+    from .conftest import load
+
+    _route(respx_mock, "/uapi/domestic-stock/v1/trading/inquire-balance", "balance_kr.json", load)
+    cash = KisBroker(make_account("paper-main", "paper"), paper_client).get_cash("KR")
+    assert cash.currency == "KRW" and cash.total == Decimal("9300000")
+    assert cash.available == Decimal("9300000")
+
+
+def test_positions_and_cash_us_parsed(paper_client, respx_mock):
+    from .conftest import load
+
+    r1 = _route(
+        respx_mock, "/uapi/overseas-stock/v1/trading/inquire-balance", "balance_us.json", load
+    )
+    r2 = _route(
+        respx_mock,
+        "/uapi/overseas-stock/v1/trading/inquire-present-balance",
+        "present_balance_us.json",
+        load,
+    )
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    pos = broker.get_positions("US")
+    assert (
+        pos[0].ticker == "AAPL" and pos[0].qty == 3 and pos[0].current_price == Decimal("110.0000")
+    )
+    assert r1.calls[0].request.url.params["OVRS_EXCG_CD"] == "NASD"
+    cash = broker.get_cash("US")
+    assert cash.currency == "USD"
+    assert cash.available == Decimal("1200.00") and cash.total == Decimal("1250.50")
+    p = r2.calls[0].request.url.params
+    assert p["WCRC_FRCR_DVSN_CD"] == "02" and p["NATN_CD"] == "840"
+    assert r2.calls[0].request.headers["tr_id"] == "VTRP6504R"
+
+
+def test_cash_us_without_usd_row_is_zero(paper_client, respx_mock):
+    from .conftest import load
+
+    data = load("present_balance_us.json")
+    data["output2"] = []
+    respx_mock.get(PAPER + "/uapi/overseas-stock/v1/trading/inquire-present-balance").mock(
+        return_value=httpx.Response(200, json=data)
+    )
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    cash = broker.get_cash("US")
+    assert cash.available == Decimal("0") and cash.total == Decimal("0")
+
+
+def test_market_not_in_account_rejected(paper_client):
+    broker = KisBroker(make_account("paper-main", "paper", ["KR"]), paper_client)
+    with pytest.raises(ValueError, match="US"):
+        broker.get_positions("US")
+
+
+def test_get_balance_kr_single_request(paper_client, respx_mock):
+    """build_portfolio 가 get_positions + get_cash 를 따로 부르면 같은 inquire-balance 를 2번 친다
+    (모의 2/s). 한 응답에서 둘을 뽑는다."""
+    from .conftest import load
+
+    route = _route(
+        respx_mock, "/uapi/domestic-stock/v1/trading/inquire-balance", "balance_kr.json", load
+    )
+    b = KisBroker(make_account("paper-main", "paper"), paper_client)
+    positions, cash = b.get_balance("KR")
+    assert route.call_count == 1
+    assert [p.ticker for p in positions] == [p.ticker for p in b.get_positions("KR")]
+    assert cash == b.get_cash("KR")
+
+
+def test_positions_us_carry_exchange_code(paper_client, respx_mock):
+    """US 보유 종목은 잔고의 ovrs_excg_cd(NASD|NYSE|AMEX)를 시세용 EXCD(NAS|NYS|AMS)로 바꿔 둔다
+    (monitor 가 universe 밖 보유분의 시세·매도 거래소를 알 수 있도록)."""
+    from .conftest import load
+
+    _route(respx_mock, "/uapi/overseas-stock/v1/trading/inquire-balance", "balance_us.json", load)
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    pos = broker.get_positions("US")
+    assert pos[0].exchange == "NAS"
+    kr = KisBroker(make_account("paper-main", "paper"), paper_client)
+    _route(respx_mock, "/uapi/domestic-stock/v1/trading/inquire-balance", "balance_kr.json", load)
+    assert kr.get_positions("KR")[0].exchange is None
+
+
+def test_cash_kr_carries_total_evaluation_as_nav(paper_client, respx_mock):
+    """NAV 는 예수금(dnca_tot_amt, 미결제) + 평가 합이 아니라 잔고 응답의 총평가(tot_evlu_amt)다 —
+    체결 뒤 2영업일 동안 매수분이 이중 계산돼 일일손실 −5% 오탐이 났다."""
+    from .conftest import load
+
+    _route(respx_mock, "/uapi/domestic-stock/v1/trading/inquire-balance", "balance_kr.json", load)
+    positions, cash = KisBroker(make_account("paper-main", "paper"), paper_client).get_balance("KR")
+    assert cash.nav == Decimal("10015000")
+    assert positions[0].sellable_qty == 10 and positions[0].sell_qty == 10
+
+
+def test_us_balance_and_fills_query_all_three_exchanges(paper_client, respx_mock):
+    """US 잔고·체결은 NASD 고정이 아니라 NASD·NYSE·AMEX 를 모두 조회해 합친다(중복 제거)."""
+    from .conftest import load
+
+    bal = _route(
+        respx_mock, "/uapi/overseas-stock/v1/trading/inquire-balance", "balance_us.json", load
+    )
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    positions = broker.get_positions("US")
+    assert bal.call_count == 3
+    tickers = [p.ticker for p in positions]
+    assert len(tickers) == len(set(tickers))  # 같은 응답을 세 번 받아도 종목은 한 번
+
+
+def test_kr_fills_merge_continuation_pages(paper_client, respx_mock):
+    """체결 조회가 한 페이지를 넘으면(tr_cont=M) 다음 페이지 체결도 받는다 (리뷰 F14)."""
+    from datetime import date as _date
+
+    ccld = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+
+    def row(odno, qty):
+        return {
+            "odno": odno,
+            "pdno": "005930",
+            "sll_buy_dvsn_cd": "02",
+            "tot_ccld_qty": str(qty),
+            "avg_prvs": "70000",
+            "ord_dt": "20261009",
+            "ord_tmd": "100000",
+        }
+
+    respx_mock.get(PAPER + ccld).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                headers={"tr_cont": "M"},
+                json={"rt_cd": "0", "msg_cd": "", "msg1": "", "output1": [row("1", 3)]},
+            ),
+            httpx.Response(
+                200,
+                headers={"tr_cont": "D"},
+                json={"rt_cd": "0", "msg_cd": "", "msg1": "", "output1": [row("2", 5)]},
+            ),
+        ]
+    )
+    broker = KisBroker(make_account("paper-main", "paper"), paper_client)
+    fills = broker.get_fills("KR", _date(2026, 10, 9))
+    assert [(f.order_no, f.qty) for f in fills] == [("1", 3), ("2", 5)]
+
+
+def test_cash_us_nav_is_not_krw_total_assets(paper_client, respx_mock):
+    """전체 검토 O1: output3.tot_asst_amt(원화 환산 총자산)를 US NAV(USD)로 쓰지 않는다."""
+    from .conftest import load
+
+    respx_mock.get(PAPER + "/uapi/overseas-stock/v1/trading/inquire-present-balance").mock(
+        return_value=httpx.Response(200, json=load("present_balance_us.json"))
+    )
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    cash = broker.get_cash("US")
+    assert cash.currency == "USD" and cash.nav is None  # executor 가 USD 예수금 + 평가 합으로
+
+
+def test_kis_broker_rejects_fo_account(paper_client):
+    from trader.kernel.broker.broker import KisBroker
+    from trader.kernel.broker.models import BrokerAccount
+
+    acct = BrokerAccount(id="paper-fo", env="paper", cano="00000000", asset="fo")
+    with pytest.raises(ValueError):
+        KisBroker(acct, paper_client)
