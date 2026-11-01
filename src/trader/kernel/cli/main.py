@@ -17,6 +17,7 @@ from trader.kernel.cli.dev import dev_app
 from trader.kernel.config import KST, load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
+from trader.kernel.notify import NullNotifier
 from trader.kernel.notify.commands import CommandContext, poll_once
 from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_receiver
 from trader.kernel.platform import paths
@@ -128,7 +129,9 @@ def notify_test() -> None:
     notifier = make_notifier(b.secrets, enabled=b.settings.notify.enabled)
     stamp = datetime.now(KST).strftime("%H:%M:%S")
     if notifier.send(f"trader 알림 테스트 {stamp}"):
-        typer.echo("전송 성공")
+        null = isinstance(notifier, NullNotifier)
+        note = " (텔레그램 미설정·꺼짐 — 실제 전송 없음)" if null else ""
+        typer.echo("전송 성공" + note)
     else:
         typer.echo("전송 실패", err=True)
         raise typer.Exit(code=1)

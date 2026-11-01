@@ -139,6 +139,17 @@ def test_remove_deletes_one_line_and_keeps_ledger(yml, db):
     assert db.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 1
 
 
+def test_remove_clears_mode_and_live_confirmation(yml, db):
+    from trader.features.accounts.modes import set_account_mode
+
+    acct = _load(yml)["real-main"]
+    set_account_mode(db, acct, "auto", confirm="LIVE")
+    q = "SELECT COUNT(*) FROM account_modes WHERE account_id=?"
+    assert db.execute(q, ("real-main",)).fetchone()[0] == 1
+    accounts_io.remove_account(yml, "real-main", db)
+    assert db.execute(q, ("real-main",)).fetchone()[0] == 0
+
+
 def test_remove_unknown_account(yml, db):
     with pytest.raises(ConfigError, match="없습니다"):
         accounts_io.remove_account(yml, "nope", db)

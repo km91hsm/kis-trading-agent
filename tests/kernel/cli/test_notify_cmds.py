@@ -43,6 +43,7 @@ def test_cli_telegram_poll_without_secrets_exits_1(project):
 def test_cli_notify_test_null_notifier_succeeds(project):
     r = CliRunner().invoke(main_mod.app, ["notify-test"])
     assert r.exit_code == 0 and "전송 성공" in r.stdout
+    assert "텔레그램 미설정·꺼짐 — 실제 전송 없음" in r.stdout
 
 
 def test_cli_notify_test_failure_exits_1(project, monkeypatch):

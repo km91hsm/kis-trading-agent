@@ -203,7 +203,8 @@ def blockers(conn: sqlite3.Connection, account_id: str) -> list[str]:
 
 
 def remove_account(path: Path, account_id: str, conn: sqlite3.Connection) -> dict:
-    """계좌 줄 하나를 뺀다(원장 기록·연결 키는 그대로). 반환 {id, backup}."""
+    """계좌 줄 하나를 뺀다. 모드·LIVE 확인 기록(`account_modes`)은 지우고, 원장(주문·체결)과
+    연결 키는 그대로 둔다. 반환 {id, backup}."""
     with _editing(path):
         if account_id not in {a.id for a in _current(path)}:
             raise ConfigError(f"그런 계좌가 없습니다: {account_id}")
@@ -227,4 +228,7 @@ def remove_account(path: Path, account_id: str, conn: sqlite3.Connection) -> dic
                 raise ConfigError(f"계좌 {account_id} 가 아직 남아 있습니다")
 
         _verify(path, backup, check)
+        if _table_exists(conn, "account_modes"):  # 같은 id 로 다시 만든 계좌에 넘어가지 않게
+            conn.execute("DELETE FROM account_modes WHERE account_id=?", (account_id,))
+            conn.commit()
     return {"id": account_id, "backup": backup}

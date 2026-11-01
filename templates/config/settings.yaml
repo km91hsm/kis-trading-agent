@@ -1,4 +1,4 @@
-# 시장 목록과 웹 서버 설정. 기능별 섹션은 해당 기능이 추가된 뒤 이 파일에 적는다.
+# 시장 목록·웹 서버·알림(notify) 설정. 기능별 섹션은 해당 기능이 추가된 뒤 이 파일에 적는다.
 markets: [KR, US]
 
 web:
@@ -7,3 +7,4 @@ web:
 
 notify:
   enabled: true
+  poll_interval_s: 30

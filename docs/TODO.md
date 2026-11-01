@@ -50,7 +50,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
   - bare `import trader.features.a` 가 서비스 기능 간에 허용되는 구멍 막기(+테스트)
   - `test_discover_real_package…` 실제 목록 단언
   - WEB_TOKEN 을 `secrets/.env` 에서도 읽기(python-dotenv)
-- 이연(M2 리뷰, minor): `Boot.secrets` 타입 `Secrets | None`·`build_web_deps` 재읽기 제거; `settings.py` 자리표시자 판정 헬퍼화; `commands.py` echo 예외 집계(try/else)·미인식 명령 도움말 블록 중복; `notify.enabled=false` 와 토큰 없음 문구 구분; `modes.py` docstring; `telegram.py` 미사용 `logger`·`ctx: Any`; 핸들러가 컨텍스트의 accounts/secrets 를 쓰도록
+- 이연(M2 리뷰, minor): `Boot.secrets` 타입 `Secrets | None`·`build_web_deps` 재읽기 제거; `settings.py` 자리표시자 판정 헬퍼화; `commands.py` echo 예외 집계(try/else)·미인식 명령 도움말 블록 중복; `notify.enabled=false` 와 토큰 없음 문구 구분; `modes.py` docstring; `telegram.py` `ctx: Any`; T1 `load_secrets` UnicodeDecodeError 바이트 위치 노출; T9 `accounts add` ValidationError 원문 echo 가독성; T10 `/mode … fast` 경로 단언 약함; T4 `/status` 절별 격리(M4 가 status 절을 더하기 전에)·`commands.registry` 검사를 `registry.contracts.check` 로 이동(M4)·데몬 telegram 잡 예외 내성(M4); 핸들러가 컨텍스트의 accounts/secrets 를 쓰도록
   - 상세 차이는 `features/accounts/README.md`·`docs/architecture.md` 「notify」 의 "알려진 차이"
 
 ## M3 — features/ingest + saveticker

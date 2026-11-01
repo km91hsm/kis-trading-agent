@@ -103,7 +103,7 @@
 
 ## cli
 
-- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev` 를 둔다.
+- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 을 둔다.
 - 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`).
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
@@ -121,7 +121,9 @@
   - 토큰은 URL 에 들어가므로 URL·예외 메시지를 로그에 남기지 않는다(`trader.notify`).
   - 메시지는 4000자(`MAX_LEN`)로 분할하고 HTML 이스케이프한다.
   - 발신 실패 시 outbox 에 보관하고 `True` 를 돌려준다. `flush_outbox` 가 재전송하며 보관 24h(`OUTBOX_TTL`), 한 번에 10건(`OUTBOX_FLUSH_MAX`).
-  - 수신은 신뢰 발신자(설정된 chat_id)만 처리한다. 오프셋(`telegram_offset`)은 업데이트마다 전진한다.
+  - 수신: 설정된 chat_id 가 아닌 채팅의 메시지는 버린다.
+  - 신뢰 판정: `TELEGRAM_ALLOWED_USERS` 가 있으면 그 목록의 발신자만, 없으면 1:1(private) 채팅만 신뢰한다. 신뢰 밖 발신자는 `/status` 와 `untrusted_ok` 명령만 쓸 수 있고 나머지는 "명령 거부" 로 답한다(`commands.poll_once`).
+  - 오프셋(`telegram_offset`)은 업데이트마다 전진한다.
   - 모르는 명령은 분당 1회(`HELP_EVERY_S=60`, 플래그 `telegram_help_at`)만 도움말을 보낸다.
   - `/status` 는 내장이고 기능이 `status_sections` 로 절을 더한다. 명령 이름 `status` 는 예약이다.
   - `notify.enabled=false` 면 `NullNotifier` 이고 수신기는 없다(리허설).

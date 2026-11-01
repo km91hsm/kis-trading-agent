@@ -1,4 +1,4 @@
-"""설정 로더 + 섹션 레지스트리. 커널 자체 섹션(settings.markets·web)만 여기서 등록한다."""
+"""설정 로더 + 섹션 레지스트리. 커널 자체 섹션(settings.markets·web·notify)만 여기서 등록한다."""
 
 from __future__ import annotations
 

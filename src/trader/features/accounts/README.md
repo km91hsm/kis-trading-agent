@@ -15,7 +15,9 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 
 ## 규약
 
-- 같은 값으로 모드를 다시 설정하면 쓰기를 하지 않는다(`set_account_mode`). `effective_mode` 는 실전 계좌가 `auto` 인데 LIVE 미확인이면 `approve` 로 낮추고 `LIVE_UNCONFIRMED_NOTE` 를 붙인다. 실전 파생 계좌는 주문이 없다(`REAL_FO_OFF_NOTE`).
+- 같은 값으로 모드를 다시 설정하면 쓰기를 하지 않는다(`set_account_mode`; 실전 auto 를 같은 confirm 으로 재확인하면 확인 시각 `at` 이 바뀌어 다시 쓴다). `effective_mode` 는 실전 계좌가 `auto` 인데 LIVE 미확인이면 **`off`** 로 취급하고(`LIVE_UNCONFIRMED_NOTE`) 설명을 붙인다. 실전 파생 계좌는 주문이 없다(`REAL_FO_OFF_NOTE`).
+- 키 규칙: 공용 `KIS_PAPER_*`/`KIS_REAL_*`, 계좌 전용 `KIS_<ID 대문자, 영숫자 외는 _>_*`(`account_prefix`; 예 `real-2` → `KIS_REAL_2_`). 계좌의 `credentials` 로 접두사를 직접 지정할 수 있다(`KIS_…_` 형식). 예약 접두사 `KIS_PAPER_`/`KIS_REAL_` 은 `credentials` 로 쓸 수 없다. 전용 접두사에 `APP_KEY` 가 없으면 env 공용 키로 폴백한다.
+- 시세 키(`market_creds`) 폴백 순서: 공용 실전 키 → 첫 실전 현물 계좌의 전용 키 → 공용(없음). 파생 계좌 키는 쓰지 않는다.
 - 같은 키를 여러 계좌가 쓰면 경고(주식 WARNING, 파생 INFO). 키가 없는 계좌, `fo_product` 가 없는 파생 계좌는 경고 후 건너뛴다.
 - 시크릿 값은 로그·stdout·예외 메시지에 넣지 않는다(이름과 '설정됨' 여부만). 로거는 `trader.config`(옛 호환)·`trader.accounts`.
 - 코드는 `kernel/` 만 import 한다(3층 규칙).
@@ -41,3 +43,4 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 13. `notify.enabled=false` 와 토큰 없음이 `telegram poll|loop` 에서 같은 토큰 오류 문구로 나온다(원인 구분 없음).
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.
+16. 옛 코드는 계좌를 지워도 control 플래그(모드·LIVE 확인)가 남았으나 새 코드는 `remove_account` 때 `account_modes` 행을 지운다(같은 id 로 다시 만든 계좌에 넘어가지 않게).

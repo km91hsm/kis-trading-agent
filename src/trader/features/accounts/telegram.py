@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from trader.features.accounts import modes
 from trader.features.accounts.settings import Account, load_accounts
 from trader.kernel.notify import messages
 from trader.kernel.registry.types import StatusSection, TelegramCommand
-
-logger = logging.getLogger("trader.accounts")
 
 
 def _mode_label(conn, account: Account) -> str:

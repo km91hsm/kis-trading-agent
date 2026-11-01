@@ -63,6 +63,17 @@ def test_missing_key_account_is_skipped_with_warning(caplog):
     assert not any("secret" in r.message.lower() and "ps" in r.message for r in caplog.records)
 
 
+def test_warnings_never_leak_key_values(caplog):
+    sec = Secrets(KIS_PAPER_APP_KEY="pk-SECRET", KIS_PAPER_APP_SECRET="ps-SECRET")
+    accts = [_acct("paper-main", env="paper"), _acct("paper-2", env="paper"),
+             _acct("real-main")]  # 같은 키 공유 경고 + 키 없는 계좌 건너뜀 경고
+    with caplog.at_level(logging.DEBUG, logger="trader.accounts"):
+        brokers.build_brokers(sec, accts)
+    assert any("같은 앱키" in r.message for r in caplog.records)
+    assert any("건너뜀" in r.message for r in caplog.records)
+    assert "pk-SECRET" not in caplog.text and "ps-SECRET" not in caplog.text
+
+
 def test_market_falls_back_to_first_real_stock_account_key():
     only = Secrets.model_validate({"KIS_REAL_2_APP_KEY": "k2", "KIS_REAL_2_APP_SECRET": "s2"})
     assert brokers.market_creds(only, [_acct("real-2")]).app_key == "k2"
