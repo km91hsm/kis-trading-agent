@@ -1,8 +1,8 @@
-config/
-secrets/
-state/
-dist/
-build/
+/config/
+/secrets/
+/state/
+/dist/
+/build/
 web/dist/
 web/node_modules/
 .venv/
