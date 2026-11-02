@@ -90,6 +90,15 @@ EXECUTION = Migration(
             created_at TEXT NOT NULL,
             UNIQUE(account_id, date, market, asset, ticker)
         )""",
+        """CREATE TABLE IF NOT EXISTS fills (
+            id INTEGER PRIMARY KEY,
+            order_id INTEGER NOT NULL,
+            account_id TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            price TEXT NOT NULL,
+            filled_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_fills_order ON fills(order_id)",
         """CREATE TABLE account_nav (
             id INTEGER PRIMARY KEY,
             account_id TEXT NOT NULL,

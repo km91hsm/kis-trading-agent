@@ -12,17 +12,6 @@ NOON = "2026-11-02T03:00:00+00:00"  # KST 12:00, ET 새벽 — 둘 다 D 안이 
 KR_DAY = "2026-11-02T03:00:00+00:00"
 
 
-@pytest.fixture
-def fills_table(conn):
-    """fills 는 M5 가 만든다 — 공식 검증용 최소 테이블."""
-    conn.execute(
-        "CREATE TABLE fills (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, "
-        "account_id TEXT NOT NULL, qty INTEGER NOT NULL, price TEXT NOT NULL, "
-        "filled_at TEXT NOT NULL)"
-    )
-    conn.commit()
-
-
 def _order(
     conn,
     *,
@@ -216,7 +205,7 @@ def test_today_order_amount_and_pending_buy_amounts(conn):
     assert ledger.today_order_amount(conn, "a", D, "US") == Decimal("5")
 
 
-def test_held_since(conn, fills_table):
+def test_held_since(conn):
     a1 = _order(conn, ticker="A", qty=10)
     a2 = _order(conn, ticker="A", side="SELL", qty=10)
     a3 = _order(conn, ticker="A", qty=5)
@@ -237,7 +226,7 @@ def test_held_since(conn, fills_table):
     assert ledger.held_since(conn, "a", []) == {}
 
 
-def test_realized_pnl_5d(conn, fills_table):
+def test_realized_pnl_5d(conn):
     b = _order(conn, ticker="A", qty=10)
     s = _order(conn, ticker="A", side="SELL", qty=10)
     sc = _order(conn, ticker="A", side="SELL", qty=1, origin="scalp")
