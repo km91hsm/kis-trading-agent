@@ -19,6 +19,7 @@ def _freeze(monkeypatch, exe_dir):
 def test_not_frozen_defaults(project):
     assert bundle.is_frozen() is False
     assert bundle.tool_command() == "python -m trader tool"
+    assert bundle.tool_bin_dir() == paths.Path(sys.executable).parent
     assert bundle.cli_argv() == [sys.executable, "-m", "trader"]
     # 템플릿은 소스 트리 기준이라 TRADER_HOME(project)과 무관하다
     assert bundle.templates_dir().joinpath("config", "settings.yaml").is_file()
@@ -35,6 +36,7 @@ def test_frozen_root_is_executable_dir(tmp_path, monkeypatch):
     assert bundle.is_frozen() is True
     assert paths.project_root() == exe_dir.resolve()
     assert bundle.tool_command() == "trader tool"
+    assert bundle.tool_bin_dir() == exe_dir.resolve()
     assert paths.web_dist() == exe_dir / "_internal" / "web" / "dist"
     assert paths.agents_dir() == exe_dir / "_internal" / "agents"
     assert bundle.templates_dir() == exe_dir.resolve() / "_internal" / "templates"
