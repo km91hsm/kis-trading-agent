@@ -13,6 +13,7 @@ from trader.kernel.ledger.db import LedgerError
 from trader.kernel.ledger.migrations import KERNEL, Migration
 from trader.kernel.ledger.migrations import check as check_migrations
 from trader.kernel.registry.types import Feature
+from trader.kernel.session.migrations import SESSION
 
 # orders.origin CHECK 허용값 (Task 5 가 execution.types 로 옮기고 여기서 re-export)
 ORIGIN_CHECK = (
@@ -24,14 +25,19 @@ PUBLIC_MODULE = "api"
 KERNEL_EXEMPT = Path("registry") / "discover.py"
 
 
+# ledger.migrations.KERNEL(v1)에 넣지 않는 커널 모듈 소유 마이그레이션
+KERNEL_MODULES: list[Migration] = [SESSION]
+
+
 def _dups(items: Iterable[str]) -> list[str]:
     return sorted(k for k, n in Counter(items).items() if n > 1)
 
 
 def all_migrations(features: Iterable[Feature]) -> list[Migration]:
-    """커널 + 모든 기능 마이그레이션을 버전순으로 합친다 (기능 간 버전 교차 배치 허용)."""
+    """커널 + 커널 모듈 + 모든 기능 마이그레이션을 버전순으로 합친다 (기능 간 교차 배치 허용)."""
     return sorted(
-        [*KERNEL, *(m for f in features for m in f.migrations)], key=lambda m: m.version
+        [*KERNEL, *KERNEL_MODULES, *(m for f in features for m in f.migrations)],
+        key=lambda m: m.version,
     )
 
 

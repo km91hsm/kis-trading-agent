@@ -2,11 +2,14 @@ import pytest
 
 from trader.kernel.cli import boot as boot_mod
 from trader.kernel.config import ConfigError
+from trader.kernel.ledger.migrations import Migration
 from trader.kernel.registry.types import Feature, Port
 
 
 def _feat(fid, *ports):
-    return Feature(id=fid, tier="service", ports=tuple(ports))
+    # 첫 기능 "a" 가 v2·v3 자리를 채워 커널 모듈 v4(session)와 버전이 연속되게 한다.
+    migs = (Migration(2, "a2"), Migration(3, "a3")) if fid == "a" else ()
+    return Feature(id=fid, tier="service", ports=tuple(ports), migrations=migs)
 
 
 def test_boot_ports_builds_each_feature_port(project, monkeypatch):
