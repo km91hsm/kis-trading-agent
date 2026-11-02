@@ -93,18 +93,20 @@ def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any
     return {"hour": int(m.group(1)), "minute": int(m.group(2)), "timezone": zone}
 
 
-def _interval_seconds(spec: JobSpec, schedule: Any) -> int:
+def _interval_seconds(spec: JobSpec, schedule: Any, tag: str | None = None) -> int:
     """interval 잡 주기(초). schedule_key 가 가리키는 값(정수 ≥ 1)을 우선하고, 키가 없거나 값이
-    None 이면 spec.interval_s 로 폴백한다. 둘 다 없으면 ConfigError."""
+    None 이면 spec.interval_s 로 폴백한다. 둘 다 없으면 ConfigError. per_market 잡은 schedule_key
+    의 {market} 을 소문자 시장(tag)으로 채운다(id 와 같은 규칙)."""
     if spec.schedule_key:
+        key = spec.schedule_key.format(market=tag) if spec.per_market else spec.schedule_key
         try:
-            value = _lookup(schedule, spec.schedule_key)
+            value = _lookup(schedule, key)
         except ConfigError:
             value = None
         if value is not None:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ConfigError(
-                    f"schedule '{spec.schedule_key}' 은 1 이상의 정수(초)여야 합니다: {value!r}"
+                    f"schedule '{key}' 은 1 이상의 정수(초)여야 합니다: {value!r}"
                 )
             return value
     if not spec.interval_s:
@@ -146,6 +148,6 @@ def build(
                             ScheduledJob(ident if i == 0 else f"{ident}_{i}", spec, market, kwargs)
                         )
                     continue
-                kwargs = {"seconds": _interval_seconds(spec, schedule)}
+                kwargs = {"seconds": _interval_seconds(spec, schedule, tag)}
                 out.append(ScheduledJob(ident, spec, market, kwargs))
     return out

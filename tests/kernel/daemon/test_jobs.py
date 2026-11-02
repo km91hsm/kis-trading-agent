@@ -85,6 +85,19 @@ def test_interval_job_falls_back_to_interval_s_when_key_missing():
     assert job.trigger_kwargs == {"seconds": 1800}
 
 
+def test_per_market_interval_job_formats_schedule_key_with_market():
+    """Ruling 15: per_market interval 잡도 schedule_key 의 {market} 을 소문자 시장으로 채운다 —
+    yaml 값이 interval_s 기본값을 이긴다(키가 없는 시장만 폴백)."""
+    s = spec(
+        id="{market}_watch", trigger="interval", per_market=True,
+        schedule_key="{market}.watch.interval_s", interval_s=60,
+    )  # fmt: skip
+    sched = {"kr": {"watch": {"interval_s": 30}}, "us": {}}
+    kr, us = run_build([feat(s)], schedule=sched)
+    assert (kr.id, kr.trigger_kwargs) == ("kr_watch", {"seconds": 30})
+    assert (us.id, us.trigger_kwargs) == ("us_watch", {"seconds": 60})
+
+
 def test_cron_job_without_schedule_key_raises_config_error():
     with pytest.raises(ConfigError, match="schedule_key"):
         run_build([feat(spec(schedule_key=None))])
