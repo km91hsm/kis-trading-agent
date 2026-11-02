@@ -11,12 +11,12 @@ from datetime import UTC, datetime
 
 import typer
 
+from trader.features.spot.executor import boot_notifier
 from trader.features.spot.schemas import CHECKPOINT_NAMES
 from trader.features.spot.session_kinds import AGENTS, ANALYZE
 from trader.kernel.cli.boot import Boot
 from trader.kernel.config import ConfigError
 from trader.kernel.lane.types import LaneContext
-from trader.kernel.notify import make_notifier
 from trader.kernel.platform import paths
 from trader.kernel.platform.claude_bin import ClaudeNotFound
 from trader.kernel.session.agents import by_name
@@ -97,7 +97,7 @@ def _run(
         state=state,
         now=lambda: datetime.now(UTC),
         dry_run=dry_run,
-        notifier=make_notifier(boot.secrets),
+        notifier=boot_notifier(boot),
         ports=boot.ports,
     )
     res = run_session(

@@ -190,22 +190,31 @@ def exec_ctx_from(
     )
 
 
+def boot_notifier(boot: Any) -> Any:
+    """부트 결과로 알림기를 만든다(spot CLI·도구·분석 공용). settings `notify.enabled` 를 따르고,
+    시크릿이 없거나 조립이 실패하면(OSError·ValueError) 경고 후 NullNotifier — 알림 때문에
+    실행을 막지 않는다."""
+    from trader.kernel.notify import make_notifier
+
+    if boot.secrets is None:
+        return NullNotifier()
+    enabled = boot.settings.notify.enabled if boot.settings is not None else True
+    try:
+        return make_notifier(boot.secrets, enabled=enabled)
+    except (OSError, ValueError) as e:
+        logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
+        return NullNotifier()
+
+
 def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
     """부트 결과(`ports=True`)로 ExecContext 를 조립한다. 계좌 포트가 없으면 계좌 없음."""
-    from trader.kernel.notify import make_notifier
     from trader.kernel.platform import paths
 
-    notifier: Any = NullNotifier()
-    if boot.secrets is not None:
-        try:
-            notifier = make_notifier(boot.secrets)
-        except (OSError, ValueError) as e:  # 알림 조립 실패는 실행을 막지 않는다(알림 없음)
-            logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
     return exec_ctx_from(
         boot.settings,
         boot.conn,
         boot.ports.get("accounts"),
-        notifier,
+        boot_notifier(boot),
         None,
         paths.state_dir(),
         record_portfolio=record_portfolio,
@@ -254,14 +263,6 @@ def deps_of(ctx: ExecContext) -> core.ExecDeps:
 def _shown(ctx: ExecContext, market: str, ticker: str) -> str:
     """알림용 '이름(코드)' 표기 (원장만, 네트워크 없음)."""
     return labels.label(ticker, labels.resolve(ctx.conn, market, ticker))
-
-
-def _notify_quietly(ctx: ExecContext, text: str) -> None:
-    """알림 실패가 주문 흐름을 끊지 않도록 예외를 경고로 바꾼다."""
-    try:
-        ctx.notifier.send(text)
-    except Exception as e:  # noqa: BLE001 - 알림 채널 장애는 주문 결과와 무관
-        logger.warning("알림 전송 실패: %s", type(e).__name__)
 
 
 # --- 미체결 매수 취소 ------------------------------------------------------------------
@@ -620,8 +621,8 @@ def execute(
             bookkeeping_error = bookkeeping_error or e
         except Exception as e:  # noqa: BLE001 - 원장 잠금·OSError 등: 다음 계좌는 계속 간다
             logger.exception("계좌 %s 실행 실패 %s %s", account.id, market, decision.ticker)
-            _notify_quietly(
-                ctx,
+            core.notify_quietly(
+                ctx.notifier,
                 messages.execution_failure(
                     account=account.id,
                     market=market,
@@ -646,8 +647,8 @@ def execute(
                 exchange_of=lambda _t: exchange,
             )
             if n or left:
-                _notify_quietly(
-                    ctx,
+                core.notify_quietly(
+                    ctx.notifier,
                     messages.open_buys_cancelled(
                         account=account.id,
                         label=_shown(ctx, market, decision.ticker),

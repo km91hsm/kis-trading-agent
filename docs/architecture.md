@@ -48,7 +48,7 @@
   - `anonymize`: 프롬프트 직전 종목명·티커 익명화(`anonymize`·`deanonymize`, `Alias`). 문자열 값만, 단어 경계에서만 치환한다.
   - `stages`: `StageRule`(허용 단계 glob + 선행 단계 + 최소 개수) 검사 `first_rule`·`check_rule`.
   - `run_store`: 체크포인트 저장소 `state/runs/<운영일>/<시장>/<종목>/<이름>.json` — `run_date_for`·`run_dir`·`market_dir`, `checkpoint_payload`·`write_checkpoint`·`read_checkpoint`·`list_checkpoints`.
-  - `runner`: `run_session(spec, kind, ctx, …)` — `SessionSpec`·`SessionResult`·`PipelineError`·`ThrottleBlocked`·`SessionCancelled`, `build_command`·`parse_stream`·`run_claude`·`terminate_group`. 세션 1회 = `agent_calls` 1행 + `runs` 1행. 서브에이전트 정의는 `--agents <json 파일>`, 도구는 `--allowedTools "Bash(<tool_command> *)"` 만, cwd 는 빈 임시 디렉터리, 세션 PATH 앞에 `bundle.tool_bin_dir()`. `FAKE_CLAUDE=1`(`is_fake`)이면 subprocess 없이 `SessionKind.fake(ctx, spec)` 가 체크포인트를 쓴다.
+  - `runner`: `run_session(spec, kind, ctx, …)` (`kind.retry_guard` 면 같은 운영일 같은 종목 세션 타임아웃이 `llm.timeout_retry_max` 번이면 다시 띄우지 않음) — `SessionSpec`·`SessionResult`·`PipelineError`·`ThrottleBlocked`·`SessionCancelled`, `build_command`·`parse_stream`·`run_claude`·`terminate_group`. 세션 1회 = `agent_calls` 1행 + `runs` 1행. 서브에이전트 정의는 `--agents <json 파일>`, 도구는 `--allowedTools "Bash(<tool_command> *)"` 만, cwd 는 빈 임시 디렉터리, 세션 PATH 앞에 `bundle.tool_bin_dir()`. `FAKE_CLAUDE=1`(`is_fake`)이면 subprocess 없이 `SessionKind.fake(ctx, spec)` 가 체크포인트를 쓴다.
 - 공개면: `kernel.session.__all__` — `SESSION`·`SessionSpec`·`SessionResult`·`PipelineError`·`run_session`·`by_name`·`check_rule`·`first_rule`·`run_dir`·`run_date_for`·`checkpoint_payload`·`write_checkpoint`·`read_checkpoint`·`list_checkpoints`. 나머지는 서브모듈 경로로 import 한다.
 - 규약:
   - 운영일 `run_date_for(market, now)`: KR 은 KST 날짜. US 는 현지 날짜의 개장 시각(09:30 ET)을 KST 로 바꾼 날짜라서, 개장 전 analyze 와 KST 자정 뒤 장중 monitor·재평가가 같은 디렉터리를 본다.
@@ -116,7 +116,7 @@
 ## registry
 
 - 책임: 기능 계약(`Feature`)과 그 타입, 기능 발견, 계약·import 경계 검사.
-- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`(세션 종류: 에이전트·프롬프트 절·스키마·타임아웃 키·`runs` kind·상한 키·감속 등급·FAKE·stdin 보충)·`AgentDef`(에이전트 md 경로 + 출력 스키마)·`StageRule`(`ToolCommand.stage_rules` 의 단계 전제조건)·`OriginSpec`(주문 출처: 리스크·주문 단계 이름·결정 행 유무·게이트 면제·멱등 단위)·`ToolCommand`(`trader tool` 하위 명령, `handler` 가 `Typer` 면 그룹)·`Port`(부트가 `build(boot)` 로 조립하는 이름 붙은 구현체). `Feature` 의 M4 추가 필드: `tools`·`origins`·`session_kinds`·`agents`·`ports`, `RegistryError`, `discover`, `check`, `import_violations`.
+- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`(세션 종류: 에이전트·프롬프트 절·스키마·타임아웃 키·`runs` kind·상한 키·감속 등급·FAKE·stdin 보충·`retry_guard`(같은 종목 반복 타임아웃 차단 — 커널은 세션 이름이 아니라 이 선언만 본다))·`AgentDef`(에이전트 md 경로 + 출력 스키마)·`StageRule`(`ToolCommand.stage_rules` 의 단계 전제조건)·`OriginSpec`(주문 출처: 리스크·주문 단계 이름·결정 행 유무·게이트 면제·멱등 단위)·`ToolCommand`(`trader tool` 하위 명령, `handler` 가 `Typer` 면 그룹)·`Port`(부트가 `build(boot)` 로 조립하는 이름 붙은 구현체). `Feature` 의 M4 추가 필드: `tools`·`origins`·`session_kinds`·`agents`·`ports`, `RegistryError`, `discover`, `check`, `import_violations`.
 - 규약:
   - `discover()` 는 `trader.features` 아래 각 패키지의 `feature.FEATURE` 를 `importlib`+`pkgutil` 로 동적 import 한다. kernel 이 features 를 import 하는 유일한 경로다.
   - import 3층 규칙: `kernel` ← 서비스 기능 ← 레인. 다른 기능은 `api.py` 로만, 레인은 기능 import 금지, 커널은 기능 import 금지(`discover` 제외). `import_violations` 가 AST 로 검사하며 `from pkg import features`·상대 import 형태도 잡는다.

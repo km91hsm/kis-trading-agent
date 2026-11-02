@@ -25,7 +25,7 @@ def _exec_ctx(ctx: CommandContext) -> executor.ExecContext | None:
 
 def _parse(arg: str | None) -> tuple[int, list[str]] | None:
     parts = (arg or "").split()
-    if not parts or not parts[0].isdigit():
+    if not parts or not (parts[0].isascii() and parts[0].isdigit()):  # "²" 같은 유니코드 숫자 거부
         return None
     return int(parts[0]), parts[1:]
 

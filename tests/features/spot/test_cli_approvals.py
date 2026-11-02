@@ -87,6 +87,20 @@ def test_cli_approvals_paused_keeps_pending(env):
     conn.close()
 
 
+def test_cli_approvals_mode_off_keeps_pending(env):
+    """요청 뒤 계좌를 off 로 내렸으면 CLI 승인도 주문하지 않고 요청은 pending 으로 남는다."""
+    broker, _sent, aid = env
+    conn = db.connect()
+    modes.set_account_mode(conn, make_account("paper-main", "paper", "approve"), "off")
+    conn.close()
+    r = CliRunner().invoke(app, ["spot", "approvals", "approve", str(aid)])
+    assert r.exit_code == 1 and broker.orders == []
+    assert "approve 가 아님(off)" in r.output
+    conn = db.connect()
+    assert xledger.get_approval(conn, aid)["status"] == "pending"
+    conn.close()
+
+
 def test_cli_telegram_poll_processes_commands(env, monkeypatch):
     broker, sent, aid = env
     receiver = FakeReceiver(

@@ -29,7 +29,7 @@ from trader.features.spot import costs, executor, rules, schemas, tradability
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot import summary as summary_mod
 from trader.kernel.execution import ledger as exec_ledger
-from trader.kernel.notify import NullNotifier, make_notifier
+from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
 from trader.kernel.session import calls, runner
@@ -179,18 +179,12 @@ def ctx_from_ports(
 def tool_ctx(boot: Any) -> ToolContext:
     """부트 결과(`ports=True`)로 ToolContext 를 만든다. `TRADER_DRY_RUN` 이 없거나 "1" 이면
     dry_run(주문·승인 요청 없음) — LLM 이 플래그를 빠뜨려도 주문이 나가지 않는다."""
-    notifier: Any = NullNotifier()
-    if boot.secrets is not None:
-        try:
-            notifier = make_notifier(boot.secrets)
-        except (OSError, ValueError) as e:  # 알림 조립 실패는 도구를 막지 않는다(알림 없음)
-            logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
     return ctx_from_ports(
         settings=boot.settings,
         conn=boot.conn,
         state=paths.state_dir(),
         ports=boot.ports,
-        notifier=notifier,
+        notifier=executor.boot_notifier(boot),
         dry_run=os.environ.get("TRADER_DRY_RUN", "1") != "0",
     )
 

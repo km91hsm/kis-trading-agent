@@ -61,6 +61,7 @@ def test_usage_when_arg_missing_or_not_numeric(conn, settings, accounts, brokers
     assert "사용법: /approve <승인 id>" in handle_approve(c, None)
     assert "사용법: /approve <승인 id>" in handle_approve(c, "abc")
     assert "사용법: /reject <승인 id>" in handle_reject(c, "")
+    assert "사용법: /approve <승인 id>" in handle_approve(c, "²")  # 유니코드 숫자는 id 아님
 
 
 def test_paper_approve_executes(conn, settings, accounts, brokers):

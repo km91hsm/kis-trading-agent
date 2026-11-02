@@ -50,3 +50,62 @@ def test_dry_run_env_missing_means_dry_run(project, monkeypatch, env, expected):
         b.conn.close()
     assert ctx.dry_run is expected
     assert ctx.policy is not None and ctx.paused is not None and ctx.inputs is not None
+
+
+def test_submit_decision_cli_without_dry_run_env_sends_nothing(project, monkeypatch):
+    """Review Focus 1 끝까지: `TRADER_DRY_RUN` 이 없으면 `trader tool submit-decision` 은 브로커가
+    있어도 주문·승인 요청을 하나도 만들지 않는다(auto·approve 계좌 모두)."""
+    import json
+
+    import yaml
+    from typer.testing import CliRunner
+
+    from tests.features.spot.helpers import ok_decision
+    from tests.features.spot.test_cli_analyze import _inject_fake_broker
+    from tests.features.spot.test_tools import _ready_for_submit
+    from trader.features.accounts.ports import AccountsPortImpl
+    from trader.kernel.cli.main import app
+
+    monkeypatch.delenv("TRADER_DRY_RUN", raising=False)
+    (project / "config" / "accounts.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "accounts": [
+                    {"id": "paper-auto", "env": "paper", "cano": "00000000",
+                     "markets": ["KR"], "mode": "auto"},
+                    {"id": "paper-appr", "env": "paper", "cano": "00000000",
+                     "markets": ["KR"], "mode": "approve"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )  # fmt: skip
+    _inject_fake_broker(monkeypatch)
+    made: list = []
+    real_brokers = AccountsPortImpl.brokers
+
+    def tracked(self):
+        out = real_brokers(self)
+        made.extend(out.values())
+        return out
+
+    monkeypatch.setattr(AccountsPortImpl, "brokers", tracked)
+    b = boot(ports=True)
+    try:
+        _ready_for_submit(tools.tool_ctx(b), project)
+    finally:
+        b.conn.close()
+    args = ["tool", "submit-decision", "--ticker", "005930", "--market", "KR",
+            "--date", "2026-10-09", "--json", json.dumps(ok_decision())]  # fmt: skip
+    r = CliRunner().invoke(app, args)
+    assert r.exit_code == 0, r.output
+    out = json.loads(r.stdout)
+    assert out["ok"] is True and {e["account_id"] for e in out["executions"]} == {
+        "paper-auto", "paper-appr",
+    }  # fmt: skip
+    assert made and all(br.orders == [] for br in made)
+    b = boot(conn=True)
+    try:
+        assert b.conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0] == 0
+    finally:
+        b.conn.close()

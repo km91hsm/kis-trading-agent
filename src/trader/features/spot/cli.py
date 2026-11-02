@@ -69,8 +69,9 @@ def exec_key_release(
         if not any(r["key"] == key for r in store.list_all()):
             typer.echo(f"오류: 실행 키 없음: {key}", err=True)
             raise typer.Exit(code=1)
-        store.release(key)
+        # 감사 기록을 먼저 남긴다 — 해제 뒤 실패해도 누가 왜 풀었는지는 남아야 한다
         control.set_flag(b.conn, f"exec_key_released:{key}", {"note": text, "at": now_iso()})
+        store.release(key)
     finally:
         b.conn.close()
     typer.echo(f"실행 키 해제: {key}")

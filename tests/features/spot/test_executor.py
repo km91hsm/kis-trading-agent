@@ -1044,3 +1044,21 @@ def test_policy_without_paused_is_fail_closed(ectx):
     assert ectx.brokers["paper-main"].orders == []
     no_policy, not_paused = executor.policy_pair(None, None)
     assert no_policy(ectx.conn, ectx.accounts[0])[0] == "off" and not_paused(ectx.conn) is False
+
+
+def test_exec_ctx_respects_notify_enabled_false(project, conn, settings):
+    """settings `notify.enabled=false` 면 텔레그램 키가 있어도 spot 실행 알림은 NullNotifier."""
+    from types import SimpleNamespace
+
+    from trader.kernel.config import Secrets
+    from trader.kernel.notify import NullNotifier
+    from trader.kernel.notify.telegram import TelegramNotifier
+
+    secrets = Secrets(TELEGRAM_BOT_TOKEN="t", TELEGRAM_CHAT_ID="c")
+    on = SimpleNamespace(settings=settings, conn=conn, ports={}, secrets=secrets)
+    assert isinstance(executor.exec_ctx(on).notifier, TelegramNotifier)
+    off_settings = settings.model_copy(
+        update={"notify": settings.notify.model_copy(update={"enabled": False})}
+    )
+    off = SimpleNamespace(settings=off_settings, conn=conn, ports={}, secrets=secrets)
+    assert isinstance(executor.exec_ctx(off).notifier, NullNotifier)

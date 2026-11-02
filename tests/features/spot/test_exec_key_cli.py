@@ -60,3 +60,18 @@ def test_exec_key_release_requires_note_and_records_flag(project):
         app, ["spot", "exec-key", "release", "none", "--note", "메모 열 자 이상입니다"]
     )
     assert r.exit_code == 1
+
+
+def test_exec_key_release_records_flag_before_releasing(project, monkeypatch):
+    """해제 기록을 먼저 남긴다 — 해제 뒤 어떤 실패가 나도 감사 기록은 남아 있어야 한다."""
+    _seed()
+    seen: list[bool] = []
+
+    def release_then_fail(self, key):
+        seen.append(control.get_flag(self.conn, f"exec_key_released:{key}") is not None)
+        raise RuntimeError("해제 실패")
+
+    monkeypatch.setattr(ExecKeyStore, "release", release_then_fail)
+    args = ["spot", "exec-key", "release", KEY, "--note", "KIS 주문 없음 확인함"]
+    r = CliRunner().invoke(app, args)
+    assert isinstance(r.exception, RuntimeError) and seen == [True]

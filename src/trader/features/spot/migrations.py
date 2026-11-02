@@ -81,6 +81,6 @@ MIGRATIONS = (
                 PRIMARY KEY (market, ticker)
             )""",
         ),
-        owner="features/spot",
+        owner="spot",
     ),
 )
