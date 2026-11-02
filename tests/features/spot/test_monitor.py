@@ -791,6 +791,27 @@ def test_stop_loss_floor_survives_same_day_reevaluation(conn, settings):
     assert out["stop_loss_orders"] == 1
 
 
+def test_stop_floor_ignores_decision_dated_before_holding_even_if_ingested_later(conn, settings):
+    """손절 바닥은 보유 시작 **날짜** 이후 결정만 본다(옛 `date >= since`). 보유 시작 전 날짜의
+    결정을 나중에(`spot analyze --asof <과거>`, 더 큰 id 로) 적재해도 그 손절가가 현재 보유분의
+    바닥을 올려 즉시 손절을 내면 안 된다 — 평단 70000·현재 63000: 기본 −15%(59500) 는 안 닿는다."""
+    today_dec = Decision(**ok_decision(action="HOLD", target_weight=0.0, stop_loss=None))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "30_decision", {"data": today_dec.model_dump()}
+    )
+    did = spot_ledger.decision_id(conn, D, "KR", "005930")
+    _filled_buy(conn, did, NOW.isoformat())  # 보유 시작 = 오늘
+    old = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D - timedelta(days=5), "KR", "005930", "30_decision", {"data": old.model_dump()}
+    )
+    assert spot_ledger.decision_id(conn, D - timedelta(days=5), "KR", "005930") > did
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0
+    assert all(b.orders == [] for b in ctx.exec.brokers.values())
+
+
 def test_close_rule_keeps_session_alignment_and_skips_on_missing_session(project):
     """PR #63 Codex: 빠진 거래일을 지우면 연속이 아닌 종가가 연속처럼 보인다 — 거래일 정렬을 지키고
     필요한 종가 중 하나라도 없으면(빠진 날·오래된 마지막 값) 미판정.

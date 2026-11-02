@@ -59,7 +59,7 @@ CLI·명령
 - 헤지 ETF·현금 운용(`excluded_tickers`) 건너뛰기와 헤지·현금 운용 틱은 없다(M6) — 모든 보유가 손절·트리거 대상이다.
 - `close` 무효화 조건의 종가표는 `MonitorContext.close_table(시장, since, until)` 주입이다(옛 피처 스토어 `ml.dataset.close_table` 은 M8). 주입이 없으면 그 조건은 미판정. 데몬·CLI 는 아직 주입하지 않는다.
 - US 거래소는 잔고 응답(`Position.exchange`) 다음 `MonitorContext.exchanges` 만 본다. 옛 `universe.us` 폴백은 없다(유니버스는 ingest 소유 — 데몬·CLI 는 빈 표를 넘긴다).
-- 손절 바닥은 `held_since`(보유 묶음 시작일) 이후 첫 결정 id(`ledger.first_decision_id_since`)부터의 `max_stop_since`(결정 라운드 손절가 최고값)다.
+- 손절 바닥은 `max_stop_since(..., since_date=held_since)` — 보유 묶음 시작일 이후 **날짜**의 결정 라운드 손절가 최고값(옛 `date >= since` 와 같음; 결정 id 순서가 아니라 과거 asof 결정을 나중에 적재해도 바닥에 들어가지 않는다).
 - 손절 전 미체결 SELL·BUY 취소는 `kernel.execution.core.cancel` 을 지난다(옛 `broker.cancel_order` 직접 호출).
 - 재평가 큐 등록은 데몬의 `enqueue_from_job(deps, "reevaluate", …)` — kind 등록(Task 14) 전에는 등록 실패를 경고만 하고 다음 틱에 다시 본다(인라인으로 돌리지 않음).
 

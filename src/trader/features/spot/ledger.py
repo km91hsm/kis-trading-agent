@@ -370,41 +370,37 @@ def max_stop_since(
     since_decision_id: int | None,
     *,
     before: tuple[int, int] | None = None,
+    since_date: date | None = None,
 ) -> Decimal | None:
     """since_decision_id 이후 그 종목 결정들의 BUY/ADD/HOLD 라운드 손절가 최고값(헤지 제외).
 
     손절선은 올리기만 한다 — 같은 날 재평가가 결정 행을 덮어써도, 보유 재분석의 HOLD 가 손절가를
     비우거나 낮춰도 이전 손절선을 지킨다. SELL/TRIM 의 손절가는 바닥에 넣지 않는다.
     기준 결정이 없으면 None. before=(decision_id, round) 이면 그 라운드 **앞**의 라운드만 본다
-    (재적재 때 뒤 라운드의 손절가가 앞 라운드 행으로 번지지 않게)."""
-    if since_decision_id is None:
+    (재적재 때 뒤 라운드의 손절가가 앞 라운드 행으로 번지지 않게).
+    since_date 를 주면(장중 감시) 결정 id 대신 **결정 날짜** `>= since_date`(보유 묶음 시작일)로
+    거른다 — 보유 시작 전 날짜의 결정을 나중에 적재해도(더 큰 id) 바닥에 들어가지 않는다(옛
+    `max_stop_since(since=날짜)`). 이때 since_decision_id 는 None 이어도 된다."""
+    if since_decision_id is None and since_date is None:
         return None
     lim = ""
-    args: list[Any] = [market, ticker, since_decision_id]
+    args: list[Any] = [market, ticker]
+    if since_decision_id is not None:
+        lim += "AND r.decision_id >= ? "
+        args.append(since_decision_id)
+    if since_date is not None:
+        lim += "AND d.date >= ? "
+        args.append(since_date.isoformat())
     if before is not None:
-        lim = "AND (r.decision_id < ? OR (r.decision_id = ? AND r.round < ?)) "
+        lim += "AND (r.decision_id < ? OR (r.decision_id = ? AND r.round < ?)) "
         args += [before[0], before[0], before[1]]
     rows = conn.execute(
         "SELECT r.stop_loss FROM decision_rounds r JOIN decisions d ON d.id = r.decision_id "
-        "WHERE d.market=? AND d.ticker=? AND r.decision_id >= ? AND r.stop_loss IS NOT NULL "
+        "WHERE d.market=? AND d.ticker=? AND r.stop_loss IS NOT NULL "
         "AND r.action IN ('BUY','ADD','HOLD') AND COALESCE(r.source, '') != 'hedge' " + lim,
         args,
     ).fetchall()
     return max((Decimal(r["stop_loss"]) for r in rows), default=None)
-
-
-def first_decision_id_since(
-    conn: sqlite3.Connection, market: str, ticker: str, since: date | None
-) -> int | None:
-    """보유 묶음 시작일(since) 이후 그 종목의 첫 결정 id — `max_stop_since` 의 기준점(옛
-    `max_stop_since(since=날짜)` 의 `date >= since`). since 가 없거나 결정이 없으면 None."""
-    if since is None:
-        return None
-    row = conn.execute(
-        "SELECT MIN(id) AS id FROM decisions WHERE market=? AND ticker=? AND date >= ?",
-        (market, ticker, since.isoformat()),
-    ).fetchone()
-    return int(row["id"]) if row is not None and row["id"] is not None else None
 
 
 def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:

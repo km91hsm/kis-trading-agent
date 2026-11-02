@@ -185,10 +185,13 @@ def _closes_if_needed(
 def _floor_data(
     ctx: MonitorContext, account: Any, market: str, pos: Position, data: dict | None
 ) -> dict | None:
-    """보유 묶음 시작 뒤 결정들의 손절 바닥으로 손절선을 단조 유지한다(전체 검토 L5·2-O1)."""
+    """보유 묶음 시작일 이후 날짜의 결정들의 손절 바닥으로 손절선을 단조 유지한다(전체 검토
+    L5·2-O1). 기준은 결정 날짜다(결정 id 순서가 아니다 — 과거 asof 결정을 나중에 적재해도 현재
+    보유분의 바닥을 올리지 않는다). 보유 기록이 없으면 바닥 없음."""
     since = xledger.held_since(ctx.exec.conn, account.id, [pos.ticker]).get(pos.ticker)
-    first = spot_ledger.first_decision_id_since(ctx.exec.conn, market, pos.ticker, since)
-    best = spot_ledger.max_stop_since(ctx.exec.conn, market, pos.ticker, first)
+    if since is None:
+        return data
+    best = spot_ledger.max_stop_since(ctx.exec.conn, market, pos.ticker, None, since_date=since)
     return monotone_stop(data, best)
 
 
@@ -445,6 +448,9 @@ def _cancel_rows(
     broker = ex.brokers.get(account.id)
     exchange = _exchange(ctx, pos) if market == "US" else None
     done = left = 0
+    # 호출자(`_sell_now`)는 실제 손절을 낼 수 있을 때(`live`: dry-run·off·일시정지 아님)만 여기에
+    # 온다(`_cancel_open_sells` 도 dry_run 이면 먼저 돌아간다) — 그래서 취소는 실제로 보낸다
+    assert not ctx.dry_run, "dry-run 에서는 손절 전 취소를 보내지 않는다"
     for r in rows:
         if not r["order_no"] or (market == "US" and not exchange):
             left += 1
