@@ -1,10 +1,18 @@
-"""spot 데몬 잡: `approvals_expire` — 만료 시각이 지난 pending 승인을 expired 로."""
+"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)와 `fills_sync`(체결 동기화)."""
 
 from __future__ import annotations
 
-from trader.features.spot import executor
+import logging
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+from trader.features.spot import executor, fills
 from trader.kernel.notify.telegram import NullNotifier
-from trader.kernel.registry.types import JobSpec
+from trader.kernel.registry.types import JobSpec, QueueKind
+from trader.kernel.session.run_store import run_date_for
+
+logger = logging.getLogger("trader.fills")
 
 
 def expire_body(ctx, job) -> dict:
@@ -32,3 +40,71 @@ APPROVALS_EXPIRE = JobSpec(
     schedule_key=None, interval_s=60, enabled=None, gate="none", heavy=False,
     misfire="idempotent", catch_up="none", start_soon_s=30, body=expire_body,
 )  # fmt: skip
+
+
+def sync_all(ctx) -> dict:
+    """계좌마다 시장별 현지 오늘 체결을 적재하고, 아직 정리되지 않은 지난 날짜 주문이 있으면 그
+    날짜도 다시 조회한다. 조회에 실패한 계좌·시장이 있으면 최상위 `error` 로 올려 runs·하트비트·
+    운영 점검에 오류로 보이게 한다. 한 계좌의 실패가 다른 계좌 동기화를 막지 않는다."""
+    out: dict[str, Any] = {}
+    failures: list[str] = []
+    conn = ctx.conn_factory()
+    try:
+        notifier = ctx.notifier or NullNotifier()
+        ectx = executor.exec_ctx_from(
+            ctx.settings, conn, ctx.ports.get("accounts"), notifier, ctx.now, ctx.state
+        )
+        for a in ectx.accounts:
+            b = ectx.brokers.get(a.id)
+            if b is None or getattr(a, "asset", "stock") != "stock":
+                continue
+            try:
+                # US 체결은 ET 날짜로 조회해야 한다 (07:10 KST 는 전날 ET) → 시장별 현지 날짜
+                r = fills.sync_fills(conn, b, a, ctx.now(), now=ctx.now, notifier=notifier)
+                out[a.id] = r
+                failures += [f"{a.id} {m}" for m in r.get("failed_markets") or []]
+            except Exception as e:  # noqa: BLE001 - 한 계좌의 실패가 다른 계좌를 막지 않는다
+                logger.warning("체결 동기화 실패 %s: %s", a.id, e)
+                out[a.id] = {"error": f"{type(e).__name__}: {e}"}
+                failures.append(f"{a.id} ({type(e).__name__})")
+                continue
+            for m in a.markets:
+                one = a.model_copy(update={"markets": [m]})
+                for day in fills.stale_open_days(conn, a.id, m, run_date_for(m, ctx.now())):
+                    try:
+                        past = fills.sync_fills(conn, b, one, day, now=ctx.now, notifier=notifier)
+                    except Exception as e:  # noqa: BLE001
+                        failures.append(f"{a.id} {m} {day} ({type(e).__name__})")
+                        continue
+                    out.setdefault(f"{a.id}:lookback", []).append(past)
+                    failures += [f"{a.id} {x} {day}" for x in past.get("failed_markets") or []]
+    finally:
+        conn.close()
+    if failures:
+        out["error"] = "체결 조회 실패: " + ", ".join(failures)
+    return out
+
+
+def fills_body(ctx, job) -> dict:
+    """`fills_sync` 크론 본문."""
+    return sync_all(ctx)
+
+
+def fills_request(deps, params: dict, progress) -> dict:
+    """큐 `fills_sync`(체결통보·웹 버튼) 본문 — 체결 동기화만. 잔고 갱신은 Task 8 이 이어 붙인다."""
+    return sync_all(deps)
+
+
+class EmptyParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+FILLS_SYNC = JobSpec(
+    id="fills_sync", kind="fills_sync", trigger="cron", per_market=False,
+    schedule_key="fills_sync.times", interval_s=None, enabled=None, gate="none", heavy=False,
+    misfire="idempotent", catch_up="queue", start_soon_s=0, body=fills_body, days="mon-sat",
+)  # fmt: skip
+
+QUEUE_KINDS = (
+    QueueKind("fills_sync", EmptyParams, "체결 동기화", "fast", 0, False, True, fills_request),
+)

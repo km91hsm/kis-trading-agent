@@ -1,0 +1,383 @@
+"""spot 체결 동기화: 외부 체결 행·부분/전량·누적 교체·마감 만료·모호 플래그·미정리 날짜 재조회.
+
+옛 tests/orchestrator/test_fills.py 16건 이식(+ 중복 체결·조회 실패 Review Focus 1건).
+"""
+
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+
+from tests.features.accounts.conftest import make_account
+from trader.features.accounts.settings import to_broker_account
+from trader.features.spot import fills as fills_mod
+from trader.kernel.broker.fake import FakeBroker
+from trader.kernel.broker.models import Fill
+from trader.kernel.config.market_hours import MARKET_CLOSE, market_close
+from trader.kernel.execution import ledger as repo
+from trader.kernel.ledger import control
+
+D = date(2026, 10, 9)
+
+
+def _fb(acct, **kw):
+    return FakeBroker(to_broker_account(acct), **kw)
+
+
+def _fill(order_no, ticker="005930", qty=3, price="70900", side="BUY"):
+    return Fill(
+        order_no=order_no,
+        ticker=ticker,
+        market="KR",
+        side=side,
+        qty=qty,
+        price=Decimal(price),
+        filled_at=datetime(2026, 10, 9, 1, 5, 12, tzinfo=UTC),
+    )
+
+
+def _order(conn, order_no, qty=3):
+    return repo.insert_order(
+        conn,
+        decision_id=None,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=qty,
+        order_type="LIMIT",
+        price=Decimal("71000"),
+        status="accepted",
+        order_no=order_no,
+        message="",
+        mode="auto",
+        created_at="2026-10-09T00:10:00+00:00",  # 09:10 KST, 체결(10:05 KST)과 같은 현지 날짜
+    )
+
+
+def test_sync_fills_idempotent(conn):
+    acct = make_account("paper-main", "paper", "auto")
+    broker = _fb(acct, fills={("KR", D): [_fill("0000117057")]})
+    _order(conn, "0000117057")
+    r1 = fills_mod.sync_fills(conn, broker, acct, D)
+    r2 = fills_mod.sync_fills(conn, broker, acct, D)
+    assert (r1["inserted"], r2["inserted"]) == (1, 0)
+    assert conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0] == 1
+
+
+def test_sync_marks_filled_and_partial(conn):
+    acct = make_account("paper-main", "paper", "auto")
+    oid_full = _order(conn, "A", qty=3)
+    oid_part = _order(conn, "B", qty=5)
+    broker = _fb(acct, fills={("KR", D): [_fill("A", qty=3), _fill("B", qty=2)]})
+    in_session = datetime(2026, 10, 9, 2, 0, tzinfo=UTC)  # 11:00 KST
+    r = fills_mod.sync_fills(conn, broker, acct, D, now=lambda: in_session)
+    assert r["inserted"] == 2 and r["orders_updated"] == 2
+    rows = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM orders")}
+    assert rows[oid_full] == "filled" and rows[oid_part] == "partial"
+    # 마감 뒤: 잔량이 남은 partial 은 죽은 주문(expired)이 되고 체결은 그대로 남는다.
+    # 다음 동기화가 같은 누적 체결을 다시 보고 partial 로 되살리지 않는다
+    after_close = datetime(2026, 10, 9, 7, 0, tzinfo=UTC)
+    r2 = fills_mod.sync_fills(conn, broker, acct, D, now=lambda: after_close)
+    rows = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM orders")}
+    assert rows[oid_part] == "expired" and r2["expired"] == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM fills").fetchone()["n"] == 2
+    fills_mod.sync_fills(conn, broker, acct, D, now=lambda: after_close)
+    rows = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM orders")}
+    assert rows[oid_part] == "expired"
+
+
+def test_external_fill_creates_order_row(conn):
+    acct = make_account("paper-main", "paper", "auto")
+    broker = _fb(acct, fills={("KR", D): [_fill("ZZZ", ticker="000660", side="SELL")]})
+    r = fills_mod.sync_fills(conn, broker, acct, D)
+    assert r["inserted"] == 1
+    o = conn.execute("SELECT * FROM orders WHERE order_no='ZZZ'").fetchone()
+    assert o["mode"] == "external" and o["decision_id"] is None and o["status"] == "filled"
+    assert o["side"] == "SELL" and o["ticker"] == "000660" and o["origin"] == "external"
+    assert repo.held_since(conn, "paper-main") == {}  # 매도 체결은 보유 시작이 아니다
+
+
+def test_sync_skips_markets_not_in_account(conn):
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    broker = _fb(acct, fills={("US", D): [_fill("X")]})
+    r = fills_mod.sync_fills(conn, broker, acct, D)
+    assert r["inserted"] == 0 and "get_fills" in broker.calls
+
+
+def test_sync_cumulative_fill_updates_not_duplicates(conn):
+    """KIS 체결 조회는 주문당 누적 수량이라 장중 2주 → 마감 5주는 한 행이 5주로 갱신돼야 한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _order(conn, "A", qty=5)
+    broker = _fb(acct, fills={("KR", D): [_fill("A", qty=2)]})
+    fills_mod.sync_fills(conn, broker, acct, D)
+    broker.fills[("KR", D)] = [_fill("A", qty=5, price="70950")]
+    r = fills_mod.sync_fills(conn, broker, acct, D)
+    rows = conn.execute("SELECT qty, price FROM fills WHERE order_id=?", (oid,)).fetchall()
+    assert len(rows) == 1 and rows[0]["qty"] == 5 and rows[0]["price"] == "70950"
+    assert r["updated"] == 1
+    assert (
+        conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"]
+        == "filled"
+    )
+
+
+def test_sync_fills_datetime_uses_market_local_date(conn):
+    """07:10 KST(=전날 18:10 ET) 동기화: US 는 ET 날짜(전날), KR 은 KST 날짜로 조회해야 한다."""
+    acct = make_account("paper-main", "paper", "auto", ["KR", "US"])
+    us = Fill(
+        order_no="U1",
+        ticker="AAPL",
+        market="US",
+        side="BUY",
+        qty=1,
+        price=Decimal("200"),
+        filled_at=datetime(2026, 10, 8, 14, 0, tzinfo=UTC),
+    )
+    broker = _fb(
+        acct,
+        fills={("KR", date(2026, 10, 9)): [_fill("K1")], ("US", date(2026, 10, 8)): [us]},
+    )
+    now = datetime(2026, 10, 8, 22, 10, tzinfo=UTC)  # 2026-10-09 07:10 KST, 2026-10-08 18:10 ET
+    r = fills_mod.sync_fills(conn, broker, acct, now)
+    assert r["inserted"] == 2
+    assert r["date"] == {"KR": "2026-10-09", "US": "2026-10-08"}
+
+
+def test_order_no_match_requires_same_ticker_and_side(conn):
+    """KIS 주문번호는 날마다 다시 시작하므로 종목·방향이 다른 옛 주문에 체결을 붙이지 않는다."""
+    acct = make_account("paper-main", "paper", "auto")
+    old = _order(conn, "0000000012", qty=3)  # 005930 BUY
+    broker = _fb(
+        acct, fills={("KR", D): [_fill("0000000012", ticker="000660", side="SELL", qty=2)]}
+    )
+    fills_mod.sync_fills(conn, broker, acct, D)
+    # 체결은 붙지 않았다 (옛 날짜를 마감 뒤 동기화했으니 미체결 BUY 는 expired 로 끝난다)
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (old,)).fetchone()["status"] == (
+        "expired"
+    )
+    assert conn.execute("SELECT COUNT(*) FROM fills WHERE order_id=?", (old,)).fetchone()[0] == 0
+    ext = conn.execute("SELECT * FROM orders WHERE ticker='000660'").fetchone()
+    assert ext["mode"] == "external" and ext["side"] == "SELL" and ext["status"] == "filled"
+
+
+def test_fill_does_not_attach_to_old_order_with_reused_order_no(conn):
+    """KIS 주문번호는 날마다 다시 시작한다. 8일 뒤 같은 번호·종목·방향의 외부 체결이 옛 원장 주문에
+    붙어 기존 체결을 지우면 안 된다 → 같은 현지 날짜의 주문만 매칭하고, 없으면 external 행."""
+    acct = make_account("paper-main", "paper", "auto")
+    old = _order(conn, "0000000012", qty=3)
+    fills_mod.sync_fills(conn, _fb(acct, fills={("KR", D): [_fill("0000000012")]}), acct, D)
+    assert (
+        conn.execute("SELECT COUNT(*) AS n FROM fills WHERE order_id=?", (old,)).fetchone()["n"]
+        == 1
+    )
+    later = date(2026, 10, 17)
+    f2 = Fill(
+        order_no="0000000012",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=5,
+        price=Decimal("72000"),
+        filled_at=datetime(2026, 10, 17, 2, 0, tzinfo=UTC),
+    )
+    r = fills_mod.sync_fills(conn, _fb(acct, fills={("KR", later): [f2]}), acct, later)
+    assert r["inserted"] == 1 and r["updated"] == 0
+    rows = conn.execute("SELECT id, mode, status FROM orders ORDER BY id").fetchall()
+    assert len(rows) == 2 and rows[1]["mode"] == "external" and rows[1]["status"] == "filled"
+    # 옛 주문의 체결은 그대로
+    q = conn.execute("SELECT SUM(qty) AS q FROM fills WHERE order_id=?", (old,)).fetchone()["q"]
+    assert q == 3
+
+
+def test_fill_attaches_to_unknown_order_of_same_day(conn):
+    """응답을 못 받아 unknown 으로 남은 주문(주문번호 없음)에 같은 날·종목·방향 체결이 오면
+    external 행을 만들지 않고 그 주문에 붙여 accepted→filled 로 확정한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = repo.insert_order(
+        conn,
+        decision_id=None,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=3,
+        order_type="LIMIT",
+        price=Decimal("71000"),
+        status="unknown",
+        order_no=None,
+        message="NETWORK_UNKNOWN",
+        mode="auto",
+        created_at="2026-10-09T00:10:00+00:00",
+    )
+    broker = _fb(acct, fills={("KR", D): [_fill("0000117057")]})
+    fills_mod.sync_fills(conn, broker, acct, D)
+    rows = conn.execute("SELECT id, status, order_no, mode FROM orders ORDER BY id").fetchall()
+    assert len(rows) == 1 and rows[0]["id"] == oid
+    row = rows[0]
+    assert (row["status"], row["order_no"], row["mode"]) == ("filled", "0000117057", "auto")
+
+
+def _order_with(conn, *, status, order_no, created_at, market="KR", ticker="005930", side="BUY"):
+    return repo.insert_order(
+        conn,
+        decision_id=None,
+        account_id="paper-main",
+        ticker=ticker,
+        market=market,
+        side=side,
+        qty=3,
+        order_type="LIMIT",
+        price=Decimal("71000"),
+        status=status,
+        order_no=order_no,
+        message="",
+        mode="auto",
+        created_at=created_at,
+    )
+
+
+def test_sync_after_close_expires_unfilled_orders_of_that_day(conn):
+    """장 마감 뒤 체결 조회를 마쳤는데 그날 accepted·unknown 주문에 체결이 없으면 expired 로 바꾼다
+    (당일 주문은 마감에 소멸). 체결이 붙은 주문·다른 시장·다른 날 주문은 건드리지 않는다."""
+    acct = make_account("paper-main", "paper", "auto", ["KR", "US"])
+    t0 = "2026-10-09T00:10:00+00:00"
+    o_acc = _order_with(conn, status="accepted", order_no="A", created_at=t0)
+    o_unk = _order_with(conn, status="unknown", order_no=None, created_at=t0)
+    t1, t_old, t_us = (
+        "2026-10-09T00:30:00+00:00",
+        "2026-10-08T00:30:00+00:00",
+        "2026-10-09T14:00:00+00:00",
+    )
+    o_fill = _order_with(conn, status="accepted", order_no="F", created_at=t1, ticker="000660")
+    o_old = _order_with(conn, status="accepted", order_no="O", created_at=t_old)
+    o_us = _order_with(
+        conn, status="accepted", order_no="U", created_at=t_us, market="US", ticker="AAPL"
+    )
+    broker = _fb(acct, fills={("KR", D): [_fill("F", ticker="000660")]})
+    after_close = datetime(2026, 10, 9, 7, 0, tzinfo=UTC)  # 16:00 KST
+    r = fills_mod.sync_fills(conn, broker, acct, D, now=lambda: after_close)
+    st = {row["id"]: row["status"] for row in conn.execute("SELECT id, status FROM orders")}
+    assert st[o_acc] == "expired" and st[o_unk] == "expired"
+    assert st[o_fill] == "filled" and st[o_old] == "accepted" and st[o_us] == "accepted"
+    assert r["expired"] == 2
+    # 만료된 주문은 살아 있는 주문이 아니다
+    assert not [
+        o for o in repo.open_limit_orders_today(conn, "paper-main", "KR", D)
+        if o["ticker"] == "005930"
+    ]  # 옛 has_open_order_today
+    assert "005930" not in repo.today_buy_tickers(conn, "paper-main", D, market="KR")
+
+
+def test_sync_during_session_does_not_expire(conn):
+    """장중(마감 전) 수동 fills sync 는 미체결 주문을 만료시키지 않는다."""
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    oid = _order_with(conn, status="accepted", order_no="A", created_at="2026-10-09T00:10:00+00:00")
+    broker = _fb(acct, fills={("KR", D): []})
+    r = fills_mod.sync_fills(
+        conn,
+        broker,
+        acct,
+        D,
+        now=lambda: datetime(2026, 10, 9, 3, 0, tzinfo=UTC),  # 12:00 KST
+    )
+    status = conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"]
+    assert status == "accepted" and r["expired"] == 0
+
+
+def test_sync_fetch_failure_does_not_expire(conn):
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    oid = _order_with(conn, status="accepted", order_no="A", created_at="2026-10-09T00:10:00+00:00")
+    broker = _fb(acct, fail={"get_fills"})
+    after_close = datetime(2026, 10, 9, 7, 0, tzinfo=UTC)
+    fills_mod.sync_fills(conn, broker, acct, D, now=lambda: after_close)
+    status = conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"]
+    assert status == "accepted"
+
+
+def test_us_early_close_day_closes_at_13_et():
+    from datetime import date as _date
+    from datetime import time as _time
+
+    fm = fills_mod
+    early = _date(2026, 11, 27)
+    assert market_close("US", early) == _time(13, 0)
+    assert market_close("US", _date(2026, 11, 30)) == MARKET_CLOSE["US"]
+    assert market_close("KR", early) == MARKET_CLOSE["KR"]
+    at_1330_et = datetime(2026, 11, 27, 18, 30, tzinfo=UTC)
+    assert fm._session_closed("US", early, at_1330_et)
+    assert not fm._session_closed(
+        "US", _date(2026, 11, 30), datetime(2026, 11, 30, 18, 30, tzinfo=UTC)
+    )
+
+
+def test_ambiguous_unknown_candidates_are_not_attached_and_flagged(conn):
+    """Phase 23 B: 같은 날·종목·방향의 unknown 주문이 둘이면 어느 것의 체결인지 몰라 붙이지 않고
+    external 행으로 적재 + 알림 1회 + control 플래그."""
+    acct = make_account("paper-main", "paper", "auto")
+    for _ in range(2):
+        _order_with(conn, status="unknown", order_no=None, created_at="2026-10-09T00:10:00+00:00")
+    sent = []
+    notifier = type("N", (), {"send": lambda self, t, **k: sent.append(t) or True})()
+    broker = _fb(acct, fills={("KR", D): [_fill("0000117057")]})
+    in_session = lambda: datetime(2026, 10, 9, 2, 0, tzinfo=UTC)  # noqa: E731 - 11:00 KST
+    fills_mod.sync_fills(conn, broker, acct, D, notifier=notifier, now=in_session)
+    rows = conn.execute("SELECT status, order_no, mode FROM orders ORDER BY id").fetchall()
+    assert [r["status"] for r in rows] == ["unknown", "unknown", "filled"]
+    assert rows[2]["mode"] == "external"
+    flag = control.get_flag(conn, "fill_ambiguous:KR:2026-10-09")
+    assert flag["candidates"] == 2 and flag["cases"][0]["order_ids"] == [1, 2]
+    assert len(sent) == 1 and "[체결 매칭 모호]" in sent[0]
+    fills_mod.sync_fills(conn, broker, acct, D, notifier=notifier, now=in_session)  # 재알림 없음
+    assert len(sent) == 1
+
+
+def test_stale_open_days_lists_past_live_orders(conn):
+    """오늘 이전 7일 안에 아직 살아 있는 주문이 있는 현지 날짜(동기화 실패·놓친 날 다시 조회)."""
+    _order_with(conn, status="accepted", order_no="A", created_at="2026-10-07T01:00:00+00:00")
+    _order_with(conn, status="filled", order_no="B", created_at="2026-10-08T01:00:00+00:00")
+    _order_with(conn, status="unknown", order_no="C", created_at="2026-10-09T01:00:00+00:00")
+    days = fills_mod.stale_open_days(conn, "paper-main", "KR", D)
+    assert days == [date(2026, 10, 7)]  # 오늘(10-09)·체결 완료는 제외
+
+
+def test_stale_open_days_has_no_lookback_limit_but_caps_per_run(conn):
+    """전체 검토 2차 2-O11: 8일 넘게 꺼져 있던 뒤의 살아 있는 주문도 다시 조회한다(범위 제한 없음).
+    실행당 조회 날짜는 오래된 순 `STALE_QUERY_CAP` 개까지 — 나머지는 그 주문이 정리된 뒤
+    다음 실행."""
+    for i in range(fills_mod.STALE_QUERY_CAP + 2):
+        day = date(2026, 8, 1) + timedelta(days=i)
+        _order_with(
+            conn,
+            status="accepted",
+            order_no=f"A{i}",
+            created_at=f"{day.isoformat()}T01:00:00+00:00",
+        )
+    days = fills_mod.stale_open_days(conn, "paper-main", "KR", D)
+    assert len(days) == fills_mod.STALE_QUERY_CAP and days[0] == date(2026, 8, 1)
+    assert days == sorted(days)
+
+
+def test_duplicate_fill_does_not_double_count_and_fetch_failure_does_not_expire(conn):
+    """Review Focus 3: 같은 (주문·시각·수량·가격) 체결은 filled_qty 를 두 번 세지 않고, 체결 조회가
+    예외면 그날 미체결 주문을 만료시키지 않는다."""
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    oid = _order(conn, "A", qty=5)
+    broker = _fb(acct, fills={("KR", D): [_fill("A", qty=2)]})
+    in_session = lambda: datetime(2026, 10, 9, 2, 0, tzinfo=UTC)  # noqa: E731 - 11:00 KST
+    fills_mod.sync_fills(conn, broker, acct, D, now=in_session)
+    fills_mod.sync_fills(conn, broker, acct, D, now=in_session)
+    row = conn.execute("SELECT status, filled_qty FROM orders WHERE id=?", (oid,)).fetchone()
+    assert (row["status"], row["filled_qty"]) == ("partial", 2)
+    # 원장 계층에서 같은 체결을 또 넣어도 무시되고 누적 수량은 그대로
+    dup = dict(
+        order_id=oid, account_id="paper-main", market="KR", ticker="005930", side="BUY",
+        qty=2, price=Decimal("70900"), filled_at="2026-10-09T01:05:12+00:00", order_no="A",
+    )  # fmt: skip
+    assert repo.insert_fill(conn, **dup) is None
+    assert conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0] == 1
+    # 조회 예외: 마감 뒤여도 만료시키지 않는다(부분체결 주문도 그대로)
+    broker.fail = {"get_fills"}
+    after_close = lambda: datetime(2026, 10, 9, 7, 0, tzinfo=UTC)  # noqa: E731
+    r = fills_mod.sync_fills(conn, broker, acct, D, now=after_close)
+    assert r["failed_markets"] == ["KR"] and r["expired"] == 0
+    row = conn.execute("SELECT status, filled_qty FROM orders WHERE id=?", (oid,)).fetchone()
+    assert (row["status"], row["filled_qty"]) == ("partial", 2)

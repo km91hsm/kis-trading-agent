@@ -4,6 +4,7 @@ yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -112,3 +113,22 @@ SECTIONS = (
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
 )
+
+
+class FillsSyncSchedule(BaseModel):
+    """schedule.yaml `fills_sync`: 체결 동기화 시각(KST "HH:MM", 월~토). KR 마감 뒤·US 마감 뒤."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    times: list[str] = Field(default_factory=lambda: ["16:10", "07:10"], min_length=1)
+
+    @field_validator("times")
+    @classmethod
+    def _hhmm(cls, v: list[str]) -> list[str]:
+        for t in v:
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+                raise ValueError(f"HH:MM 형식이어야 합니다: {t!r}")
+        return v
+
+
+SCHEDULE_SECTIONS = (Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),)

@@ -43,6 +43,7 @@ CLI·명령
 - 텔레그램 핸들러는 `CommandContext.ports["accounts"]` 로 계좌·브로커·정책을 받는다(포트가 없으면 안내만, 주문 없음).
 - `approvals_expire` 잡은 `boot` 를 부르지 않고 `ctx.conn_factory()`·`ctx.now`·`ctx.notifier` 로 계좌·브로커 없는 최소 `ExecContext` 를 만든다(만료는 conn+now 만 쓴다).
 - `approval_line` 은 spot `messages.py` 가 소유한다(커널 `notify.messages` 의 ENV·SIDE·`money`·`kst_hhmm` 재사용).
+- 체결 동기화(`fills.py`, `trader spot fills sync`, `fills_sync` 잡·큐 kind): 파생(`fo`) 계좌 분기는 M10 까지 없다(현물 계좌만). 큐 본문 `fills_request` 는 체결 동기화만 — 잔고 갱신은 balance 이식 때 이어 붙인다.
 
 세션·컨텍스트
 - 주문 알림 제목 꼬리 표 `_STAGE_KIND`(커널 `execution.core`)는 `order_stage` 를 `_r` 로 잘라 찾는 옛 동작을 그대로 둔다. 그래서 `_r` 로 시작하는 꼬리가 있는 `52_order_reprice`·`53_order_rebalance` 는 꼬리가 비고, 실제로 꼬리가 붙는 것은 `51_order`(재평가)·`55_order_sl`(손절) 등 `_r` 가 없는 단계다(M4 의 spot 이 쓰는 것은 51·55).

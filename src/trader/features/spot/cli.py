@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, date, datetime
+
 import typer
 
 from trader.features.spot import analyze as analyze_mod
-from trader.features.spot import executor
+from trader.features.spot import executor, fills
 from trader.features.spot.messages import approval_line
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.execution import ledger as xledger
@@ -26,6 +29,8 @@ exec_key_app = typer.Typer(help="실행 키(멱등 선점) 조회·수동 해제
 spot_app.add_typer(exec_key_app, name="exec-key")
 approvals_app = typer.Typer(help="승인 요청 조회·승인·거부", no_args_is_help=True)
 spot_app.add_typer(approvals_app, name="approvals")
+fills_app = typer.Typer(help="체결 조회 → fills 적재·주문 상태 갱신", no_args_is_help=True)
+spot_app.add_typer(fills_app, name="fills")
 
 
 def _cell(v: object) -> str:
@@ -156,3 +161,34 @@ def approvals_reject(approval_id: int = typer.Argument(..., help="승인 id")) -
         typer.echo(f"거부 실패 #{approval_id}: {r.get('error') or r.get('status')}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"거부 #{approval_id}")
+
+
+@fills_app.command("sync")
+@config_errors
+def fills_sync(
+    account: str | None = typer.Option(None, "--account", help="특정 계좌 id 만"),
+    day: str | None = typer.Option(
+        None, "--date", help="YYYY-MM-DD (기본: 시장별 현지 오늘 — US 는 뉴욕 날짜)"
+    ),
+) -> None:
+    """계좌별 체결을 원장에 적재한다(멱등). 계좌마다 JSON 한 줄."""
+    try:
+        d: date | datetime = date.fromisoformat(day) if day else datetime.now(UTC)
+    except ValueError as e:
+        typer.echo(f"오류: --date 는 YYYY-MM-DD 여야 합니다: {day}", err=True)
+        raise typer.Exit(code=1) from e
+    b = boot(ports=True)
+    try:
+        ectx = executor.exec_ctx(b)
+        failed = False
+        for a in ectx.accounts:
+            broker = ectx.brokers.get(a.id)
+            if broker is None or (account and a.id != account):
+                continue
+            r = fills.sync_fills(b.conn, broker, a, d, notifier=ectx.notifier)
+            failed = failed or bool(r["failed_markets"])
+            typer.echo(json.dumps(r, ensure_ascii=False))
+    finally:
+        b.conn.close()
+    if failed:
+        raise typer.Exit(code=1)
