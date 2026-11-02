@@ -99,7 +99,7 @@ def build(
     features: list[Feature], *, schedule: Any, settings: Any, markets: list[str], ctx: Any
 ) -> list[ScheduledJob]:
     """기능이 선언한 JobSpec 을 ScheduledJob 으로 펼친다.
-    per_market 이면 시장마다 `id.format(market=m)`,
+    per_market 이면 시장마다 `id.format(market=m.lower())`(schedule_key 도 소문자 — yaml `kr.…`),
     `enabled(settings)` 가 False 면 제외. 선언 오류(schedule_key·interval_s·미등록 게이트)는
     ConfigError. heavy·misfire·catch_up 등은 손대지 않고 spec 에 그대로 둔다."""
     gates = getattr(ctx, "gates", None) or {}
@@ -113,12 +113,13 @@ def build(
             if spec.per_market and "{market}" not in spec.id:
                 raise ConfigError(f"잡 {spec.id}: per_market 잡의 id 에 {{market}} 가 필요합니다")
             for market in markets if spec.per_market else [None]:
-                ident = spec.id.format(market=market) if spec.per_market else spec.id
+                tag = market.lower() if market else None
+                ident = spec.id.format(market=tag) if spec.per_market else spec.id
                 if spec.trigger == "cron":
                     if not spec.schedule_key:
                         raise ConfigError(f"잡 {spec.id}: cron 잡에는 schedule_key 가 필요합니다")
                     key = (
-                        spec.schedule_key.format(market=market)
+                        spec.schedule_key.format(market=tag)
                         if spec.per_market
                         else spec.schedule_key
                     )

@@ -26,8 +26,8 @@ def feat(*specs: JobSpec) -> Feature:
 
 
 SCHEDULE = SimpleNamespace(
-    KR=SimpleNamespace(scan="07:30"),
-    US={"scan": {"time": "22:40", "tz": "America/New_York"}},
+    kr=SimpleNamespace(scan="07:30"),
+    us={"scan": {"time": "22:40", "tz": "America/New_York"}},
     reflect="16:30",
 )
 CTX = SimpleNamespace(gates={})
@@ -45,7 +45,8 @@ def test_build_expands_per_market_and_respects_enabled():
     s_off = spec(id="off", per_market=False, schedule_key="reflect", enabled=lambda st: st.on)
     s_on = spec(id="on", per_market=False, schedule_key="reflect", enabled=lambda st: st.on)
     jobs = run_build([feat(s_all, s_off)], settings=SimpleNamespace(on=False))
-    assert [j.id for j in jobs] == ["scan_KR", "scan_US"]
+    # Ruling P6: {market} 는 소문자로 — id `scan_kr`, schedule_key `kr.scan`
+    assert [j.id for j in jobs] == ["scan_kr", "scan_us"]
     assert [j.market for j in jobs] == ["KR", "US"]
     assert all(isinstance(j, ScheduledJob) and j.spec is s_all for j in jobs)
     jobs = run_build([feat(s_on)], settings=SimpleNamespace(on=True))
