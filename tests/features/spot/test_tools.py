@@ -125,16 +125,24 @@ def test_checkpoint_write_rejects_name_payload_mismatch(ctx, project):
     w = lambda stage, payload: tools.checkpoint_write(  # noqa: E731
         ctx, ticker="005930", market="KR", date=D, stage=stage, payload=payload, agent="a"
     )
-    assert w("10_analyst_technical", ok_report(role="sentiment"))["ok"] is False
-    assert w("10_analyst_technical", ok_report(ticker="000660"))["ok"] is False
-    assert w("10_analyst_bogus", ok_report(role="technical"))["ok"] is False
-    assert w("20_debate_r0_bull", ok_turn("bear"))["ok"] is False
-    assert w("20_debate_r1_bull", ok_turn("bull", round=0))["ok"] is False
-    assert w("20_debate_r2_bull", ok_turn("bull", round=2))["ok"] is False  # debate_rounds=1
-    assert list(run_dir(D, "KR", "005930").glob("10_analyst_*")) == []
-    # StageRule 전제조건(애널리스트 2개)을 채우면 r1 토론 턴은 통과한다
+    # 전제조건(애널리스트 2개)을 먼저 채워 아래 거부가 불일치 때문임을 보인다
     for role in ("technical", "fundamental"):
         assert w(f"10_analyst_{role}", ok_report(role=role))["ok"] is True
+    r = w("10_analyst_news_macro", ok_report(role="sentiment"))
+    assert r["ok"] is False and "role" in r["error"] and "불일치" in r["error"]
+    r = w("10_analyst_news_macro", ok_report(role="news_macro", ticker="000660"))
+    assert r["ok"] is False and "ticker 불일치" in r["error"]
+    r = w("10_analyst_bogus", ok_report(role="technical"))
+    assert r["ok"] is False and "알 수 없는" in r["error"]
+    r = w("20_debate_r0_bull", ok_turn("bear"))
+    assert r["ok"] is False and "불일치" in r["error"]
+    r = w("20_debate_r1_bull", ok_turn("bull", round=0))
+    assert r["ok"] is False and "불일치" in r["error"]
+    r = w("20_debate_r2_bull", ok_turn("bull", round=2))  # debate_rounds=1
+    assert r["ok"] is False and "넘습니다" in r["error"]
+    names = sorted(p.name for p in run_dir(D, "KR", "005930").glob("1*_*.json"))
+    assert names == ["10_analyst_fundamental.json", "10_analyst_technical.json"]
+    assert list(run_dir(D, "KR", "005930").glob("20_debate_*")) == []
     assert w("20_debate_r1_bull", ok_turn("bull", round=1))["ok"] is True
 
 

@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from trader.features.spot import costs, rules, schemas, tradability
 from trader.features.spot import summary as summary_mod
 from trader.kernel.execution import ledger as exec_ledger
+from trader.kernel.notify import NullNotifier, make_notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
 from trader.kernel.session import calls
@@ -147,13 +148,12 @@ def tool_ctx(boot: Any) -> ToolContext:
         market_client = acc.market_client()
         holiday_fn = acc.holiday_fn()
         policy, paused = acc.policy, acc.paused
-    notifier = None
-    try:
-        from trader.kernel.notify import make_notifier
-
-        notifier = make_notifier(boot.secrets) if boot.secrets is not None else None
-    except Exception as e:  # noqa: BLE001 - 알림 조립 실패가 도구를 막지 않는다
-        logger.warning("알림 조립 실패: %s", type(e).__name__)
+    notifier: Any = NullNotifier()
+    if boot.secrets is not None:
+        try:
+            notifier = make_notifier(boot.secrets)
+        except (OSError, ValueError) as e:  # 알림 조립 실패는 도구를 막지 않는다(알림 없음)
+            logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
     return ToolContext(
         settings=boot.settings,
         accounts=accounts,
