@@ -559,7 +559,7 @@ def test_throttle_raises_throttle_blocked_and_timeout_by_kind(project, conn):
         _run(spec(), ctx, kind=_kind(), runner=fake_runner)
 
 
-def test_same_ticker_not_retried_after_two_timeouts_today(project, conn):
+def _seed_two_timeouts(conn):
     for _ in range(2):
         conn.execute(
             "INSERT INTO agent_calls(ticker, market, agent, model, status, error, created_at) "
@@ -567,6 +567,22 @@ def test_same_ticker_not_retried_after_two_timeouts_today(project, conn):
             (datetime(2026, 10, 9, 2, tzinfo=UTC).isoformat(),),
         )
     conn.commit()
+
+
+def test_same_ticker_not_retried_after_two_timeouts_today(project, conn):
+    _seed_two_timeouts(conn)
     later = datetime(2026, 10, 9, 3, tzinfo=UTC)
     with pytest.raises(runner.PipelineError, match="타임아웃"):
-        _run(spec(), make_ctx(project, conn, now=lambda: later))
+        _run(spec(), make_ctx(project, conn, now=lambda: later), kind=_kind(retry_guard=True))
+
+
+def test_timeout_guard_follows_kind_retry_guard_not_kind_name(project, conn):
+    """Ruling 23: 반복 타임아웃 차단은 `SessionKind.retry_guard` 선언으로만 켜진다(이름 무관)."""
+    _seed_two_timeouts(conn)
+    later = datetime(2026, 10, 9, 3, tzinfo=UTC)
+    ctx = make_ctx(project, conn, now=lambda: later)
+    with pytest.raises(runner.PipelineError, match="타임아웃"):
+        _run(spec(), ctx, kind=_kind(kind="screen", retry_guard=True))
+    # 이름이 analyze 여도 retry_guard=False 면 차단하지 않고 세션을 띄운다
+    res = _run(spec(), ctx, kind=_kind(retry_guard=False), runner=lambda cmd, **kw: _ok_result())
+    assert res.ok

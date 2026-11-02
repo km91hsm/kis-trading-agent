@@ -45,4 +45,5 @@ ANALYZE = SessionKind(
     throttle="hard",
     fake=run_fake_analyze,
     stdin_extra=None,
+    retry_guard=True,  # 같은 종목 반복 타임아웃 차단(옛 analyze 동작)
 )
