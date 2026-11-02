@@ -254,6 +254,7 @@ def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
     project, conn, settings, monkeypatch
 ):
     from trader.features.accounts.ports import AccountsPortImpl
+    from trader.kernel.broker import factory
 
     accounts = [
         make_account("paper-main", "paper", "auto"),
@@ -290,6 +291,8 @@ def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
     assert (spec.id, spec.kind, spec.trigger, spec.interval_s, spec.gate, spec.start_soon_s) == (
         "notice_listener", "notice_listener", "interval", 30, "none", 5,
     )  # fmt: skip
+    assert (spec.per_market, spec.schedule_key, spec.heavy) == (False, None, False)
+    assert (spec.misfire, spec.catch_up) == ("default", "none")
     assert spec.teardown is spot_jobs.notice_stop and spec.enabled(settings) is False
     try:
         out = spec.body(deps, None)
@@ -302,6 +305,52 @@ def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
         assert "real" not in socks  # 실전 계좌가 모두 off → 실전 세션을 쓰지 않는다
     finally:
         spot_jobs.notice_stop(deps)
+        factory.reset_clients()  # 시세 키 비교가 만든 클라이언트 캐시를 비운다
     assert spot_jobs._LISTENERS == {}
     assert socks["paper"].closed
     assert not [t for t in threading.enumerate() if t.name.startswith("kis-notice-")]
+
+
+# --- 옛 tests/test_multi_account_keys.py 에서 이식(Ruling 18) ---------------------------------
+
+MULTI_SECRETS = Secrets.model_validate(
+    {
+        "KIS_REAL_APP_KEY": "shared-k",
+        "KIS_REAL_APP_SECRET": "shared-s",
+        "KIS_REAL_CANO": "11111111",
+        "KIS_HTS_ID": "me",
+        "KIS_REAL_2_APP_KEY": "k2",
+        "KIS_REAL_2_APP_SECRET": "s2",
+        "KIS_REAL_2_CANO": "22222222",
+        "KIS_ISA_APP_KEY": "k3",
+        "KIS_ISA_APP_SECRET": "s3",
+    }
+)
+
+
+def test_one_notice_listener_per_hts_id_prefers_non_market_key(project, conn, settings):
+    from trader.features.accounts.ports import AccountsPortImpl
+    from trader.kernel.broker import factory
+
+    def listeners(accts):
+        deps = SimpleNamespace(
+            settings=settings,
+            conn_factory=db.connect,
+            queue=SimpleNamespace(kinds=jobq.kinds_of(discover())),
+            now=lambda: datetime(2026, 10, 27, 0, 0, tzinfo=UTC),
+            secrets=MULTI_SECRETS,
+            ports={"accounts": AccountsPortImpl(accts, MULTI_SECRETS)},
+        )
+        return spot_jobs.notice_listeners(deps)
+
+    factory.reset_clients()
+    try:
+        accts = [make_account("real-main", "real", "off"), make_account("real-2", "real", "off")]
+        lst = listeners(accts)
+        assert len(lst) == 1 and lst[0].env == "real"
+        # 시세 허브(공용 키)와 겹치지 않는 real-2 키로 붙는다 → 허브가 비켜설 필요 없음
+        assert lst[0].shares_market_session is False
+        only_shared = listeners([make_account("real-main", "real", "off")])
+        assert only_shared[0].shares_market_session is True
+    finally:
+        factory.reset_clients()

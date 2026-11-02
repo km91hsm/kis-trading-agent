@@ -385,9 +385,31 @@ def _notice_enabled(ctx, port: Any, env: str, members: list) -> Callable[[], boo
     return enabled
 
 
-def _notice_targets(ctx, port: Any) -> dict[str, tuple[str, Any, list]]:
-    """env → (HTS ID, 자격증명, 같은 HTS ID 계좌들). HTS ID·앱키가 있는 현물 계좌만(없으면 그
-    env 는 정기 동기화만). 통보는 HTS ID 단위라 같은 명의 계좌 여럿은 연결 하나로 받는다."""
+def _market_session_client(port: Any) -> Any | None:
+    """시세 허브가 쓰는 KIS 클라이언트(없으면 None). `client_for` 가 (env, 앱키)마다 하나만 만들므로
+    같은 앱키면 같은 객체다 — 키 값을 꺼내지 않고 객체 동일성으로 비교한다."""
+    try:
+        mc = port.market_client()
+    except Exception as e:  # noqa: BLE001 - 시세 없이도 리스너는 붙는다
+        logger.warning("체결통보: 시세 클라이언트 확인 실패: %s", type(e).__name__)
+        return None
+    return getattr(mc, "client", None) if mc is not None else None
+
+
+def _shares_market_key(creds: Any, market_client: Any | None) -> bool:
+    if market_client is None or creds.env != "real":
+        return False
+    try:
+        return factory.client_for(creds) is market_client
+    except Exception:  # noqa: BLE001 - 클라이언트를 못 만들면 겹치지 않는 것으로 본다
+        return False
+
+
+def _notice_targets(ctx, port: Any) -> dict[str, tuple[str, Any, list, bool]]:
+    """env → (HTS ID, 자격증명, 같은 HTS ID 계좌들, 시세 키 공유 여부). HTS ID·앱키가 있는 현물
+    계좌만(없으면 그 env 는 정기 동기화만). 통보는 HTS ID 단위라 같은 명의 계좌 여럿은 연결 하나로
+    받는다. KIS 는 앱키당 웹소켓 세션 하나라, 실전은 시세 허브가 쓰지 않는 계좌 전용 키를 먼저
+    고른다(충돌 없음). 같은 키밖에 없으면 공유 — 붙어 있는 동안 허브가 비켜선다."""
     groups: dict[str, list] = {}
     for a in sorted(port.accounts(), key=lambda x: x.id):
         if getattr(a, "asset", "stock") != "stock":
@@ -395,53 +417,77 @@ def _notice_targets(ctx, port: Any) -> dict[str, tuple[str, Any, list]]:
         c = ctx.secrets.kis_creds(a)
         if c.hts_id and c.app_key and c.app_secret:
             groups.setdefault(a.env, []).append((a, c))
-    out: dict[str, tuple[str, Any, list]] = {}
+    market_client = _market_session_client(port) if "real" in groups else None
+    out: dict[str, tuple[str, Any, list, bool]] = {}
     for env, members in groups.items():
-        hts, creds = members[0][1].hts_id, members[0][1]
-        same = [a for a, c in members if c.hts_id == hts]
+        hts = members[0][1].hts_id
+        same = [(a, c) for a, c in members if c.hts_id == hts]
         if len(same) < len(members):
             logger.warning(
-                "체결통보 (%s): HTS ID 가 여럿 — 첫 계좌 %s 의 것만 구독", env, same[0].id
+                "체결통보 (%s): HTS ID 가 여럿 — 첫 계좌 %s 의 것만 구독", env, same[0][0].id
             )
-        out[env] = (hts, creds, same)
+        # 시세 허브와 겹치지 않는 키를 먼저(같은 키면 허브가 비켜선다)
+        ranked = sorted(same, key=lambda m: (_shares_market_key(m[1], market_client), m[0].id))
+        creds = ranked[0][1]
+        shares = _shares_market_key(creds, market_client)
+        out[env] = (hts, creds, [a for a, _ in same], shares)
+    return out
+
+
+def notice_listeners(ctx, skip: frozenset[str] = frozenset()) -> list[notice.NoticeListener]:
+    """(env, HTS ID) 마다 체결통보 리스너 하나(시작 전). skip 의 env 는 만들지 않는다."""
+    port = ctx.ports.get("accounts")
+    if port is None or getattr(ctx, "secrets", None) is None:
+        return []
+    out: list[notice.NoticeListener] = []
+    for env, (hts, creds, members, shares) in sorted(_notice_targets(ctx, port).items()):
+        if env in skip:
+            continue
+        try:
+            auth = _auth_for(creds)
+        except Exception as e:  # noqa: BLE001 - 한 env 실패가 다른 env 를 막지 않는다
+            logger.warning("체결통보 생략 (%s): %s", env, type(e).__name__)
+            continue
+        lst = notice.NoticeListener(
+            env=env,
+            hts_id=hts,
+            approval=auth.approval_key,
+            invalidate=auth.invalidate_approval,
+            on_notice=notice_handler(ctx),
+            enabled=_notice_enabled(ctx, port, env, members),
+        )
+        lst.shares_market_session = shares
+        out.append(lst)
     return out
 
 
 def notice_body(ctx, job) -> dict:
     """`notice_listener` interval 잡 본문: env 별 리스너 1개가 돌고 있음을 보장한다(죽었으면 다시
-    띄우고, HTS ID 거절로 멈춘 리스너는 그대로 둔다). 반환 {listeners: {env: status}}."""
+    띄우고, HTS ID 거절로 멈춘 리스너는 그대로 둔다). 반환 {listeners: {env: status}}.
+
+    전제: 데몬은 종료 때 `stop_event` 를 먼저 세우고, 스케줄러(이 interval 잡 실행 포함)를 내린 뒤
+    teardown(`notice_stop`)을 부른다 — 그래서 teardown 이 `_LISTENERS` 를 비운 뒤 이 본문이 다시
+    리스너를 띄울 여지가 없다(혹시 겹쳐도 아래 `stop_event` 검사가 막는다)."""
     stop = getattr(ctx, "stop_event", None)
     if stop is not None and stop.is_set():
         return {"skipped": "종료 중", "listeners": {}}
-    port = ctx.ports.get("accounts")
-    if port is None or getattr(ctx, "secrets", None) is None:
+    if ctx.ports.get("accounts") is None or getattr(ctx, "secrets", None) is None:
         return {"skipped": "계좌 포트·시크릿 없음 — 정기 체결 동기화만", "listeners": {}}
-    targets = _notice_targets(ctx, port)
     with _LISTENERS_LOCK:
-        for env, (hts, creds, members) in sorted(targets.items()):
-            cur = _LISTENERS.get(env)
-            if cur is not None and (cur.alive() or cur.rejected is not None):
-                continue
-            try:
-                auth = _auth_for(creds)
-            except Exception as e:  # noqa: BLE001 - 한 env 실패가 다른 env 를 막지 않는다
-                logger.warning("체결통보 생략 (%s): %s", env, type(e).__name__)
-                continue
-            lst = notice.NoticeListener(
-                env=env,
-                hts_id=hts,
-                approval=auth.approval_key,
-                invalidate=auth.invalidate_approval,
-                on_notice=notice_handler(ctx),
-                enabled=_notice_enabled(ctx, port, env, members),
-            )
-            _LISTENERS[env] = lst
+        keep = frozenset(
+            env for env, cur in _LISTENERS.items() if cur.alive() or cur.rejected is not None
+        )
+        for lst in notice_listeners(ctx, skip=keep):
+            _LISTENERS[lst.env] = lst
             lst.start()
         return {"listeners": {env: lst.status() for env, lst in sorted(_LISTENERS.items())}}
 
 
 def notice_stop(ctx) -> None:
-    """데몬 종료(teardown): 모든 리스너를 멈추고 스레드가 끝나기를 기다린다."""
+    """데몬 종료(teardown): 모든 리스너를 멈추고 스레드가 끝나기를 기다린다.
+
+    전제: 커널이 teardown 전에 `stop_event` 를 세우고 interval 잡 실행이 끝난 뒤 부른다 — 비운
+    `_LISTENERS` 에 `notice_body` 가 리스너를 다시 띄우지 않는다."""
     with _LISTENERS_LOCK:
         listeners = list(_LISTENERS.values())
         _LISTENERS.clear()
