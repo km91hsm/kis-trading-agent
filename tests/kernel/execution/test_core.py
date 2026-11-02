@@ -506,3 +506,29 @@ def test_approve_empty_recheck_reason_still_expires(deps, conn, broker):
     aid = _request(deps)
     r = _approve(deps, aid, recheck=lambda a, o: "")
     assert r["reason"] == "recheck" and _status(conn, aid) == "expired" and broker.orders == []
+
+
+def test_approve_expiring_during_recheck_expires_without_order(deps, conn, broker):
+    """Ruling 25: recheck 도중 만료 시각이 지나면 조건부 UPDATE 가 approved 로 바꾸지 않는다."""
+    aid = _request(deps)
+
+    def slow_recheck(approval, order):
+        deps.now.t = T0 + APPROVAL_TTL + timedelta(seconds=1)  # 재판정이 오래 걸렸다
+        return None
+
+    r = _approve(deps, aid, recheck=slow_recheck)
+    assert r["ok"] is False and r["status"] == "expired" and r["reason"] == "expired"
+    assert _status(conn, aid) == "expired" and broker.orders == []
+
+
+def test_request_approval_bind_failure_still_reports_has_approval(deps, conn, monkeypatch):
+    """`bind` 가 승인 행 생성 뒤 실패해도 `has_approval` 이 True 라 호출자가 키를 풀지 않는다."""
+
+    def broken_bind(*_a, **_k):
+        raise RuntimeError("bind 실패")
+
+    assert deps.idem.claim(KEY, now=T0.isoformat())
+    monkeypatch.setattr(deps.idem, "bind", broken_bind)
+    with pytest.raises(RuntimeError):
+        core.request_approval(deps, _intent(), env="paper")
+    assert _lock(conn)["approval_id"] is None and deps.idem.has_approval(KEY)

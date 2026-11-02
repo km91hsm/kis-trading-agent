@@ -228,3 +228,17 @@ def test_claim_commits_pending_caller_writes(conn, store):
     assert not store.claim("k", now=NOW)  # IntegrityError 경로
     conn.rollback()
     assert conn.execute("SELECT COUNT(*) FROM orders WHERE ticker='X'").fetchone()[0] == 1
+
+
+def test_has_approval_sees_pending_approval_row_before_bind(conn, store):
+    """승인 행은 생겼는데 `bind` 전에 실패했어도(approval_id 없음) 키는 승인에 걸린 것으로 본다 —
+    호출자가 키를 풀어 pending 승인과 새 선점이 함께 살지 않게."""
+    assert store.claim("k", now=NOW)
+    aid = _approval(conn)
+    conn.execute("UPDATE approvals SET exec_key='k' WHERE id=?", (aid,))
+    conn.commit()
+    assert _lock(conn, "k")["approval_id"] is None
+    assert store.has_approval("k")
+    conn.execute("UPDATE approvals SET status='rejected' WHERE id=?", (aid,))
+    conn.commit()
+    assert not store.has_approval("k")  # 닫힌 승인은 키를 붙잡지 않는다

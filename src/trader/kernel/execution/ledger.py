@@ -643,12 +643,18 @@ def decide_approval(
     *,
     decided_at: str | None = None,
     expect: str = "pending",
+    unexpired_at: str | None = None,
 ) -> bool:
-    """`expect` 상태일 때만 바꾼다(조건부 UPDATE). 다른 프로세스가 먼저 처리했으면 False."""
-    cur = conn.execute(
-        "UPDATE approvals SET status=?, decided_at=? WHERE id=? AND status=?",
-        (status, decided_at or now_iso(), approval_id, expect),
-    )
+    """`expect` 상태일 때만 바꾼다(조건부 UPDATE). 다른 프로세스가 먼저 처리했으면 False.
+
+    `unexpired_at` 을 주면 `expires_at > unexpired_at` 인 행만 바꾼다 — 승인 실행 직전에 만료된
+    요청이 approved 로 굳지 않게 한다(만료로 0행이면 역시 False)."""
+    sql = "UPDATE approvals SET status=?, decided_at=? WHERE id=? AND status=?"
+    params: tuple = (status, decided_at or now_iso(), approval_id, expect)
+    if unexpired_at is not None:
+        sql += " AND expires_at > ?"
+        params += (unexpired_at,)
+    cur = conn.execute(sql, params)
     conn.commit()
     return cur.rowcount == 1
 

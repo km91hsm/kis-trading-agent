@@ -107,10 +107,10 @@ class ExecDeps:
     label: Callable[[str, str | None], str] = lambda ticker, name: ticker
 
 
-def _notify_quietly(deps: ExecDeps, text: str) -> None:
-    """알림 실패가 주문 흐름을 끊지 않도록 예외를 경고로 바꾼다."""
+def notify_quietly(notifier: Notifier, text: str) -> None:
+    """알림 실패가 주문 흐름을 끊지 않도록 예외를 경고로 바꾼다(코어·레인 공용)."""
     try:
-        deps.notifier.send(text)
+        notifier.send(text)
     except Exception as e:  # noqa: BLE001 - 알림 채널 장애는 주문 결과와 무관
         logger.warning("알림 전송 실패: %s", type(e).__name__)
 
@@ -149,8 +149,8 @@ def transmit(
             # 동기화가 같은 날·종목·방향 체결로 확정한다.
             status = "unknown"
             logger.error("주문 응답 없음 %s %s: %s", intent.account_id, intent.ticker, e)
-            _notify_quietly(
-                deps,
+            notify_quietly(
+                deps.notifier,
                 messages.order_unknown(
                     account=intent.account_id,
                     market=intent.market,
@@ -220,8 +220,8 @@ def transmit(
             result.order_no,
             e,
         )
-        _notify_quietly(
-            deps,
+        notify_quietly(
+            deps.notifier,
             messages.bookkeeping_failure(
                 account=intent.account_id,
                 label=shown,
@@ -249,8 +249,8 @@ def transmit(
     except OSError as e:
         logger.warning("주문 체크포인트 기록 실패 %s %s: %s", intent.account_id, intent.ticker, e)
     if status != "unknown":  # unknown 은 위에서 이미 알렸다(실패로 덧알리면 운영자가 재주문함)
-        _notify_quietly(
-            deps,
+        notify_quietly(
+            deps.notifier,
             messages.order(
                 account=intent.account_id,
                 market=intent.market,
@@ -325,8 +325,8 @@ def request_approval(
     )
     if intent.idem_key:
         deps.idem.bind(intent.idem_key, approval_id=aid, at=now.isoformat())
-    _notify_quietly(
-        deps,
+    notify_quietly(
+        deps.notifier,
         messages.approval_request(
             approval_id=aid,
             account=intent.account_id,
@@ -419,7 +419,8 @@ def approve(
     → 만료 ④ 모드가 approve 아님 → pending 유지 ⑤ 지문 불일치 → failed + 긴급 알림 ⑥ 결정 방향이
     바뀜(`decision_side_of(decision_id)` 가 값을 주고 주문 방향과 다름) → 만료 ⑦ 브로커 없음 →
     pending 유지 ⑧ `recheck(approval, order)` ⑨ 조건부 UPDATE 로 approved
-    (다른 프로세스가 먼저 처리했으면 race) ⑩ `transmit(mode="approve")`. 기록 실패
+    (다른 프로세스가 먼저 처리했으면 race, 그 사이 만료 시각이 지났으면 expired)
+    ⑩ `transmit(mode="approve")`. 기록 실패
     (`OrderBookkeepingError`)는 승인을 failed 로 바꾸고 다시 올린다. 브로커 거부·실패는 failed,
     unknown 은 approved 로 둔다(KIS 에 접수됐을 수 있다).
 
@@ -457,8 +458,8 @@ def approve(
     if a["fingerprint"] != approval_fingerprint(account_id, a["decision_id"], order):
         logger.critical("승인 지문 불일치 #%s %s", approval_id, account_id)
         decide_approval(deps.conn, approval_id, "failed", decided_at=deps.now().isoformat())
-        _notify_quietly(
-            deps,
+        notify_quietly(
+            deps.notifier,
             messages.approval_tampered(approval_id=approval_id, account=account_id, label=shown),
         )
         return _fail(
@@ -515,8 +516,17 @@ def approve(
                 approval_id, "recheck", "expired",
                 f"승인 요청 #{approval_id} 실행 직전 재판정: {why} (요청은 만료 처리)",
             )  # fmt: skip
-    # 조건부 UPDATE: 다른 프로세스(텔레그램 ↔ CLI ↔ 웹)가 먼저 처리했으면 주문 없음
-    if not decide_approval(deps.conn, approval_id, "approved", decided_at=deps.now().isoformat()):
+    # 조건부 UPDATE: 다른 프로세스(텔레그램 ↔ CLI ↔ 웹)가 먼저 처리했거나, 재판정 사이에
+    # 만료 시각이 지났으면 주문 없음
+    now = deps.now().isoformat()
+    if not decide_approval(deps.conn, approval_id, "approved", decided_at=now, unexpired_at=now):
+        current = get_approval(deps.conn, approval_id)
+        if current is not None and current["status"] == "pending":  # 처리된 게 아니라 만료
+            decide_approval(deps.conn, approval_id, "expired", decided_at=now)
+            return _fail(
+                approval_id, "expired", "expired",
+                f"승인 요청 #{approval_id} 은 실행 직전 만료됨 (30분 초과)",
+            )  # fmt: skip
         return _fail(
             approval_id, "race", None,
             f"승인 요청 #{approval_id} 은 이미 다른 프로세스가 처리함",

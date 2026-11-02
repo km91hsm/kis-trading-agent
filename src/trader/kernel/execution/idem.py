@@ -226,8 +226,16 @@ class ExecKeyStore:
         self.conn.commit()
 
     def has_approval(self, key: str) -> bool:
+        """키가 승인에 걸려 있나: 묶인 approval_id 가 있거나, `bind` 전에 끊겼어도 이 키를 단
+        pending 승인 행이 있다. True 면 호출자는 키를 풀지 않는다(남은 승인과 새 선점이 함께
+        살면 같은 주문이 두 번 나갈 수 있다)."""
         row = self.conn.execute("SELECT approval_id FROM exec_locks WHERE key=?", (key,)).fetchone()
-        return row is not None and row["approval_id"] is not None
+        if row is not None and row["approval_id"] is not None:
+            return True
+        pending = self.conn.execute(
+            "SELECT 1 FROM approvals WHERE exec_key=? AND status='pending' LIMIT 1", (key,)
+        ).fetchone()
+        return pending is not None
 
     def list_all(self) -> list[dict]:
         """남아 있는 실행 키 전부(오래된 순). `sent_at` 이 있고 `order_id` 가 없는 키는 보낸 뒤
