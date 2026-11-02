@@ -20,6 +20,7 @@ from trader.kernel.platform import bundle
 from trader.kernel.registry.types import AgentDef, SessionKind
 from trader.kernel.session import agents as ag
 from trader.kernel.session import calls, runner, usage
+from trader.kernel.session.run_store import list_checkpoints, run_dir, write_checkpoint
 from trader.kernel.session.runner import SessionSpec, build_command, run_session
 
 D = date(2026, 10, 9)
@@ -183,13 +184,41 @@ def test_run_session_records_call_and_writes_agents_file(project, conn, monkeypa
     assert (run["kind"], run["status"]) == ("analyze", "ok")
 
 
-def test_session_error_recorded(project, conn):
+def test_session_error_recorded_and_resumable(project, conn):
+    d = run_dir(D, "KR", "005930", project / "state")
+    write_checkpoint(d, "10_alpha", {"schema_version": 1, "data": {}, "call": None})
     res = _run(
         spec(),
         make_ctx(project, conn),
         runner=lambda cmd, **kw: _ok_result(is_error=True, result="budget exceeded"),
     )
     assert res.ok is False and "budget" in res.error
+    assert conn.execute("SELECT status FROM agent_calls").fetchone()["status"] == "error"
+    assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "error"
+    assert list_checkpoints(d) == ["10_alpha"]  # 보존: 재실행 시 이어간다
+
+
+def test_runner_arbitrary_exception_closes_rows_and_propagates(project, conn):
+    def boom(cmd, **kw):
+        raise RuntimeError("러너 폭발")
+
+    with pytest.raises(RuntimeError, match="러너 폭발"):
+        _run(spec(), make_ctx(project, conn), runner=boom)
+    assert conn.execute("SELECT status FROM agent_calls").fetchone()["status"] == "error"
+    assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "error"
+
+
+def test_stdin_extra_failure_does_not_leave_running_rows(project, conn):
+    def bad_extra(sp):
+        return {"x": sp.extra["missing"]}
+
+    with pytest.raises(KeyError):
+        _run(
+            spec(),
+            make_ctx(project, conn),
+            kind=_kind(stdin_extra=bad_extra),
+            runner=lambda *a, **k: _ok_result(),
+        )
     assert conn.execute("SELECT status FROM agent_calls").fetchone()["status"] == "error"
     assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "error"
 
@@ -509,7 +538,8 @@ def test_throttle_raises_throttle_blocked_and_timeout_by_kind(project, conn):
     with pytest.raises(runner.ThrottleBlocked):
         _run(spec(), ctx)
     llm = LlmSettings()
-    assert llm.timeout_for("analyze") == 900 and llm.timeout_for("resume") == 600
+    assert llm.timeout_for("analyze") == 900 and llm.timeout_for("screen") == 300
+    assert llm.timeout_for("resume") == 600 and llm.timeout_for("unknown") == llm.timeout_s
     # soft 등급(throttle="soft") 이면 90% 에서도 hard 만 막는다 → 80~95% 구간에서 통과
     conn.execute("DELETE FROM llm_rate_limits")
     usage.record_rate_limit(

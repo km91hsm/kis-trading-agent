@@ -437,7 +437,10 @@ def run_session(
         # 구분한다)
         if cwd is not None:
             shutil.rmtree(cwd, ignore_errors=True)
-        runs.finish(conn, run_id, "error", error=f"세션 준비 실패: {type(e).__name__}: {e}")
+        try:
+            runs.finish(conn, run_id, "error", error=f"세션 준비 실패: {type(e).__name__}: {e}")
+        except Exception:  # noqa: BLE001 - 원 예외를 가리지 않는다
+            logger.warning("runs 종료 기록 실패", exc_info=True)
         raise
     asof = spec.asof or started
 
@@ -468,6 +471,10 @@ def run_session(
         return fail(f"세션 타임아웃 ({timeout}s)")
     except OSError as e:  # 실행파일 없음·권한 등: running 행을 남기지 않고 오류로 닫는다
         return fail(f"세션 기동 실패: {type(e).__name__}: {e}")
+    except Exception as e:
+        # stdin_payload·러너의 임의 예외: running 행을 남기지 않고 error 로 닫은 뒤 그대로 올린다
+        fail(f"세션 실행 실패: {type(e).__name__}: {e}")
+        raise
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
     try:
