@@ -96,3 +96,13 @@ def test_fills_request_is_sync_only(project, conn, settings):
     deps = _fills_deps(settings, accounts, fake_brokers(accounts))
     out = spot_jobs.fills_request(deps, {}, lambda t: None)
     assert "error" not in out and out["paper-main"]["failed_markets"] == []
+
+
+def test_fills_body_errors_without_accounts_port(project, conn, settings):
+    """계좌 포트가 없으면 'ok' 가 아니라 오류로 남는다. 포트가 있고 계좌가 0개면 정상(빈 결과)."""
+    deps = _fills_deps(settings, [], {})
+    deps.ports = {}
+    out = spot_jobs.fills_body(deps, None)
+    assert "계좌 포트 없음" in out["error"]
+    assert spot_jobs.fills_request(deps, {}, lambda t: None) == out
+    assert spot_jobs.fills_body(_fills_deps(settings, [], {}), None) == {}

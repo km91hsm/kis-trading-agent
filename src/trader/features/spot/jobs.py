@@ -12,7 +12,7 @@ from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session.run_store import run_date_for
 
-logger = logging.getLogger("trader.fills")
+logger = logging.getLogger("trader.spot")
 
 
 def expire_body(ctx, job) -> dict:
@@ -46,6 +46,8 @@ def sync_all(ctx) -> dict:
     """계좌마다 시장별 현지 오늘 체결을 적재하고, 아직 정리되지 않은 지난 날짜 주문이 있으면 그
     날짜도 다시 조회한다. 조회에 실패한 계좌·시장이 있으면 최상위 `error` 로 올려 runs·하트비트·
     운영 점검에 오류로 보이게 한다. 한 계좌의 실패가 다른 계좌 동기화를 막지 않는다."""
+    if ctx.ports.get("accounts") is None:
+        return {"error": "계좌 포트 없음 — 체결 동기화 불가"}
     out: dict[str, Any] = {}
     failures: list[str] = []
     conn = ctx.conn_factory()

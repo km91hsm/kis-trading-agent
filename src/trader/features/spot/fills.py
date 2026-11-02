@@ -25,7 +25,7 @@ from trader.kernel.execution.types import DEAD_STATUSES
 from trader.kernel.ledger import control
 from trader.kernel.notify import messages
 
-logger = logging.getLogger("trader.fills")
+logger = logging.getLogger("trader.spot")
 
 # 정리되지 않은 지난 주문을 다시 조회하는 날짜 수 상한(실행당, 오래된 순). 범위 제한은 없다 —
 # 8일 넘게 꺼져 있던 뒤의 접수·unknown 주문도 다시 조회해 마감 뒤 expired 로 정리한다.

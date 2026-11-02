@@ -260,10 +260,7 @@ def test_sync_after_close_expires_unfilled_orders_of_that_day(conn):
     assert st[o_fill] == "filled" and st[o_old] == "accepted" and st[o_us] == "accepted"
     assert r["expired"] == 2
     # 만료된 주문은 살아 있는 주문이 아니다
-    assert not [
-        o for o in repo.open_limit_orders_today(conn, "paper-main", "KR", D)
-        if o["ticker"] == "005930"
-    ]  # 옛 has_open_order_today
+    assert not repo.open_orders_today(conn, "paper-main", "005930", "BUY", D, market="KR")
     assert "005930" not in repo.today_buy_tickers(conn, "paper-main", D, market="KR")
 
 
