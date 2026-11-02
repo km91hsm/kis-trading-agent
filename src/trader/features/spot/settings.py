@@ -1,4 +1,4 @@
-"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`.
+"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`.
 
 yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
@@ -108,10 +108,20 @@ class DebateCfg(BaseModel):
     consensus_min_conviction: float = Field(default=0.7, ge=0, le=1)
 
 
+class FillNoticeCfg(BaseModel):
+    """KIS 체결통보 웹소켓 리스너(데몬 잡 `notice_listener`). 켜면 env 별 리스너가 통보마다
+    `fills_sync` 를 큐에 넣는다. 실전은 실전 계좌 모드가 off 가 아닐 때만 붙는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 SECTIONS = (
     Section("settings", "risk", RiskLimits, RiskLimits),
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
+    Section("settings", "fill_notice", FillNoticeCfg, FillNoticeCfg),
 )
 
 

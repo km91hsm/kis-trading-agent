@@ -7,6 +7,7 @@ from trader.features.spot.jobs import (
     BALANCE_REFRESH,
     FILLS_SYNC,
     MONITOR,
+    NOTICE_LISTENER,
     QUEUE_KINDS,
     RECONCILE,
 )
@@ -28,6 +29,6 @@ FEATURE = Feature(
     agents=AGENTS,
     session_kinds=(ANALYZE, RESUME),
     telegram_commands=TELEGRAM_COMMANDS,
-    jobs=(APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE, MONITOR),
+    jobs=(APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE, MONITOR, NOTICE_LISTENER),
     queue_kinds=QUEUE_KINDS,
 )

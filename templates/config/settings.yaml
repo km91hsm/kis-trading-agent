@@ -70,3 +70,8 @@ debate:
   # 애널리스트 4명이 모두 같은 방향(NEUTRAL 제외)·확신 ≥ 기준이면 토론 없이 트레이더로 (전체 검토 L17, 세션 비용)
   skip_on_consensus: true
   consensus_min_conviction: 0.7
+
+# KIS 체결통보 웹소켓(데몬 잡 notice_listener). 켜면 통보마다 체결 동기화(fills_sync)를 바로 당긴다.
+# HTS ID(secrets KIS_HTS_ID)가 필요하고, 실전은 실전 계좌 모드가 off 가 아닐 때만 붙는다
+fill_notice:
+  enabled: false
