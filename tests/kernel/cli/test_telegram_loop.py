@@ -1,0 +1,37 @@
+"""옛 tests/test_cli_telegram_loop.py 이식."""
+
+from typer.testing import CliRunner
+
+from trader.kernel.cli import main as main_mod
+from trader.kernel.notify.telegram import Update
+
+
+class FakeReceiver:
+    last_update_id = None
+
+    def __init__(self):
+        self.n = 0
+
+    def poll(self, offset=None):
+        self.n += 1
+        return [Update(update_id=self.n, text="/status", chat_id="1")]
+
+
+class Sent:
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, text, *, escape=True):
+        self.msgs.append(text)
+        return True
+
+
+def test_cli_telegram_loop_runs_n_times(project, monkeypatch):
+    recv, sent = FakeReceiver(), Sent()
+    monkeypatch.setattr(main_mod, "make_receiver", lambda s, **kw: recv)
+    monkeypatch.setattr(main_mod, "make_notifier", lambda s, **kw: sent)
+    r = CliRunner().invoke(
+        main_mod.app, ["telegram", "loop", "--interval", "0", "--max-iterations", "2"]
+    )
+    assert r.exit_code == 0, r.stdout
+    assert recv.n == 2 and len(sent.msgs) == 2 and r.stdout.count("명령 1건") == 2

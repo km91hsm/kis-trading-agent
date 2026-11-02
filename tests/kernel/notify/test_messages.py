@@ -159,3 +159,49 @@ def test_approval_request_shows_env_amount_and_kst_expiry():
     )
     assert "시장가 = $400.00 (현재가 기준)" in paper and "리스크 판정: 확신 0.45" in paper
     assert "/approve 3 · /reject 3 (30분 안)" in paper
+
+
+# --- 손절·재호가·대조·체결 8종(옛 tests/notify/test_messages.py::test_stop_loss_and_failure 등) ---
+
+
+def test_stop_loss_and_failure():
+    assert M.stop_loss(
+        account="paper-main", market="KR", label="삼성전자(005930)", qty=3,
+        quote=64000, level=65000, order_no="9",
+    ) == (
+        "[손절] paper-main · 삼성전자(005930)\n"
+        "3주 즉시 매도 · 접수번호 9\n"
+        "현재가 64,000원 ≤ 손절선 65,000원"
+    )  # fmt: skip
+    assert M.reevaluation_failed(market="KR", label="005930", err=ValueError("x")) == (
+        "[재평가 실패] KR 005930\n오류: ValueError: x"
+    )
+
+
+def test_stop_deferred_paused_and_reprice():
+    assert M.stop_deferred(account="a", market="KR", label="삼성전자(005930)") == (
+        "[손절 보류] a · 삼성전자(005930)\n"
+        "당일 미체결 매도를 취소하지 못해 손절을 내지 않았어요. 다음 점검에서 다시 해요."
+    )
+    assert M.stop_paused(market="KR", label="삼성전자(005930)", quote=64000, level=65000) == (
+        "[손절 보류: 일시정지] KR 삼성전자(005930)\n"
+        "현재가 64,000원 ≤ 손절선 65,000원\n재개하면 다음 점검에서 매도해요."
+    )
+    assert M.reprice(
+        account="a", market="KR", label="L", side="BUY", qty=2, old=70000, new=70100, tail="재주문"
+    ) == "[재호가] a · L\n매수 2주 70,000원 → 70,100원\n원 주문 취소 · 재주문"
+    assert M.reprice_deferred(
+        account="a", market="US", label="L", side="SELL", qty=1, limit=10, why="호가 없음"
+    ) == "[재호가 보류] a · L\n매도 1주 @$10.00\n호가 없음 — 원 주문은 그대로 둬요"
+
+
+def test_reconcile_mismatch_and_fill_ambiguous():
+    assert M.reconcile_mismatch(
+        account="a", market="KR", day="2026-10-26", parts=["현금 1 → 2"]
+    ) == (
+        "[대조 불일치] a · KR 2026-10-26\n현금 1 → 2\n"
+        "원장 스냅샷을 브로커 값으로 고쳤어요. 주문·체결 행은 그대로예요."
+    )
+    assert M.fill_ambiguous(
+        account="a", market="KR", label="L", side="BUY", detail="후보 2건"
+    ) == "[체결 매칭 모호] a · KR L\n매수 — 후보 2건"

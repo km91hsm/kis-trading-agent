@@ -56,6 +56,8 @@ class DaemonDeps:
     ports: dict[str, Any] = field(default_factory=dict)
     # 큐 상태(`queue_jobs.QueueState`: kind 표·heavy 락·양보 카운터). Daemon 이 없으면 만든다
     queue: Any = None
+    # 등록된 기능 목록(내장 telegram_poll 이 명령 표를 만든다). Daemon 이 비어 있으면 채운다
+    features: list = field(default_factory=list)
 
 
 class _DropMaxInstances(logging.Filter):
@@ -146,6 +148,8 @@ class Daemon:
         self.features = features
         if deps.queue is None:
             deps = replace(deps, queue=QueueState(kinds=kinds_of(features)))
+        if not deps.features:
+            deps = replace(deps, features=features)
         self.deps = deps
         self._jobs: list[ScheduledJob] = []
         self._scheduler: BackgroundScheduler | None = None
@@ -160,12 +164,13 @@ class Daemon:
     def start(self, *, install_signals: bool = True) -> bool:
         """잡 정의 검증 → 잠금 → bootstrap 훅·큐 복구·stale 정리 → 놓친 cron 따라잡기 →
         스케줄러 등록(기능 잡 + 큐 잡 4개)·기동 → 하트비트. 잠금을 못 잡으면 False."""
+        from trader.kernel.daemon import builtin_jobs as bj
         from trader.kernel.daemon import queue_jobs as qj
 
         deps = self.deps
         self._jobs = build(
-            [*self.features, qj.QUEUE_FEATURE], schedule=deps.schedule, settings=deps.settings,
-            markets=deps.markets, ctx=deps,
+            [*self.features, qj.QUEUE_FEATURE, bj.BUILTIN_FEATURE],
+            schedule=deps.schedule, settings=deps.settings, markets=deps.markets, ctx=deps,
         )  # fmt: skip
         if not self._lock.acquire():
             return False

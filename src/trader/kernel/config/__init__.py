@@ -90,6 +90,14 @@ class JobQueueSchedule(BaseModel):
     interval_s: int = Field(default=10, ge=1)
 
 
+class TelegramPollSchedule(BaseModel):
+    """schedule.yaml 의 telegram_poll: 내장 텔레그램 폴링 주기."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(default=30, ge=1)
+
+
 KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "markets", list[Market], lambda: ["KR", "US"]),
     Section("settings", "web", WebSettings, WebSettings),
@@ -99,6 +107,7 @@ KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "claude_bin", str | None, lambda: None),
     Section("settings", "anonymize", bool, lambda: False),
     Section("schedule", "job_queue", JobQueueSchedule, JobQueueSchedule),
+    Section("schedule", "telegram_poll", TelegramPollSchedule, TelegramPollSchedule),
 )
 
 

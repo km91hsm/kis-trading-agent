@@ -311,3 +311,82 @@ def open_buys_cancelled(
             f"취소하지 못함: {', '.join(left)} — 증권사 앱에서 직접 취소하세요" if left else "",
         ],
     )
+
+
+# --- 손절·재호가·대조·체결 (옛 notify/messages.py 이식, 문구 그대로) ---------------------------
+
+
+def stop_loss(
+    *, account: str, market: str, label: str, qty: Any, quote: Any, level: Any, order_no: Any
+) -> str:
+    return render(
+        "손절",
+        f"{account} · {label}",
+        [
+            f"{qty}주 즉시 매도 · 접수번호 {order_no or '—'}",
+            f"현재가 {money(quote, market)} ≤ 손절선 {money(level, market)}",
+        ],
+    )
+
+
+def stop_deferred(*, account: str, market: str, label: str) -> str:
+    return render(
+        "손절 보류",
+        f"{account} · {label}",
+        ["당일 미체결 매도를 취소하지 못해 손절을 내지 않았어요. 다음 점검에서 다시 해요."],
+    )
+
+
+def stop_paused(*, market: str, label: str, quote: Any, level: Any) -> str:
+    return render(
+        "손절 보류: 일시정지",
+        f"{market} {label}",
+        [
+            f"현재가 {money(quote, market)} ≤ 손절선 {money(level, market)}",
+            "재개하면 다음 점검에서 매도해요.",
+        ],
+    )
+
+
+def reevaluation_failed(*, market: str, label: str, err: Any) -> str:
+    return failure("재평가 실패", f"{market} {label}", err)
+
+
+def reprice(
+    *, account: str, market: str, label: str, side: str, qty: Any, old: Any, new: Any, tail: str
+) -> str:
+    return render(
+        "재호가",
+        f"{account} · {label}",
+        [
+            f"{SIDE.get(side, side)} {qty}주 {money(old, market)} → {money(new, market)}",
+            f"원 주문 취소 · {tail}",
+        ],
+    )
+
+
+def reprice_deferred(
+    *, account: str, market: str, label: str, side: str, qty: Any, limit: Any, why: str
+) -> str:
+    return render(
+        "재호가 보류",
+        f"{account} · {label}",
+        [
+            f"{SIDE.get(side, side)} {qty}주 @{money(limit, market)}",
+            f"{why} — 원 주문은 그대로 둬요",
+        ],
+    )
+
+
+def reconcile_mismatch(*, account: str, market: str, day: str, parts: list[str]) -> str:
+    return render(
+        "대조 불일치",
+        f"{account} · {market} {day}",
+        [*parts, "원장 스냅샷을 브로커 값으로 고쳤어요. 주문·체결 행은 그대로예요."],
+    )
+
+
+def fill_ambiguous(*, account: str, market: str, label: str, side: str, detail: str) -> str:
+    return render(
+        "체결 매칭 모호", f"{account} · {market} {label}", [f"{SIDE.get(side, side)} — {detail}"]
+    )
