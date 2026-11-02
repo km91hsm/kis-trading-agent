@@ -7,8 +7,8 @@ from trader.kernel.registry.types import Feature, Port
 
 
 def _feat(fid, *ports):
-    # 첫 기능 "a" 가 v2·v3 자리를 채워 커널 모듈 v4(session)와 버전이 연속되게 한다.
-    migs = (Migration(2, "a2"), Migration(3, "a3")) if fid == "a" else ()
+    # 첫 기능 "a" 가 v2·v3·v6·v9 자리를 채워 커널 모듈(v4·v5·v7·v8)과 버전이 연속되게 한다.
+    migs = tuple(Migration(v, f"a{v}") for v in (2, 3, 6, 9)) if fid == "a" else ()
     return Feature(id=fid, tier="service", ports=tuple(ports), migrations=migs)
 
 

@@ -152,8 +152,6 @@ def test_common_rules_strips_trailing_period_before_or_after_parenthesis(tmp_pat
     b.write_text(f"# 공통 규칙\n{rule} (보충 B).\n{tail}\n", encoding="utf-8")
     c = tmp_path / "c.md"
     c.write_text(f"# 공통 규칙\n{rule}.\n{tail}\n", encoding="utf-8")
-    got = {
-        tuple(ag.common_rules(ag.load_agent(AgentDef(p.stem, p)).prompt)) for p in (a, b, c)
-    }
+    got = {tuple(ag.common_rules(ag.load_agent(AgentDef(p.stem, p)).prompt)) for p in (a, b, c)}
     assert len(got) == 1
     assert next(iter(got))[0] == rule

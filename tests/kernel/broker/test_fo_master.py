@@ -47,31 +47,59 @@ def test_front_month_skips_within_roll_days(contracts):
         return ltd.get(c.code)
 
     today = date(2026, 10, 27)
-    assert fo_master.front_month(
-        contracts, MINI, "FUTURES", today=today, roll_days=2, last_trade_date_of=ltd_of
-    ).code == "105W11"
+    assert (
+        fo_master.front_month(
+            contracts, MINI, "FUTURES", today=today, roll_days=2, last_trade_date_of=ltd_of
+        ).code
+        == "105W11"
+    )
     # D-2: 11/10 은 roll 안 → 다음 월물
-    assert fo_master.front_month(
-        contracts, MINI, "FUTURES", today=date(2026, 11, 10), roll_days=2, last_trade_date_of=ltd_of
-    ).code == "105W12"
-    assert fo_master.front_month(
-        contracts, MINI, "FUTURES", today=date(2026, 11, 9), roll_days=2, last_trade_date_of=ltd_of
-    ).code == "105W11"
+    assert (
+        fo_master.front_month(
+            contracts,
+            MINI,
+            "FUTURES",
+            today=date(2026, 11, 10),
+            roll_days=2,
+            last_trade_date_of=ltd_of,
+        ).code
+        == "105W12"
+    )
+    assert (
+        fo_master.front_month(
+            contracts,
+            MINI,
+            "FUTURES",
+            today=date(2026, 11, 9),
+            roll_days=2,
+            last_trade_date_of=ltd_of,
+        ).code
+        == "105W11"
+    )
     # 시세가 없으면 둘째 목요일 추정
-    assert fo_master.front_month(
-        contracts, MINI, "FUTURES", today=today, roll_days=2, last_trade_date_of=lambda c: None
-    ).code == "105W11"
+    assert (
+        fo_master.front_month(
+            contracts, MINI, "FUTURES", today=today, roll_days=2, last_trade_date_of=lambda c: None
+        ).code
+        == "105W11"
+    )
     # 정규 상품은 미니 코드를 고르지 않는다
     reg = FO_REGULAR
-    assert fo_master.front_month(
-        contracts, reg, "FUTURES", today=today, roll_days=2, last_trade_date_of=lambda c: None
-    ).code == "101W12"
+    assert (
+        fo_master.front_month(
+            contracts, reg, "FUTURES", today=today, roll_days=2, last_trade_date_of=lambda c: None
+        ).code
+        == "101W12"
+    )
 
 
 def _resolve(contracts, **kw):
     base = dict(
-        underlying=Decimal("350.8"), today=date(2026, 10, 27), roll_days=2,
-        last_trade_date_of=lambda c: None, expiry_rule="front",
+        underlying=Decimal("350.8"),
+        today=date(2026, 10, 27),
+        roll_days=2,
+        last_trade_date_of=lambda c: None,
+        expiry_rule="front",
     )
     base.update(kw)
     return fo_master.resolve_option(contracts, MINI, **base)

@@ -30,6 +30,7 @@ from trader.kernel.execution.ledger import (
     expire_pending,
     get_approval,
     insert_order,
+    set_order_status,
 )
 from trader.kernel.execution.types import (
     APPROVAL_TTL,
@@ -49,6 +50,7 @@ __all__ = [
     "OrderIntent",
     "approval_fingerprint",
     "approve",
+    "cancel",
     "expire_approvals",
     "reject",
     "request_approval",
@@ -116,6 +118,35 @@ def notify_quietly(notifier: Notifier, text: str) -> None:
 
 
 # --- 전송 ---------------------------------------------------------------------------------
+
+
+def cancel(
+    deps: ExecDeps,
+    *,
+    order_id: int,
+    order_no: str,
+    market: str,
+    broker: Any,
+    dry_run: bool,
+    reason: str,
+) -> dict:
+    """미체결 주문 1건을 취소한다. 브로커 취소 1회 뒤에 주문 상태를 cancelled 로 바꾼다.
+
+    dry_run 은 브로커도 상태도 건드리지 않고 현재 상태만 돌려준다. 브로커 예외는 상태를 그대로
+    두고 다시 올린다(취소 여부를 모르는 채 cancelled 로 적지 않는다)."""
+    if dry_run:
+        row = deps.conn.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+        status = row["status"] if row else None
+        logger.info("취소 건너뜀(dry_run) 주문 #%d: %s", order_id, reason)
+        return {"ok": True, "dry_run": True, "order_id": order_id, "status": status}
+    try:
+        broker.cancel_order(order_no, market=market)
+    except Exception:
+        logger.warning("주문 #%d 취소 실패(상태 유지): %s", order_id, reason)
+        raise
+    set_order_status(deps.conn, order_id, "cancelled")
+    logger.info("주문 #%d 취소: %s", order_id, reason)
+    return {"ok": True, "order_id": order_id, "status": "cancelled"}
 
 
 def transmit(

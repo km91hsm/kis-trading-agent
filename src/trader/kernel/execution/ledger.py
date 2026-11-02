@@ -11,7 +11,7 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from trader.kernel.broker.models import Position
 from trader.kernel.config.time import KST, MARKET_TZ
@@ -134,6 +134,64 @@ def insert_order(
 def set_order_status(conn: sqlite3.Connection, order_id: int, status: str) -> None:
     conn.execute("UPDATE orders SET status=? WHERE id=?", (status, order_id))
     conn.commit()
+
+
+def update_order_fill(
+    conn: sqlite3.Connection,
+    order_id: int,
+    *,
+    filled_qty: int,
+    status: Literal["partial", "filled"],
+) -> None:
+    """누적 체결 수량과 부분·전량 체결 상태를 주문 행에 적는다."""
+    conn.execute(
+        "UPDATE orders SET filled_qty=?, status=? WHERE id=?", (filled_qty, status, order_id)
+    )
+    conn.commit()
+
+
+def insert_fill(
+    conn: sqlite3.Connection,
+    *,
+    order_id: int,
+    account_id: str,
+    market: str,
+    ticker: str,
+    side: str,
+    qty: int,
+    price: Decimal,
+    filled_at: str,
+    order_no: str | None,
+) -> int | None:
+    """체결 1건 적재. 같은 (주문, 시각, 수량, 가격) 은 무시하고 None (재동기화 멱등)."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO fills(order_id, account_id, qty, price, filled_at, order_no, "
+        "ticker, side, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, account_id, qty, str(price), filled_at, order_no, ticker, side, market),
+    )
+    conn.commit()
+    return int(cur.lastrowid) if cur.rowcount == 1 else None
+
+
+def open_limit_orders_today(
+    conn: sqlite3.Connection,
+    account_id: str,
+    market: str,
+    today: date,
+    *,
+    exclude_origins: tuple[str, ...] = ("stop", "hedge"),
+) -> list[dict]:
+    """운영일 today(시장 현지 하루)에 낸 살아 있는 주문 중 exclude_origins 가 아닌 것(id 순)."""
+    lo, hi = day_bounds(today, market)
+    sql = (
+        "SELECT * FROM orders WHERE account_id=? AND market=? "
+        f"AND status NOT IN ({dead_status_sql()}) AND created_at >= ? AND created_at < ?"
+    )
+    args: list = [account_id, market, lo, hi]
+    if exclude_origins:
+        sql += f" AND origin NOT IN ({','.join('?' * len(exclude_origins))})"
+        args += list(exclude_origins)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY id", args).fetchall()]
 
 
 def has_open_order_or_approval(
@@ -666,6 +724,24 @@ def expire_pending(conn: sqlite3.Connection, now: str) -> list[int]:
         for r in conn.execute(
             "SELECT id FROM approvals WHERE status='pending' AND expires_at <= ? ORDER BY id",
             (now,),
+        ).fetchall()
+    ]
+    return [i for i in ids if decide_approval(conn, i, "expired", decided_at=now)]
+
+
+def expire_pending_buys(
+    conn: sqlite3.Connection, *, account_id: str, market: str, ticker: str, now: str
+) -> list[int]:
+    """그 계좌·시장·종목의 pending BUY 승인 요청을 만료로 닫는다(손절 직후 사람이 옛 요청을 승인해
+    곧바로 되사는 것을 막는다). 닫은 승인 id."""
+    ids = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM approvals WHERE account_id=? AND status='pending' "
+            "AND json_extract(order_json, '$.ticker')=? "
+            "AND COALESCE(json_extract(order_json, '$.market'), ?)=? "
+            "AND json_extract(order_json, '$.side')='BUY' ORDER BY id",
+            (account_id, ticker, market, market),
         ).fetchall()
     ]
     return [i for i in ids if decide_approval(conn, i, "expired", decided_at=now)]

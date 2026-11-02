@@ -248,8 +248,14 @@ def test_order_state_terminal_identity(paper_client, respx_mock):
     d = date(2026, 10, 27)
     s = b.get_order_state("0000000101", d)
     assert s == FoOrderState(
-        order_no="0000000101", order_qty=2, filled_qty=2, remaining_qty=0, rejected_qty=0,
-        cancelled_qty=0, terminal=True, state="filled",
+        order_no="0000000101",
+        order_qty=2,
+        filled_qty=2,
+        remaining_qty=0,
+        rejected_qty=0,
+        cancelled_qty=0,
+        terminal=True,
+        state="filled",
     )
     s = b.get_order_state("0000000102", d)
     assert s.state == "open" and not s.terminal and s.remaining_qty == 2
@@ -277,10 +283,16 @@ def test_order_state_cancel_lineage(paper_client, respx_mock):
 
 def _fake(**kw):
     cash = FoCash(
-        deposit=Decimal("10000000"), orderable_cash=Decimal("8000000"),
-        orderable_total=Decimal("8000000"), margin_total=Decimal("0"), add_margin=Decimal("0"),
-        nav=Decimal("10000000"), realized_today=Decimal("0"), unrealized=Decimal("0"),
-        requested_at=T0, received_at=T0,
+        deposit=Decimal("10000000"),
+        orderable_cash=Decimal("8000000"),
+        orderable_total=Decimal("8000000"),
+        margin_total=Decimal("0"),
+        add_margin=Decimal("0"),
+        nav=Decimal("10000000"),
+        realized_today=Decimal("0"),
+        unrealized=Decimal("0"),
+        requested_at=T0,
+        received_at=T0,
     )
     bal = FoBalance(positions=[], unverified=[], cash=cash)
     return FakeFoBroker(fo_account(), balance=bal, **kw)
@@ -306,8 +318,15 @@ def test_fake_broker_scenarios():
     assert e.value.msg_cd == UNKNOWN_RESPONSE_CODE
     assert len(b3.orders) == 1  # 요청은 나갔다
     pos = FoPosition(
-        code="105W11", name=None, kind="FUTURES", contract_side="LONG", qty=1,
-        avg_price=Decimal("350"), current_price=Decimal("350"), pnl=Decimal("0"), sellable_qty=1,
+        code="105W11",
+        name=None,
+        kind="FUTURES",
+        contract_side="LONG",
+        qty=1,
+        avg_price=Decimal("350"),
+        current_price=Decimal("350"),
+        pnl=Decimal("0"),
+        sellable_qty=1,
     )
     b4 = _fake()
     b4.balance = b4.balance.model_copy(update={"positions": [pos]})

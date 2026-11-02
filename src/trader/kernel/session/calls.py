@@ -111,3 +111,14 @@ def finish_call(
         (status, session_id, cost, duration_ms, error, num_turns, call_id),
     )
     conn.commit()
+
+
+def close_stale_running(conn: sqlite3.Connection, *, older_than: str) -> int:
+    """`older_than` 이전에 시작해 아직 running 인 세션 행을 error 로 닫는다(데몬 재기동 정리)."""
+    cur = conn.execute(
+        "UPDATE agent_calls SET status='error', error='데몬 재기동으로 종료' "
+        "WHERE status='running' AND created_at < ?",
+        (older_than,),
+    )
+    conn.commit()
+    return cur.rowcount

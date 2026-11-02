@@ -8,7 +8,8 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from trader.kernel.execution.migrations import EXECUTION
+from trader.kernel.daemon.migrations import QUEUE
+from trader.kernel.execution.migrations import EXECUTION, EXECUTION_V7
 from trader.kernel.execution.types import ORIGIN_CHECK
 from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
@@ -24,7 +25,7 @@ KERNEL_EXEMPT = Path("registry") / "discover.py"
 
 
 # ledger.migrations.KERNEL(v1)에 넣지 않는 커널 모듈 소유 마이그레이션
-KERNEL_MODULES: list[Migration] = [SESSION, EXECUTION]
+KERNEL_MODULES: list[Migration] = [SESSION, EXECUTION, EXECUTION_V7, QUEUE]
 
 
 def _dups(items: Iterable[str]) -> list[str]:

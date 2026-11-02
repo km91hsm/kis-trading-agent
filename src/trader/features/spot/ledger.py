@@ -11,6 +11,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger.db import now_iso
 
 _ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
@@ -225,3 +226,135 @@ def exchange_of(conn: sqlite3.Connection, market: str, ticker: str) -> str | Non
         "SELECT exchange FROM ticker_exchanges WHERE market=? AND ticker=?", (market, ticker)
     ).fetchone()
     return str(row["exchange"]) if row else None
+
+
+# --- 트리거 (monitor) -----------------------------------------------------------------
+
+
+def insert_trigger(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    ticker: str,
+    kind: str,
+    detail: dict,
+    price: Decimal | None,
+    decision_id: int | None,
+    account_id: str | None,
+    created_at: str,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO triggers(account_id, market, ticker, kind, detail, price, decision_id, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            account_id,
+            market,
+            ticker,
+            kind,
+            _js(detail),
+            None if price is None else str(price),
+            decision_id,
+            created_at,
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def mark_trigger_handled(
+    conn: sqlite3.Connection, trigger_id: int, marker: str, *, handled_at: str
+) -> None:
+    """트리거를 처리 완료로 표시한다. marker 는 세션 id 또는 '실패:…'(기동 실패)."""
+    conn.execute(
+        "UPDATE triggers SET handled_at=?, session_id=? WHERE id=?",
+        (handled_at, marker, trigger_id),
+    )
+    conn.commit()
+
+
+def get_trigger(conn: sqlite3.Connection, trigger_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT id, market, ticker, kind, detail, price, decision_id, handled_at FROM triggers "
+        "WHERE id=?",
+        (trigger_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    try:
+        out["detail"] = json.loads(out["detail"]) if out.get("detail") else {}
+    except ValueError:
+        out["detail"] = {}
+    return out
+
+
+def unhandled_trigger_id(
+    conn: sqlite3.Connection, market: str, ticker: str, kind: str, today: date
+) -> int | None:
+    """운영일 today(시장 현지 하루)에 쌓인 같은 종목·종류의 미처리 트리거 id. 어제 처리 못 한
+    트리거가 이월돼 오늘 재평가가 옛 가격·사유로 돌지 않게 한다."""
+    lo, hi = day_bounds(today, market)
+    row = conn.execute(
+        "SELECT id FROM triggers WHERE market=? AND ticker=? AND kind=? AND handled_at IS NULL "
+        "AND created_at >= ? AND created_at < ? ORDER BY id LIMIT 1",
+        (market, ticker, kind, lo, hi),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def reevaluated_between(
+    conn: sqlite3.Connection, market: str, ticker: str, kind: str, lo: str, hi: str
+) -> bool:
+    """[lo, hi) 안에 같은 종류의 트리거가 재평가 세션까지 마쳤는가 (운영일 1회 제한용).
+
+    기동 실패(marker 가 '실패:' 로 시작)는 세지 않아 30분 뒤 재시도할 수 있다."""
+    row = conn.execute(
+        "SELECT 1 FROM triggers WHERE market=? AND ticker=? AND kind=? "
+        "AND handled_at >= ? AND handled_at < ? "
+        "AND (session_id IS NULL OR session_id NOT LIKE '실패:%') LIMIT 1",
+        (market, ticker, kind, lo, hi),
+    ).fetchone()
+    return row is not None
+
+
+def last_trigger_handled_at(conn: sqlite3.Connection, market: str, ticker: str) -> str | None:
+    """해당 종목의 마지막 재평가 시각 (30분 1회 제한용)."""
+    row = conn.execute(
+        "SELECT MAX(handled_at) AS t FROM triggers WHERE market=? AND ticker=? "
+        "AND handled_at IS NOT NULL",
+        (market, ticker),
+    ).fetchone()
+    return row["t"] if row and row["t"] else None
+
+
+def latest_trigger_price(
+    conn: sqlite3.Connection, market: str, ticker: str, today: date
+) -> Decimal | None:
+    """운영일 today 의 가장 최근 트리거 가격 (재평가의 '현재가'). 트리거가 없거나 가장 최근
+    트리거에 가격이 없으면(뉴스 재평가) None."""
+    lo, hi = day_bounds(today, market)
+    row = conn.execute(
+        "SELECT price FROM triggers WHERE market=? AND ticker=? "
+        "AND created_at >= ? AND created_at < ? ORDER BY id DESC LIMIT 1",
+        (market, ticker, lo, hi),
+    ).fetchone()
+    return Decimal(str(row["price"])) if row and row["price"] is not None else None
+
+
+def max_stop_since(
+    conn: sqlite3.Connection, market: str, ticker: str, since_decision_id: int | None
+) -> Decimal | None:
+    """since_decision_id 이후 그 종목 결정들의 BUY/ADD/HOLD 라운드 손절가 최고값(헤지 제외).
+
+    손절선은 올리기만 한다 — 같은 날 재평가가 결정 행을 덮어써도, 보유 재분석의 HOLD 가 손절가를
+    비우거나 낮춰도 이전 손절선을 지킨다. SELL/TRIM 의 손절가는 바닥에 넣지 않는다.
+    기준 결정이 없으면 None."""
+    if since_decision_id is None:
+        return None
+    rows = conn.execute(
+        "SELECT r.stop_loss FROM decision_rounds r JOIN decisions d ON d.id = r.decision_id "
+        "WHERE d.market=? AND d.ticker=? AND r.decision_id >= ? AND r.stop_loss IS NOT NULL "
+        "AND r.action IN ('BUY','ADD','HOLD') AND COALESCE(r.source, '') != 'hedge'",
+        (market, ticker, since_decision_id),
+    ).fetchall()
+    return max((Decimal(r["stop_loss"]) for r in rows), default=None)

@@ -11,9 +11,9 @@ OK_ROOT = FIXTURES / "features_ok"
 
 
 def _ok() -> list[Feature]:
-    # alpha 가 v2·v3 자리를 채워 커널 모듈 v4(session)와 버전이 연속되게 한다.
+    # alpha 가 v2·v3·v6·v9 자리를 채워 커널 모듈(v4·v5·v7·v8)과 버전이 연속되게 한다.
     alpha, beta = discover("tests.fixtures.features_ok")
-    stubs = (Migration(2, "a2", owner="alpha"), Migration(3, "a3", owner="alpha"))
+    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, 9))
     return [replace(alpha, migrations=stubs), beta]
 
 
@@ -78,12 +78,13 @@ def test_contracts_reject_duplicate_migration_version():
 def test_interleaved_migration_versions_across_features_are_accepted():
     alpha, beta = _ok()
     alpha = replace(
-        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(6, "a6", owner="alpha"))
+        alpha,
+        migrations=tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 6, 9)),
     )
     beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
     msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
     assert not any("마이그레이션" in m for m in msgs)
-    assert [m.version for m in contracts.all_migrations([alpha, beta])] == [1, 2, 3, 4, 5, 6]
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 10))
 
 
 def test_duplicate_version_still_reported_with_interleaving():
@@ -125,9 +126,7 @@ def test_duplicate_port_names_reported():
 
     alpha, beta = _ok()
     p = Port(name="broker", build=lambda b: None)
-    msgs = contracts.check(
-        [replace(alpha, ports=(p,)), replace(beta, ports=(p,))], roots=[OK_ROOT]
-    )
+    msgs = contracts.check([replace(alpha, ports=(p,)), replace(beta, ports=(p,))], roots=[OK_ROOT])
     assert "포트 중복: broker" in msgs
 
 

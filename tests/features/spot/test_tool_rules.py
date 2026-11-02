@@ -34,9 +34,7 @@ def test_submit_rule_requires_two_reports_and_summary():
     assert check_rule(debate, "20_debate_r1_bear", ["00_inputs", *ok]) == []
 
 
-@pytest.mark.parametrize(
-    ("env", "expected"), [(None, True), ("1", True), ("0", False), ("", True)]
-)
+@pytest.mark.parametrize(("env", "expected"), [(None, True), ("1", True), ("0", False), ("", True)])
 def test_dry_run_env_missing_means_dry_run(project, monkeypatch, env, expected):
     """Review Focus 1: TRADER_DRY_RUN 이 없거나 "1" 이면 dry_run, "0" 일 때만 실주문 가능."""
     if env is None:

@@ -86,9 +86,7 @@ def boot(
             except Exception as e:  # noqa: BLE001 - 어떤 조립 실패도 설정 오류로 알린다
                 if connection is not None:
                     connection.close()
-                raise ConfigError(
-                    f"포트 {port.name} 조립 실패: {type(e).__name__}: {e}"
-                ) from e
+                raise ConfigError(f"포트 {port.name} 조립 실패: {type(e).__name__}: {e}") from e
     return replace(boot_, ports=built)
 
 

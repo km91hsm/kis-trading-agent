@@ -1,4 +1,4 @@
-"""spot 원장 마이그레이션 (전역 버전 6)."""
+"""spot 원장 마이그레이션 (전역 버전 6·9)."""
 
 from trader.kernel.ledger.migrations import Migration
 
@@ -80,6 +80,27 @@ MIGRATIONS = (
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (market, ticker)
             )""",
+        ),
+        owner="spot",
+    ),
+    Migration(
+        9,
+        "spot_triggers",
+        (
+            """CREATE TABLE triggers (
+                id INTEGER PRIMARY KEY,
+                account_id TEXT,
+                market TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                price TEXT,
+                decision_id INTEGER,
+                created_at TEXT NOT NULL,
+                handled_at TEXT,
+                session_id TEXT
+            )""",
+            "CREATE INDEX ix_triggers_open ON triggers(market, ticker, handled_at)",
         ),
         owner="spot",
     ),

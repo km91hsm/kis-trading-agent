@@ -1,0 +1,95 @@
+"""core.cancel: 브로커 취소 1회 + 상태 갱신 (dry_run 은 기록만, 실패는 상태 유지 후 재발생)."""
+
+from datetime import UTC, datetime
+from decimal import Decimal
+
+import pytest
+
+from trader.kernel.broker.models import OrderResult
+from trader.kernel.execution import core
+from trader.kernel.execution.idem import ExecKeyStore
+from trader.kernel.execution.ledger import insert_order
+
+T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
+
+
+class _Notifier:
+    def send(self, text, *, escape=True):
+        return True
+
+
+class _Broker:
+    def __init__(self, exc=None):
+        self.calls: list[tuple[str, dict]] = []
+        self.exc = exc
+
+    def cancel_order(self, order_no, **kw):
+        self.calls.append((order_no, kw))
+        if self.exc:
+            raise self.exc
+        return OrderResult(order_no=order_no, accepted=True, message="ok")
+
+
+def _deps(conn):
+    return core.ExecDeps(
+        conn=conn,
+        notifier=_Notifier(),
+        now=lambda: T0,
+        idem=ExecKeyStore(conn),
+        broker_of=lambda a: None,
+    )
+
+
+def _order(conn):
+    return insert_order(
+        conn,
+        decision_id=None,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=2,
+        order_type="LIMIT",
+        price=Decimal("100"),
+        status="accepted",
+        order_no="0001",
+        message="",
+        mode="auto",
+    )
+
+
+def _status(conn, oid):
+    return conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()["status"]
+
+
+def test_cancel_calls_broker_once_and_sets_cancelled(conn):
+    oid, broker = _order(conn), _Broker()
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
+        dry_run=False, reason="재호가",
+    )  # fmt: skip
+    assert out == {"ok": True, "order_id": oid, "status": "cancelled"}
+    assert broker.calls == [("0001", {"market": "KR"})]
+    assert _status(conn, oid) == "cancelled"
+
+
+def test_cancel_dry_run_records_without_broker(conn):
+    oid, broker = _order(conn), _Broker()
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
+        dry_run=True, reason="재호가",
+    )  # fmt: skip
+    assert out == {"ok": True, "dry_run": True, "order_id": oid, "status": "accepted"}
+    assert broker.calls == []
+    assert _status(conn, oid) == "accepted"
+
+
+def test_cancel_broker_failure_keeps_status_and_raises(conn):
+    oid, broker = _order(conn), _Broker(exc=RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        core.cancel(
+            _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
+            dry_run=False, reason="재호가",
+        )  # fmt: skip
+    assert len(broker.calls) == 1
+    assert _status(conn, oid) == "accepted"

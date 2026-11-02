@@ -10,11 +10,19 @@ def _acct(id_, env="real"):
     return BrokerAccount(id=id_, env=env, cano="00000000")
 
 
-SECRETS = Secrets.model_validate({
-    "KIS_REAL_APP_KEY": "shared-k", "KIS_REAL_APP_SECRET": "shared-s", "KIS_REAL_CANO": "11111111",
-    "KIS_HTS_ID": "me", "KIS_REAL_2_APP_KEY": "k2", "KIS_REAL_2_APP_SECRET": "s2",
-    "KIS_REAL_2_CANO": "22222222", "KIS_ISA_APP_KEY": "k3", "KIS_ISA_APP_SECRET": "s3",
-})
+SECRETS = Secrets.model_validate(
+    {
+        "KIS_REAL_APP_KEY": "shared-k",
+        "KIS_REAL_APP_SECRET": "shared-s",
+        "KIS_REAL_CANO": "11111111",
+        "KIS_HTS_ID": "me",
+        "KIS_REAL_2_APP_KEY": "k2",
+        "KIS_REAL_2_APP_SECRET": "s2",
+        "KIS_REAL_2_CANO": "22222222",
+        "KIS_ISA_APP_KEY": "k3",
+        "KIS_ISA_APP_SECRET": "s3",
+    }
+)
 
 
 def test_creds_prefer_account_keys_then_shared():

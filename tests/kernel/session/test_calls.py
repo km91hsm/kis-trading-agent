@@ -85,3 +85,18 @@ def test_finish_call_updates_status_cost_turns(conn):
     calls.finish_call(conn, cid2, status="error", error="boom")
     row = conn.execute("SELECT * FROM agent_calls WHERE id=?", (cid2,)).fetchone()
     assert row["session_id"] == "s1" and row["error"] == "boom"
+
+
+def test_close_stale_running_marks_error_after_age(conn):
+    old, fresh = NOW - timedelta(hours=3), NOW - timedelta(minutes=5)
+    for when, status in ((old, "running"), (fresh, "running"), (old, "ok")):
+        conn.execute(
+            "INSERT INTO agent_calls(agent, status, created_at) VALUES ('orchestrator', ?, ?)",
+            (status, when.isoformat()),
+        )
+    conn.commit()
+    n = calls.close_stale_running(conn, older_than=(NOW - timedelta(hours=1)).isoformat())
+    assert n == 1
+    rows = conn.execute("SELECT status, error, created_at FROM agent_calls ORDER BY id").fetchall()
+    assert [r["status"] for r in rows] == ["error", "running", "ok"]
+    assert rows[0]["error"] == "데몬 재기동으로 종료"
