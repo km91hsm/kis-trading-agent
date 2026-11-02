@@ -1,4 +1,5 @@
-"""`trader spot` — 현물 레인 운영 명령. 지금은 실행 키 조회·수동 해제(`exec-key list|release`)만.
+"""`trader spot` — 현물 레인 운영 명령: 종목 분석 세션(`analyze`)과 실행 키 조회·수동 해제
+(`exec-key list|release`).
 
 보낸 뒤(sent_at) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이라 같은 결정·계좌·방향의 주문이 다시
 나가지 않는다 — 사람이 KIS 주문 유무를 확인한 뒤 사유와 함께 푼다. 해제 기록은 control
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import typer
 
+from trader.features.spot import analyze as analyze_mod
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.execution.idem import ExecKeyStore
 from trader.kernel.ledger import control
@@ -67,3 +69,32 @@ def exec_key_release(
     finally:
         b.conn.close()
     typer.echo(f"실행 키 해제: {key}")
+
+
+@spot_app.command("analyze")
+@config_errors
+def analyze(
+    ticker: str = typer.Option(..., "--ticker", help="종목코드/심볼"),
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    exchange: str | None = typer.Option(None, "--exchange", help="미국 거래소 코드 (NAS/NYS/AMS)"),
+    asof: str | None = typer.Option(None, "--asof", help="기준 시각 ISO8601 (기본: 현재 UTC)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="판정·기록까지만, 주문·승인 요청 없음"),
+    skip_collect: bool = typer.Option(False, "--skip-collect", help="00_inputs 수집 생략"),
+) -> None:
+    """오케스트레이터 세션을 띄워 종목 하나를 분석하고 30_decision.json 을 만든다."""
+    analyze_mod.validate_args(market, exchange)  # 부트·디렉터리 생성 전에 거른다
+    b = boot(ports=True)
+    try:
+        code = analyze_mod.run_analyze(
+            b,
+            ticker=ticker,
+            market=market,
+            exchange=exchange,
+            asof=asof,
+            dry_run=dry_run,
+            skip_collect=skip_collect,
+        )
+    finally:
+        b.conn.close()
+    if code:
+        raise typer.Exit(code=code)

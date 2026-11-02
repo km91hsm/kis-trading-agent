@@ -136,11 +136,18 @@ class ToolContext:
     inputs: Any = None  # InputsPort 구현
 
 
-def tool_ctx(boot: Any) -> ToolContext:
-    """부트 결과(`ports=True`)로 ToolContext 를 만든다. `TRADER_DRY_RUN` 이 없거나 "1" 이면
-    dry_run(주문·승인 요청 없음) — LLM 이 플래그를 빠뜨려도 주문이 나가지 않는다."""
-    acc = boot.ports.get("accounts")
-    dry_run = os.environ.get("TRADER_DRY_RUN", "1") != "0"
+def ctx_from_ports(
+    *,
+    settings: Any,
+    conn: sqlite3.Connection | None,
+    state: Path | None,
+    ports: Any,
+    notifier: Any,
+    dry_run: bool,
+    now: Callable[[], datetime] | None = None,
+) -> ToolContext:
+    """accounts·inputs 포트로 ToolContext 를 조립한다(CLI `tool_ctx` 와 FAKE 세션이 공유)."""
+    acc = ports.get("accounts")
     brokers: dict[str, Any] = {}
     accounts: list = []
     market_client = holiday_fn = policy = paused = None
@@ -151,17 +158,12 @@ def tool_ctx(boot: Any) -> ToolContext:
         market_client = acc.market_client()
         holiday_fn = acc.holiday_fn()
         policy, paused = acc.policy, acc.paused
-    notifier: Any = NullNotifier()
-    if boot.secrets is not None:
-        try:
-            notifier = make_notifier(boot.secrets)
-        except (OSError, ValueError) as e:  # 알림 조립 실패는 도구를 막지 않는다(알림 없음)
-            logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
+    extra = {"now": now} if now is not None else {}
     return ToolContext(
-        settings=boot.settings,
+        settings=settings,
         accounts=accounts,
-        conn=boot.conn,
-        state=paths.state_dir(),
+        conn=conn,
+        state=state,
         brokers=brokers,
         notifier=notifier,
         dry_run=dry_run,
@@ -169,7 +171,27 @@ def tool_ctx(boot: Any) -> ToolContext:
         market_client=market_client,
         policy=policy,
         paused=paused,
-        inputs=boot.ports.get("inputs"),
+        inputs=ports.get("inputs"),
+        **extra,
+    )
+
+
+def tool_ctx(boot: Any) -> ToolContext:
+    """부트 결과(`ports=True`)로 ToolContext 를 만든다. `TRADER_DRY_RUN` 이 없거나 "1" 이면
+    dry_run(주문·승인 요청 없음) — LLM 이 플래그를 빠뜨려도 주문이 나가지 않는다."""
+    notifier: Any = NullNotifier()
+    if boot.secrets is not None:
+        try:
+            notifier = make_notifier(boot.secrets)
+        except (OSError, ValueError) as e:  # 알림 조립 실패는 도구를 막지 않는다(알림 없음)
+            logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
+    return ctx_from_ports(
+        settings=boot.settings,
+        conn=boot.conn,
+        state=paths.state_dir(),
+        ports=boot.ports,
+        notifier=notifier,
+        dry_run=os.environ.get("TRADER_DRY_RUN", "1") != "0",
     )
 
 
