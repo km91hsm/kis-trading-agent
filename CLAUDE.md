@@ -15,7 +15,7 @@
 | `uv run trader web [--host] [--port]` | 웹 UI·API 서버 |
 | `uv run trader accounts show\|mode\|pause\|resume\|ping\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·추가삭제·키 가져오기 (모드 변경·`ping` 은 사용자 전용) |
 | `uv run trader ingest collect --ticker … [--market KR\|US --exchange … --asof … --force]` | 종목 수집 1회(공시·뉴스·거시 등, 절별 오류 격리) |
-| `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension prepare\|install-host\|uninstall-host\|status` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
+| `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
 | `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |

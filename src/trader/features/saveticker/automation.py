@@ -1,6 +1,6 @@
 """AI 호출 없는 수집 서비스 및 로컬 장애 감시.
 
-서비스는 데몬(`daemon._saveticker_body`, 앱이 켜져 있는 동안)이나 macOS launchd 가 띄운다. 같은
+서비스는 데몬(`job.watch`, 앱이 켜져 있는 동안)이나 macOS launchd 가 띄운다. 같은
 수집 폴더의 `runtime/service.lock` 으로 하나만 돌고, 인증 실패·재기동 한도로 멈추면
 `should_start` 가 다시 띄울 때를 정한다."""
 
@@ -51,7 +51,12 @@ def collector_alive(pid):
 
         return procs.pid_alive(pid)
     result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5
+        ["ps", "-p", str(pid), "-o", "command="],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=5,
     )
     return result.returncode == 0 and (
         "trader saveticker run" in result.stdout
@@ -137,7 +142,12 @@ def notify(message):
         'with title "SAVE Ticker" sound name "Glass"\nend run'
     )
     result = subprocess.run(
-        ["/usr/bin/osascript", "-e", script, message], capture_output=True, text=True, timeout=15
+        ["/usr/bin/osascript", "-e", script, message],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
     )
     return result.returncode == 0
 
@@ -376,7 +386,12 @@ def service_elsewhere():
         return False
     try:
         result = subprocess.run(
-            ["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5
+            ["ps", "-axo", "pid=,command="],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
         return False

@@ -36,6 +36,8 @@ def news_collect(ctx: Any, job: Any) -> dict:
     conn = ctx.conn_factory()
     try:
         for m in ctx.markets:
+            if ctx.stop_event.is_set():
+                break
             try:
                 out[m] = news_store.collect(
                     conn, cfg.news, secrets, market=m, names=names_by_market[m], now=ctx.now

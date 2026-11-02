@@ -256,6 +256,8 @@ def _stop_legacy(root: Path) -> None:
         ["ps", "-p", str(pid), "-o", "command="],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=5,
     ).stdout
     if "trader saveticker service" not in command:

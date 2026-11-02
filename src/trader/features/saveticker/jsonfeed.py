@@ -2,12 +2,12 @@
 
 from datetime import datetime
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
 from trader.features.saveticker.dom import identity
 from trader.features.saveticker.models import Item
+from trader.kernel.config import KST
 
 ROUTES = {
     "/api/news/list": "news",
@@ -48,7 +48,7 @@ def aware(value):
     if not value:
         return None
     result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return result if result.tzinfo else result.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    return result if result.tzinfo else result.replace(tzinfo=KST)
 
 
 def scalar(value):

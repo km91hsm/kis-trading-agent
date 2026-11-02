@@ -12,7 +12,6 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
@@ -22,6 +21,7 @@ from trader.features.saveticker.models import Capture, Item, ViewInfo
 from trader.features.saveticker.reports import save_pdf
 from trader.features.saveticker.service import View, build_views, lane_for
 from trader.features.saveticker.store import Store, atomic_json
+from trader.kernel.config import KST
 from trader.kernel.daemon.lock import Lock
 
 EXTENSION_ID = "gfchfnjghmjiidifohjglpodaakdphho"
@@ -55,7 +55,7 @@ def _now():
 
 
 def build_plan(now=None) -> dict:
-    local = (now or _now()).astimezone(ZoneInfo("Asia/Seoul"))
+    local = (now or _now()).astimezone(KST)
     ordinal = local.year * 12 + local.month - 1
 
     def month(offset):

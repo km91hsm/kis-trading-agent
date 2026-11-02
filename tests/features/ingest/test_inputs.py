@@ -280,7 +280,13 @@ def test_macro_item_failures_are_collected(project, monkeypatch):
         }
 
     monkeypatch.setattr(inputs, "collect_macro", fake_macro)
-    c = SourcesConfig.model_validate({"edgar": {"user_agent": "x y@z"}, "news": {"enabled": False}})
+    c = SourcesConfig.model_validate(
+        {
+            "edgar": {"user_agent": "x y@z"},
+            "news": {"enabled": False},
+            "community": {"enabled": False},
+        }
+    )
     d = build_inputs(
         ticker="005930", market="KR", exchange=None, asof=T0, cfg=c, secrets=Secrets(), deps=deps()
     )

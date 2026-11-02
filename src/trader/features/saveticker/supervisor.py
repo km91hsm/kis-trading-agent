@@ -25,6 +25,7 @@ def supervise(commands, root: Path, stop, on_status):
             logs.append(log)
             processes[lane] = subprocess.Popen(
                 command,
+                shell=False,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,

@@ -6,7 +6,7 @@
 - 원장 v3 `news_items`(시장 전체 뉴스 저장소)를 소유한다. 시장 전체 뉴스를 상시 쌓아 발굴·세션 입력이 읽는다(`news_store`: 멱등 적재 `insert_items`, 유니버스 종목명·코드 태깅, asof 창 읽기 `recent`, 유사 뉴스 판정 `novel_items`, 보존 정리 `prune`).
 - 수집기: `news`(구글 RSS·네이버), `macro`(FRED·ECOS), `dart`·`edgar`, `community`·`youtube`·`telegram_channel`·`naver_blog`, `manual_inputs`, `disclosures`(공시 중요도), `indicators`(기술 지표). `inputs.build_inputs` 가 절(technical·fundamental·news_macro·sentiment)을 스레드풀로 모아 `00_inputs` 를 만들고 `collect_and_save` 가 저장한다. 세이브티커 jsonl 은 `saveticker_ingest` 가 뉴스 저장소로 옮긴다.
 - 데몬 잡 `news_collect`(`job.py`, `schedule.yaml news_collect.interval_s` 기본 1800, heavy 밖): 시장별 질의 묶음(`news.market_queries`)을 돌려 적재 → 세이브티커 폴더 적재 → `store_retention_days`(14) 지난 행 prune → `news.post_ingest` 훅. 시장·세이브티커 실패는 그 항목만 `{"error": ...}` 로 남기고 잡은 계속하며, 훅 실패도 잡을 실패시키지 않는다(`out["hooks"]`).
-- CLI: `trader ingest collect ...`, `universe`/`sectors` 관련 하위 명령(`cli.py`).
+- CLI: `trader ingest collect ...`(`cli.py`). `universe check|sectors` CLI 는 M7.
 
 ## 공개면 (`api.py`)
 

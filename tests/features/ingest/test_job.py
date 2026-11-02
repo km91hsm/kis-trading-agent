@@ -50,9 +50,7 @@ def _old_and_new(conn, market):
          "published_at": (NOW - timedelta(days=20)).isoformat(),
          "received_at": (NOW - timedelta(days=20)).isoformat()},
     ]  # fmt: skip
-    news_store.insert_items(
-        conn, rows, market=market, source="t", query="q", lang="ko", names={}
-    )
+    news_store.insert_items(conn, rows, market=market, source="t", query="q", lang="ko", names={})
 
 
 def test_build_jobs_includes_news_collect_interval(project):
@@ -89,9 +87,7 @@ def test_news_body_collects_per_market_and_prunes(project, respx_mock):
 
 
 def test_news_body_skipped_when_disabled(project, monkeypatch):
-    monkeypatch.setattr(
-        job, "load_sources", lambda **kw: SourcesConfig(news={"enabled": False})
-    )
+    monkeypatch.setattr(job, "load_sources", lambda **kw: SourcesConfig(news={"enabled": False}))
     assert job.news_collect(_deps(project), job.JOB) == {"skipped": "news.enabled=false"}
 
 
@@ -128,6 +124,15 @@ def test_news_body_isolates_market_failure(project, respx_mock, monkeypatch):
     out = job.news_collect(deps, job.JOB)
     assert out["KR"] == {"error": "RuntimeError: rss down"}
     assert out["US"]["inserted"] >= 1 and out["pruned"] == 1
+
+
+def test_news_body_stops_before_markets_when_stop_event_set(project, monkeypatch):
+    calls = []
+    monkeypatch.setattr(news_store, "collect", lambda *a, **k: calls.append(k) or {})
+    deps = _deps(project)
+    deps.stop_event.set()
+    out = job.news_collect(deps, job.JOB)
+    assert isinstance(out, dict) and calls == [] and "KR" not in out and "US" not in out
 
 
 def test_post_ingest_hook_failure_does_not_fail_job(project, monkeypatch):
