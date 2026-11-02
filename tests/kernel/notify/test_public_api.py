@@ -8,6 +8,12 @@ def test_notify_public_surface():
                  "parse_command", "make_notifier", "make_receiver", "CommandContext", "poll_once",
                  "messages"):
         assert name in n.__all__ and hasattr(n, name)
+    # 주문·승인 문구(M4 Task 6)
+    for name in ("DecisionBrief", "opinion_lines", "order", "order_unknown",
+                 "bookkeeping_failure", "execution_failure", "approve_hint", "approval_request",
+                 "approval_rejected", "approval_tampered", "open_buys_cancelled",
+                 "throttle_skip"):
+        assert name in n.__all__ and getattr(n, name) is getattr(n.messages, name)
 
 
 def test_architecture_has_notify_section_and_accounts_readme():

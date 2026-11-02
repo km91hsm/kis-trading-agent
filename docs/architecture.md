@@ -130,7 +130,7 @@
 ## notify
 
 - 책임: 텔레그램 발신(outbox 포함)·수신·명령 디스패처·문구 베이스. 기능 이름을 모른다. 기능은 `registry` 에 명령과 `/status` 절을 더한다.
-- 공개면: `kernel.notify.__all__` — `Notifier`·`NullNotifier`·`TelegramNotifier`·`TelegramReceiver`·`Update`·`parse_command`·`make_notifier`·`make_receiver`·`CommandContext`·`poll_once`·`messages`(`money`·`pct`·`first_sentences`·`kst_hhmm`·`render`·`event`·`failure`·`mode_changed`). `commands.registry`·`help_line`·`status_message` 는 모듈 경로로 쓴다. 설정 섹션 `settings.notify`(`enabled`, `poll_interval_s` 5..600), `DaemonDeps.notifier`. CLI `trader notify-test`, `trader telegram poll|loop [--interval]`.
+- 공개면: `kernel.notify.__all__` — `Notifier`·`NullNotifier`·`TelegramNotifier`·`TelegramReceiver`·`Update`·`parse_command`·`make_notifier`·`make_receiver`·`CommandContext`·`poll_once`·`messages`(`money`·`pct`·`first_sentences`·`kst_hhmm`·`render`·`event`·`failure`·`mode_changed`, 주문·승인 문구 `DecisionBrief`·`opinion_lines`·`order`·`order_unknown`·`bookkeeping_failure`·`execution_failure`·`approve_hint`·`approval_request`·`approval_rejected`·`approval_tampered`·`open_buys_cancelled`·`throttle_skip` — 이 열둘은 `kernel.notify` 에서도 바로 import 한다). `commands.registry`·`help_line`·`status_message` 는 모듈 경로로 쓴다. 설정 섹션 `settings.notify`(`enabled`, `poll_interval_s` 5..600), `DaemonDeps.notifier`. CLI `trader notify-test`, `trader telegram poll|loop [--interval]`.
 - 규약:
   - 토큰은 URL 에 들어가므로 URL·예외 메시지를 로그에 남기지 않는다(`trader.notify`).
   - 메시지는 4000자(`MAX_LEN`)로 분할하고 HTML 이스케이프한다.
@@ -146,7 +146,7 @@
   - 옛 `expire_approvals` 훅은 M4 가 더한다.
   - 데몬 `telegram_poll`·outbox flush 잡은 M4.
   - 옛 `telegram` 로거 이름은 `trader.notify` 로 바뀌었다.
-  - `/status` 는 절 하나가 실패하면 전체가 실패한다. `SCALP_EXIT` 표·`DecisionBrief` 는 이식하지 않았다(M4/M5/M9).
+  - `/status` 는 절 하나가 실패하면 전체가 실패한다. `SCALP_EXIT` 표는 이식하지 않았다(M5/M9). `DecisionBrief`·주문·승인 문구는 M4(실행 코어)가 옮겼다.
 
 ## features 층
 
