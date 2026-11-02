@@ -112,20 +112,22 @@ def ingest_checkpoint(
         if did is not None and m_round is None:
             _upsert_round(conn, did, 0, data, js, now)
         elif did is not None:
-            rdata, rjs = _with_stop_floor(conn, did, market, ticker, data, js)
-            _upsert_round(conn, did, int(m_round.group(1)), rdata, rjs, now)
+            rnd = int(m_round.group(1))
+            rdata, rjs = _with_stop_floor(conn, did, rnd, market, ticker, data, js)
+            _upsert_round(conn, did, rnd, rdata, rjs, now)
     conn.commit()
 
 
 def _with_stop_floor(
-    conn: sqlite3.Connection, did: int, market: str, ticker: str, data: dict, js: str
+    conn: sqlite3.Connection, did: int, rnd: int, market: str, ticker: str, data: dict, js: str
 ) -> tuple[dict, str]:
     """재평가 라운드(BUY/ADD/HOLD)의 손절가를 같은 날 앞선 라운드들의 바닥(`max_stop_since`)
-    이상으로 올린다 — 재평가 HOLD 가 손절가를 비우거나 낮춰도 아침 손절선이 산다(Ruling 13).
+    이상으로 올린다(이 라운드 **앞**의 라운드만 본다) — 재평가 HOLD 가 손절가를 비우거나
+    낮춰도 아침 손절선이 산다(Ruling 13).
     SELL/TRIM 은 바닥 대상이 아니라 손대지 않는다. 바닥이 없거나 이미 높으면 그대로."""
     if data.get("action") not in ("BUY", "ADD", "HOLD"):
         return data, js
-    floor = max_stop_since(conn, market, ticker, did)
+    floor = max_stop_since(conn, market, ticker, did, before=(did, rnd))
     if floor is None:
         return data, js
     cur = data.get("stop_loss")
@@ -362,20 +364,31 @@ def latest_trigger_price(
 
 
 def max_stop_since(
-    conn: sqlite3.Connection, market: str, ticker: str, since_decision_id: int | None
+    conn: sqlite3.Connection,
+    market: str,
+    ticker: str,
+    since_decision_id: int | None,
+    *,
+    before: tuple[int, int] | None = None,
 ) -> Decimal | None:
     """since_decision_id 이후 그 종목 결정들의 BUY/ADD/HOLD 라운드 손절가 최고값(헤지 제외).
 
     손절선은 올리기만 한다 — 같은 날 재평가가 결정 행을 덮어써도, 보유 재분석의 HOLD 가 손절가를
     비우거나 낮춰도 이전 손절선을 지킨다. SELL/TRIM 의 손절가는 바닥에 넣지 않는다.
-    기준 결정이 없으면 None."""
+    기준 결정이 없으면 None. before=(decision_id, round) 이면 그 라운드 **앞**의 라운드만 본다
+    (재적재 때 뒤 라운드의 손절가가 앞 라운드 행으로 번지지 않게)."""
     if since_decision_id is None:
         return None
+    lim = ""
+    args: list[Any] = [market, ticker, since_decision_id]
+    if before is not None:
+        lim = "AND (r.decision_id < ? OR (r.decision_id = ? AND r.round < ?)) "
+        args += [before[0], before[0], before[1]]
     rows = conn.execute(
         "SELECT r.stop_loss FROM decision_rounds r JOIN decisions d ON d.id = r.decision_id "
         "WHERE d.market=? AND d.ticker=? AND r.decision_id >= ? AND r.stop_loss IS NOT NULL "
-        "AND r.action IN ('BUY','ADD','HOLD') AND COALESCE(r.source, '') != 'hedge'",
-        (market, ticker, since_decision_id),
+        "AND r.action IN ('BUY','ADD','HOLD') AND COALESCE(r.source, '') != 'hedge' " + lim,
+        args,
     ).fetchall()
     return max((Decimal(r["stop_loss"]) for r in rows), default=None)
 

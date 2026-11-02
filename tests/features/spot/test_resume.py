@@ -21,6 +21,7 @@ from trader.kernel.lane.types import LaneContext
 from trader.kernel.notify import NullNotifier
 from trader.kernel.session import run_store
 from trader.kernel.session.run_store import list_checkpoints, read_checkpoint, run_dir
+from trader.kernel.session.runner import SessionResult
 
 
 @pytest.fixture
@@ -276,3 +277,12 @@ def test_resume_change_pct_is_trigger_price_vs_previous_close(ctx):
         reasons = r["executions"][0]["reasons"]
         chased = any("당일 등락률 +12.3%" in s for s in reasons)
         assert chased is (n == 2), reasons
+
+
+def test_handled_marker_success_and_failure_prefix():
+    """성공이면 session_id, 실패면 '실패:' 접두사 문자열(옛 shape — 운영일 1회 제한에서 빠진다)."""
+    ok = SessionResult(ok=True, session_id="s1")
+    assert resume.handled_marker(ok) == "s1"
+    bad = SessionResult(ok=False, session_id="s2", error="타임아웃")
+    assert resume.handled_marker(bad) == "실패: 타임아웃 (s2)"
+    assert resume.handled_marker(SessionResult(ok=False)) == "실패: unknown (-)"

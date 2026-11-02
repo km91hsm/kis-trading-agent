@@ -159,3 +159,23 @@ def test_stop_loss_floor_survives_same_day_reevaluation(conn):
     assert ledger.max_stop_since(conn, "KR", "005930", did) == Decimal("68000.0")
     r3 = conn.execute("SELECT stop_loss FROM decision_rounds WHERE round=3").fetchone()
     assert Decimal(r3["stop_loss"]) == Decimal("1000")
+
+
+def test_stop_floor_ignores_later_rounds_on_reingest(conn):
+    """submit_decision 은 제출마다 모든 체크포인트를 다시 적재한다. 뒤 라운드(r2=68000)가 앞선
+    라운드 행(r1)을 소급해 올리면 안 된다 — r1 은 그 시점의 바닥(65000)만 본다."""
+    stages = [
+        ("30_decision", ok_decision(stop_loss=65000.0)),
+        ("31_decision_r1", ok_decision(action="HOLD", target_weight=0.0, stop_loss=None)),
+        ("31_decision_r2", ok_decision(action="ADD", stop_loss=68000.0)),
+        ("31_decision_r3", ok_decision(action="SELL", target_weight=0.0, stop_loss=None)),
+    ]
+    for _ in range(2):  # 제출 때마다 전체 재적재
+        for stage, dec in stages:
+            ledger.ingest_checkpoint(conn, D, "KR", "005930", stage, cp(dec))
+    rows = conn.execute(
+        "SELECT round, action, stop_loss FROM decision_rounds ORDER BY round"
+    ).fetchall()
+    got = [(r["round"], r["action"], r["stop_loss"]) for r in rows]
+    assert got == [(0, "BUY", "65000.0"), (1, "HOLD", "65000.0"), (2, "ADD", "68000.0"),
+                   (3, "SELL", None)]  # fmt: skip
