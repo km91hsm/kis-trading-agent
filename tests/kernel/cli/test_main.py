@@ -76,12 +76,13 @@ def test_feature_cli_is_mounted(monkeypatch):
 
 
 def test_build_daemon_deps(project):
-    b = boot_mod.boot(settings=True, conn=True, schedule=True)
+    b = boot_mod.boot(ports=True, schedule=True)
     try:
         deps = main_mod.build_daemon_deps(b, dry_run=True)
         assert deps.dry_run is True
         assert deps.markets == ["KR", "US"]
-        assert deps.gates == {}
+        assert set(deps.gates) == {"market", "monitor"}
+        assert deps.ports is b.ports and "accounts" in deps.ports
         assert isinstance(deps.stop_event, threading.Event)
         assert deps.state == project.resolve() / "state"
         assert deps.now().tzinfo is not None

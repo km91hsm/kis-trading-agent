@@ -57,6 +57,36 @@ class Account(BaseModel):
 SECTION = Section("accounts", "accounts", list[Account], list)
 
 
+class MonitorWindow(BaseModel):
+    """schedule.yaml `<시장>.monitor`: 장중 감시 주기(초)와 시장 현지 시각 창."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(default=60, ge=1)
+    start: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="15:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class KrSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    monitor: MonitorWindow = Field(default_factory=MonitorWindow)
+
+
+class UsSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    monitor: MonitorWindow = Field(
+        default_factory=lambda: MonitorWindow(start="09:30", end="16:00")
+    )
+
+
+SCHEDULE_SECTIONS: tuple[Section, ...] = (
+    Section("schedule", "kr", KrSchedule, KrSchedule),
+    Section("schedule", "us", UsSchedule, UsSchedule),
+)
+
+
 def _registry() -> SectionRegistry:
     reg = SectionRegistry()
     reg.register(SECTION)

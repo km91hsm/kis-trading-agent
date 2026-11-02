@@ -16,7 +16,8 @@ from trader.kernel.daemon import heartbeat as hb_mod
 from trader.kernel.daemon.jobs import build
 from trader.kernel.daemon.runner import Daemon, DaemonDeps, run_job
 from trader.kernel.ledger import connect, init_schema
-from trader.kernel.ledger.migrations import KERNEL
+from trader.kernel.registry import discover
+from trader.kernel.registry.contracts import all_migrations
 from trader.kernel.registry.types import Feature, JobSpec
 
 NOW = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
@@ -40,7 +41,7 @@ def make_deps(project: Path, **kw) -> DaemonDeps:
         return connect(db)
 
     c = factory()
-    init_schema(c, KERNEL)
+    init_schema(c, all_migrations(discover()))
     c.close()
     base = dict(
         settings=SimpleNamespace(), schedule=SimpleNamespace(at="03:00"), conn_factory=factory,
@@ -78,7 +79,7 @@ def rows(conn):
 def test_deps_is_frozen_with_exact_field_order(deps):
     assert [f.name for f in fields(DaemonDeps)] == [
         "settings", "schedule", "conn_factory", "state", "now", "markets", "gates", "stop_event",
-        "dry_run", "notifier", "secrets", "registry", "hooks",
+        "dry_run", "notifier", "secrets", "registry", "hooks", "ports",
     ]  # fmt: skip
     with pytest.raises(FrozenInstanceError):
         deps.dry_run = True  # type: ignore[misc]

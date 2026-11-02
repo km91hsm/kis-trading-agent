@@ -1,3 +1,13 @@
 # 데몬 잡 주기
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
+kr:
+  monitor:
+    interval_s: 60     # 장중 감시 주기(초)
+    start: "09:00"     # 감시 창(시장 현지 시각)
+    end: "15:30"
+us:
+  monitor:
+    interval_s: 60
+    start: "09:30"
+    end: "16:00"

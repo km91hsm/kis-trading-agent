@@ -19,6 +19,7 @@ from trader.kernel.registry.types import Feature
 from trader.kernel.session.migrations import SESSION
 
 # 다른 기능에서 import 할 수 있는 유일한 공개면.
+GATE_NAMES = ("market", "monitor")
 PUBLIC_MODULE = "api"
 # 커널 중 기능 패키지를 동적으로 import 하는 유일한 파일.
 KERNEL_EXEMPT = Path("registry") / "discover.py"
@@ -56,8 +57,15 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         ("origin", [o.origin for f in features for o in f.origins]),
         ("에이전트 이름", [a.name for f in features for a in f.agents]),
         ("포트", [p.name for f in features for p in f.ports]),
+        ("게이트", [g.name for f in features for g in f.gates]),
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
+    msgs += [
+        f"기능 {f.id}: 알 수 없는 게이트 {g.name}"
+        for f in features
+        for g in f.gates
+        if g.name not in GATE_NAMES
+    ]
     try:
         check_migrations(all_migrations(features))
     except LedgerError as exc:

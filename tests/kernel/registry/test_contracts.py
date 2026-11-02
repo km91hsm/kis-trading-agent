@@ -4,7 +4,7 @@ from pathlib import Path
 from trader.kernel.ledger.migrations import Migration
 from trader.kernel.registry import contracts
 from trader.kernel.registry.discover import discover
-from trader.kernel.registry.types import Feature, OriginSpec, QueueKind, SseKey
+from trader.kernel.registry.types import Feature, GateSpec, OriginSpec, QueueKind, SseKey
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 OK_ROOT = FIXTURES / "features_ok"
@@ -157,3 +157,14 @@ def test_stage_rule_defaults():
     r = StageRule(pattern="x")
     assert r.requires == () and r.min_counts == ()
     assert ToolCommand(name="t", handler=print).stage_rules == ()
+
+
+def test_gate_names_unique_and_known():
+    alpha, beta = _ok()
+    mk = lambda name: GateSpec(name, lambda boot, deps: lambda job: None)  # noqa: E731
+    ok = [replace(alpha, gates=(mk("market"), mk("monitor"))), beta]
+    assert contracts.check(ok, roots=[OK_ROOT]) == []
+    dup = [replace(alpha, gates=(mk("market"),)), replace(beta, gates=(mk("market"),))]
+    assert any("게이트 중복" in m and "market" in m for m in contracts.check(dup, roots=[OK_ROOT]))
+    bad = [replace(alpha, gates=(mk("nope"),)), beta]
+    assert any("nope" in m for m in contracts.check(bad, roots=[OK_ROOT]))

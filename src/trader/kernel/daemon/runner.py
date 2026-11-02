@@ -8,8 +8,8 @@ import signal
 import sqlite3
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +23,15 @@ from trader.kernel.daemon.heartbeat import Heartbeat
 from trader.kernel.daemon.jobs import ScheduledJob, build
 from trader.kernel.daemon.lock import Lock
 from trader.kernel.ledger import runs
+from trader.kernel.registry import hooks as hooks_mod
 from trader.kernel.registry.types import Feature
+from trader.kernel.session import calls
 
 logger = logging.getLogger("trader.daemon")
 
 HEARTBEAT_JOB_ID = "daemon_heartbeat"
 HEARTBEAT_INTERVAL_S = 30
+STALE_SESSION_AGE = timedelta(hours=1)  # 이보다 오래 running 인 세션 행은 재기동 때 닫는다
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,7 @@ class DaemonDeps:
     secrets: Any = None
     registry: Any = None
     hooks: Any = None
+    ports: dict[str, Any] = field(default_factory=dict)
 
 
 class _DropMaxInstances(logging.Filter):
@@ -141,6 +145,8 @@ class Daemon:
     def start(self, *, install_signals: bool = True) -> bool:
         """잡 정의 검증 → 잠금 → 스케줄러 등록·기동 → 하트비트. 잠금을 못 잡으면 False."""
         deps = self.deps
+        hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
+        self._close_stale_sessions()
         self._jobs = build(
             self.features, schedule=deps.schedule, settings=deps.settings,
             markets=deps.markets, ctx=deps,
@@ -177,6 +183,17 @@ class Daemon:
             raise
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
         return True
+
+    def _close_stale_sessions(self) -> None:
+        """재기동 전에 남은 running 세션 행(1시간 초과)을 error 로 닫는다."""
+        conn = self.deps.conn_factory()
+        try:
+            cutoff = (self.deps.now() - STALE_SESSION_AGE).isoformat()
+            n = calls.close_stale_running(conn, older_than=cutoff)
+        finally:
+            conn.close()
+        if n:
+            logger.info("재기동 정리: running 세션 %d건 종료", n)
 
     def _sync_next(self, job_id: str) -> None:
         if self._scheduler is None or self._down:

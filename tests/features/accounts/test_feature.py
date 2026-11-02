@@ -5,7 +5,8 @@ from trader.kernel.registry import check, discover
 
 def test_feature_declaration():
     assert FEATURE.id == "accounts" and FEATURE.tier == "service"
-    assert [s.key for s in FEATURE.sections] == ["accounts"]
+    assert [s.key for s in FEATURE.sections] == ["accounts", "kr", "us"]
+    assert [g.name for g in FEATURE.gates] == ["market", "monitor"]
     assert [m.version for m in FEATURE.migrations] == [2]
     assert FEATURE.migrations[0].owner == "accounts"
     assert {c.name for c in FEATURE.telegram_commands} == {"pause", "resume", "mode"}
