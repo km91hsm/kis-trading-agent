@@ -438,3 +438,16 @@ def test_approve_recheck_reason_expires_and_reject_and_expire_all(deps, conn, br
     deps.now.t = T0 + APPROVAL_TTL + timedelta(seconds=1)
     assert core.expire_approvals(deps) == [aid5]
     assert _status(conn, aid5) == "expired" and _status(conn, aid6) == "pending"
+
+
+def test_approve_recheck_keep_pending_leaves_row_pending(deps, conn, broker):
+    """Ruling 7: 재판정 불가(잔고 조회 실패 등)는 만료가 아니라 pending 유지."""
+    aid = _request(deps)
+    r = _approve(deps, aid, recheck=lambda a, o: core.KeepPending("balance"))
+    assert {k: r[k] for k in ("ok", "approval_id", "status", "reason")} == {
+        "ok": False, "approval_id": aid, "status": "pending", "reason": "balance",
+    }  # fmt: skip
+    assert "pending 유지" in r["error"] and "order" not in r
+    assert _status(conn, aid) == "pending" and _orders(conn) == [] and broker.orders == []
+    assert _lock(conn)["approval_id"] == aid
+    assert _approve(deps, aid)["ok"] is True  # 다음 승인 시도는 그대로 실행된다

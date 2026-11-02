@@ -45,6 +45,7 @@ logger = logging.getLogger("trader.execution")
 
 __all__ = [
     "ExecDeps",
+    "KeepPending",
     "OrderIntent",
     "approval_fingerprint",
     "approve",
@@ -84,6 +85,13 @@ def approval_fingerprint(account_id: str, decision_id: int | None, order: dict) 
         default=str,
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class KeepPending:
+    """recheck 가 '지금은 판단 불가, 승인은 pending 유지' 를 알리는 반환값."""
+
+    reason: str
 
 
 @dataclass
@@ -392,7 +400,7 @@ def approve(
     policy_of: Callable[[str], ExecPolicy | None],
     run_dir_of: Callable[[dict], Path],
     decision_side_of: Callable[[int], str | None] | None = None,
-    recheck: Callable[[dict, dict], str | None] | None = None,
+    recheck: Callable[[dict, dict], str | KeepPending | None] | None = None,
     opinion_of: Callable[[dict], dict | None] | None = None,
 ) -> dict:
     """pending·미만료 승인 요청을 주문으로 실행한다. 두 번째 호출은 거부된다.
@@ -400,10 +408,14 @@ def approve(
     순서(옛 executor.approve): ① 없음·처리됨·만료 ② 일시정지 → pending 유지 ③ 계좌 없음(정책 None)
     → 만료 ④ 모드가 approve 아님 → pending 유지 ⑤ 지문 불일치 → failed + 긴급 알림 ⑥ 결정 방향이
     바뀜(`decision_side_of(decision_id)` 가 값을 주고 주문 방향과 다름) → 만료 ⑦ 브로커 없음 →
-    pending 유지 ⑧ `recheck(approval, order)` 가 사유를 주면 → 만료 ⑨ 조건부 UPDATE 로 approved
+    pending 유지 ⑧ `recheck(approval, order)` ⑨ 조건부 UPDATE 로 approved
     (다른 프로세스가 먼저 처리했으면 race) ⑩ `transmit(mode="approve")`. 기록 실패
     (`OrderBookkeepingError`)는 승인을 failed 로 바꾸고 다시 올린다. 브로커 거부·실패는 failed,
     unknown 은 approved 로 둔다(KIS 에 접수됐을 수 있다).
+
+    `recheck` 반환 세 갈래: `None` → 계속 진행, 사유 `str` → 만료(주문 없음),
+    `KeepPending(reason)` → 지금은 판단 불가(예: 잔고 조회 실패) — 승인은 pending 그대로 두고
+    `{ok: False, approval_id, status: "pending", reason}` 를 돌려준다(다음 승인 시도가 다시 본다).
 
     `opinion_of(approval)` 은 주문 알림에 붙일 결정 의견 dict(승인 행 전체를 받는다 — decision_id 와
     order 가 함께 있다). 반환 {ok, approval_id, status(승인 상태), reason?, error?, order?}."""
@@ -458,6 +470,11 @@ def approve(
         )  # fmt: skip
     if recheck is not None:
         why = recheck(a, order)
+        if isinstance(why, KeepPending):
+            return _fail(
+                approval_id, why.reason, "pending",
+                f"승인 요청 #{approval_id} 재판정 불가({why.reason}): 요청은 pending 유지",
+            )  # fmt: skip
         if why:
             _expire(deps, approval_id)
             return _fail(
