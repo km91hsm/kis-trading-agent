@@ -1,5 +1,5 @@
 """`trader spot` — 현물 레인 운영 명령: 종목 분석 세션(`analyze`)과 실행 키 조회·수동 해제
-(`exec-key list|release`).
+(`exec-key list|release`), 승인 요청 처리(`approvals list|approve|reject`).
 
 보낸 뒤(sent_at) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이라 같은 결정·계좌·방향의 주문이 다시
 나가지 않는다 — 사람이 KIS 주문 유무를 확인한 뒤 사유와 함께 푼다. 해제 기록은 control
@@ -10,7 +10,10 @@ from __future__ import annotations
 import typer
 
 from trader.features.spot import analyze as analyze_mod
+from trader.features.spot import executor
+from trader.features.spot.messages import approval_line
 from trader.kernel.cli.boot import boot, config_errors
+from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.idem import ExecKeyStore
 from trader.kernel.ledger import control
 from trader.kernel.ledger.db import now_iso
@@ -21,6 +24,8 @@ _COLS = ("key", "created_at", "order_id", "approval_id", "sent_at")
 spot_app = typer.Typer(help="현물 레인", no_args_is_help=True)
 exec_key_app = typer.Typer(help="실행 키(멱등 선점) 조회·수동 해제", no_args_is_help=True)
 spot_app.add_typer(exec_key_app, name="exec-key")
+approvals_app = typer.Typer(help="승인 요청 조회·승인·거부", no_args_is_help=True)
+spot_app.add_typer(approvals_app, name="approvals")
 
 
 def _cell(v: object) -> str:
@@ -98,3 +103,55 @@ def analyze(
         b.conn.close()
     if code:
         raise typer.Exit(code=code)
+
+
+@approvals_app.command("list")
+@config_errors
+def approvals_list() -> None:
+    """만료분을 정리한 뒤 승인 대기 요청을 한 줄씩 보여 준다."""
+    b = boot(ports=True)
+    try:
+        ectx = executor.exec_ctx(b)
+        executor.expire_approvals(ectx)
+        envs = {a.id: a.env for a in ectx.accounts}
+        pending = xledger.pending_approvals(b.conn)
+    finally:
+        b.conn.close()
+    if not pending:
+        typer.echo("승인 대기 없음")
+        return
+    for a in pending:
+        typer.echo(approval_line(a, envs.get(a["account_id"])))
+
+
+@approvals_app.command("approve")
+@config_errors
+def approvals_approve(approval_id: int = typer.Argument(..., help="승인 id")) -> None:
+    """승인 요청을 주문으로 실행한다."""
+    b = boot(ports=True)
+    try:
+        r = executor.approve(executor.exec_ctx(b), approval_id)
+    finally:
+        b.conn.close()
+    if not r["ok"]:
+        order = r.get("order") or {}
+        err = r.get("error") or order.get("message") or r.get("reason") or r.get("status")
+        typer.echo(f"승인 실패 #{approval_id}: {err}", err=True)
+        raise typer.Exit(code=1)
+    order = r.get("order") or {}
+    typer.echo(f"승인 실행 #{approval_id}: 주문번호 {order.get('order_no') or '-'}")
+
+
+@approvals_app.command("reject")
+@config_errors
+def approvals_reject(approval_id: int = typer.Argument(..., help="승인 id")) -> None:
+    """승인 요청을 거부한다."""
+    b = boot(ports=True)
+    try:
+        r = executor.reject(executor.exec_ctx(b), approval_id)
+    finally:
+        b.conn.close()
+    if not r["ok"]:
+        typer.echo(f"거부 실패 #{approval_id}: {r.get('error') or r.get('status')}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"거부 #{approval_id}")

@@ -56,6 +56,7 @@ __all__ = [
     "cancel_open_buys",
     "deps_of",
     "exec_ctx",
+    "exec_ctx_from",
     "execute",
     "expire_approvals",
     "origin_of",
@@ -147,43 +148,67 @@ class ExecContext:
     market_client: Any | None = None
 
 
-def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
-    """부트 결과(`ports=True`)로 ExecContext 를 조립한다. 계좌 포트가 없으면 계좌 없음."""
-    from trader.kernel.notify import make_notifier
-    from trader.kernel.platform import paths
-
-    acc = boot.ports.get("accounts")
+def exec_ctx_from(
+    settings: Any,
+    conn: sqlite3.Connection,
+    accounts_port: Any | None,
+    notifier: Any,
+    now: Callable[[], datetime] | None,
+    state: Path | None,
+    *,
+    record_portfolio: bool = True,
+) -> ExecContext:
+    """ExecContext 단일 조립 경로(CLI·텔레그램 공용). 계좌 포트가 없으면 계좌 없음(fail-closed:
+    정책 없음 → 모든 계좌 off)."""
     accounts: list = []
     brokers: dict[str, Any] = {}
     market_client = holiday_fn = None
     policy: Callable[[Any, Any], tuple[str, str | None]] | None = None
     paused: Callable[[Any], bool] | None = None
-    if acc is not None:
-        accounts = list(acc.accounts())
-        raw = acc.brokers()
+    if accounts_port is not None:
+        accounts = list(accounts_port.accounts())
+        raw = accounts_port.brokers()
         brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
-        market_client = acc.market_client()
-        holiday_fn = acc.holiday_fn()
-        policy, paused = acc.policy, acc.paused
+        market_client = accounts_port.market_client()
+        holiday_fn = accounts_port.holiday_fn()
+        policy, paused = accounts_port.policy, accounts_port.paused
     policy, paused = policy_pair(policy, paused)
+    kw: dict[str, Any] = {} if now is None else {"now": now}
+    return ExecContext(
+        settings=settings,
+        accounts=accounts,
+        conn=conn,
+        brokers=brokers,
+        policy=policy,
+        paused=paused,
+        notifier=notifier if notifier is not None else NullNotifier(),
+        state=state,
+        holiday_fn=holiday_fn,
+        record_portfolio=record_portfolio,
+        market_client=market_client,
+        **kw,
+    )
+
+
+def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
+    """부트 결과(`ports=True`)로 ExecContext 를 조립한다. 계좌 포트가 없으면 계좌 없음."""
+    from trader.kernel.notify import make_notifier
+    from trader.kernel.platform import paths
+
     notifier: Any = NullNotifier()
     if boot.secrets is not None:
         try:
             notifier = make_notifier(boot.secrets)
         except (OSError, ValueError) as e:  # 알림 조립 실패는 실행을 막지 않는다(알림 없음)
             logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
-    return ExecContext(
-        settings=boot.settings,
-        accounts=accounts,
-        conn=boot.conn,
-        brokers=brokers,
-        policy=policy,
-        paused=paused,
-        notifier=notifier,
-        state=paths.state_dir(),
-        holiday_fn=holiday_fn,
+    return exec_ctx_from(
+        boot.settings,
+        boot.conn,
+        boot.ports.get("accounts"),
+        notifier,
+        None,
+        paths.state_dir(),
         record_portfolio=record_portfolio,
-        market_client=market_client,
     )
 
 

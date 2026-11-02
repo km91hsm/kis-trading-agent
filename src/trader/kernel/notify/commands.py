@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ class CommandContext:
     notifier: Notifier
     features: list[Feature]
     echo: Callable[[str], None] = lambda s: None
+    ports: dict[str, Any] = field(default_factory=dict)  # 기능이 내놓은 포트(이름 → 구현)
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:

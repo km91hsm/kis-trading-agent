@@ -122,6 +122,7 @@ def build_command_ctx(boot_: Boot, *, echo) -> CommandContext:
         notifier=make_notifier(boot_.secrets, enabled=boot_.settings.notify.enabled),
         features=boot_.features,
         echo=echo,
+        ports=boot_.ports,
     )
 
 
@@ -144,7 +145,7 @@ telegram_app = typer.Typer(help="텔레그램 수신 (승인 명령 폴링)")
 
 
 def _telegram_run(*, interval: int | None, max_iterations: int | None) -> None:
-    b = boot(settings=True, secrets=True, conn=True, log_name="telegram")
+    b = boot(ports=True, log_name="telegram")
     try:
         receiver = make_receiver(b.secrets, enabled=b.settings.notify.enabled)
         if receiver is None:
