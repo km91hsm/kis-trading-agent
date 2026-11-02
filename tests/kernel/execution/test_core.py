@@ -451,3 +451,58 @@ def test_approve_recheck_keep_pending_leaves_row_pending(deps, conn, broker):
     assert _status(conn, aid) == "pending" and _orders(conn) == [] and broker.orders == []
     assert _lock(conn)["approval_id"] == aid
     assert _approve(deps, aid)["ok"] is True  # 다음 승인 시도는 그대로 실행된다
+
+
+def test_approve_prepares_before_approved_update(deps, conn, broker):
+    """approved 로 바꾸기 전에 run_dir_of·opinion_of·주문 복원을 끝낸다 — 실패하면 주문 없는
+    approved 가 굳지 않는다(준비 실패는 pending 유지, 복원 불가 주문은 failed)."""
+
+    def boom(_a):
+        raise OSError("디스크 없음")
+
+    aid = _request(deps)
+    for kw in ({"run_dir_of": boom}, {"opinion_of": boom}):
+        call = {"policy_of": lambda _a: APPROVE, "run_dir_of": lambda _a: _RUN_DIR[0], **kw}
+        r = core.approve(deps, aid, **call)
+        assert r["ok"] is False and r["reason"] == "prepare" and r["status"] == "pending"
+    assert _status(conn, aid) == "pending" and broker.orders == [] and _orders(conn) == []
+    # 지문은 맞지만 주문으로 복원되지 않는 행(OrderRequest 검증 실패) → failed, 주문 없음
+    order = get_approval(conn, aid)["order"]
+    bad = {**order, "side": "HOLD"}
+    side_cols = ("quote_price", "order_stage", "exec_key", "origin")  # 열에 따로 있는 값
+    body = {k: v for k, v in bad.items() if k not in side_cols}
+    conn.execute(
+        "UPDATE approvals SET order_json=?, fingerprint=? WHERE id=?",
+        (json.dumps(body), core.approval_fingerprint(ACCT, 7, bad), aid),
+    )
+    conn.commit()
+    r = _approve(deps, aid)
+    assert r["ok"] is False and r["reason"] == "invalid_order" and r["status"] == "failed"
+    assert _status(conn, aid) == "failed" and broker.orders == []
+    # 브로커는 UPDATE 전에 한 번만 얻어 transmit 에 넘긴다
+    calls = []
+    once = core.ExecDeps(
+        conn=conn, notifier=deps.notifier, now=deps.now, idem=deps.idem,
+        broker_of=lambda a: calls.append(a) or (broker if len(calls) == 1 else None),
+    )  # fmt: skip
+    aid2 = _request(deps, idem_key="8|paper-main|BUY|50_order", decision_id=8)
+    assert _approve(once, aid2)["ok"] is True and calls == [ACCT]
+
+
+def test_request_approval_notifier_failure_keeps_approval_and_key(deps, conn):
+    class Down:
+        def send(self, text, *, escape=True):
+            raise RuntimeError("텔레그램 장애")
+
+    deps.notifier = Down()
+    assert deps.idem.claim(KEY, now=T0.isoformat())
+    aid = core.request_approval(deps, _intent(), env="paper")  # 예외가 올라오지 않는다
+    assert _status(conn, aid) == "pending"
+    assert _lock(conn)["approval_id"] == aid and deps.idem.has_approval(KEY)
+
+
+def test_approve_empty_recheck_reason_still_expires(deps, conn, broker):
+    """Ruling 7: recheck 가 돌려준 str 은 빈 문자열이어도 만료."""
+    aid = _request(deps)
+    r = _approve(deps, aid, recheck=lambda a, o: "")
+    assert r["reason"] == "recheck" and _status(conn, aid) == "expired" and broker.orders == []

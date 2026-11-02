@@ -118,18 +118,22 @@ def _notify_quietly(deps: ExecDeps, text: str) -> None:
 # --- 전송 ---------------------------------------------------------------------------------
 
 
-def transmit(deps: ExecDeps, intent: OrderIntent, *, run_dir: Path, mode: str) -> dict:
+def transmit(
+    deps: ExecDeps, intent: OrderIntent, *, run_dir: Path, mode: str, broker: Any | None = None
+) -> dict:
     """주문 1건을 브로커로 보내고 기록한다(옛 `_place`).
 
     실행 키(`intent.idem_key`, 빈 문자열이면 키 없음)는 브로커 호출 **직전** `mark_sent` 로
     표시한다 — 그 뒤로는 응답이 없어도 KIS 에 주문이 있을 수 있다. 브로커가 거부·실패한 주문은
     키를 놓고(KIS 에 주문 없음 → 재시도 허용), 접수·unknown 은 키를 남겨 주문 행에 묶는다.
     접수·unknown 뒤 원장 기록이 실패하면 CRITICAL + 알림 뒤 `OrderBookkeepingError` 를 올린다.
+    `broker` 를 주면 그것을 쓰고(승인 실행이 UPDATE 전에 미리 얻은 것), 없으면 `broker_of`.
     반환 {status, order_id, order_no, message, request, result}."""
     key = intent.idem_key
     request = intent.request()
     shown = deps.label(intent.ticker, intent.name)
-    broker = deps.broker_of(intent.account_id)
+    if broker is None:
+        broker = deps.broker_of(intent.account_id)
     if broker is None:
         raise ValueError(f"계좌 {intent.account_id} 브로커 없음")
     if key:
@@ -297,7 +301,12 @@ def request_approval(
 
     시장가는 금액을 모르므로 요청 시 현재가(quote_price)를 남겨 승인 뒤 주문의 amount 로 쓴다.
     주문 단계(order_stage)·실행 키·origin 도 남겨 승인 실행이 이어 쓴다. `reasons` 는 리스크 판정
-    사유(알림 표시용). 실패 시 실행 키 해제(`release`)는 호출자가 한다."""
+    사유(알림 표시용).
+
+    알림 실패는 경고로만 남긴다 — 이미 만든 승인 요청을 되돌리지 않는다. 이 함수가 예외를 올리면
+    (승인 행 생성 전·묶기 실패 등) 실행 키 해제는 호출자가 하되 **`not idem.has_approval(key)` 일
+    때만** 푼다. 승인에 묶인 키를 풀면 다른 경로가 같은 키를 잡고, 사람이 남은 승인까지 실행하면
+    같은 주문이 두 번 나간다."""
     now = deps.now()
     expires = (now + ttl).isoformat()
     order = _approval_order(intent)
@@ -316,7 +325,8 @@ def request_approval(
     )
     if intent.idem_key:
         deps.idem.bind(intent.idem_key, approval_id=aid, at=now.isoformat())
-    deps.notifier.send(
+    _notify_quietly(
+        deps,
         messages.approval_request(
             approval_id=aid,
             account=intent.account_id,
@@ -331,7 +341,7 @@ def request_approval(
             env=env,
             quote_price=intent.quote_price,
             expires_at=expires,
-        )
+        ),
     )
     return aid
 
@@ -413,7 +423,11 @@ def approve(
     (`OrderBookkeepingError`)는 승인을 failed 로 바꾸고 다시 올린다. 브로커 거부·실패는 failed,
     unknown 은 approved 로 둔다(KIS 에 접수됐을 수 있다).
 
-    `recheck` 반환 세 갈래: `None` → 계속 진행, 사유 `str` → 만료(주문 없음),
+    approved 로 바꾸기(⑨) **전에** 주문 요청 검증·`run_dir_of`·`opinion_of`·브로커 조회를 끝낸다 —
+    UPDATE 뒤에 예외가 나면 주문 없는 approved 가 굳기 때문이다. 주문 dict 가 주문으로 복원되지
+    않으면 failed(`invalid_order`), `run_dir_of`·`opinion_of` 예외는 pending 유지(`prepare`).
+
+    `recheck` 반환 세 갈래: `None` → 계속 진행, `str`(빈 문자열 포함) → 만료(주문 없음),
     `KeepPending(reason)` → 지금은 판단 불가(예: 잔고 조회 실패) — 승인은 pending 그대로 두고
     `{ok: False, approval_id, status: "pending", reason}` 를 돌려준다(다음 승인 시도가 다시 본다).
 
@@ -439,9 +453,8 @@ def approve(
         )  # fmt: skip
     order = dict(a["order"])
     shown = deps.label(str(order.get("ticker")), order.get(NAME_KEY))
-    # v5 의 fingerprint 는 NOT NULL 이라 항상 검사한다(옛 NULL 행 통과 규칙은 남겨 둔다)
-    fp = a.get("fingerprint")
-    if fp and fp != approval_fingerprint(account_id, a["decision_id"], order):
+    # v5 의 fingerprint 는 NOT NULL 이라 항상 비교한다
+    if a["fingerprint"] != approval_fingerprint(account_id, a["decision_id"], order):
         logger.critical("승인 지문 불일치 #%s %s", approval_id, account_id)
         decide_approval(deps.conn, approval_id, "failed", decided_at=deps.now().isoformat())
         _notify_quietly(
@@ -452,7 +465,16 @@ def approve(
             approval_id, "tampered", "failed",
             f"승인 요청 #{approval_id} 지문 불일치: 주문 내용이 바뀜",
         )  # fmt: skip
-    intent = _intent_of(a, order, None)
+    try:
+        intent = _intent_of(a, order, None)
+        intent.request()  # OrderRequest 검증(extra=forbid·Literal) — UPDATE 전에
+    except (KeyError, TypeError, ValueError, ArithmeticError) as e:
+        logger.error("승인 주문 복원 실패 #%s %s: %s", approval_id, account_id, e)
+        decide_approval(deps.conn, approval_id, "failed", decided_at=deps.now().isoformat())
+        return _fail(
+            approval_id, "invalid_order", "failed",
+            f"승인 요청 #{approval_id} 주문 내용을 복원하지 못함: {e}",
+        )  # fmt: skip
     # 요청 뒤 재평가가 같은 결정을 반대 방향·관망으로 바꿨으면 옛 요청을 실행하지 않는다
     if decision_side_of is not None and a["decision_id"]:
         want = decision_side_of(a["decision_id"])
@@ -463,11 +485,23 @@ def approve(
                 f"승인 요청 #{approval_id} 뒤 결정이 {want} 로 바뀌어 실행하지 않음 "
                 "(요청은 만료 처리)",
             )  # fmt: skip
-    if deps.broker_of(account_id) is None:
+    broker = deps.broker_of(account_id)
+    if broker is None:
         return _fail(
             approval_id, "no_broker", "pending",
             f"계좌 {account_id} 브로커 없음(앱키 미설정): 요청은 pending 유지",
         )  # fmt: skip
+    try:
+        run_dir = run_dir_of(a)
+        opinion = opinion_of(a) if opinion_of is not None else None
+    except Exception as e:  # noqa: BLE001 - 준비 실패는 주문 전이라 다음 시도에 맡긴다
+        logger.warning("승인 실행 준비 실패 #%s %s: %s", approval_id, account_id, e)
+        return _fail(
+            approval_id, "prepare", "pending",
+            f"승인 요청 #{approval_id} 실행 준비 실패({type(e).__name__}): 요청은 pending 유지",
+        )  # fmt: skip
+    if opinion is not None:
+        intent = _intent_of(a, order, opinion)
     if recheck is not None:
         why = recheck(a, order)
         if isinstance(why, KeepPending):
@@ -475,7 +509,7 @@ def approve(
                 approval_id, why.reason, "pending",
                 f"승인 요청 #{approval_id} 재판정 불가({why.reason}): 요청은 pending 유지",
             )  # fmt: skip
-        if why:
+        if isinstance(why, str):
             _expire(deps, approval_id)
             return _fail(
                 approval_id, "recheck", "expired",
@@ -487,10 +521,8 @@ def approve(
             approval_id, "race", None,
             f"승인 요청 #{approval_id} 은 이미 다른 프로세스가 처리함",
         )  # fmt: skip
-    if opinion_of is not None:
-        intent = _intent_of(a, order, opinion_of(a))
     try:
-        result = transmit(deps, intent, run_dir=run_dir_of(a), mode="approve")
+        result = transmit(deps, intent, run_dir=run_dir, mode="approve", broker=broker)
     except OrderBookkeepingError:  # 접수 뒤 기록 실패: approved 로 굳지 않게 failed 로 남긴다
         decide_approval(deps.conn, approval_id, "failed", expect="approved")
         raise
