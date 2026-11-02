@@ -156,8 +156,8 @@ def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
     accounts: list = []
     brokers: dict[str, Any] = {}
     market_client = holiday_fn = None
-    policy: Callable[[Any, Any], tuple[str, str | None]] = _no_policy
-    paused: Callable[[Any], bool] = _not_paused
+    policy: Callable[[Any, Any], tuple[str, str | None]] | None = None
+    paused: Callable[[Any], bool] | None = None
     if acc is not None:
         accounts = list(acc.accounts())
         raw = acc.brokers()
@@ -165,6 +165,7 @@ def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
         market_client = acc.market_client()
         holiday_fn = acc.holiday_fn()
         policy, paused = acc.policy, acc.paused
+    policy, paused = policy_pair(policy, paused)
     notifier: Any = NullNotifier()
     if boot.secrets is not None:
         try:
@@ -192,6 +193,25 @@ def _no_policy(conn: Any, account: Any) -> tuple[str, str | None]:
 
 def _not_paused(conn: Any) -> bool:
     return False
+
+
+def _always_paused(conn: Any) -> bool:
+    return True
+
+
+def policy_pair(
+    policy: Callable[[Any, Any], tuple[str, str | None]] | None,
+    paused: Callable[[Any], bool] | None,
+) -> tuple[Callable[[Any, Any], tuple[str, str | None]], Callable[[Any], bool]]:
+    """주입된 (정책, 일시정지) 콜백의 빈 자리를 안전하게 채운다(fail-closed).
+    정책이 없으면 모든 계좌 off(주문 없음). 정책은 있는데 일시정지 콜백이 없으면 일시정지로 본다 —
+    paused 를 놓쳐 신규 주문이 나가는 일이 없게(경고 로그)."""
+    if policy is None:
+        return _no_policy, paused or _not_paused
+    if paused is None:
+        logger.warning("일시정지 콜백 없이 계좌 정책만 주입됨: 일시정지로 취급(주문 없음)")
+        return policy, _always_paused
+    return policy, paused
 
 
 def deps_of(ctx: ExecContext) -> core.ExecDeps:
@@ -781,6 +801,9 @@ def _execute_account(
             idem_key=key,
             name=labels.resolve(ctx.conn, market, decision.ticker),
         )
+        # 주문 요청 검증(pydantic) — 키를 잡은 채 코어 안에서 실패하면 키가 미발송으로 남는다
+        for intent in plan.intents:
+            intent.request()
         write_checkpoint(
             d, f"{origin.risk_stage}_{account.id}", checkpoint_payload(plan.verdict_payload)
         )

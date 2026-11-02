@@ -986,3 +986,61 @@ def test_plan_of_returns_gate_plan(ectx):
         rejected, executor.origin_of(), acct, decision=dec, market="KR", exchange=None,
         price=PRICE, decision_id=7, idem_key=None,
     ).intents == []  # fmt: skip
+
+
+# --- Fix round 1 -------------------------------------------------------------------
+
+
+def test_invalid_order_request_releases_exec_key(ectx, monkeypatch):
+    """주문 요청 검증 실패(잘못된 order_type)는 코어로 가기 전에 나고 실행 키를 놓는다 — 미발송
+    키가 남으면 10분 회수 전까지 같은 결정의 재실행이 '실행 키 선점됨' 으로 막힌다."""
+    from trader.features.spot import rules
+
+    real = rules.evaluate
+
+    def bad(*a, **kw):
+        return real(*a, **kw).model_copy(update={"order_type": "STOP"})
+
+    monkeypatch.setattr(rules, "evaluate", bad)
+    results = _run(ectx)
+    r = next(x for x in results if x["account_id"] == "paper-main")
+    assert "error" in r and ectx.brokers["paper-main"].orders == []
+    assert ectx.conn.execute("SELECT COUNT(*) FROM exec_locks").fetchone()[0] == 0
+    assert ectx.conn.execute("SELECT COUNT(*) FROM buy_reservations").fetchone()[0] == 0
+
+
+def test_approve_buy_keeps_pending_when_balance_lookup_fails(ectx):
+    """Ruling 7: 승인 재판정의 잔고 조회가 실패하면 판정 불가 — 만료도 실행도 하지 않고 pending."""
+    aid = _pending(ectx)
+    ectx.brokers["paper-main"] = _broker(ectx.accounts[0], fail={"get_balance"})
+    r = executor.approve(ectx, aid)
+    assert r["ok"] is False and r["status"] == "pending" and r["reason"] == "balance"
+    assert repo.get_approval(ectx.conn, aid)["status"] == "pending"
+    assert ectx.brokers["paper-main"].orders == []
+
+
+def test_approve_hedge_buy_skips_balance_recheck(ectx):
+    """헤지 origin 매수 승인은 일일 손실 재판정을 보지 않는다(잔고 실패여도 실행)."""
+    modes.set_account_mode(ectx.conn, ectx.accounts[0], "approve")
+    dec = Decision(**ok_decision())
+    _ingest(ectx.conn, dec)
+    results = executor.execute(
+        ectx, dec, date=D, market="KR", price=PRICE, dry_run=False, is_hedge=True
+    )
+    aid = next(x for x in results if x["account_id"] == "paper-main")["approval_id"]
+    assert repo.get_approval(ectx.conn, aid)["order"]["origin"] == "hedge"
+    ectx.brokers["paper-main"] = _broker(ectx.accounts[0], fail={"get_balance"})
+    r = executor.approve(ectx, aid)
+    assert r["ok"] is True and len(ectx.brokers["paper-main"].orders) == 1
+
+
+def test_policy_without_paused_is_fail_closed(ectx):
+    """정책만 주입되고 일시정지 콜백이 없으면 일시정지로 본다 — 주문·승인 요청 없음."""
+    policy, paused = executor.policy_pair(accounts_api.effective_mode, None)
+    assert paused(ectx.conn) is True
+    ectx.policy, ectx.paused = policy, paused
+    r = next(x for x in _run(ectx) if x["account_id"] == "paper-main")
+    assert r["order"] is None and "일시정지" in (r["note"] or "")
+    assert ectx.brokers["paper-main"].orders == []
+    no_policy, not_paused = executor.policy_pair(None, None)
+    assert no_policy(ectx.conn, ectx.accounts[0])[0] == "off" and not_paused(ectx.conn) is False

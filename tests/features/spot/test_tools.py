@@ -1102,3 +1102,14 @@ def test_fake_session_submit_does_not_record_portfolio(ctx, project, monkeypatch
     assert r["ok"] and r["executions"][0]["approved"]
     assert ctx.conn.execute("SELECT COUNT(*) AS n FROM positions_snapshot").fetchone()["n"] == 0
     assert ctx.conn.execute("SELECT COUNT(*) AS n FROM account_nav").fetchone()["n"] == 0  # v5
+
+
+def test_submit_with_policy_but_no_paused_callback_places_no_order(ctx, project):
+    """도구 컨텍스트에 정책만 있고 일시정지 콜백이 없으면 fail-closed(일시정지) — 주문 없음."""
+    _ready_for_submit(ctx, project)
+    ctx.brokers = _cash_brokers(ctx)
+    ctx.dry_run = False
+    ctx.paused = None
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] and r["executions"][0]["order"] is None
+    assert ctx.brokers["paper-main"].orders == []

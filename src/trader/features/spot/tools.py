@@ -885,20 +885,17 @@ def _account_finished(
     return False
 
 
-def _no_policy(conn: Any, account: Any) -> tuple[str, str | None]:
-    return "off", "계좌 정책 포트 없음: 주문 없음"
-
-
 def _exec_ctx_of(ctx: ToolContext) -> executor.ExecContext:
     """도구 컨텍스트 → 실행 컨텍스트. FAKE 세션은 가짜 브로커 잔고를 기록하지 않는다."""
     assert ctx.conn is not None
+    policy, paused = executor.policy_pair(ctx.policy, ctx.paused)
     return executor.ExecContext(
         settings=ctx.settings,
         accounts=ctx.accounts,
         conn=ctx.conn,
         brokers=ctx.brokers,
-        policy=ctx.policy or _no_policy,
-        paused=ctx.paused or (lambda _c: False),
+        policy=policy,
+        paused=paused,
         notifier=ctx.notifier or NullNotifier(),
         state=ctx.state,
         now=ctx.now,
