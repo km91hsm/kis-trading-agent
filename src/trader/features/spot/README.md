@@ -44,7 +44,7 @@ CLI·명령
 - `approvals_expire` 잡은 `boot` 를 부르지 않고 `ctx.conn_factory()`·`ctx.now`·`ctx.notifier` 로 계좌·브로커 없는 최소 `ExecContext` 를 만든다(만료는 conn+now 만 쓴다).
 - `approval_line` 은 spot `messages.py` 가 소유한다(커널 `notify.messages` 의 ENV·SIDE·`money`·`kst_hhmm` 재사용).
 - 체결 동기화(`fills.py`, `trader spot fills sync`, `fills_sync` 잡·큐 kind): 파생(`fo`) 계좌 분기는 M10 까지 없다(현물 계좌만). 큐 `fills_sync` 본문 `fills_then_balance` 는 체결 동기화 뒤 장 밖이어도 잔고를 바로 다시 읽는다(잔고 실패는 체결 결과를 가리지 않음).
-- balance(`balance.py`, `balance_refresh` 잡, `trader spot balance refresh`)·reconcile(`reconcile.py`, `{market}_reconcile` 잡·큐 kind `reconcile`, `trader spot reconcile`): 옛 동작에서 섹터 자동분류(`_classify`)·킬스위치 미체결 BUY 회수(`cancel_buys`)·cash_park/헤지 제외·메모리 브레이커 인자·fo 분기를 뺐다. `snapshot_age` 는 보유 0건 계좌도 신선도가 보이도록 `account_nav` 를 본다. 대사 알림은 (계좌·시장·날짜) 플래그가 이미 있으면 다시 보내지 않는다(하루 1회). `reconcile.us` 는 뉴욕 시각(`tz: America/New_York`).
+- balance(`balance.py`, `balance_refresh` 잡, `trader spot balance refresh`)·reconcile(`reconcile.py`, `{market}_reconcile` 잡·큐 kind `reconcile`, `trader spot reconcile`): 옛 동작에서 섹터 자동분류(`_classify`)·킬스위치 미체결 BUY 회수(`cancel_buys`)·cash_park/헤지 제외·메모리 브레이커 인자·fo 분기를 뺐다. `snapshot_age` 는 보유 0건 계좌도 신선도가 보이도록 `account_nav` 를 본다. 대사 알림은 (계좌·시장·날짜) 플래그가 이미 있으면 다시 보내지 않는다(하루 1회). 대사 불일치 알림은 종목 표시명이 아니라 티커를 보여준다(옛 `names.display` — 종목명 해석은 M7 `ticker_names` 캐시 이식 때 복원). `reconcile.us` 는 뉴욕 시각(`tz: America/New_York`).
 
 세션·컨텍스트
 - 주문 알림 제목 꼬리 표 `_STAGE_KIND`(커널 `execution.core`)는 `order_stage` 를 `_r` 로 잘라 찾는 옛 동작을 그대로 둔다. 그래서 `_r` 로 시작하는 꼬리가 있는 `52_order_reprice`·`53_order_rebalance` 는 꼬리가 비고, 실제로 꼬리가 붙는 것은 `51_order`(재평가)·`55_order_sl`(손절) 등 `_r` 가 없는 단계다(M4 의 spot 이 쓰는 것은 51·55).

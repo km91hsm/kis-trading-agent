@@ -148,8 +148,8 @@ class ReconcileSchedule(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kr: ReconcileAt = Field(default_factory=lambda: ReconcileAt(time="15:45"))
-    us: ReconcileAt = Field(
+    kr: str | ReconcileAt = "15:45"  # 문자열이면 KST
+    us: str | ReconcileAt = Field(
         default_factory=lambda: ReconcileAt(time="16:15", tz="America/New_York")
     )
 

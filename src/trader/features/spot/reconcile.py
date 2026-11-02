@@ -106,9 +106,10 @@ def reconcile_account(
         )
         out["snapshot_fixed"] = True
     key = flag_key(account.id, market, today)
-    already = control.get_flag(conn, key) is not None  # 같은 날 두 번째 실행부터는 알리지 않는다
-    control.set_flag(conn, key, {**out, "at": now().isoformat()})
-    if not out["ok"] and notifier is not None and not already:
+    prev = control.get_flag(conn, key)
+    # 같은 날 불일치 알림은 한 번만 — ok 실행이 뒤의 불일치 알림을 막지 않고, 전송 실패는 재시도
+    notified = bool(prev and prev.get("notified"))
+    if not out["ok"] and notifier is not None and not notified:
         name = label or (lambda t: t)
         parts = [
             f"{name(m['ticker'])} 원장 {m['ledger_qty']}↔KIS {m['broker_qty']}" for m in mismatches
@@ -124,8 +125,10 @@ def reconcile_account(
                     account=account.id, market=market, day=str(today), parts=parts
                 )
             )
+            notified = True
         except Exception:  # noqa: BLE001 - 알림 실패가 대조를 바꾸지 않는다
             logger.debug("대조 알림 실패", exc_info=True)
+    control.set_flag(conn, key, {**out, "at": now().isoformat(), "notified": notified})
     logger.info(
         "대조 %s %s: 불일치 %d, 미정리 주문 %d", account.id, market, len(mismatches), len(stale)
     )

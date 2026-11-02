@@ -167,6 +167,7 @@ def test_reconcile_declarations():
     assert (r.id, r.kind, r.per_market, r.schedule_key, r.gate, r.catch_up) == (
         "{market}_reconcile", "reconcile", True, "reconcile.{market}", "market", "queue",
     )  # fmt: skip
+    assert (r.days, r.trigger, r.misfire) == ("mon-fri", "cron", "idempotent")
     b = spot_jobs.BALANCE_REFRESH
     assert (b.trigger, b.schedule_key, b.gate, b.catch_up) == (
         "interval", "balance_refresh.interval_s", "none", "none",
@@ -175,3 +176,70 @@ def test_reconcile_declarations():
     assert (q.label, q.lane, q.priority, q.trading, q.restart_requeue) == (
         "대사", "fast", 0, False, True,
     )  # fmt: skip
+
+
+def test_latest_positions_uses_nav_date_after_full_liquidation(project, conn):
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    y = date(2026, 10, 23)
+    xledger.snapshot_positions(
+        conn, account_id="paper-main", d=y, market="KR", nav=Decimal(1), cash=Decimal(1),
+        positions=[{"ticker": "005930", "market": "KR", "qty": 10}],
+    )  # fmt: skip
+    xledger.snapshot_positions(
+        conn, account_id="paper-main", d=D, market="KR", nav=Decimal(2), cash=Decimal(2),
+        positions=[],
+    )  # fmt: skip
+    latest = latest_positions(conn, "paper-main", "KR")
+    assert latest["date"] == D.isoformat() and latest["positions"] == []
+    out = reconcile.reconcile_account(
+        conn, _broker(acct, []), acct, "KR", today=D, now=lambda: T0, notifier=Notes()
+    )
+    assert out["ok"] and out["mismatches"] == []
+
+
+def test_reconcile_notified_only_when_sent(project, conn):
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    _snap(conn)
+    notes = Notes()
+    ok = _broker(acct, [_pos("005930", 10)])
+    bad = _broker(acct, [_pos("005930", 7)])
+    kw = dict(today=D, now=lambda: T0, notifier=notes)
+    reconcile.reconcile_account(conn, ok, acct, "KR", **kw)
+    assert notes.sent == []
+    reconcile.reconcile_account(conn, bad, acct, "KR", **kw)  # ok 뒤 같은 날 불일치
+    assert len(notes.sent) == 1
+    xledger.snapshot_positions(
+        conn, account_id="paper-main", d=D, market="KR", nav=Decimal(1), cash=Decimal(1),
+        positions=[{"ticker": "005930", "market": "KR", "qty": 3}],
+    )  # fmt: skip
+    reconcile.reconcile_account(conn, bad, acct, "KR", **kw)  # 불일치 → 불일치
+    assert len(notes.sent) == 1
+
+
+def test_reconcile_failed_send_retries(project, conn):
+    acct = make_account("paper-main", "paper", "auto", ["KR"])
+    _snap(conn)
+
+    class Boom:
+        def send(self, text, **_):
+            raise RuntimeError("down")
+
+    bad = _broker(acct, [_pos("005930", 7)])
+    kw = dict(today=D, now=lambda: T0)
+    reconcile.reconcile_account(conn, bad, acct, "KR", notifier=Boom(), **kw)
+    xledger.snapshot_positions(
+        conn, account_id="paper-main", d=D, market="KR", nav=Decimal(1), cash=Decimal(1),
+        positions=[{"ticker": "005930", "market": "KR", "qty": 3}],
+    )  # fmt: skip
+    notes = Notes()
+    reconcile.reconcile_account(conn, bad, acct, "KR", notifier=notes, **kw)
+    assert len(notes.sent) == 1
+
+
+def test_reconcile_schedule_accepts_string_and_object():
+    from trader.features.spot.settings import ReconcileSchedule
+
+    s = ReconcileSchedule.model_validate({"kr": "15:50", "us": {"time": "16:20", "tz": "UTC"}})
+    assert s.kr == "15:50" and s.us.time == "16:20" and s.us.tz == "UTC"
+    d = ReconcileSchedule()
+    assert d.kr == "15:45" and d.us.tz == "America/New_York"
