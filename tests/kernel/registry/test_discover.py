@@ -15,4 +15,4 @@ def test_discover_without_feature_module_raises():
 
 
 def test_discover_real_package_lists_accounts():
-    assert [f.id for f in discover()] == ["accounts"]
+    assert [f.id for f in discover()] == ["accounts", "ingest", "saveticker"]

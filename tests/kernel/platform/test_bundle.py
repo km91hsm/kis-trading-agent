@@ -89,3 +89,7 @@ def test_bundle_root_windows_flat_layout_unchanged(tmp_path, monkeypatch):
     exe_dir = tmp_path / "dist" / "trader"
     _freeze(monkeypatch, exe_dir)
     assert bundle.bundle_root() == exe_dir.resolve()
+
+
+def test_app_bundle_dir_is_public():
+    assert hasattr(bundle, "app_bundle_dir")

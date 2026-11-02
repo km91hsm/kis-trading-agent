@@ -13,7 +13,9 @@ def _repo_home(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TRADER_HOME", str(Path(__file__).resolve().parents[3]))
 
 
-@pytest.mark.parametrize("name", ["settings", "schedule", "accounts"])
+@pytest.mark.parametrize(
+    "name", ["settings", "schedule", "accounts", "sources", "universe", "sectors"]
+)
 def test_every_template_loads_with_all_sections(name):
     load(name, build_registry(discover()), path=templates_dir() / "config" / f"{name}.yaml")
 

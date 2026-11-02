@@ -37,6 +37,18 @@
   - 커널은 `control`·`runs` 외의 도메인 테이블을 모른다. 기능이 자기 마이그레이션으로 만든다.
 - 테스트: `tests/kernel/ledger/`
 
+## session
+
+- 책임: 실행 체크포인트 저장소(`kernel/session/run_store.py`). 레이아웃은 `state/runs/<운영일>/<시장>/<종목>/<이름>.json`. M4 이후 단계 파일은 이 함수들로만 읽고 쓴다.
+- 공개면: `run_date_for`·`run_dir`·`market_dir`, `CHECKPOINT_SCHEMA_VERSION`(=1)·`checkpoint_payload`, `write_checkpoint`·`read_checkpoint`·`list_checkpoints`.
+- 규약:
+  - 운영일 `run_date_for(market, now)`: KR 은 KST 날짜. US 는 현지 날짜의 개장 시각(09:30 ET)을 KST 로 바꾼 날짜라서, 개장 전 analyze 와 KST 자정 뒤 장중 monitor·재평가가 같은 디렉터리를 본다.
+  - `run_dir(d, market, ticker, state=None)` 은 종목 디렉터리를 만들어 돌려주고 `state/runs` 밖을 가리키면 `ValueError`. `market_dir(..., create=False)` 은 시장 단위 산출물(`_scan`·`_screen`·`_reflect`) 자리.
+  - 체크포인트 봉투 `checkpoint_payload(data, call=None)` = `{schema_version, data, call}`.
+  - `write_checkpoint` 는 pid·스레드 접미사 임시파일에 쓴 뒤 `atomic_replace` 로 교체한다(데몬의 monitor·작업 대기열이 다른 스레드라 pid 만으로는 임시파일이 겹친다).
+  - `read_checkpoint` 는 없으면 `None`, 이름이 디렉터리 밖을 가리키면 `ValueError`. `list_checkpoints` 는 이름 정렬.
+- 테스트: `tests/kernel/session/test_run_store.py`
+
 ## broker
 
 - 책임: KIS Open API 접근 전체. 인증·HTTP 클라이언트(레이트·재시도)·시세·주문/잔고·파생·웹소켓 프레임·가짜 구현·점검(`ping`)·클라이언트 조립. 주문 판단은 모른다.
@@ -73,6 +85,7 @@
   - `discover()` 는 `trader.features` 아래 각 패키지의 `feature.FEATURE` 를 `importlib`+`pkgutil` 로 동적 import 한다. kernel 이 features 를 import 하는 유일한 경로다.
   - import 3층 규칙: `kernel` ← 서비스 기능 ← 레인. 다른 기능은 `api.py` 로만, 레인은 기능 import 금지, 커널은 기능 import 금지(`discover` 제외). `import_violations` 가 AST 로 검사하며 `from pkg import features`·상대 import 형태도 잡는다.
   - `check(features, roots=None)`: `roots` 기본값은 `trader.features.__path__`. 기능 id·잡 id·큐 kind·SSE 키·origin 중복, 기능 폴더 README 존재, 마이그레이션 규칙을 메시지 목록으로 돌려준다.
+  - 훅: `hooks.by_point(features)` 가 각 `Feature.hooks` 를 포인트별 튜플로 묶고(기능 순서·선언 순서 유지), `hooks.run(hooks, point, **kw)` 가 차례로 부른다. 훅 하나의 예외는 기록하고 다음 훅을 계속하며(실패 격리), 훅마다 `{"hook","result"}` 또는 `{"hook","error"}` 한 건을 돌려준다. 포인트는 `news.post_ingest` 등. 커널은 훅 내용을 모른다.
   - 이름이 `features` 인 기능 폴더는 두지 않는다(루트 추론이 `<root>/features` 존재에 의존).
 - 테스트: `tests/kernel/registry/` (합성 fixture 는 `tests/fixtures/`)
 
@@ -87,6 +100,7 @@
   - 하트비트는 30초 주기 스케줄러 잡 `daemon_heartbeat`. `read_status` 가 웹의 `daemon` SSE 키와 상태 표시에 쓰인다.
   - 게이트가 사유를 돌려주면 cron 잡은 `skipped` 행을 남기고 interval 잡은 행을 남기지 않는다.
   - `DaemonDeps` 가 데몬이 받는 의존성 전부다(설정·스케줄·연결 팩토리·상태 폴더·시계·시장·게이트·정지 이벤트·`dry_run`).
+  - `DaemonDeps.secrets/registry/hooks` 로 잡 본문이 시크릿·레지스트리·훅을 받는다. 종료(`Daemon.shutdown`) 때 등록된 잡의 `spec.teardown(deps)` 를 spec 당 1회 부른다(실패 격리). interval 잡 주기는 `JobSpec.schedule_key` 가 가리키는 `schedule.yaml` 정수(초)를 우선한다.
   - 큐 레인 4개·heavy 락·미스파이어 정책은 M4 이후(JobSpec 속성만 통과시킨다).
 - 테스트: `tests/kernel/daemon/`
 
@@ -136,4 +150,4 @@
 
 ## features 층
 
-`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.

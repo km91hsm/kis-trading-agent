@@ -1,0 +1,57 @@
+# 외부 수집원 설정. 기본값은 robots·약관이 허용하는 소스만 on. off 소스를 켜는 책임은 사용자에게 있다.
+# 키를 추가하면 src/trader/features/<기능>/settings.py 의 섹션 모델도 함께 바꾼다.
+
+kis:
+  daily_days: 260      # high_52w_pos(252봉)·sma_120 워밍업 때문에 260 미만이면 지표가 None 이 된다
+  investor_days: 20
+
+news:
+  enabled: true
+  google_rss: true     # 키 불필요
+  naver: true          # NAVER_CLIENT_ID/SECRET 필요, 없으면 건너뜀
+  max_items: 20
+  macro_items: 10
+  # 시장 전체 뉴스 저장소: 데몬 news_collect 잡이 질의 묶음을 돌려 원장 news_items 에 쌓는다. 질의는 사용자가 고친다.
+  market_queries:
+    KR: ["증시", "코스피 OR 코스닥", "실적 발표", "수주 OR 계약", "신약 OR 임상", "반도체 OR 2차전지 OR 자동차", "금리 OR 환율"]
+    US: ["stock market", "earnings", "Fed OR Treasury yields", "guidance OR upgrade", "semiconductor OR AI OR biotech"]
+  store_retention_days: 14
+  store_hours: 48
+  store_items: 60
+
+macro:
+  enabled: true
+  fred: true           # FRED_API_KEY
+  ecos: true           # ECOS_API_KEY
+
+dart:
+  enabled: true        # DART_API_KEY
+
+edgar:
+  enabled: true
+  user_agent: ""       # 비우면 secrets/.env 의 EDGAR_USER_AGENT 를 쓴다 (SEC 요구 형식: "<이름> <이메일>")
+
+community:
+  enabled: true
+  reddit: true         # 서브레딧 RSS → OAuth (공식 API)
+  clien: true          # 게시판 목록 1페이지만 (robots 허용 범위)
+  dcinside: false      # HTML 수집 가능하나 robots 가 AI 크롤러를 차단 (회색지대)
+  fmkorea: false       # 위와 같음
+  toss: false          # SPA, 내부 API 는 조사 필요
+  naver_board: false   # SPA, robots 전면 차단
+  max_posts: 50
+
+# YouTube 채널 ID, 텔레그램 공개채널명, 네이버 블로그 id (rss.blog.naver.com/<id>.xml)
+channels:
+  youtube: []
+  telegram: []
+  naver_blog: []       # 키워드 무관 최근 naver_blog_posts 건을 분위기 입력에 싣는다
+  naver_blog_posts: 5
+
+saveticker:
+  # 수집 폴더(상대 경로는 프로젝트 루트 기준). 수집기와 리더가 같은 폴더를 본다
+  dir: state/external/saveticker
+  # false 면 브라우저 수집을 하지 않는다(이미 쌓인 데이터는 계속 읽는다)
+  collect: true
+  # 수집 데이터 보존 일수(3~365)
+  retention_days: 30

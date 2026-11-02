@@ -55,9 +55,29 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 
 ## M3 — features/ingest + saveticker
 수집(KIS·DART·EDGAR·뉴스·커뮤니티·거시)과 saveticker 수집기·리더·데몬 잡. 완료 기준: 옛 `sources/*`·`saveticker/*` 테스트 이식 통과.
-- [ ] 착수 전
+- [x] Task 1: 커널 전제(의존성·paths·bundle·run_store·hooks·DaemonDeps·teardown·디스플레이 skip)
+- [x] Task 2: saveticker 설정·경로·모델·스토어·보고서
+- [x] Task 3: saveticker 파서·플랜·API 계약·네이티브 호스트
+- [x] Task 4: saveticker Chromium·브라우저·감독·자동화
+- [x] Task 5: saveticker 확장 설치·`extensions/saveticker/`·JS 테스트 CI
+- [x] Task 6: saveticker 리더·CLI·데몬 잡·feature·api·README
+- [x] Task 7: ingest 설정(sources·universe·sectors)·템플릿·원장 v3·base
+- [x] Task 8: ingest 뉴스·뉴스 저장소·공시 중요도
+- [x] Task 9: ingest DART·EDGAR·거시
+- [x] Task 10: ingest 커뮤니티·채널(네이버 블로그·텔레그램·YouTube)
+- [x] Task 11: ingest 수동 입력·기술 지표·세이브티커 적재
+- [x] Task 12: ingest `build_inputs`·클라이언트 조립·CLI `ingest collect`
+- [x] Task 13: ingest 데몬 잡 `news_collect`·api·feature 완성·README
+- [x] Task 14: 문서·체크리스트·공개면 점검
+- [ ] PR #4 머지 (사용자 머지 대기)
 - 이연(M0 리뷰):
-  - TODO 승계 `EDGAR_USER_AGENT` 입력 항목
+  - TODO 승계 `EDGAR_USER_AGENT` 입력 항목 (아래 「사용자 확인 대기」)
+- 이연(M3):
+  - M4: `InputDeps.market` 주입, native-host argv 우회(번들) — `test_native_origin_routes_before_cli`, `trader collect` 별칭 여부
+  - M6: `_vix`
+  - M7: `_news_trigger`·`_discover_body`·`_disclosure_trigger`·`_events_check`·`ticker_names` 캐시·`peer_fn`·`universe check|sectors`, 옛 `test_daemon_news` 7건·`test_daemon_disclosure` 3건
+  - M11: `/api/news`·`/api/control/manual-inputs`·`/api/system/saveticker`·restart
+  - M12: health `disclosure`·`saveticker`, selfcheck playwright 점검, `test_health_disclosure_area_critical_for_held`, 패키징(`extensions/saveticker` data·playwright 드라이버)
 
 ## M4 — kernel/session + kernel/execution + spot analyze
 SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경로(가장 큼, 골든 회귀 1회 재기준). 완료 기준: `FAKE_CLAUDE=1 trader analyze --dry-run` 체크포인트 일치.
@@ -134,3 +154,5 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
 - [ ] 실기(사용자 확인 대기): 번들 zip 을 풀어 더블클릭 → 웹 UI → `kis ping` (macOS 우클릭 열기·Windows SmartScreen 1회) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
+- [ ] 사용자 확인 대기: `channels.naver_blog` 기본값 — 옛 기본 `ranto28` 복원 여부 결정 (M3)
+- [ ] 사용자 확인 대기: `EDGAR_USER_AGENT` 시크릿 입력 (M3 ingest, EDGAR 수집)

@@ -14,6 +14,8 @@
 | `uv run trader daemon [--dry-run]` | 스케줄러 데몬 (사용자 전용 — 금지사항 참고) |
 | `uv run trader web [--host] [--port]` | 웹 UI·API 서버 |
 | `uv run trader accounts show\|mode\|pause\|resume\|ping\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·추가삭제·키 가져오기 (모드 변경·`ping` 은 사용자 전용) |
+| `uv run trader ingest collect --ticker … [--market KR\|US --exchange … --asof … --force]` | 종목 수집 1회(공시·뉴스·거시 등, 절별 오류 격리) |
+| `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
 | `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
@@ -43,6 +45,7 @@
 - `secrets/` 를 커밋하지 않는다. 읽지도 않는다(`cat` 같은 Bash 읽기 명령 포함, 다른 명령과 묶지 않는다). `config/accounts.yaml` 에는 실제 계좌번호가 있으므로 값을 출력·인용하지 않는다.
 - 계좌 모드(`control`/`account_modes`)를 임의로 변경하지 않는다. 모드 변경은 사용자가 한다.
 - `FAKE_CLAUDE=1` 없이 `uv run trader analyze` 를 돌리지 않는다(구독 호출 발생). 사용자 요청 없이 실제 세션을 띄우지 않는다.
+- `trader saveticker run|service|install-browser` 는 사이트 로그인·Chromium 다운로드라 사용자 요청 없이 돌리지 않는다.
 - 셸 스크립트(`.sh`/`.bat`/`.ps1`)를 추가하지 않는다. 훅·설치·유틸·빌드는 전부 파이썬.
 - `state/` 파일을 직접 편집하지 않는다.
 - 저장소는 공개다. 외부 사이트에서 수집한 원문(기사 제목·본문·리포트 텍스트)을 테스트 fixture 로 커밋하지 않는다. 구조만 본뜬 합성 데이터를 쓴다.

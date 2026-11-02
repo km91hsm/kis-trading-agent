@@ -65,6 +65,25 @@ def test_interval_job_trigger_kwargs():
     assert job.trigger_kwargs == {"seconds": 30} and job.interval_s == 30 and job.cron is None
 
 
+def test_interval_job_reads_seconds_from_schedule_key():
+    sched = SimpleNamespace(news_collect=SimpleNamespace(interval_s=600))
+    s = spec(
+        id="news", trigger="interval", per_market=False,
+        schedule_key="news_collect.interval_s", interval_s=1800,
+    )  # fmt: skip
+    (job,) = run_build([feat(s)], schedule=sched)
+    assert job.trigger_kwargs == {"seconds": 600}
+
+
+def test_interval_job_falls_back_to_interval_s_when_key_missing():
+    s = spec(
+        id="news", trigger="interval", per_market=False,
+        schedule_key="news_collect.interval_s", interval_s=1800,
+    )  # fmt: skip
+    (job,) = run_build([feat(s)], schedule=SimpleNamespace())
+    assert job.trigger_kwargs == {"seconds": 1800}
+
+
 def test_cron_job_without_schedule_key_raises_config_error():
     with pytest.raises(ConfigError, match="schedule_key"):
         run_build([feat(spec(schedule_key=None))])
