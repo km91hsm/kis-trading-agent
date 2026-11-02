@@ -38,7 +38,7 @@ logger = logging.getLogger("trader.daemon")
 HEAVY_POLL_S = 30.0  # heavy 락 대기 폴링 간격
 HEAVY_WAIT_NOTIFY_S = 600.0  # cron 이 이만큼 기다리면 알림 1건
 QUEUED_MAX_AGE = timedelta(hours=6)  # 기동 때 이보다 오래 대기한 요청은 만료
-AUTO_SOURCES = frozenset({"daemon", "news", "notice"})  # 꺼낼 때 게이트를 다시 보는 자동 출처
+AUTO_SOURCES = frozenset({"daemon", "news", "notice", "restart"})  # 꺼낼 때 게이트 재검사
 RESTART_SOURCE = "restart"
 
 SCAN_MISFIRE_GRACE_S = 3600  # 절전 등으로 늦어도 1시간 안이면 그냥 돈다(하루를 잃는 것보다 낫다)
@@ -166,9 +166,9 @@ def lane_kinds(kinds: jobq.Kinds, lanes: frozenset[str]) -> frozenset[str]:
 
 
 def auto_gate(deps: Any, req: dict) -> str | None:
-    """자동 요청(데몬 따라잡기·뉴스·체결통보)의 trading kind 는 넣은 뒤 꺼내기 전에 장이 끝나거나
-    일시정지·휴장일일 수 있다 — 꺼내는 시점에 시장 게이트와 장 마감을 다시 본다. 사람이 누른
-    요청(web·telegram·cli)과 trading 이 아닌 kind 는 그대로 돈다."""
+    """자동 요청(데몬 따라잡기·뉴스·체결통보·재기동 재등록)의 trading kind 는 넣은 뒤 꺼내기
+    전에 장이 끝나거나 일시정지·휴장일일 수 있다 — 꺼내는 시점에 시장 게이트와 장 마감을 다시
+    본다. 사람이 누른 요청(web·telegram·cli)과 trading 이 아닌 kind 는 그대로 돈다."""
     spec = deps.queue.kinds.get(req["kind"])
     if spec is None or not spec.trading or req.get("source") not in AUTO_SOURCES:
         return None

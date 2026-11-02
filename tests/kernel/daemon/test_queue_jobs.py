@@ -83,6 +83,7 @@ def make_kinds(box: Box) -> dict[str, QueueKind]:
         ("sync", NoParams, "fast", 0, False, True),
         ("collect", NoParams, "fast", 0, False, False),
         ("reeval", MarketParams, "reeval", 10, True, False),
+        ("reeval_rr", MarketParams, "reeval", 10, True, True),
         ("probe", NoParams, "info", 0, False, False),
     ]
     return {
@@ -636,3 +637,17 @@ def test_daemon_registers_queue_jobs_grace_and_start_soon(env):
         assert d.deps.queue.heartbeat is d._hb
     finally:
         d.shutdown(wait=False)
+
+
+def test_restart_requeued_trading_request_rechecks_market_gate(env, conn):
+    """Ruling 9: 재기동으로 다시 넣은 요청(source restart)도 자동 출처 — trading kind 는 꺼낼 때
+    시장 게이트를 다시 보고, 걸리면 본체 없이 skipped 로 닫는다."""
+    enqueue(env, conn, "reeval_rr", {"market": "KR"}, source="monitor")
+    jobq.claim_next(conn, now=NOW, kinds=["reeval_rr"])  # 실행 중에 데몬이 죽었다
+    r = qj.bootstrap_queue(env.deps)
+    (row,) = [x for x in jobq.list_recent(conn) if x["status"] == "queued"]
+    assert r["requeued"] and row["source"] == "restart"
+    assert env.tick("reeval") == {"request": row["id"], "kind": "reeval_rr"}  # NOW 는 토요일
+    done = next(x for x in jobq.list_recent(conn) if x["id"] == row["id"])
+    assert done["status"] == "skipped" and done["result"] == {"skipped": "주말"}
+    assert env.ran == []
