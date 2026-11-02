@@ -5,11 +5,13 @@ from __future__ import annotations
 from trader.kernel.registry.contracts import check, import_violations
 from trader.kernel.registry.discover import discover
 from trader.kernel.registry.types import (
+    AgentDef,
     Feature,
     HealthArea,
     Hook,
     JobSpec,
     OriginSpec,
+    Port,
     QueueKind,
     RegistryError,
     SessionKind,
@@ -21,11 +23,13 @@ from trader.kernel.registry.types import (
 )
 
 __all__ = [
+    "AgentDef",
     "Feature",
     "HealthArea",
     "Hook",
     "JobSpec",
     "OriginSpec",
+    "Port",
     "QueueKind",
     "RegistryError",
     "SessionKind",

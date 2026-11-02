@@ -15,9 +15,9 @@ from typing import Any
 from trader.kernel.config.time import KST, MARKET_TZ
 from trader.kernel.platform import paths
 from trader.kernel.platform.fsutil import atomic_replace
+from trader.kernel.session.stages import CHECKPOINT_SCHEMA_VERSION
 
 _US_OPEN = time(9, 30)
-CHECKPOINT_SCHEMA_VERSION = 1
 
 
 def run_date_for(market: str, now: datetime) -> date:

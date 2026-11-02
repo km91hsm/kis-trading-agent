@@ -104,3 +104,52 @@ def test_contracts_require_readme(tmp_path):
 
 def test_real_tree_has_no_violations():
     assert contracts.check(discover()) == []
+
+
+def test_duplicate_agent_names_reported():
+    from trader.kernel.registry.types import AgentDef
+
+    alpha, beta = _ok()
+    a = AgentDef(name="trader", path=Path("a.md"))
+    msgs = contracts.check(
+        [replace(alpha, agents=(a,)), replace(beta, agents=(a,))], roots=[OK_ROOT]
+    )
+    assert "에이전트 이름 중복: trader" in msgs
+
+
+def test_duplicate_port_names_reported():
+    from trader.kernel.registry.types import Port
+
+    alpha, beta = _ok()
+    p = Port(name="broker", build=lambda b: None)
+    msgs = contracts.check(
+        [replace(alpha, ports=(p,)), replace(beta, ports=(p,))], roots=[OK_ROOT]
+    )
+    assert "포트 중복: broker" in msgs
+
+
+def test_lane_tier_must_match_lanes_both_ways():
+    alpha, _ = _ok()
+    msgs = contracts.check([replace(alpha, tier="lane")], roots=[OK_ROOT])
+    assert "기능 alpha: tier=lane 이지만 LANES 에 없음" in msgs
+    msgs = contracts.check([replace(alpha, id="spot", tier="service")], roots=[OK_ROOT])
+    assert "LANES 의 spot 가 tier=lane 이 아님" in msgs
+    # 기능이 없으면 LANES 항목은 검사하지 않는다
+    assert not any("LANES" in m for m in contracts.check([alpha], roots=[OK_ROOT]))
+
+
+def test_origin_outside_check_reported():
+    alpha, _ = _ok()
+    o = OriginSpec("bogus", "r", "o", False, frozenset(), "decision")
+    msgs = contracts.check([replace(alpha, origins=(o,))], roots=[OK_ROOT])
+    assert "기능 alpha: origin bogus 는 orders.origin CHECK 밖" in msgs
+    ok = replace(o, origin="llm")
+    assert contracts.check([replace(alpha, origins=(ok,))], roots=[OK_ROOT]) == []
+
+
+def test_stage_rule_defaults():
+    from trader.kernel.registry.types import StageRule, ToolCommand
+
+    r = StageRule(pattern="x")
+    assert r.requires == () and r.min_counts == ()
+    assert ToolCommand(name="t", handler=print).stage_rules == ()

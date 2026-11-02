@@ -16,7 +16,7 @@
 ## config
 
 - 책임: yaml 설정 로더와 섹션 레지스트리. 커널 자체 섹션(`settings.markets`·`settings.web`)만 여기서 등록하고, 기능 섹션은 부트가 더한다.
-- 공개면: `load`·`memo_load`, `Section`·`SectionRegistry`·`ConfigFile`, `kernel_registry`·`KERNEL_SECTIONS`, `ConfigError`, `KST`, `Market`, `WebSettings`, `NotifySettings`, `secrets`(`load_secrets`·`Secrets`).
+- 공개면: `LlmSettings`(`settings.llm`: 세션 예산·타임아웃·`timeout_for(kind)`·감속 `UsageThrottle`·`UsageProbe`)·`models`·`claude_bin`·`anonymize` 섹션, `load`·`memo_load`, `Section`·`SectionRegistry`·`ConfigFile`, `kernel_registry`·`KERNEL_SECTIONS`, `ConfigError`, `KST`, `Market`, `WebSettings`, `NotifySettings`, `secrets`(`load_secrets`·`Secrets`).
 - 규약:
   - `Section.model` 은 pydantic **필드 주석**이다(`list[Market]` 같은 타입도 허용). RootModel `.root` 를 강요하지 않는다.
   - 모든 섹션 모델은 `extra="forbid"`. 알 수 없는 키는 `ConfigError`.
@@ -80,7 +80,7 @@
 ## registry
 
 - 책임: 기능 계약(`Feature`)과 그 타입, 기능 발견, 계약·import 경계 검사.
-- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`, `RegistryError`, `discover`, `check`, `import_violations`.
+- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`·`AgentDef`(에이전트 정의 파일)·`Port`(부트가 `build(boot)` 로 조립하는 이름 붙은 구현체), `RegistryError`, `discover`, `check`, `import_violations`.
 - 규약:
   - `discover()` 는 `trader.features` 아래 각 패키지의 `feature.FEATURE` 를 `importlib`+`pkgutil` 로 동적 import 한다. kernel 이 features 를 import 하는 유일한 경로다.
   - import 3층 규칙: `kernel` ← 서비스 기능 ← 레인. 다른 기능은 `api.py` 로만, 레인은 기능 import 금지, 커널은 기능 import 금지(`discover` 제외). `import_violations` 가 AST 로 검사하며 `from pkg import features`·상대 import 형태도 잡는다.

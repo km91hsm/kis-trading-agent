@@ -1,4 +1,4 @@
-# 시장 목록·웹 서버·알림(notify) 설정. 기능별 섹션은 해당 기능이 추가된 뒤 이 파일에 적는다.
+# 시장 목록·웹 서버·알림(notify)·LLM 설정. 기능별 섹션은 해당 기능이 추가된 뒤 이 파일에 적는다.
 markets: [KR, US]
 
 web:
@@ -8,3 +8,34 @@ web:
 notify:
   enabled: true
   poll_interval_s: 30
+
+# 역할별 모델 (스펙 §4.1). 강세·약세 리서처는 같은 모델(2026-10-26 전체 검토 L11 — 이전엔 약세만 opus).
+models:
+  orchestrator: sonnet
+  screener: haiku
+  scout: sonnet       # 종목 발굴(Phase 19): 시장 뉴스로 유니버스 안 → 상장 전체
+  analyst: sonnet
+  researcher_bull: sonnet
+  researcher_bear: sonnet  # 강세와 같은 모델(전체 검토 L11 — 비대칭이면 정당한 수렴도 '아첨' 으로 판정)
+  trader: opus
+  reflector: sonnet
+
+anonymize: false      # true 면 프롬프트 직전 종목명·티커 치환
+claude_bin: null      # null 이면 PATH 에서 claude 탐색
+
+# 오케스트레이터 세션 예산·동시성 (스펙 §4.1)
+llm:
+  budget_usd: 5.0        # 세션당 --max-budget-usd (전문 전달 세션은 $2~3, 실기 확인)
+  timeout_s: 900         # 세션 타임아웃(종류별은 timeout_by_kind 기본값: 스크리너·발굴 300, 재평가 600). 600 에서 분석 35% 가 시간 초과(2026-10-29)
+  daily_session_cap: 80  # 하루 세션 수 고정 상한 (종목 analyze + 시장 세션 + 장중 발굴·재분석). Phase 24 에 40→80 — 2~4주 통계 뒤 다시 정한다
+  usage_throttle:        # 구독 사용률 감속: 세션 rate_limit_event·상태줄 파일의 최신 관측 기준
+    enabled: true
+    soft_pct: 0.80       # 5시간·7일 창 중 하나라도 80% 이상이면 보유 재평가만
+    hard_pct: 0.95       # 95% 이상이면 새 세션 전부 중지
+    max_age_h: 6         # 이보다 오래된 관측은 무시(고정 상한만)
+  market_session_cap: 2  # 시장 세션(거시·토론·전략가) 하루 상한. 큐로 다시 눌러도 이 수를 넘지 않는다
+  usage_file: ~/.claude/rate_limits.json  # 대화형 claude 상태줄이 남기는 구독 사용률 관측 파일 (웹 대시보드)
+  usage_probe:           # 데몬이 주기적으로 haiku 단발 호출 1회로 사용률·초기화 시각 확인(웹 사용량 블록 실시간)
+    enabled: true
+    interval_min: 30     # 확인 주기
+    skip_if_recent_min: 5  # 최근 이 시간 안에 세션 관측이 있으면 건너뜀

@@ -8,13 +8,16 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
 from trader.kernel.ledger.migrations import KERNEL, Migration
 from trader.kernel.ledger.migrations import check as check_migrations
 from trader.kernel.registry.types import Feature
 
-# 레인 기능: 어떤 기능도 import 하지 못한다(필요한 것은 deps 주입).
-LANES = frozenset({"spot", "fo", "scalp"})
+# orders.origin CHECK 허용값 (Task 5 가 execution.types 로 옮기고 여기서 re-export)
+ORIGIN_CHECK = (
+    "llm", "stop", "hedge", "scalp", "rebalance", "reprice", "park", "external", "fo",
+)  # fmt: skip
 # 다른 기능에서 import 할 수 있는 유일한 공개면.
 PUBLIC_MODULE = "api"
 # 커널 중 기능 패키지를 동적으로 import 하는 유일한 파일.
@@ -46,12 +49,24 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         ("큐 kind", [q.kind for f in features for q in f.queue_kinds]),
         ("SSE 키", [s.key for f in features for s in f.sse_keys]),
         ("origin", [o.origin for f in features for o in f.origins]),
+        ("에이전트 이름", [a.name for f in features for a in f.agents]),
+        ("포트", [p.name for f in features for p in f.ports]),
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
     try:
         check_migrations(all_migrations(features))
     except LedgerError as exc:
         msgs.append(str(exc))
+    for f in features:
+        if f.tier == "lane" and f.id not in LANES:
+            msgs.append(f"기능 {f.id}: tier=lane 이지만 LANES 에 없음")
+        if f.id in LANES and f.tier != "lane":
+            msgs.append(f"LANES 의 {f.id} 가 tier=lane 이 아님")
+        msgs += [
+            f"기능 {f.id}: origin {o.origin} 는 orders.origin CHECK 밖"
+            for o in f.origins
+            if o.origin not in ORIGIN_CHECK
+        ]
     search = list(roots) if roots is not None else _default_roots()
     for f in features:
         if not any((root / f.id / "README.md").is_file() for root in search):

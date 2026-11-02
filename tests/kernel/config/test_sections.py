@@ -55,3 +55,22 @@ def test_copy_is_independent():
     assert reg.keys("settings") == ["a"]
     assert clone.keys("settings") == ["a", "b"]
     assert clone.model_for("settings") is not reg.model_for("settings")
+
+
+def test_kernel_llm_section_defaults_and_timeout_for():
+    from trader.kernel.config import UsageProbe, UsageThrottle, kernel_registry
+
+    cfg = kernel_registry().model_for("settings")()
+    s = cfg.llm
+    assert s.budget_usd == 5.0 and s.timeout_s == 900 and s.daily_session_cap == 80
+    assert s.timeout_for("screen") == 300 and s.timeout_for("zzz") == 900
+    assert s.usage_throttle == UsageThrottle() and s.usage_probe == UsageProbe()
+    assert s.market_session_cap == 2 and s.timeout_retry_max == 2
+    assert s.usage_file == "~/.claude/rate_limits.json"
+
+
+def test_kernel_models_claude_bin_anonymize_sections():
+    from trader.kernel.config import kernel_registry
+
+    cfg = kernel_registry().model_for("settings")()
+    assert cfg.models == {} and cfg.claude_bin is None and cfg.anonymize is False

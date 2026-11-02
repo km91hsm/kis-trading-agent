@@ -31,10 +31,65 @@ class NotifySettings(BaseModel):
     poll_interval_s: int = Field(30, ge=5, le=600)
 
 
+class UsageThrottle(BaseModel):
+    """구독 사용률 감속. 마지막 관측(세션 rate_limit_event·상태줄 파일)의 5시간·7일 창 중
+    하나라도 soft 이상이면 보유 재평가(resume)만, hard 이상이면 새 세션을 전부 막는다.
+    관측이 없거나 max_age_h 보다 오래면 막지 않는다(고정 상한 daily_session_cap 만)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    soft_pct: float = Field(0.80, gt=0, le=1)
+    hard_pct: float = Field(0.95, gt=0, le=1)
+    max_age_h: float = Field(6.0, gt=0)
+
+
+class UsageProbe(BaseModel):
+    """구독 사용률 확인(웹 실시간): 데몬이 interval_min 마다 haiku 단발 `claude -p` 1회로 5시간·7일
+    사용률과 초기화 시각을 관측한다. 최근 skip_if_recent_min 안에 다른 관측(세션)이 있으면 건너뛰고,
+    사용률이 감속 hard 이상이면 확인도 쉰다(사용량을 더 쓰지 않게)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    interval_min: int = Field(30, ge=5, le=360)
+    skip_if_recent_min: int = Field(5, ge=0, le=120)
+
+
+class LlmSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    budget_usd: float = 5.0
+    # 세션 타임아웃(초). 2026-10-29 운영 점검: 600초에서 분석 세션 35% 가 시간 초과(성공 최장 588초)
+    timeout_s: int = 900
+    # 종류별 타임아웃(없으면 timeout_s). 스크리너·발굴은 짧게, 재평가는 중간
+    timeout_by_kind: dict[str, int] = Field(
+        default_factory=lambda: {
+            "screen": 300, "discover": 300, "resume": 600, "fo_resume": 600, "reflect": 600,
+        }
+    )  # fmt: skip
+    # 같은 운영일 같은 종목이 타임아웃으로 이만큼 실패하면 그날은 다시 띄우지 않는다
+    timeout_retry_max: int = Field(default=2, ge=1, le=10)
+    # 종목 analyze + 시장 세션 + 장중 발굴·재분석 합계
+    daily_session_cap: int = 80
+    usage_throttle: UsageThrottle = Field(default_factory=UsageThrottle)
+    market_session_cap: int = 2  # 하루 시장 세션(kind=market) 상한 (종목 분석 예산 보호)
+    # 대화형 Claude Code 상태줄이 남기는 구독 사용률 관측 파일. 비우면 표시 안 함
+    usage_file: str | None = "~/.claude/rate_limits.json"
+    usage_probe: UsageProbe = Field(default_factory=UsageProbe)
+
+    def timeout_for(self, kind: str) -> int:
+        return int(self.timeout_by_kind.get(kind, self.timeout_s))
+
+
 KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "markets", list[Market], lambda: ["KR", "US"]),
     Section("settings", "web", WebSettings, WebSettings),
     Section("settings", "notify", NotifySettings, NotifySettings),
+    Section("settings", "llm", LlmSettings, LlmSettings),
+    Section("settings", "models", dict[str, str], dict),
+    Section("settings", "claude_bin", str | None, lambda: None),
+    Section("settings", "anonymize", bool, lambda: False),
 )
 
 
@@ -52,11 +107,14 @@ __all__ = [
     "ConfigError",
     "ConfigFile",
     "Env",
+    "LlmSettings",
     "Market",
     "NotifySettings",
     "Section",
     "SectionRegistry",
     "Secrets",
+    "UsageProbe",
+    "UsageThrottle",
     "WebSettings",
     "account_prefix",
     "kernel_registry",
