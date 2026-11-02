@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from trader.features.accounts import api
 from trader.features.accounts.api import Account
+from trader.kernel.config import market_hours
 from trader.kernel.config.secrets import Secrets
 from trader.kernel.registry.types import Port
 
@@ -47,8 +49,22 @@ class AccountsPortImpl:
     def paused(self, conn: sqlite3.Connection) -> bool:
         return api.is_paused(conn)
 
-    def holiday_fn(self) -> Callable[..., bool] | None:
-        return None  # M5
+    def holiday_fn(self) -> Callable[[str, date], bool]:
+        """`(market, d) -> bool` 휴장 판정. KR 은 KIS 조회(실패 = 개장), US 는 NYSE 규칙."""
+        client = self.market_client()
+
+        def is_holiday(market: str, d: date) -> bool:
+            if market == "US":
+                return market_hours.is_us_holiday(d)
+            if client is None:
+                return False
+            try:
+                return bool(client.is_holiday(d))
+            except Exception as e:  # noqa: BLE001 - 조회 실패는 개장으로 본다
+                logger.warning("휴장일 조회 실패, 개장으로 처리: %s", type(e).__name__)
+                return False
+
+        return is_holiday
 
 
 PORT = Port("accounts", lambda b: AccountsPortImpl(api.load_accounts(secrets=b.secrets), b.secrets))
