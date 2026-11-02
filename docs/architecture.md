@@ -23,6 +23,7 @@
   - `kernel_registry()` 는 호출마다 커널 섹션만 담은 새 레지스트리를 준다. 부트가 복제본에 `feature.sections` 를 등록한다.
   - `KST` 는 `config/time.py` 하나. 다른 곳에서 `ZoneInfo("Asia/Seoul")` 를 만들지 않는다.
   - `templates/config/*.yaml` 은 스키마를 통과해야 한다(자리표시자만).
+  - `config.market_hours`: 시장 달력·장중 판정(`REGULAR` 정규장, `in_window`, `us_holidays`/`us_early_closes`(NYSE 휴장·조기폐장 13:00 ET 규칙), `is_us_holiday`, `has_session`, `is_open`, `session_over`, `completed_candles`, `close_hm`/`market_close`). KR 휴장일은 모르고 `holiday_fn`(accounts 포트가 KIS 휴장 조회로 공급)을 받는 쪽이 본다. 옛 시그니처를 그대로 둔다.
 - 테스트: `tests/kernel/config/`
 
 ## ledger
@@ -67,6 +68,7 @@
   - `idem`: 실행 키 저장소 `IdemStore`·`ExecKeyStore`. `exec_locks` 가 키를 쥐고 매수 예약이면 `buy_reservations` 가 계좌·시장·종목·금액을 남겨 동시 판정이 서로의 진행 중 예약을 보게 한다.
   - `ledger`: 원장 원시 — 주문·승인·리스크 판정·스냅샷·NAV 기록과 게이트 입력용 조회(`realized_pnl_5d`·`held_since` 등). 옛 `ledger/repo.py` 와 같은 시그니처·공식(게이트 입력이라 공식이 바뀌면 매매가 바뀐다). 금액은 Decimal ↔ TEXT, 시각은 UTC ISO.
   - `core`: `transmit`(보낸 시각 `mark_sent` → 브로커 → 상태 결정 → 원장 → 키를 주문에 묶거나 놓음 → 체크포인트·알림), `request_approval`·`approve`·`reject`·`expire_approvals`, `approval_fingerprint`, `ExecDeps`. `approve` 는 기능이 아는 판단(계좌 정책·결정 방향·재판정·의견)을 콜백으로 받고, `recheck` 는 `None` 통과 / `str` 사유 → expired / `KeepPending(reason)` → pending 유지.
+  - `core.cancel(deps, *, order_id, order_no, market, broker, dry_run, reason, exchange=None)`: 미체결 주문 1건 취소의 유일한 경로. US 취소에 필요한 `org_no`·`ticker`·`qty` 는 주문 행에서 읽는다. 브로커 취소 1회, 접수되면 `cancelled` 로 바꾸고 거부(`ok=False`)는 상태를 두며, 예외는 상태를 그대로 두고 다시 올린다. `dry_run` 은 브로커·상태 모두 건드리지 않는다. 기능(monitor 의 손절 전 미체결 정리, reprice)이 `broker.cancel_order` 를 직접 부르지 않는다.
   - `ports`: 코어가 기능에 기대는 접점 Protocol `AccountsPort`·`InputsPort`. 구현은 accounts·ingest 기능이 맡는다.
 - 공개면: `kernel.execution.__all__` — `EXECUTION`·`OrderIntent`·`ExecPolicy`·`GatePlan`·`OrderBookkeepingError`·`ExecKeyStore`·`IdemStore`·`KeepPending`·`approval_fingerprint`·`AccountsPort`·`InputsPort`. 원장 원시는 `from trader.kernel.execution import ledger as xledger`, 코어는 `core` 모듈로 쓴다.
 - 규약:
@@ -138,7 +140,13 @@
   - 게이트가 사유를 돌려주면 cron 잡은 `skipped` 행을 남기고 interval 잡은 행을 남기지 않는다.
   - `DaemonDeps` 가 데몬이 받는 의존성 전부다(설정·스케줄·연결 팩토리·상태 폴더·시계·시장·게이트·정지 이벤트·`dry_run`).
   - `DaemonDeps.secrets/registry/hooks` 로 잡 본문이 시크릿·레지스트리·훅을 받는다. 종료(`Daemon.shutdown`) 때 등록된 잡의 `spec.teardown(deps)` 를 spec 당 1회 부른다(실패 격리). interval 잡 주기는 `JobSpec.schedule_key` 가 가리키는 `schedule.yaml` 정수(초)를 우선한다.
-  - 큐 레인 4개·heavy 락·미스파이어 정책은 M4 이후(JobSpec 속성만 통과시킨다).
+  - **게이트**: `JobSpec.gate`(`none`|`market`|`monitor`)는 `Feature.gates`(`GateSpec(name, build)`) 가 공급한다. `build(boot, deps)` 가 `gate(job) -> 사유|None` 을 돌려주고 `build_daemon_deps` 가 `deps.gates[name]` 에 채운다(accounts: `market` = 일시정지·주말·휴장, `monitor` = market + `<시장>.monitor.start/end` 창, 창 밖 사유는 "창 밖"). 판정 순수 함수는 `daemon.gates.should_skip(market, today, *, paused, is_holiday)`. 커널은 게이트 이름만 알고 브로커·계좌를 모른다.
+  - **잡 큐**(`daemon.queue`·`queue_jobs`, 원장 v8 `job_requests`): 기능이 `QueueKind(kind, params_model, label, lane, priority, trading, restart_requeue, body)` 를 선언한다. 요청은 `enqueue`(중복은 `DuplicateRequest`)·`claim_next`·`finish`·`cancel` 로 오가고 `trader jobs list|run|kinds` 와 `enqueue_from_job(deps, kind, params, source=…)` 가 등록한다. 큐 잡 4개 `job_queue`(slow)·`job_queue_fast`·`job_queue_reeval`·`job_queue_info` 는 각자 자기 레인 kind 만 `schedule.yaml job_queue.interval_s`(기본 10초) 주기로 꺼낸다. 상태(`QueueState`)는 `DaemonDeps.queue` 에 둔다.
+  - **heavy 락·자동 출처**: `JobSpec.heavy` cron 은 락을 기다리며 `heavy_wanted` 를 세우고, slow 레인 요청은 progress 경계에서 락을 양보한다. `AUTO_SOURCES`(`daemon`·`news`·`notice`·`restart`) 요청 중 `trading` kind 는 꺼낼 때 시장 게이트·장 마감을 다시 검사한다(큐에서 오래 기다린 요청이 다음 날 주문을 내지 않게). 사람(cli/web/telegram) 요청은 시장 게이트를 보지 않는다.
+  - **재기동 복구·캐치업**: 기동 때 `daemon.bootstrap` 훅 → `bootstrap_queue`(이전 running → error "데몬 재시작", 6시간 넘은 queued 만료, `restart_requeue` kind 만 `source="restart"` 로 재등록, 끊긴 요청 알림 1건) → stale `running` 세션(1시간↑) 정리 → `catch_up_missed`(`JobSpec.catch_up="queue"` 인 놓친 cron 을 큐로 한 번 따라잡기, 조회 범위 20시간). 이 단계는 **잠금을 잡은 뒤에만** 돈다(둘째 데몬이 실행 중 데몬의 행을 닫지 않게). `JobSpec.misfire` 에 따라 grace 가 다르다(`scan` 1시간·`idempotent` 6시간·나머지 2분).
+  - **내장 잡**: `daemon.builtin_jobs.BUILTIN_FEATURE`(`kernel_builtin`)의 `telegram_poll`(interval, `schedule.yaml telegram_poll.interval_s` 기본 30초) — outbox 재전송(실패 삼킴) 뒤 `getUpdates` 1회로 명령 처리. 수신 설정이 없으면 `skipped`.
+  - **bootstrap 훅·ports**: 훅 지점 `daemon.bootstrap` 은 `deps` 를 받아 잠금 직후 한 번 돈다. `DaemonDeps.ports` 는 부트의 `Port` 구현체(`accounts`·`inputs`)이고 잡 본문(spot 포함)은 이것만 통해 계좌·브로커·시세·휴장일·수집에 닿는다(기능 간 import 금지).
+  - `JobSpec.days`(cron 요일, 예 `mon-sat`)와 `schedule_key` 가 리스트(`fills_sync.times`)이면 시각마다 cron 트리거를 펼친다. per_market 잡의 id·`schedule_key` 의 `{market}` 은 소문자(`kr_monitor`, `reconcile.kr`)로 치환된다.
 - 테스트: `tests/kernel/daemon/`
 
 ## web

@@ -18,6 +18,11 @@
 | `uv run trader spot analyze --ticker … [--market KR\|US --exchange … --asof … --dry-run --skip-collect]` | 종목 1개 분석 세션 → `30_decision` (`FAKE_CLAUDE=1` 없이 금지 — 금지사항) |
 | `uv run trader spot approvals list\|approve\|reject` | 승인 대기 조회·승인·거부 (`approve` 는 사용자 전용) |
 | `uv run trader spot exec-key list\|release` | 실행 키(멱등 선점) 조회·수동 해제 (`release` 는 KIS 주문 유무 확인 뒤 사용자가) |
+| `uv run trader spot monitor --market KR\|US [--once --interval 60 --dry-run]` | 보유종목 장중 점검(손절 즉시 매도·트리거 재평가) — 자동 주문이 나가므로 사용자 전용 |
+| `uv run trader spot fills sync [--account … --date …]` | 체결 동기화(원장 적재, 멱등, 계좌마다 JSON 1줄) |
+| `uv run trader spot balance refresh [--market KR\|US --force]` | 잔고 스냅샷 갱신(조회만) |
+| `uv run trader spot reconcile --market KR\|US` | 브로커 보유 vs 스냅샷 대사(스냅샷만 보정, 주문 유지) |
+| `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
 | `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |

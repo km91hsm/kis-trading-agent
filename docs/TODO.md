@@ -97,6 +97,7 @@ SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경�
 - [x] Task 13 승인 경로(`trader spot approvals`·텔레그램 `/approve`·`/reject`·`approvals_expire` 잡)
 - [x] Task 14 골든 회귀 재기준·analyze 체크포인트 집합 테스트
 - [x] Task 15 문서·체크리스트·공개면 점검
+- [x] PR #5 머지
 - 이연(M0 리뷰, M4 가 한 것): 계약 테스트 2종(agents 공통 규칙 패리티, `allowedTools==tool_command()`)·`Feature.tier=="lane"` ↔ `LANES` 교차 검증
 - 이연(M0 리뷰, 남음):
   - 두 번째 시그널 테스트 `wait=True` 실동작 (M5)
@@ -116,8 +117,32 @@ SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경�
 
 ## M5 — spot 운영 경로
 monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기준: 옛 테스트 이식 통과.
-- [ ] 착수 전
-- 이연(M2): 체결통보 리스너(`_notice_listeners`)
+- [x] 착수
+- [x] Task 1 원장 v7·v8·v9 + 원시 함수 + `core.cancel`
+- [x] Task 2 `config.market_hours` — US 휴장·조기폐장·장중 창·`holiday_fn` 공급자
+- [x] Task 3 `Feature.gates` 공급 경로·`DaemonDeps.ports`·bootstrap 훅·stale `running` 정리
+- [x] Task 4 잡 큐 저장소(`job_requests`) — enqueue·claim·finish·cancel·stale·expire
+- [x] Task 5 큐 틱 4레인·heavy 락·재기동 복구·캐치업·`trader jobs`
+- [x] Task 6 내장 `telegram_poll` 잡(outbox flush)·운영 알림 문구
+- [x] Task 7 fills 동기화·`fills_sync` 잡·cron `schedule_key` 리스트
+- [x] Task 8 balance 스냅샷 잡·reconcile 대사
+- [x] Task 9 resume 세션·`31_decision_r<n>`·`stop_floor`·트리거 가격 게이트
+- [x] Task 10 monitor 순수 규칙(손절·익절·급등락·무효화·정기)
+- [x] Task 11 `monitor_once`·손절 집행·`trader spot monitor`
+- [x] Task 12 아침 미체결 재호가(reprice)
+- [x] Task 13 체결통보 리스너(`notice`)
+- [x] Task 14 큐 `reevaluate` 요청·종목 락
+- [x] Task 15 문서·템플릿·체크리스트·골든 재검증
+- [ ] PR·CI(ubuntu+windows)·머지
+- 이연(M2, M5 가 한 것): 체결통보 리스너(`_notice_listeners`)
+- 이연(M5):
+  - M6: killswitch·hedge·`cash_park`·`excluded_tickers`(monitor 의 헤지/현금 운용 건너뛰기·`cancel_buys`)
+  - M7: 공시/뉴스 트리거 생산(`news.post_ingest` 훅)·`analyze_ticker` kind(종목 락 `locks.lock_for` 공유)·discover·`reevaluate` 의 dry_run 담긴 요청 실행 단언·US 거래소 보강 단언
+  - M8: memory(메모리 브레이커 인자·`test_resume` memory 1건)·`close` 무효화 종가표(`close_table` 콜러블 주입, Ruling 14)
+  - M9: `ops_check` 잡·health
+  - M10: fo 분기·`test_balance_dispatch` 3건·`test_fills_fo`
+  - M11: jobs 라우터(웹 큐 API)·섹터 자동분류(`_classify`)·웹 시세 허브 `hub_blocked` 비켜서기(live_quotes yielding)
+  - 커널 후보: `_close_stale_sessions` 공개 헬퍼화(spot jobs 와 runner 중복)
 
 ## M6 — features/regime + 의도 생산자
 국면·stance·시장 세션·킬스위치·블랙아웃, hedge·cash_park·rebalance, scan 의 테마·사건. 완료 기준: 옛 테스트 이식 통과.
