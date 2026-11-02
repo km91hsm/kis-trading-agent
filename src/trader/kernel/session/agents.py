@@ -158,6 +158,11 @@ def orchestrator_prompt(
 
 
 def common_rules(prompt: str) -> list[str]:
-    """`# 공통 규칙` 절의 번호 줄을 괄호 보충 앞까지 잘라 돌려준다."""
+    """`# 공통 규칙` 절의 번호 줄을 괄호 보충 앞까지 잘라 돌려준다(끝 마침표는 뗀다 —
+    보충 괄호가 붙는 md 는 마침표가 괄호 뒤에 온다)."""
     tail = prompt.split("# 공통 규칙", 1)[1]
-    return [ln.split("(", 1)[0].strip() for ln in tail.splitlines() if re.match(r"^\d\. ", ln)]
+    return [
+        ln.split("(", 1)[0].strip().rstrip(".")
+        for ln in tail.splitlines()
+        if re.match(r"^\d\. ", ln)
+    ]
