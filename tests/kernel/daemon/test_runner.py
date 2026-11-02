@@ -45,7 +45,8 @@ def make_deps(project: Path, **kw) -> DaemonDeps:
     init_schema(c, all_migrations(discover()))
     c.close()
     base = dict(
-        settings=SimpleNamespace(), schedule=SimpleNamespace(at="03:00"), conn_factory=factory,
+        settings=SimpleNamespace(notify=SimpleNamespace(enabled=False)),
+        schedule=SimpleNamespace(at="03:00"), conn_factory=factory,
         state=state, now=lambda: NOW, markets=["KR"], gates={}, stop_event=threading.Event(),
         dry_run=False,
     )  # fmt: skip
