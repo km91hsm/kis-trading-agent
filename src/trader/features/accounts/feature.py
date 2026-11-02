@@ -2,6 +2,7 @@
 
 from trader.features.accounts.cli import accounts_app
 from trader.features.accounts.migrations import MIGRATIONS
+from trader.features.accounts.ports import PORT
 from trader.features.accounts.settings import SECTION
 from trader.features.accounts.telegram import STATUS_SECTION, TELEGRAM_COMMANDS
 from trader.kernel.registry.types import Feature
@@ -16,4 +17,5 @@ FEATURE = Feature(
     telegram_commands=TELEGRAM_COMMANDS,
     status_sections=(STATUS_SECTION,),
     control_namespaces=("paused",),
+    ports=(PORT,),
 )

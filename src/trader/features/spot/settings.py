@@ -1,0 +1,114 @@
+"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`.
+
+yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from trader.kernel.config.sections import Section
+
+
+class HorizonProfile(BaseModel):
+    """보유기간 프로필: 결정의 `horizon_days` 가 정하는 장중 점검 주기·임계.
+    단기 결정은 자주·작은 변동에, 장기 결정은 큰 변동·뉴스 묶음에만 다시 본다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    move_pct: float = Field(gt=0, le=0.5)  # 급등락 재평가 트리거(평단 대비)
+    reeval_interval_min: int = Field(ge=1)  # 같은 종목 재평가 세션 최소 간격(분)
+    periodic_check_min: int = Field(ge=0)  # 시간 단위 정기 재평가 간격(분), 0 = 없음
+    news_min_novel: int = Field(ge=1)  # 뉴스 재분석에 필요한 새 뉴스 건수
+    daily_reanalyze_every: int = Field(ge=1)  # 보유 종목 아침 재분석 주기(운영일)
+
+
+def _default_profiles() -> dict[str, HorizonProfile]:
+    return {
+        "short": HorizonProfile(
+            move_pct=0.04,
+            reeval_interval_min=15,
+            periodic_check_min=60,
+            news_min_novel=1,
+            daily_reanalyze_every=1,
+        ),
+        "mid": HorizonProfile(
+            move_pct=0.07,
+            reeval_interval_min=30,
+            periodic_check_min=0,
+            news_min_novel=1,
+            daily_reanalyze_every=2,
+        ),
+        "long": HorizonProfile(
+            move_pct=0.10,
+            reeval_interval_min=60,
+            periodic_check_min=0,
+            news_min_novel=3,
+            daily_reanalyze_every=5,
+        ),
+    }
+
+
+class RepriceCfg(BaseModel):
+    """아침 미체결 재호가: 개장 뒤 after_min 분에 운영일 1회, 오늘 낸 지정가 미체결 주문을
+    취소하고 같은 결정으로 현재가 지정가 재제출(게이트 재통과). 원 지정가 대비 max_chase_pct
+    넘게 불리하면 재제출하지 않고 알린다. dry_run·off 계좌는 제외."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    after_min: int = Field(default=30, ge=1, le=300)
+    max_chase_pct: float = Field(default=0.01, gt=0, le=0.1)
+
+
+class RiskLimits(BaseModel):
+    """리스크 한도(공격적 기본값). 파이썬 리스크 규칙이 강제한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_position_pct: float = 0.25
+    max_positions: int = 5
+    daily_loss_stop_pct: float = -0.05
+    stop_loss_pct: float = -0.15
+    min_cash_pct: float = 0.0
+    max_sector_pct: float = Field(default=0.40, gt=0, le=1)  # 같은 섹터 합계 상한 (BUY/ADD 뒤)
+    # 1회 손실 한도: 손절까지 잃는 금액이 NAV 의 이 비율을 넘지 않게 BUY/ADD 수량을 자른다
+    risk_per_trade_pct: float = Field(default=0.02, gt=0, le=0.25)
+    # 보유기간 프로필: short(≤10일)·mid(11~40)·long(>40) 셋이 전부 있어야 한다
+    horizon_profiles: dict[str, HorizonProfile] = Field(default_factory=_default_profiles)
+    reprice: RepriceCfg = Field(default_factory=RepriceCfg)  # 아침 미체결 재호가
+    # 테마 매매 안전장치: 같은 테마 합계 상한, 당일 급등 추격 금지, 테마 종목은 짧은 보유·익절가
+    max_theme_pct: float = Field(default=0.20, gt=0, le=1)
+    chase_limit_pct: float = Field(default=0.10, gt=0)  # 당일 등락률 ≥ 이 값이면 신규 매수 금지
+    theme_max_horizon_days: int = Field(default=10, ge=1)
+    # 누적 손실 킬스위치: (계좌·시장) NAV 가 시작(또는 해제 시점) 대비 이 비율 넘게 빠지면
+    # 신규 매수 중단, 해제는 사람만. 0 이면 끔
+    killswitch_drawdown_pct: float = Field(default=0.15, ge=0, lt=1)
+
+    @field_validator("horizon_profiles")
+    @classmethod
+    def _profiles_complete(cls, v: dict[str, HorizonProfile]) -> dict[str, HorizonProfile]:
+        missing = {"short", "mid", "long"} - set(v)
+        if missing:
+            raise ValueError(f"horizon_profiles 에 빠진 프로필: {sorted(missing)}")
+        return v
+
+
+class DebateCfg(BaseModel):
+    """애널리스트 합의 시 토론 생략(세션 비용).
+
+    10_analyst_* 네 역할이 모두 같은 방향(NEUTRAL·UNKNOWN 제외)이고 확신이 전부
+    `consensus_min_conviction` 이상이면 요약 단계가 토론 없이 요약을 만든다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skip_on_consensus: bool = True
+    consensus_min_conviction: float = Field(default=0.7, ge=0, le=1)
+
+
+SECTIONS = (
+    Section("settings", "risk", RiskLimits, RiskLimits),
+    Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
+    Section("settings", "debate", DebateCfg, DebateCfg),
+)
