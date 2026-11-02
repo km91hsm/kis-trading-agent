@@ -8,8 +8,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import balance, executor, fills, monitor, reconcile
+from trader.features.spot import balance, executor, fills, labels, monitor, reconcile, reprice
+from trader.kernel.config.market_hours import REGULAR
+from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
+from trader.kernel.ledger import control
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session.run_store import run_date_for
@@ -210,6 +213,54 @@ RECONCILE = JobSpec(
 )  # fmt: skip
 
 
+def _open_hm(ctx, market: str) -> tuple[int, int]:
+    """장 시작 시각(schedule `<시장>.monitor.start`, 없으면 정규장 개장)."""
+    start = REGULAR[market][0]
+    sched = getattr(ctx, "schedule", None)
+    if sched is not None:
+        start = getattr(getattr(sched, market.lower()).monitor, "start", start)
+    h, m = start.split(":")
+    return int(h), int(m)
+
+
+def _reprice_if_due(ctx, ectx, market: str, today) -> dict:
+    """아침 미체결 재호가(Phase 23 B): 개장 + `risk.reprice.after_min` 뒤 운영일 1회."""
+    cfg = ctx.settings.risk.reprice
+    if not cfg.enabled or ectx.market_client is None or ctx.dry_run:
+        return {"skipped": "비활성"}
+    local = ctx.now().astimezone(MARKET_TZ[market])
+    oh, om = _open_hm(ctx, market)
+    if (local.hour * 60 + local.minute) - (oh * 60 + om) < cfg.after_min:
+        return {"skipped": "개장 뒤 대기"}
+    if control.get_flag(ectx.conn, reprice.done_key(market, today)):
+        return {"skipped": "오늘 이미 실행"}
+    mc = ectx.market_client
+
+    def quote(ticker: str, exchange: str | None):
+        # 시세 객체 그대로 — 재제출 게이트가 등락률·종목상태를 본다(2-O5)
+        if market == "US":
+            if not exchange:
+                raise ValueError(f"US 거래소 코드 없음: {ticker}")
+            return mc.get_price_us(ticker, exchange)
+        return mc.get_price_kr(ticker)
+
+    exchanges: dict[str, str] = {}
+    if market == "US":
+        rows = ectx.conn.execute("SELECT ticker, exchange FROM ticker_exchanges WHERE market='US'")
+        for r in rows:
+            exchanges[r["ticker"]] = r["exchange"]
+    return reprice.run_once(
+        ectx,
+        market=market,
+        today=today,
+        cfg=cfg,
+        quote_fn=quote,
+        exchanges=exchanges,
+        dry_run=bool(ctx.dry_run),
+        label=lambda t: labels.label(t, labels.resolve(ectx.conn, market, t)),
+    )
+
+
 def monitor_body(ctx, job) -> dict:
     """`{market}_monitor` interval 잡 본문(장중 창은 게이트 `monitor` 가 본다). 재평가 세션은 틱
     안에서 돌리지 않고 큐 kind `reevaluate` 로 넘긴다 — 세션이 도는 동안 손절 점검이 멈추면 안
@@ -225,6 +276,15 @@ def monitor_body(ctx, job) -> dict:
         )
         if ectx.market_client is None:
             return {"skipped": "시세 클라이언트 없음"}
+        today = run_date_for(market, ctx.now())
+        extra: dict[str, Any] = {}
+        try:  # 재호가 실패가 손절 점검을 막지 않는다
+            rp = _reprice_if_due(ctx, ectx, market, today)
+            if not isinstance(rp.get("skipped"), str):  # 건너뜀 사유(문자열)는 싣지 않는다
+                extra["reprice"] = rp
+        except Exception as e:  # noqa: BLE001
+            logger.exception("재호가 실패 %s", market)
+            extra["reprice"] = {"error": f"{type(e).__name__}: {e}"}
         mctx = monitor.MonitorContext(
             exec=ectx,
             market_client=ectx.market_client,
@@ -235,7 +295,7 @@ def monitor_body(ctx, job) -> dict:
             dry_run=bool(ctx.dry_run),
             ports=ctx.ports,
         )
-        return monitor.monitor_once(mctx, market=market, today=run_date_for(market, ctx.now()))
+        return {**monitor.monitor_once(mctx, market=market, today=today), **extra}
     finally:
         conn.close()
 
