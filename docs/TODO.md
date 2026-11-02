@@ -69,7 +69,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - [x] Task 12: ingest `build_inputs`·클라이언트 조립·CLI `ingest collect`
 - [x] Task 13: ingest 데몬 잡 `news_collect`·api·feature 완성·README
 - [x] Task 14: 문서·체크리스트·공개면 점검
-- [ ] PR #? 머지 (사용자 머지 대기)
+- [ ] PR #4 머지 (사용자 머지 대기)
 - 이연(M0 리뷰):
   - TODO 승계 `EDGAR_USER_AGENT` 입력 항목 (아래 「사용자 확인 대기」)
 - 이연(M3):
