@@ -1,6 +1,6 @@
 """`approvals_expire` 잡: 만료분을 expired 로 바꾼다(boot 없이 DaemonDeps 로)."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 from tests.features.spot.approval_helpers import (
@@ -9,9 +9,14 @@ from tests.features.spot.approval_helpers import (
     make_pending,
     make_port,
 )
+from trader.features.accounts.ports import AccountsPortImpl
 from trader.features.spot import fills as fills_mod
 from trader.features.spot import jobs as spot_jobs
+from trader.features.spot import monitor as monitor_mod
+from trader.features.spot.feature import FEATURE
 from trader.features.spot.jobs import APPROVALS_EXPIRE
+from trader.kernel.broker.fake import FakeMarket
+from trader.kernel.config import Secrets
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.ledger import db
 
@@ -107,3 +112,75 @@ def test_fills_body_errors_without_accounts_port(project, conn, settings):
     assert "계좌 포트 없음" in out["error"]
     assert spot_jobs.fills_then_balance(deps, {}, lambda t: None) == out
     assert spot_jobs.fills_body(_fills_deps(settings, [], {}), None) == {}
+
+
+# --- {market}_monitor (옛 daemon `_monitor_body`) ---------------------------------------
+
+
+class _MonitorPort(AccountsPortImpl):
+    """합성 계좌 + 가짜 브로커·시세(네트워크 없음)."""
+
+    def __init__(self, accounts, brokers, market):
+        super().__init__(accounts, Secrets())
+        self._brokers, self._market = brokers, market
+
+    def brokers(self):
+        return self._brokers
+
+    def market_client(self):
+        return self._market
+
+
+def _monitor_deps(settings, port, now):
+    return SimpleNamespace(
+        settings=settings,
+        conn_factory=db.connect,
+        state=None,
+        now=lambda: now,
+        notifier=None,
+        dry_run=False,
+        ports={"accounts": port},
+        queue=None,
+    )
+
+
+def test_monitor_declaration():
+    s = spot_jobs.MONITOR
+    assert (s.id, s.kind, s.trigger, s.per_market, s.schedule_key, s.interval_s) == (
+        "{market}_monitor", "monitor", "interval", True, "{market}.monitor.interval_s", 60,
+    )  # fmt: skip
+    assert (s.gate, s.heavy, s.misfire, s.catch_up, s.start_soon_s) == (
+        "monitor", False, "default", "none", 20,
+    )  # fmt: skip
+    assert s.body is spot_jobs.monitor_body and s in FEATURE.jobs
+
+
+def test_monitor_body_without_market_client_skips(project, conn, settings, monkeypatch):
+    accounts = [make_account("paper-main", "paper", "auto")]
+    port = _MonitorPort(accounts, fake_brokers(accounts), None)
+    called = []
+    monkeypatch.setattr(monitor_mod, "monitor_once", lambda *a, **k: called.append(1))
+    deps = _monitor_deps(settings, port, TUE_0900_KST)
+    out = spot_jobs.monitor_body(deps, SimpleNamespace(market="KR"))
+    assert out == {"skipped": "시세 클라이언트 없음"} and called == []
+
+
+def test_monitor_body_uses_market_run_date(project, conn, settings, monkeypatch):
+    """US 장중(KST 자정 넘김)에도 운영일은 뉴욕 날짜다 — 손절·재평가가 그날 analyze 와 같은
+    runs/<date> 와 주문 창을 본다."""
+    accounts = [make_account("paper-main", "paper", "auto", markets=["KR", "US"])]
+    port = _MonitorPort(accounts, fake_brokers(accounts), FakeMarket())
+    seen = {}
+
+    def fake_once(ctx, *, market, today):
+        seen.update(market=market, today=today, ctx=ctx)
+        return {"checked": 0, "stop_loss_orders": 0, "triggers": 0, "reevaluated": 0}
+
+    monkeypatch.setattr(monitor_mod, "monitor_once", fake_once)
+    at = datetime(2026, 10, 27, 15, 30, tzinfo=UTC)  # 10-28 00:30 KST, 10-27 11:30 ET
+    out = spot_jobs.monitor_body(_monitor_deps(settings, port, at), SimpleNamespace(market="US"))
+    assert out["checked"] == 0
+    assert seen["market"] == "US" and seen["today"] == date(2026, 10, 27)
+    assert seen["ctx"].enqueue_reevaluate is not None and seen["ctx"].session_runner is not None
+    spot_jobs.monitor_body(_monitor_deps(settings, port, at), SimpleNamespace(market="KR"))
+    assert seen["today"] == date(2026, 10, 28)

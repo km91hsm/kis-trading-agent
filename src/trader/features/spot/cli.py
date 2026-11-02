@@ -1,5 +1,5 @@
 """`trader spot` — 현물 레인 운영 명령: 종목 분석 세션(`analyze`)과 실행 키 조회·수동 해제
-(`exec-key list|release`), 승인 요청 처리(`approvals list|approve|reject`).
+(`exec-key list|release`), 승인 요청 처리(`approvals list|approve|reject`), 장중 감시(`monitor`).
 
 보낸 뒤(sent_at) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이라 같은 결정·계좌·방향의 주문이 다시
 나가지 않는다 — 사람이 KIS 주문 유무를 확인한 뒤 사유와 함께 푼다. 해제 기록은 control
@@ -15,9 +15,11 @@ import typer
 from trader.features.spot import analyze as analyze_mod
 from trader.features.spot import balance as balance_mod
 from trader.features.spot import executor, fills
+from trader.features.spot import monitor as monitor_mod
 from trader.features.spot import reconcile as reconcile_mod
 from trader.features.spot.messages import approval_line
 from trader.kernel.cli.boot import boot, config_errors
+from trader.kernel.config import ConfigError
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.idem import ExecKeyStore
 from trader.kernel.ledger import control
@@ -229,6 +231,51 @@ def balance_refresh(
         b.conn.close()
     if failed:
         raise typer.Exit(code=1)
+
+
+@spot_app.command("monitor")
+@config_errors
+def monitor_cmd(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    once: bool = typer.Option(False, "--once", help="1회만 점검하고 종료"),
+    interval: int = typer.Option(60, "--interval", help="반복 주기(초)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="손절 주문·재평가 주문 없이 기록만"),
+    max_iterations: int | None = typer.Option(None, "--max-iterations", hidden=True),
+) -> None:
+    """보유종목 장중 점검: 손절 즉시 매도, 트리거 → 재평가 세션 (스펙 §5.2). 틱마다 JSON 한 줄.
+    자동 주문이 나가므로 사용자 전용."""
+    import time
+
+    from trader.kernel.session.run_store import run_date_for
+    from trader.kernel.session.runner import run_session
+
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    b = boot(ports=True, log_name="monitor")  # 데몬과 다른 로그 파일 (오래 사는 명령)
+    try:
+        ectx = executor.exec_ctx(b)
+        if ectx.market_client is None:
+            raise ConfigError("시세 클라이언트 생성 실패 — monitor 를 돌릴 수 없습니다")
+        ctx = monitor_mod.MonitorContext(
+            exec=ectx,
+            market_client=ectx.market_client,
+            session_runner=run_session,
+            dry_run=dry_run,
+            ports=b.ports,
+        )
+        n = 0
+        while True:
+            today = run_date_for(market, datetime.now(UTC))
+            r = monitor_mod.monitor_once(ctx, market=market, today=today)
+            typer.echo(
+                json.dumps({"market": market, "date": today.isoformat(), **r}, ensure_ascii=False)
+            )
+            n += 1
+            if once or (max_iterations is not None and n >= max_iterations):
+                break
+            time.sleep(interval)
+    finally:
+        b.conn.close()
 
 
 @spot_app.command("reconcile")

@@ -1,4 +1,5 @@
-"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)와 `fills_sync`(체결 동기화)."""
+"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·`fills_sync`(체결 동기화)·`balance_refresh`·
+`{market}_reconcile`(야간 대사)·`{market}_monitor`(장중 감시)."""
 
 from __future__ import annotations
 
@@ -7,10 +8,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import balance, executor, fills, reconcile
+from trader.features.spot import balance, executor, fills, monitor, reconcile
+from trader.kernel.daemon.queue_jobs import enqueue_from_job
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session.run_store import run_date_for
+from trader.kernel.session.runner import run_session
 
 logger = logging.getLogger("trader.spot")
 
@@ -204,6 +207,43 @@ RECONCILE = JobSpec(
     id="{market}_reconcile", kind="reconcile", trigger="cron", per_market=True,
     schedule_key="reconcile.{market}", interval_s=None, enabled=None, gate="market", heavy=False,
     misfire="idempotent", catch_up="queue", start_soon_s=0, body=reconcile_body, days="mon-fri",
+)  # fmt: skip
+
+
+def monitor_body(ctx, job) -> dict:
+    """`{market}_monitor` interval 잡 본문(장중 창은 게이트 `monitor` 가 본다). 재평가 세션은 틱
+    안에서 돌리지 않고 큐 kind `reevaluate` 로 넘긴다 — 세션이 도는 동안 손절 점검이 멈추면 안
+    된다. 운영일은 시장 현지(US 는 뉴욕 날짜)."""
+    market = job.market or "KR"
+    port = ctx.ports.get("accounts")
+    if port is None:
+        return {"error": "계좌 포트 없음 — 장중 감시 불가"}
+    conn = ctx.conn_factory()
+    try:
+        ectx = executor.exec_ctx_from(
+            ctx.settings, conn, port, ctx.notifier or NullNotifier(), ctx.now, ctx.state
+        )
+        if ectx.market_client is None:
+            return {"skipped": "시세 클라이언트 없음"}
+        mctx = monitor.MonitorContext(
+            exec=ectx,
+            market_client=ectx.market_client,
+            session_runner=run_session,
+            enqueue_reevaluate=lambda params: enqueue_from_job(
+                ctx, "reevaluate", params, source="daemon"
+            ),
+            dry_run=bool(ctx.dry_run),
+            ports=ctx.ports,
+        )
+        return monitor.monitor_once(mctx, market=market, today=run_date_for(market, ctx.now()))
+    finally:
+        conn.close()
+
+
+MONITOR = JobSpec(
+    id="{market}_monitor", kind="monitor", trigger="interval", per_market=True,
+    schedule_key="{market}.monitor.interval_s", interval_s=60, enabled=None, gate="monitor",
+    heavy=False, misfire="default", catch_up="none", start_soon_s=20, body=monitor_body,
 )  # fmt: skip
 
 

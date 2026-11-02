@@ -17,6 +17,7 @@
 CLI(`uv run trader spot --help` 로 확인):
 
 - `trader spot analyze --ticker … [--market KR|US --exchange NAS|NYS|AMS --asof … --dry-run --skip-collect]` — 종목 하나. `--dry-run` 은 판정·기록까지만이고 주문·승인 요청이 없다. 이미 있는 단계는 건너뛰므로 재실행하면 빠진 단계부터 이어간다.
+- `trader spot monitor --market KR|US [--once --interval 60 --dry-run]` — 보유종목 장중 점검(손절 즉시 매도, 트리거 → 인라인 재평가 세션). 틱마다 JSON 한 줄. 자동 주문이 나가므로 사용자 전용. 데몬은 `{market}_monitor` 잡(게이트 `monitor`, 주기 `schedule.yaml <시장>.monitor.interval_s`)이 같은 `monitor.monitor_once` 를 부르고 재평가는 큐 kind `reevaluate` 로 넘긴다.
 - `trader spot approvals list|approve <id>|reject <id>` — `list` 는 만료분을 정리한 뒤 대기 요청을 보여 준다.
 - `trader spot exec-key list|release <key> --note <10자 이상>` — 보낸 뒤(`sent_at`) 주문 기록 전에 끊긴 실행 키는 영구 선점이라, 사람이 KIS 주문 유무를 확인한 뒤 사유와 함께 푼다. 해제 기록은 control `exec_key_released:<key>`.
 - 텔레그램 `/approve <id> [실전]`·`/reject <id>`. 실전 계좌 승인은 확인어가 없으면 실행하지 않는다.
@@ -53,6 +54,14 @@ CLI·명령
 - `ask_json`·`probe_usage`(`quick.py`)는 이식하지 않았다(M8). `resume` 세션·`31_decision_r<n>` 재평가는 M5. 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)도 재평가가 생기는 M5 로 이연.
 - `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
 - `common_rules`(커널 `session.agents`) 는 옛 정규화(끝 마침표 제거)를 복원했다 — 옛 md 간 마침표 위치 차이를 계약 테스트가 허용하기 위함.
+
+장중 감시(`monitor.py`)
+- 헤지 ETF·현금 운용(`excluded_tickers`) 건너뛰기와 헤지·현금 운용 틱은 없다(M6) — 모든 보유가 손절·트리거 대상이다.
+- `close` 무효화 조건의 종가표는 `MonitorContext.close_table(시장, since, until)` 주입이다(옛 피처 스토어 `ml.dataset.close_table` 은 M8). 주입이 없으면 그 조건은 미판정. 데몬·CLI 는 아직 주입하지 않는다.
+- US 거래소는 잔고 응답(`Position.exchange`) 다음 `MonitorContext.exchanges` 만 본다. 옛 `universe.us` 폴백은 없다(유니버스는 ingest 소유 — 데몬·CLI 는 빈 표를 넘긴다).
+- 손절 바닥은 `held_since`(보유 묶음 시작일) 이후 첫 결정 id(`ledger.first_decision_id_since`)부터의 `max_stop_since`(결정 라운드 손절가 최고값)다.
+- 손절 전 미체결 SELL·BUY 취소는 `kernel.execution.core.cancel` 을 지난다(옛 `broker.cancel_order` 직접 호출).
+- 재평가 큐 등록은 데몬의 `enqueue_from_job(deps, "reevaluate", …)` — kind 등록(Task 14) 전에는 등록 실패를 경고만 하고 다음 틱에 다시 본다(인라인으로 돌리지 않음).
 
 실행·승인
 - 승인 실행의 `pending → approved` 조건부 UPDATE 는 `expires_at > now` 도 요구한다 — 재판정(`recheck`) 도중 만료되면 주문 없이 `expired`(옛 저장소는 실행 시작 때만 만료를 봤다).

@@ -393,6 +393,20 @@ def max_stop_since(
     return max((Decimal(r["stop_loss"]) for r in rows), default=None)
 
 
+def first_decision_id_since(
+    conn: sqlite3.Connection, market: str, ticker: str, since: date | None
+) -> int | None:
+    """보유 묶음 시작일(since) 이후 그 종목의 첫 결정 id — `max_stop_since` 의 기준점(옛
+    `max_stop_since(since=날짜)` 의 `date >= since`). since 가 없거나 결정이 없으면 None."""
+    if since is None:
+        return None
+    row = conn.execute(
+        "SELECT MIN(id) AS id FROM decisions WHERE market=? AND ticker=? AND date >= ?",
+        (market, ticker, since.isoformat()),
+    ).fetchone()
+    return int(row["id"]) if row is not None and row["id"] is not None else None
+
+
 def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:
     """해당 계좌·시장의 최신 스냅샷 날짜 포지션 `{date, nav, cash, positions}`. 없으면 None.
     날짜는 positions_snapshot·account_nav 중 최신(전량 청산일은 빈 positions).

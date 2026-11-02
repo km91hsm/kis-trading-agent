@@ -1,0 +1,871 @@
+"""spot 장중 모니터 `monitor_once` — 손절 즉시 매도·트리거 기록·재평가(인라인/큐) 테스트.
+
+옛 `tests/orchestrator/test_monitor.py` 의 I/O 34건 + 종가표 1건(Ruling 14)에서 이식(순수 규칙은
+`test_monitor_rules.py`). 치환: `MonitorContext(settings, accounts, conn, brokers, …)` →
+`MonitorContext(exec=exec_ctx_from(…))`
+(`ctx.settings/accounts/conn/brokers/notifier/now` 는 `ctx.exec.*`), `repo.*` →
+`kernel.execution.ledger`·`spot.ledger`, `control.set_account_mode` → accounts `modes`,
+`control.set_flag` → `kernel.ledger.control`, 세션 러너 시그니처 `(spec, kind, lane_ctx, **kw)`,
+`repo.insert_order` monkeypatch → `core.insert_order`, `decisions.json` → `decisions.data_json`,
+`dataset.close_table` monkeypatch → `MonitorContext.close_table` 주입(Ruling 14)."""
+
+import json
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
+
+from tests.features.spot.conftest import make_account
+from tests.features.spot.helpers import ok_decision
+from trader.features.accounts import modes
+from trader.features.accounts.ports import AccountsPortImpl
+from trader.features.accounts.settings import to_broker_account
+from trader.features.spot import executor, monitor
+from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.monitor_rules import Signal, rule_hit
+from trader.features.spot.schemas import Decision
+from trader.kernel.broker.errors import KisApiError
+from trader.kernel.broker.fake import FakeBroker, FakeMarket
+from trader.kernel.broker.models import Cash, Fill, Position
+from trader.kernel.config import Secrets
+from trader.kernel.execution import core
+from trader.kernel.execution import ledger as repo
+from trader.kernel.ledger import control
+from trader.kernel.session.run_store import read_checkpoint, run_dir, write_checkpoint
+from trader.kernel.session.runner import SessionResult
+
+D = date(2026, 10, 9)
+NOW = datetime(2026, 10, 9, 2, 0, tzinfo=UTC)
+
+
+class Sent:
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, text, *, escape=True):
+        self.msgs.append(text)
+        return True
+
+
+class _Port(AccountsPortImpl):
+    """합성 계좌 + 테스트의 FakeBroker 를 돌려주는 계좌 포트(네트워크 없음)."""
+
+    def __init__(self, accounts, brokers):
+        super().__init__(accounts, Secrets())
+        self._brokers = brokers
+
+    def brokers(self):
+        return self._brokers
+
+    def market_client(self):
+        return None
+
+
+def _pos(ticker="005930", avg="70000", cur="63000", qty=10):
+    return Position(
+        ticker=ticker,
+        market="KR",
+        qty=qty,
+        avg_price=Decimal(avg),
+        current_price=Decimal(cur),
+        eval_amount=Decimal(cur) * qty,
+        pnl_pct=float(Decimal(cur) / Decimal(avg) - 1),
+    )
+
+
+def _accounts(paper_mode="auto"):
+    return [
+        make_account("paper-main", "paper", paper_mode, markets=["KR"]),
+        make_account("real-main", "real", "off", markets=["KR"]),
+    ]
+
+
+def _monitor_ctx(settings, conn, accounts, brokers, market_client, **kw):
+    ectx = executor.exec_ctx_from(
+        settings, conn, _Port(accounts, brokers), Sent(), lambda: NOW, None
+    )
+    return monitor.MonitorContext(exec=ectx, market_client=market_client, **kw)
+
+
+def _ctx(conn, settings, *, positions, price="63000", paper_mode="auto", runner=None):
+    accounts = _accounts(paper_mode)
+    cash = {"KR": Cash(currency="KRW", available=Decimal("10000000"), total=Decimal("10000000"))}
+    brokers = {
+        a.id: FakeBroker(to_broker_account(a), positions=positions, cash=cash) for a in accounts
+    }
+    calls = []
+
+    def session_runner(spec, kind, lane_ctx, **kw):
+        calls.append(SimpleNamespace(kind=spec.kind, trigger=spec.extra.get("trigger")))
+        return SessionResult(ok=True, session_id=f"s{len(calls)}", fake=True)
+
+    ctx = _monitor_ctx(
+        settings,
+        conn,
+        accounts,
+        brokers,
+        FakeMarket(prices={"005930": Decimal(price)}),
+        session_runner=runner or session_runner,
+    )
+    ctx.calls = calls  # type: ignore[attr-defined]
+    return ctx
+
+
+def _decision(conn, **over):
+    dec = Decision(**ok_decision(**over))
+    d = run_dir(D, "KR", "005930")
+    write_checkpoint(
+        d, "30_decision", {"schema_version": 1, "data": dec.model_dump(), "call": None}
+    )
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "30_decision", {"data": dec.model_dump()}
+    )
+    return dec
+
+
+def _old_decision(conn, **over):
+    """어제 날짜의 결정 (보유 중인 종목의 일반적인 상태)."""
+    dec = Decision(**ok_decision(**over))
+    yesterday = D - timedelta(days=1)
+    d = run_dir(yesterday, "KR", "005930")
+    write_checkpoint(
+        d, "30_decision", {"schema_version": 1, "data": dec.model_dump(), "call": None}
+    )
+    spot_ledger.ingest_checkpoint(
+        conn, yesterday, "KR", "005930", "30_decision", {"data": dec.model_dump()}
+    )
+    return dec
+
+
+def _with_cap(settings, cap):
+    return settings.model_copy(
+        update={"llm": settings.llm.model_copy(update={"daily_session_cap": cap})}
+    )
+
+
+# --- monitor_once (I/O) ----------------------------------------------------------------
+
+
+def test_stop_loss_sells_immediately_even_in_approve_mode(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000", paper_mode="approve")
+    modes.set_account_mode(conn, ctx.exec.accounts[0], "approve")
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 1 and r["checked"] == 2
+    orders = ctx.exec.brokers["paper-main"].orders
+    assert len(orders) == 1 and orders[0].side == "SELL" and orders[0].qty == 10
+    assert repo.pending_approvals(conn) == []  # 승인 없이 즉시
+    assert any("손절" in m for m in ctx.exec.notifier.msgs)
+    assert (
+        read_checkpoint(run_dir(D, "KR", "005930"), "55_order_sl_paper-main")["data"]["status"]
+        == "accepted"
+    )
+    rc = read_checkpoint(run_dir(D, "KR", "005930"), "45_stop_loss_paper-main")["data"]
+    assert rc["approved"] is True and rc["side"] == "SELL"
+
+
+def test_stop_loss_off_account_records_only(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert ctx.exec.brokers["real-main"].orders == []
+    assert (
+        read_checkpoint(run_dir(D, "KR", "005930"), "45_stop_loss_real-main")["data"]["mode"]
+        == "off"
+    )
+
+
+def test_stop_loss_not_repeated_same_day(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(ctx.exec.brokers["paper-main"].orders) == 1  # 같은 결정·계좌·SELL 중복 방지
+
+
+def test_trigger_reevaluation_rate_limited(conn, settings):
+    _decision(conn, take_profit=80000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000")
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r1["triggers"] >= 1 and r1["reevaluated"] == 1 and len(ctx.calls) == 1
+    assert ctx.calls[0].kind == "resume" and ctx.calls[0].trigger["kind"] == "take_profit"
+    ctx.exec.now = lambda: NOW + timedelta(minutes=10)
+    r2 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert (
+        r2["triggers"] == 0 and r2["reevaluated"] == 0 and len(ctx.calls) == 1
+    )  # 미처리 행 재사용
+    ctx.exec.now = lambda: NOW + timedelta(minutes=31)
+    r3 = monitor.monitor_once(ctx, market="KR", today=D)
+    # 같은 운영일에 같은 종류(take_profit)로 이미 재평가했으면 조건이 지속돼도 다시 띄우지 않는다
+    # (지속 조건이 30분마다 유료 세션을 재생성해 일일 상한을 소진하던 문제)
+    assert r3["reevaluated"] == 0 and r3["triggers"] == 0 and len(ctx.calls) == 1
+    rows = conn.execute("SELECT kind, handled_at FROM triggers ORDER BY id").fetchall()
+    # 같은 틱의 트리거(take_profit + move_7pct + 단기 프로필의 periodic)는 세션 1회가 모두 처리
+    assert {r["kind"] for r in rows} == {"take_profit", "move_7pct", "periodic"}
+    assert all(r["handled_at"] is not None for r in rows)
+    # 다음 운영일에는 (그날 결정이 있으면) 다시 1회
+    dec = Decision(**ok_decision(take_profit=80000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D + timedelta(days=1), "KR", "005930", "30_decision", {"data": dec.model_dump()}
+    )
+    ctx.exec.now = lambda: NOW + timedelta(days=1)
+    r5 = monitor.monitor_once(ctx, market="KR", today=D + timedelta(days=1))
+    assert r5["reevaluated"] == 1 and len(ctx.calls) == 2
+
+
+def test_failed_reevaluation_can_retry_same_day(conn, settings):
+    """세션 기동 실패로 '실패:' 로 처리된 트리거는 하루 1회 제한에서 빼서 30분 뒤 재시도한다."""
+    _decision(conn, take_profit=80000.0)
+    calls = []
+
+    def runner(spec, *a, **kw):
+        calls.append(spec)
+        if len(calls) == 1:
+            raise RuntimeError("claude 없음")
+        return SessionResult(ok=True, session_id="s2", fake=True)
+
+    ctx = _ctx(
+        conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000", runner=runner
+    )
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r1["reevaluated"] == 0 and len(calls) == 1
+    ctx.exec.now = lambda: NOW + timedelta(minutes=31)
+    r2 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r2["reevaluated"] == 1 and len(calls) == 2
+
+
+def test_reevaluation_blocked_when_paused_or_cap(conn, settings):
+    _decision(conn, take_profit=80000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000")
+    control.set_flag(conn, "paused", True)
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["reevaluated"] == 0 and r["triggers"] >= 1 and ctx.calls == []
+    control.set_flag(conn, "paused", False)
+    ctx.exec.settings = _with_cap(settings, 0)
+    ctx.exec.now = lambda: NOW + timedelta(hours=1)
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["reevaluated"] == 0 and ctx.calls == []
+
+
+def test_monitor_without_positions_checks_nothing(conn, settings):
+    ctx = _ctx(conn, settings, positions=[])
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r == {"checked": 0, "stop_loss_orders": 0, "triggers": 0, "reevaluated": 0}
+
+
+def test_quote_failure_skips_ticker(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")])
+    ctx.market_client = FakeMarket(prices={}, fail={"get_price_kr"})
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 0 and ctx.exec.brokers["paper-main"].orders == []
+
+
+@pytest.mark.parametrize("cur", ["63000"])
+def test_stop_loss_dry_run_records_without_order(conn, settings, cur):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur=cur)], price=cur)
+    ctx.dry_run = True
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 0 and ctx.exec.brokers["paper-main"].orders == []
+    assert (
+        read_checkpoint(run_dir(D, "KR", "005930"), "45_stop_loss_paper-main")["data"]["dry_run"]
+        is True
+    )
+
+
+# --- 리뷰 반영 ---------------------------------------------------------------------
+
+
+def test_stop_loss_dedupes_when_decision_is_old(conn, settings):
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(ctx.exec.brokers["paper-main"].orders) == 1
+    assert conn.execute("SELECT COUNT(*) FROM risk_checks").fetchone()[0] >= 1
+    # 손절 체크포인트는 오늘 분석의 40_/50_ 를 덮어쓰지 않는 별도 이름
+    d = run_dir(D, "KR", "005930")
+    assert read_checkpoint(d, "45_stop_loss_paper-main")["data"]["side"] == "SELL"
+    assert read_checkpoint(d, "55_order_sl_paper-main")["data"]["status"] == "accepted"
+    assert read_checkpoint(d, "40_risk_check_paper-main") is None
+
+
+def test_reevaluation_failure_does_not_block_other_positions(conn, settings):
+    _decision(conn, take_profit=80000.0)
+    dec_b = Decision(**ok_decision(ticker="000660", stop_loss=90000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "000660", "30_decision", {"data": dec_b.model_dump()}
+    )
+    pos_a = _pos("005930", avg="70000", cur="80000")
+    pos_b = _pos("000660", avg="100000", cur="85000")
+
+    def boom(spec, kind, lane_ctx, **kw):
+        raise RuntimeError("claude 없음")
+
+    ctx = _ctx(conn, settings, positions=[pos_a, pos_b], price="80000", runner=boom)
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("80000"), "000660": Decimal("85000")})
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 1  # B 손절은 A 재평가 실패와 무관하게 나간다
+    assert any(o.ticker == "000660" for o in ctx.exec.brokers["paper-main"].orders)
+    row = conn.execute(
+        "SELECT handled_at, session_id FROM triggers WHERE ticker='005930'"
+    ).fetchone()
+    assert row["handled_at"] is not None and "실패" in (row["session_id"] or "")
+
+
+def test_zero_quote_skipped(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="0")
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 0 and ctx.exec.brokers["paper-main"].orders == []
+
+
+def test_us_stop_loss_uses_marketable_limit():
+    dec = monitor._stop_loss_decision(
+        "AAPL", "US", Decimal("200"), Signal("stop_loss", Decimal("200"), {})
+    )
+    assert dec.order_type == "LIMIT" and dec.limit_price == 194.0  # 3% 아래 지정가
+    dec_kr = monitor._stop_loss_decision(
+        "005930", "KR", Decimal("63000"), Signal("stop_loss", Decimal("63000"), {})
+    )
+    assert dec_kr.order_type == "MARKET"
+
+
+def test_paused_stop_loss_notifies_once(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    control.set_flag(conn, "paused", True)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    msgs = [m for m in ctx.exec.notifier.msgs if "일시정지" in m and "손절" in m]
+    assert len(msgs) == 1 and ctx.exec.brokers["paper-main"].orders == []
+
+
+def test_trigger_not_duplicated_while_unhandled(conn, settings):
+    _decision(conn, take_profit=80000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000")
+    control.set_flag(conn, "paused", True)  # 재평가는 막히고 기록만
+    monitor.monitor_once(ctx, market="KR", today=D)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    n = conn.execute("SELECT COUNT(*) FROM triggers WHERE kind='take_profit'").fetchone()[0]
+    assert n == 1  # 미처리 트리거가 있으면 같은 종류를 다시 쌓지 않는다
+
+
+def test_stop_loss_bookkeeping_failure_does_not_abort_tick_or_repeat(conn, settings, monkeypatch):
+    """접수 뒤 원장 기록 실패(OrderBookkeepingError)가 나머지 손절 점검을 끊거나
+    다음 틱에 같은 SELL 을 다시 내게 하면 안 된다."""
+    executor_mod = executor
+
+    _decision(conn, stop_loss=65000.0)
+    dec_b = Decision(**ok_decision(ticker="000660", stop_loss=90000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "000660", "30_decision", {"data": dec_b.model_dump()}
+    )
+    positions = [_pos("005930", cur="63000"), _pos("000660", avg="100000", cur="85000")]
+    ctx = _ctx(conn, settings, positions=positions)
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("63000"), "000660": Decimal("85000")})
+
+    def boom(*a, **kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(core, "insert_order", boom)
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    orders = ctx.exec.brokers["paper-main"].orders
+    assert {o.ticker for o in orders} == {"005930", "000660"}  # 둘 다 점검됐다
+    assert r["stop_loss_orders"] == 0  # 기록이 실패한 주문은 성공으로 세지 않는다
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(ctx.exec.brokers["paper-main"].orders) == 2  # 접수된 주문을 다시 내지 않는다
+    assert executor_mod.OrderBookkeepingError is not None
+
+
+def test_filled_trim_earlier_today_does_not_suppress_stop_loss(conn, settings):
+    """오전에 체결된 TRIM(SELL, filled)이 잔량의 손절을 하루 동안 막으면 안 된다."""
+    dec = _decision(conn, stop_loss=65000.0)
+    dec_id = spot_ledger.decision_id(conn, D, "KR", "005930")
+    repo.insert_order(
+        conn,
+        decision_id=dec_id,
+        account_id="paper-main",
+        ticker=dec.ticker,
+        market="KR",
+        side="SELL",
+        qty=5,
+        order_type="MARKET",
+        price=None,
+        status="filled",
+        order_no="T1",
+        message="TRIM",
+        mode="auto",
+        created_at=(NOW - timedelta(hours=1)).isoformat(),
+    )
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000", qty=5)], price="63000")
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 1 and len(ctx.exec.brokers["paper-main"].orders) == 1
+
+
+def test_stale_accepted_sell_of_old_decision_does_not_block_stop_loss(conn, settings):
+    """어제 미체결로 끝난 손절 SELL(상태 accepted 그대로)이 오늘 손절을 영구히 막으면 안 된다."""
+    _old_decision(conn, stop_loss=65000.0)
+    dec_id = spot_ledger.decision_id(conn, D - timedelta(days=1), "KR", "005930")
+    repo.insert_order(
+        conn,
+        decision_id=dec_id,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="SELL",
+        qty=10,
+        order_type="MARKET",
+        price=None,
+        status="accepted",
+        order_no="OLD",
+        message="손절",
+        mode="auto",
+        created_at=(NOW - timedelta(days=1)).isoformat(),
+    )
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 1 and len(ctx.exec.brokers["paper-main"].orders) == 1
+
+
+def test_failed_session_result_does_not_lock_trigger_kind_for_day(conn, settings):
+    """세션이 떴지만 실패(ok=False: 타임아웃·예산)한 재평가도 '실패:' 로 표시해 하루 1회 제한에서
+    빼야 한다. uuid 로 handled 표시되면 그 종류는 그날 다시 재평가되지 않는다."""
+    _decision(conn, take_profit=80000.0)
+    calls = []
+
+    def runner(spec, *a, **kw):
+        calls.append(spec)
+        if len(calls) == 1:
+            return SessionResult(ok=False, session_id="uuid-1", error="timeout", fake=True)
+        return SessionResult(ok=True, session_id="uuid-2", fake=True)
+
+    ctx = _ctx(
+        conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000", runner=runner
+    )
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r1["reevaluated"] == 0 and len(calls) == 1
+    sql = "SELECT session_id FROM triggers WHERE handled_at IS NOT NULL"
+    handled = conn.execute(sql).fetchall()
+    assert handled and all(r["session_id"].startswith("실패:") for r in handled)
+    ctx.exec.now = lambda: NOW + timedelta(minutes=31)
+    r2 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r2["reevaluated"] == 1 and len(calls) == 2
+
+
+def test_no_decision_today_skips_session_and_keeps_trigger_pending(conn, settings):
+    """오늘 30_decision 이 없으면(analyze 미완료·실패) 유료 세션을 띄워도 submit 이 거부되므로
+    세션 없이 트리거만 미처리로 남겨 다음 틱에 다시 본다."""
+    _old_decision(conn, take_profit=80000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000")
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["triggers"] >= 1 and r["reevaluated"] == 0 and ctx.calls == []
+    rows = conn.execute("SELECT handled_at FROM triggers").fetchall()
+    assert rows and all(r["handled_at"] is None for r in rows)
+
+
+def test_us_position_exchange_from_broker_used_for_quote_and_sell(conn, settings):
+    """universe.us 에 없는 US 보유분(수동 매수·관심종목 해제)도 브로커가 준 거래소로 시세를 읽고
+    손절 매도를 낸다 (ctx.exchanges 에 없으면 NAS 로 조회해 시세 0 → 손절 불능이었다)."""
+    acct = make_account("paper-main", "paper", "auto", markets=["US"])
+    pos = Position(
+        ticker="XOM",
+        market="US",
+        qty=3,
+        avg_price=Decimal("120"),
+        current_price=Decimal("100"),
+        eval_amount=Decimal("300"),
+        pnl_pct=-0.17,
+        exchange="NYS",
+    )
+    cash = {"US": Cash(currency="USD", available=Decimal("10000"), total=Decimal("10000"))}
+    seen = []
+
+    class Market(FakeMarket):
+        def get_price_us(self, symbol, exchange):
+            seen.append(exchange)
+            return super().get_price_us(symbol, exchange)
+
+    ctx = _monitor_ctx(
+        settings,
+        conn,
+        [acct],
+        {acct.id: FakeBroker(to_broker_account(acct), positions=[pos], cash=cash)},
+        Market(prices={"XOM": Decimal("100")}),
+    )
+    r = monitor.monitor_once(ctx, market="US", today=D)
+    assert seen == ["NYS"] and r["stop_loss_orders"] == 1
+    order = ctx.exec.brokers["paper-main"].orders[0]
+    assert order.exchange == "NYS" and order.side == "SELL"
+
+
+def test_stop_loss_refreshes_fill_status_before_dedupe(conn, settings):
+    """원장 status 는 fills sync(마감 뒤)만 바꾸므로 오전에 체결된 TRIM 이 장중엔 accepted 로 남아
+    손절을 막는다 → 막힐 때 그 계좌의 체결을 한 번 동기화해 filled 면 손절을 낸다."""
+    dec = _decision(conn, stop_loss=65000.0)
+    dec_id = spot_ledger.decision_id(conn, D, "KR", "005930")
+    repo.insert_order(
+        conn,
+        decision_id=dec_id,
+        account_id="paper-main",
+        ticker=dec.ticker,
+        market="KR",
+        side="SELL",
+        qty=5,
+        order_type="MARKET",
+        price=None,
+        status="accepted",  # 체결됐지만 원장은 아직 모른다
+        order_no="T1",
+        message="TRIM",
+        mode="auto",
+        created_at=(NOW - timedelta(hours=1)).isoformat(),
+    )
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000", qty=5)], price="63000")
+    fill = Fill(
+        order_no="T1",
+        ticker="005930",
+        market="KR",
+        side="SELL",
+        qty=5,
+        price=Decimal("70500"),
+        filled_at=NOW - timedelta(minutes=50),
+    )
+    ctx.exec.brokers["paper-main"].fills = {("KR", D): [fill]}
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["stop_loss_orders"] == 1 and len(ctx.exec.brokers["paper-main"].orders) == 1
+    st = conn.execute("SELECT status FROM orders WHERE order_no='T1'").fetchone()["status"]
+    assert st == "filled"
+
+
+def _resting(conn, *, side="SELL", qty=3, price="72000", order_no="T1", org_no="91252"):
+    did = spot_ledger.decision_id(conn, D, "KR", "005930")
+    repo.insert_order(
+        conn,
+        decision_id=did,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side=side,
+        qty=qty,
+        order_type="LIMIT",
+        price=Decimal(price),
+        status="accepted",
+        order_no=order_no,
+        message=None,
+        mode="auto",
+        org_no=org_no,
+        created_at=NOW.isoformat(),
+    )
+
+
+def test_stop_loss_cancels_resting_sell_then_sells(conn, settings):
+    """아침 TRIM 지정가가 미체결로 남아 있으면 손절은 그 주문을 취소하고 매도한다(이전엔 하루 종일
+    막혔다)."""
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="HOLD", stop_loss=65000.0)
+    _resting(conn)
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    broker = ctx.exec.brokers["paper-main"]
+    assert broker.cancelled == ["T1"]
+    assert (
+        conn.execute("SELECT status FROM orders WHERE order_no='T1'").fetchone()[0] == "cancelled"
+    )
+    assert out["stop_loss_orders"] == 1
+    sells = [o for o in broker.orders if o.side == "SELL"]
+    assert len(sells) == 1 and sells[0].qty == 10
+
+
+def test_stop_loss_stays_blocked_when_cancel_fails(conn, settings, monkeypatch):
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="HOLD", stop_loss=65000.0)
+    _resting(conn, order_no="T2", org_no=None)
+
+    def boom(*a, **kw):
+        raise KisApiError("X", "취소 실패", "T")
+
+    monkeypatch.setattr(ctx.exec.brokers["paper-main"], "cancel_order", boom)
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0
+    assert any("손절 보류" in m for m in ctx.exec.notifier.msgs)
+
+
+def test_reevaluation_is_enqueued_when_daemon_provides_queue(conn, settings):
+    """데몬에서는 재평가 세션을 틱 안에서 돌리지 않고 큐로 넘긴다(손절 점검이 멈추지 않도록)."""
+    pos = _pos(cur="76000")  # +7% 넘김 → 트리거
+    ctx = _ctx(conn, settings, positions=[pos], price="76000")
+    _decision(conn, action="HOLD", stop_loss=60000.0, take_profit=None)
+    queued = []
+    ctx.enqueue_reevaluate = lambda params: queued.append(params) or 7
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["triggers"] >= 1 and out.get("queued") == 1 and ctx.calls == []
+    assert queued[0]["ticker"] == "005930" and queued[0]["trigger_id"] >= 1
+
+
+# --- 리뷰 F13·F16 ----------------------------------------------------------------------
+
+
+def test_dry_run_stop_loss_is_recorded_once_per_day(conn, settings):
+    """dry-run 손절은 기록만 하므로 매 분 45_/risk_checks 를 다시 쓰지 않는다."""
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    ctx.dry_run = True
+    monitor.monitor_once(ctx, market="KR", today=D)
+    n1 = conn.execute("SELECT COUNT(*) AS n FROM risk_checks").fetchone()["n"]
+    assert n1 >= 1 and ctx.exec.brokers["paper-main"].orders == []
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert conn.execute("SELECT COUNT(*) AS n FROM risk_checks").fetchone()["n"] == n1
+
+
+def test_old_unhandled_trigger_is_not_reused_today(conn, settings):
+    """어제 처리 못 한 트리거는 오늘 다시 쓰지 않고 오늘 가격으로 새 트리거를 쌓는다."""
+    _decision(conn, stop_loss=50000.0, take_profit=75000.0)
+    spot_ledger.insert_trigger(
+        conn,
+        market="KR",
+        ticker="005930",
+        kind="take_profit",
+        detail={},
+        price=Decimal("76000"),
+        decision_id=None,
+        account_id="paper-main",
+        created_at="2026-10-08T02:00:00+00:00",
+    )
+    yesterday = D - timedelta(days=1)
+    assert spot_ledger.unhandled_trigger_id(conn, "KR", "005930", "take_profit", yesterday) == 1
+    assert spot_ledger.unhandled_trigger_id(conn, "KR", "005930", "take_profit", D) is None
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="80000")], price="80000")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    rows = conn.execute(
+        "SELECT id, created_at FROM triggers WHERE kind='take_profit' ORDER BY id"
+    ).fetchall()
+    assert len(rows) == 2 and rows[1]["created_at"].startswith("2026-10-09")
+
+
+# --- 보유기간 프로필(Phase 23 T) ------------------------------------------------------
+
+
+def test_long_horizon_holding_uses_wider_threshold_and_longer_interval(conn, settings):
+    _decision(conn, horizon_days=60, take_profit=None, invalidation_conditions=[])
+    ctx = _ctx(conn, settings, positions=[_pos(avg="70000", cur="76000")], price="76000")
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)  # +8.6%: 장기 임계 10% 미달
+    assert r1["triggers"] == 0 and len(ctx.calls) == 0
+    ctx.market_client.prices["005930"] = Decimal("77500")  # +10.7%
+    r2 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r2["triggers"] == 1 and r2["reevaluated"] == 1
+    # 장기 간격 60분: 45분 뒤 다른 종류(무효화)가 와도 재평가는 보류된다
+    conn.execute(
+        "UPDATE decisions SET data_json=json_set(data_json, '$.invalidation_rules', json(?))",
+        ('[{"metric": "price", "op": "<", "value": 60000}]',),
+    )
+    ctx.market_client.prices["005930"] = Decimal("59000")
+    ctx.exec.now = lambda: NOW + timedelta(minutes=45)
+    r3 = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r3["reevaluated"] == 0 and len(ctx.calls) == 1
+
+
+def test_stop_loss_does_not_cancel_resting_sell_when_paused_or_off(conn, settings):
+    """전체 검토 O5: 일시정지·off 계좌에서는 손절 전 미체결 SELL 을 KIS 에서 취소하지 않는다
+    (취소만 하고 손절은 안 나가면 보호 매도만 사라진다)."""
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="HOLD", stop_loss=65000.0)
+    _resting(conn)
+    control.set_flag(conn, "paused", True)
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert ctx.exec.brokers["paper-main"].cancelled == []
+    control.set_flag(conn, "paused", False)
+    modes.set_account_mode(conn, ctx.exec.accounts[0], "off")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert ctx.exec.brokers["paper-main"].cancelled == []
+    assert conn.execute("SELECT status FROM orders WHERE order_no='T1'").fetchone()[0] == "accepted"
+
+
+def test_off_mode_stop_record_does_not_block_after_switch_to_auto(conn, settings):
+    """전체 검토 O15: off 의 "오늘 기록함" 플래그가 같은 날 auto 전환 뒤 손절을 막지 않는다."""
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="HOLD", stop_loss=65000.0)
+    modes.set_account_mode(conn, ctx.exec.accounts[0], "off")
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert ctx.exec.brokers["paper-main"].orders == []
+    modes.set_account_mode(conn, ctx.exec.accounts[0], "auto")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+
+
+def test_stop_loss_cancels_same_day_resting_buy(conn, settings):
+    """전체 검토 O13: 손절 때 같은 종목 당일 미체결 BUY 를 취소해 손절 뒤 재보유를 막는다."""
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="ADD", stop_loss=65000.0)
+    _resting(conn, side="BUY", qty=2, price="60000", order_no="B1")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+    assert ctx.exec.brokers["paper-main"].cancelled == ["B1"]
+    assert (
+        conn.execute("SELECT status FROM orders WHERE order_no='B1'").fetchone()[0] == "cancelled"
+    )
+
+
+def test_stop_loss_expires_pending_buy_approval(conn, settings):
+    """손절 직후 같은 종목의 pending BUY 승인을 만료로 닫는다(사람이 승인해 곧바로 되사지 않게)."""
+    pos = _pos()
+    ctx = _ctx(conn, settings, positions=[pos])
+    _decision(conn, action="ADD", stop_loss=65000.0)
+    did = spot_ledger.decision_id(conn, D, "KR", "005930")
+    conn.execute(
+        "INSERT INTO approvals(decision_id, account_id, order_json, status, requested_at, "
+        "expires_at, fingerprint) VALUES (?,?,?,?,?,?,?)",
+        (
+            did,
+            "paper-main",
+            json.dumps({"ticker": "005930", "side": "BUY"}),
+            "pending",
+            NOW.isoformat(),
+            NOW.isoformat(),
+            "-",
+        ),
+    )
+    conn.commit()
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert conn.execute("SELECT status FROM approvals").fetchone()[0] == "expired"
+
+
+def _filled_buy(conn, did, created_at):
+    repo.insert_order(
+        conn,
+        decision_id=did,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=10,
+        order_type="LIMIT",
+        price=Decimal("70000"),
+        status="filled",
+        order_no="F1",
+        message=None,
+        mode="auto",
+        created_at=created_at,
+    )
+
+
+def test_stop_loss_is_monotone_across_holding_decisions(conn, settings):
+    """전체 검토 L5: 보유 재분석 HOLD 가 손절가를 비워도 보유 기간 중 이전 손절선(최고값)을 지킨다.
+    (평단 70000·현재 63000: 기본 −15% 손절선 59500 은 안 닿지만 이전 결정의 65000 은 닿는다)"""
+    prev = D - timedelta(days=1)
+    first = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, prev, "KR", "005930", "30_decision", {"data": first.model_dump()}
+    )
+    did = spot_ledger.decision_id(conn, prev, "KR", "005930")
+    _filled_buy(conn, did, (NOW - timedelta(days=1)).isoformat())
+    _decision(conn, action="HOLD", target_weight=0.0, stop_loss=None)  # 오늘 HOLD, 손절가 없음
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+
+
+def test_stop_loss_floor_survives_same_day_reevaluation(conn, settings):
+    """전체 검토 2차 2-O1: 매수 당일 BUY(손절 65000) 뒤 오후 재평가 `31_decision_r1` HOLD 가
+    손절가를 비워도(같은 (date, market, ticker) 행을 덮어쓴다) 아침 손절선이 살아 있어야 한다.
+    held_since 가 오늘이라 이전 날짜 행이 없다 — 평단 70000·현재 63000: 기본 −15% 는 안 닿는다.
+    (Ruling 12: Task 9 이식본의 끝단 monitor 단언을 여기서 복원)"""
+    first = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "30_decision", {"data": first.model_dump()}
+    )
+    did = spot_ledger.decision_id(conn, D, "KR", "005930")
+    _filled_buy(conn, did, NOW.isoformat())
+    later = Decision(**ok_decision(action="HOLD", target_weight=0.0, stop_loss=None))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "31_decision_r1", {"data": later.model_dump()}
+    )
+    assert spot_ledger.get_decision(conn, did)["action"] == "HOLD"  # 행은 덮였다
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+
+
+def test_close_rule_keeps_session_alignment_and_skips_on_missing_session(project):
+    """PR #63 Codex: 빠진 거래일을 지우면 연속이 아닌 종가가 연속처럼 보인다 — 거래일 정렬을 지키고
+    필요한 종가 중 하나라도 없으면(빠진 날·오래된 마지막 값) 미판정.
+    (Ruling 14: 피처 스토어 종가표 대신 `MonitorContext.close_table` 주입)"""
+    days = [date(2026, 10, 20), date(2026, 10, 21), date(2026, 10, 22), date(2026, 10, 23)]
+    table = {
+        "005930": dict(zip(days, [90.0, float("nan"), 90.0, 90.0], strict=True)),
+        "000660": dict(zip(days, [1.0, 1.0, 1.0, 1.0], strict=True)),
+    }
+    seen = []
+
+    def close_table(market, since, until):
+        seen.append((market, since, until))
+        return table
+
+    monitor._CLOSES.clear()
+    ctx = SimpleNamespace(close_table=close_table)
+    rule = {"metric": "close", "op": "<", "value": 100, "days": 3}
+    dec = {"invalidation_rules": [rule]}
+    today = date(2026, 10, 24)
+    closes = monitor._closes_if_needed(ctx, "KR", "005930", today, dec)
+    assert closes[-3] is None and len(closes) == 4  # 빠진 날 자리가 남아 있다
+    assert rule_hit(rule, Decimal("90"), closes) is None
+    two = {"metric": "close", "op": "<", "value": 100, "days": 2}
+    assert rule_hit(two, Decimal("90"), closes) is True
+    assert seen == [("KR", today - timedelta(days=45), today - timedelta(days=1))]  # 오늘 봉 제외
+    # 종가 소스 없음·종목 없음·빈 표·읽기 실패·close 조건 없음 → None(그 조건만 미판정)
+    assert monitor._closes_if_needed(ctx, "KR", "035720", today, dec) is None
+    assert monitor._closes_if_needed(ctx, "KR", "005930", today, {"invalidation_rules": []}) is None
+    none = SimpleNamespace(close_table=None)
+    assert monitor._closes_if_needed(none, "KR", "005930", today, dec) is None
+    monitor._CLOSES.clear()
+    empty = SimpleNamespace(close_table=lambda *a: {})
+    assert monitor._closes_if_needed(empty, "KR", "005930", today, dec) is None
+    monitor._CLOSES.clear()
+
+    def fail(*a):
+        raise OSError("종가표 없음")
+
+    broken = SimpleNamespace(close_table=fail)
+    assert monitor._closes_if_needed(broken, "KR", "005930", today, dec) is None
+    monitor._CLOSES.clear()
+
+
+# --- Review Focus 1 ---------------------------------------------------------------------
+
+
+def test_paused_tick_records_trigger_notifies_once_and_places_no_order(conn, settings):
+    """데몬이 paused 상태에서 monitor 틱을 돌면 손절 주문을 내지 않고 `stop_paused` 알림을 하루
+    1회만 보내며, (다른 종목의) 트리거는 기록하되 재평가를 큐에 넣지 않는다."""
+    _decision(conn, stop_loss=65000.0)  # 005930: 63000 ≤ 65000 손절
+    dec_b = Decision(**ok_decision(ticker="000660", take_profit=110000.0, stop_loss=90000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "000660", "30_decision", {"data": dec_b.model_dump()}
+    )
+    positions = [_pos("005930", cur="63000"), _pos("000660", avg="100000", cur="112000")]
+    ctx = _ctx(conn, settings, positions=positions)
+    ctx.market_client = FakeMarket(
+        prices={"005930": Decimal("63000"), "000660": Decimal("112000")}
+    )
+    queued = []
+    ctx.enqueue_reevaluate = lambda params: queued.append(params) or 1
+    control.set_flag(conn, "paused", True)
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)
+    r2 = monitor.monitor_once(ctx, market="KR", today=D)
+    paused_msgs = [m for m in ctx.exec.notifier.msgs if "일시정지" in m and "손절" in m]
+    assert len(paused_msgs) == 1
+    assert all(b.orders == [] and b.cancelled == [] for b in ctx.exec.brokers.values())
+    assert r1["stop_loss_orders"] == 0 and r2["stop_loss_orders"] == 0
+    rows = conn.execute("SELECT ticker, kind, handled_at FROM triggers").fetchall()
+    assert rows and {r["ticker"] for r in rows} == {"000660"}
+    assert "take_profit" in {r["kind"] for r in rows}
+    assert all(r["handled_at"] is None for r in rows)  # 미처리로 남아 재개 뒤 다시 본다
+    assert r1["triggers"] >= 1 and r2["triggers"] == 0  # 두 번째 틱은 같은 행을 재사용
+    assert queued == [] and "queued" not in r1 and ctx.calls == []
+    # 일시정지에서는 손절 주문도 승인 요청도 남지 않는다
+    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    assert repo.pending_approvals(conn) == []
