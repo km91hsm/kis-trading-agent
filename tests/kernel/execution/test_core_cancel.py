@@ -19,15 +19,16 @@ class _Notifier:
 
 
 class _Broker:
-    def __init__(self, exc=None):
+    def __init__(self, exc=None, accepted=True):
         self.calls: list[tuple[str, dict]] = []
         self.exc = exc
+        self.accepted = accepted
 
     def cancel_order(self, order_no, **kw):
         self.calls.append((order_no, kw))
         if self.exc:
             raise self.exc
-        return OrderResult(order_no=order_no, accepted=True, message="ok")
+        return OrderResult(order_no=order_no, accepted=self.accepted, message="거부됨")
 
 
 def _deps(conn):
@@ -66,10 +67,12 @@ def test_cancel_calls_broker_once_and_sets_cancelled(conn):
     oid, broker = _order(conn), _Broker()
     out = core.cancel(
         _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
-        dry_run=False, reason="재호가",
+        dry_run=False, reason="재호가", exchange="NAS",
     )  # fmt: skip
     assert out == {"ok": True, "order_id": oid, "status": "cancelled"}
-    assert broker.calls == [("0001", {"market": "KR"})]
+    assert broker.calls == [
+        ("0001", {"market": "KR", "org_no": None, "ticker": "005930", "exchange": "NAS", "qty": 2})
+    ]
     assert _status(conn, oid) == "cancelled"
 
 
@@ -93,3 +96,21 @@ def test_cancel_broker_failure_keeps_status_and_raises(conn):
         )  # fmt: skip
     assert len(broker.calls) == 1
     assert _status(conn, oid) == "accepted"
+
+
+def test_cancel_rejected_keeps_status_and_returns_not_ok(conn):
+    oid, broker = _order(conn), _Broker(accepted=False)
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
+        dry_run=False, reason="재호가",
+    )  # fmt: skip
+    assert out == {"ok": False, "order_id": oid, "status": "accepted", "message": "거부됨"}
+    assert _status(conn, oid) == "accepted"
+
+
+def test_cancel_missing_order_raises(conn):
+    with pytest.raises(ValueError, match="없음"):
+        core.cancel(
+            _deps(conn), order_id=999, order_no="x", market="KR", broker=_Broker(),
+            dry_run=False, reason="r",
+        )  # fmt: skip
