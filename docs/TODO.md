@@ -69,7 +69,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - [x] Task 12: ingest `build_inputs`·클라이언트 조립·CLI `ingest collect`
 - [x] Task 13: ingest 데몬 잡 `news_collect`·api·feature 완성·README
 - [x] Task 14: 문서·체크리스트·공개면 점검
-- [ ] PR #4 머지 (사용자 머지 대기)
+- [x] PR #4 머지
 - 이연(M0 리뷰):
   - TODO 승계 `EDGAR_USER_AGENT` 입력 항목 (아래 「사용자 확인 대기」)
 - 이연(M3):
@@ -80,15 +80,39 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
   - M12: health `disclosure`·`saveticker`, selfcheck playwright 점검, `test_health_disclosure_area_critical_for_held`, 패키징(`extensions/saveticker` data·playwright 드라이버)
 
 ## M4 — kernel/session + kernel/execution + spot analyze
-SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경로(가장 큼, 골든 회귀 1회 재기준). 완료 기준: `FAKE_CLAUDE=1 trader analyze --dry-run` 체크포인트 일치.
-- [ ] 착수 전
-- 이연(M0 리뷰):
-  - 계약 테스트 2종 이연: agents 공통 규칙 패리티, `allowedTools==tool_command()`
-  - `Feature.tier=="lane"` ↔ `LANES` 교차 검증
-  - `runs.finish` 실패로 남는 `running` 행 기동 시 정리
-  - 두 번째 시그널 테스트 `wait=True` 실동작
-  - 게이트 공급 경로(`Feature` 에 gates 필드 또는 deps 주입) 설계
-- 이연(M2): `expire_approvals` 훅·데몬 `telegram_poll` 잡·outbox flush 잡·`exec-key` CLI·`DEAD_STATUSES` 커널 이동·`accounts_io.blockers` 실제 스키마; 옛 `SCALP_EXIT` 표·`DecisionBrief` 를 `notify.messages` 에(M4/M5/M9)
+SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경로(가장 큼, 골든 회귀 1회 재기준). 완료 기준: `FAKE_CLAUDE=1 trader spot analyze --dry-run` 체크포인트 일치.
+- [x] 착수
+- [x] Task 1 커널 계약·설정·부트 확장 — `AgentDef`·`Port`·lane·`tool` 루트
+- [x] Task 2 `kernel/session` 원장 v4·`calls`·`usage`
+- [x] Task 3 `session.agents`(md 로더·`agents_json`·`orchestrator_prompt`)·`anonymize`·공통 규칙 계약 테스트
+- [x] Task 4 `session.runner`(`SessionSpec`·`run_session`·`build_command`·stream 파싱)
+- [x] Task 5 `kernel/execution` 원장 v5·`types`·`idem`·`ledger` 원시
+- [x] Task 6 `execution.core`(transmit·승인·만료·지문)·notify 주문 문구
+- [x] Task 7 spot 골격(설정·스키마·원장 v6·결정 저장소)·accounts/ingest 포트
+- [x] Task 8 spot 게이트(rules·stops·horizon·costs·tradability)
+- [x] Task 9 spot summary(수렴 감시·합의 토론 생략)
+- [x] Task 10 spot 도구(`tools`·`tool_cli`·`StageRule` 표)
+- [x] Task 11 spot `executor`·`submit-decision`·승인 래퍼·`exec-key` CLI
+- [x] Task 12 spot analyze 세션(agents md·FAKE·`SessionKind`·`trader spot analyze`·`tool collect`)
+- [x] Task 13 승인 경로(`trader spot approvals`·텔레그램 `/approve`·`/reject`·`approvals_expire` 잡)
+- [x] Task 14 골든 회귀 재기준·analyze 체크포인트 집합 테스트
+- [x] Task 15 문서·체크리스트·공개면 점검
+- 이연(M0 리뷰, M4 가 한 것): 계약 테스트 2종(agents 공통 규칙 패리티, `allowedTools==tool_command()`)·`Feature.tier=="lane"` ↔ `LANES` 교차 검증
+- 이연(M0 리뷰, 남음):
+  - 두 번째 시그널 테스트 `wait=True` 실동작 (M5)
+  - 게이트 공급 경로(`Feature.gates` 필드 또는 deps 주입) 설계 (M5)
+  - `runs`/`agent_calls` 의 stale `running` 행 기동 시 정리 (M5)
+- 이연(M2, M4 가 한 것): `exec-key` CLI(`trader spot exec-key list|release`), `expire_approvals` → `approvals_expire` 잡
+- 이연(M2, 남음): `telegram_poll` 데몬 잡 (M5), outbox flush 잡 (M5), `accounts_io.blockers` 실제 스키마(orders·approvals·positions_snapshot, M5), `DEAD_STATUSES` 커널 이동·`SCALP_EXIT` 표(M5/M9)
+- 이연(M4):
+  - M5: `resume` 세션·`31_decision_r<n>` 재평가(옛 `stop_floor` 규칙 포함)·trigger 가격·stop·monitor·`telegram_poll`/outbox flush 잡·`holiday_fn`·기동 시 stale `running` 행 정리·게이트 공급 경로(`Feature.gates`)·시그널 `wait=True` 테스트·`accounts_io.blockers` 실제 스키마
+  - M6: killswitch·blackout·hedge·park·regime 컨텍스트·승인 재판정의 bear/killswitch 재검사·`test_rules` 의 regime 호출자
+  - M7: quant·RL·theme (`AnalystRole` 의 "quant" 복원 포함)
+  - M8: memory·calibration·`quick.py`(`ask_json`·`probe_usage`)·`test_quick` 9건·결과 dict `memory_entry_id`·`memory_entries` 단언
+  - M10: fo 세션·`test_session_fo`·`test_schemas_fo`·`test_ticks_fo`·`test_usage_fo`
+  - M11: `decision_trace`
+  - M12: `trader status`·`test_status_shows_last_decisions`·`paths.agents_dir` 정리·native-host argv 우회(번들)·`test_native_origin_routes_before_cli`
+  - Ruling: `trader collect`·`trader analyze` 최상위 별칭은 두지 않는다(기능 sub-app 일관: `trader spot analyze`, `trader ingest collect`)
 
 ## M5 — spot 운영 경로
 monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기준: 옛 테스트 이식 통과.

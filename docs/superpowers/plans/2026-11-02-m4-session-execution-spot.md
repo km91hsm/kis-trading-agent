@@ -92,7 +92,7 @@ tests/kernel/{session,execution,lane}/…  tests/features/spot/…  tests/fixtur
 
 | 옛 테스트 | 바뀌는 것 | 이유 |
 |---|---|---|
-| 모든 이식 테스트 | `Settings()` → `settings` fixture, `RiskLimits()` → `spot.settings.RiskLimits()`, `AccountConfig(...)` → `make_account(...)`, `control.set_account_mode` → `accounts.api.set_account_mode` | 설정 객체·계좌 모델 위치 |
+| 모든 이식 테스트 | `Settings()` → `settings` fixture, `RiskLimits()` → `spot.settings.RiskLimits()`, `AccountConfig(...)` → `make_account(...)`, `control.set_account_mode` → `accounts.modes.set_account_mode` (Ruling 17: 테스트는 `trader.features.accounts.modes` 를 직접 import — `accounts.api` 에 `set_account_mode`·`live_confirmed` 없음) | 설정 객체·계좌 모델 위치 |
 | `test_executor.py` exec_key 계열 | `SELECT … FROM exec_keys` → `exec_locks`(+ 예약 열은 `buy_reservations`) | §2.4 테이블 분리 |
 | `test_executor.py`·`test_tools.py` 결정 조회 | `decisions.round/updated_at/stop_floor` 참조 → `decision_rounds` 조인 | §2.4 |
 | `test_session.py` 전부 | `run_session(spec, settings, conn, accounts, …)` → `run_session(spec, ANALYZE_KIND, ctx, …)`; fake 호출 확인은 합성 `SessionKind.fake` | SessionKind 레지스트리 |
@@ -103,6 +103,13 @@ tests/kernel/{session,execution,lane}/…  tests/features/spot/…  tests/fixtur
 | `test_cli_analyze.py::test_status_shows_last_decisions` | 이식하지 않음(`trader status` 는 M12) | 범위 |
 | `tests/notify/test_messages.py` 5건 | import 경로만 | — |
 | `test_tools.py::test_submit_decision_runs_executor` 등 | 결과 dict 의 `memory_entry_id` 키 단언 삭제(M8) | 범위 |
+| `tests/notify/test_messages.py::test_decision_brief_from_dict_and_model` | `agents.schemas.Decision` → 로컬 pydantic 모델(커널이 features 를 import 못 함, 단언 동일) | Ruling 8 |
+| `test_executor.py::test_approve_legacy_null_fingerprint_passes` | → `test_approval_without_fingerprint_cannot_be_created`(`approvals.fingerprint NOT NULL` 이라 NULL 지문 승인은 `IntegrityError`) | Ruling 15 (v5 NOT NULL) |
+| `test_executor.py::test_record_portfolio_false_skips_snapshot_and_killswitch` | → `test_record_portfolio_false_skips_snapshot`(killswitch 단언 제거, M6) | Ruling 15 |
+| `tests/agents/test_registry.py` 공통 규칙 계약 | `common_rules` 끝 마침표 정규화(`.rstrip(".")`) 복원 — Task 3 단위 테스트 추가 | Ruling 18 (Ruling 5 폐기) |
+| `test_tools.py::test_checkpoint_write_rejects_name_payload_mismatch` | 애널리스트 2개를 먼저 써 전제조건을 만족시킨 뒤 불일치를 검증 | Task 10 (e): 전제조건 실패만으로 통과하던 약한 단언 보강 |
+| `test_tools.py` `bundle_trader` market_view 단언 | `in` → `not in`(market_view 컨텍스트 M6 이연) | Task 10 (b) 사전 승인 |
+| `test_cli_analyze.py::test_cli_analyze_without_dry_run_executes_via_fake_broker` | FakeBroker 를 `AccountsPortImpl.brokers` 패치로 주입해 HOLD 경로 유지; `/status` 단언 `"상태" in m` | Task 12 |
 | `test_stock_regression_fo.py` | 스냅샷 파일 `stock_regression_v1.json` 로 1회 재기준(원장 v1 열 이름) | 스펙 M4 행 |
 
 ---

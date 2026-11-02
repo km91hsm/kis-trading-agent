@@ -39,15 +39,51 @@
 
 ## session
 
-- 책임: 실행 체크포인트 저장소(`kernel/session/run_store.py`). 레이아웃은 `state/runs/<운영일>/<시장>/<종목>/<이름>.json`. M4 이후 단계 파일은 이 함수들로만 읽고 쓴다.
-- 공개면: `run_date_for`·`run_dir`·`market_dir`, `CHECKPOINT_SCHEMA_VERSION`(=1)·`checkpoint_payload`, `write_checkpoint`·`read_checkpoint`·`list_checkpoints`.
+- 책임: LLM 세션 공용 몫. 원장 v4(세션 행·구독 사용률), 에이전트 정의 로더·프롬프트 조립, 익명화, 단계 전제조건 검사, 체크포인트 저장소, `claude -p` 실행. 기능 이름을 모르며, 세션 종류별 차이는 `SessionKind`·`AgentDef`·`StageRule` 선언이 정한다.
+- 모듈:
+  - `migrations`: 원장 v4 `SESSION` — `agent_calls`(세션 1회 = 1행)·`llm_rate_limits`(구독 사용률 관측).
+  - `calls`: `start_call`(일일 상한 검사 포함)·`finish_call`, 오늘(KST) 세션 수 집계 `sessions_today`·`calls_today`.
+  - `usage`: 구독 한도(5시간·7일) 관측 두 곳(세션 stream-json 의 `rate_limit_event` → `llm_rate_limits`, 대화형 상태줄 `llm.usage_file`) 중 최신을 `latest_observation`, 사용률이 높으면 새 세션을 줄이는 `session_allowance`·`allowance`·`throttle_enabled`.
+  - `agents`: 에이전트 md(YAML 프런트매터 + 본문) 로더 `load_agent`·`by_name`, `--agents` JSON `agents_json`, 오케스트레이터 프롬프트 `orchestrator_prompt`, 공통 규칙 `common_rules`. 모델은 `models` 설정이 md 기본보다 우선하고, md 의 `python -m trader tool` 은 `bundle.tool_command()` 로 치환한다.
+  - `anonymize`: 프롬프트 직전 종목명·티커 익명화(`anonymize`·`deanonymize`, `Alias`). 문자열 값만, 단어 경계에서만 치환한다.
+  - `stages`: `StageRule`(허용 단계 glob + 선행 단계 + 최소 개수) 검사 `first_rule`·`check_rule`.
+  - `run_store`: 체크포인트 저장소 `state/runs/<운영일>/<시장>/<종목>/<이름>.json` — `run_date_for`·`run_dir`·`market_dir`, `checkpoint_payload`·`write_checkpoint`·`read_checkpoint`·`list_checkpoints`.
+  - `runner`: `run_session(spec, kind, ctx, …)` — `SessionSpec`·`SessionResult`·`PipelineError`·`ThrottleBlocked`·`SessionCancelled`, `build_command`·`parse_stream`·`run_claude`·`terminate_group`. 세션 1회 = `agent_calls` 1행 + `runs` 1행. 서브에이전트 정의는 `--agents <json 파일>`, 도구는 `--allowedTools "Bash(<tool_command> *)"` 만, cwd 는 빈 임시 디렉터리, 세션 PATH 앞에 `bundle.tool_bin_dir()`. `FAKE_CLAUDE=1`(`is_fake`)이면 subprocess 없이 `SessionKind.fake(ctx, spec)` 가 체크포인트를 쓴다.
+- 공개면: `kernel.session.__all__` — `SESSION`·`SessionSpec`·`SessionResult`·`PipelineError`·`run_session`·`by_name`·`check_rule`·`first_rule`·`run_dir`·`run_date_for`·`checkpoint_payload`·`write_checkpoint`·`read_checkpoint`·`list_checkpoints`. 나머지는 서브모듈 경로로 import 한다.
 - 규약:
   - 운영일 `run_date_for(market, now)`: KR 은 KST 날짜. US 는 현지 날짜의 개장 시각(09:30 ET)을 KST 로 바꾼 날짜라서, 개장 전 analyze 와 KST 자정 뒤 장중 monitor·재평가가 같은 디렉터리를 본다.
   - `run_dir(d, market, ticker, state=None)` 은 종목 디렉터리를 만들어 돌려주고 `state/runs` 밖을 가리키면 `ValueError`. `market_dir(..., create=False)` 은 시장 단위 산출물(`_scan`·`_screen`·`_reflect`) 자리.
-  - 체크포인트 봉투 `checkpoint_payload(data, call=None)` = `{schema_version, data, call}`.
-  - `write_checkpoint` 는 pid·스레드 접미사 임시파일에 쓴 뒤 `atomic_replace` 로 교체한다(데몬의 monitor·작업 대기열이 다른 스레드라 pid 만으로는 임시파일이 겹친다).
-  - `read_checkpoint` 는 없으면 `None`, 이름이 디렉터리 밖을 가리키면 `ValueError`. `list_checkpoints` 는 이름 정렬.
-- 테스트: `tests/kernel/session/test_run_store.py`
+  - 체크포인트 봉투 `checkpoint_payload(data, call=None)` = `{schema_version, data, call}`(`CHECKPOINT_SCHEMA_VERSION`=1). `write_checkpoint` 는 pid·스레드 접미사 임시파일에 쓴 뒤 `atomic_replace` 로 교체한다. `read_checkpoint` 는 없으면 `None`, 이름이 디렉터리 밖을 가리키면 `ValueError`.
+  - 일일 세션 상한 초과는 `PipelineError`. 모든 단계 파일은 `run_store` 함수로만 읽고 쓴다.
+  - 마이그레이션 `SESSION` 은 `ledger.migrations.KERNEL` 이 아니라 `contracts.KERNEL_MODULES` 로 합쳐진다(`KERNEL` 만 쓰는 커널 테스트가 깨지지 않게).
+- 테스트: `tests/kernel/session/`
+
+## execution
+
+- 책임: 주문 실행 코어. 모든 주문이 지나는 한 곳 — 실행 키 선점(멱등)·브로커 전송·주문/승인 원장 기록·사람 승인 관문. 기능 이름과 `features` 를 모른다. 알림·로그에는 계좌 id 만 쓴다(계좌번호 금지).
+- 모듈:
+  - `migrations`: 원장 v5 `EXECUTION` — 주문·승인·리스크 판정·`exec_locks`·`buy_reservations`·포지션 스냅샷·계좌 NAV·`fills`. `approvals.fingerprint` 는 NOT NULL.
+  - `types`: 주문 의도 `OrderIntent`·실행 정책 `ExecPolicy`·게이트 계획 `GatePlan`·`OrderBookkeepingError`, 상수(`ORIGIN_CHECK`·`APPROVAL_TTL`·`EXEC_KEY_STALE`), `dead_status_sql`. `broker.models`·`config`·표준 라이브러리만 import 한다.
+  - `idem`: 실행 키 저장소 `IdemStore`·`ExecKeyStore`. `exec_locks` 가 키를 쥐고 매수 예약이면 `buy_reservations` 가 계좌·시장·종목·금액을 남겨 동시 판정이 서로의 진행 중 예약을 보게 한다.
+  - `ledger`: 원장 원시 — 주문·승인·리스크 판정·스냅샷·NAV 기록과 게이트 입력용 조회(`realized_pnl_5d`·`held_since` 등). 옛 `ledger/repo.py` 와 같은 시그니처·공식(게이트 입력이라 공식이 바뀌면 매매가 바뀐다). 금액은 Decimal ↔ TEXT, 시각은 UTC ISO.
+  - `core`: `transmit`(보낸 시각 `mark_sent` → 브로커 → 상태 결정 → 원장 → 키를 주문에 묶거나 놓음 → 체크포인트·알림), `request_approval`·`approve`·`reject`·`expire_approvals`, `approval_fingerprint`, `ExecDeps`. `approve` 는 기능이 아는 판단(계좌 정책·결정 방향·재판정·의견)을 콜백으로 받고, `recheck` 는 `None` 통과 / `str` 사유 → expired / `KeepPending(reason)` → pending 유지.
+  - `ports`: 코어가 기능에 기대는 접점 Protocol `AccountsPort`·`InputsPort`. 구현은 accounts·ingest 기능이 맡는다.
+- 공개면: `kernel.execution.__all__` — `EXECUTION`·`OrderIntent`·`ExecPolicy`·`GatePlan`·`OrderBookkeepingError`·`ExecKeyStore`·`IdemStore`·`KeepPending`·`approval_fingerprint`·`AccountsPort`·`InputsPort`. 원장 원시는 `from trader.kernel.execution import ledger as xledger`, 코어는 `core` 모듈로 쓴다.
+- 규약:
+  - 주문 전송은 `core.transmit` 만 한다. 기능이 KIS 주문 API 를 직접 부르지 않는다.
+  - 보낸 뒤(`sent_at`) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이다(같은 결정·계좌·방향 주문이 다시 안 나간다). 사람이 KIS 주문 유무를 확인한 뒤 `ExecKeyStore` 로 푼다.
+  - `take_pending` 이 pending 이 아닌 승인은 실제 상태를 돌려주고 DB 를 바꾸지 않는다(approved 행을 expired 로 덮지 않는다). 승인 지문은 항상 비교한다.
+  - 마이그레이션 `EXECUTION` 은 `session` 과 같은 방식(`contracts.KERNEL_MODULES`)으로 합쳐진다.
+- 테스트: `tests/kernel/execution/`
+
+## lane
+
+- 책임: 현물·파생·단타 레인이 공유하는 계약 타입. 커널에는 Protocol·DTO 만 두고 구현은 각 레인 기능이 한다.
+- 모듈: `types` — `WorkItem`(collect 가 돌려주는 처리 단위: 종목·거래소)·`LaneContext`(설정·conn·state·now·dry_run·notifier·`ports`·`ext`)·`Lane` Protocol(`schedule`·`allowed`·`collect`·`decide`·`plan`·`tick`·`reevaluate`·`reflect`), 상수 `LANES`(`spot`·`fo`·`scalp`).
+- 규약:
+  - 레인 기능은 어떤 기능도 import 하지 못한다. 필요한 서비스(계좌·수집)는 `LaneContext.ports` 로 주입받는다(`Feature.ports` 가 `boot(ports=True)` 에서 조립됨).
+  - 레인 고유 값은 `LaneContext.ext` 에 둔다.
+- 테스트: `tests/kernel/lane/`
 
 ## broker
 
@@ -80,12 +116,13 @@
 ## registry
 
 - 책임: 기능 계약(`Feature`)과 그 타입, 기능 발견, 계약·import 경계 검사.
-- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`·`AgentDef`(에이전트 정의 파일)·`Port`(부트가 `build(boot)` 로 조립하는 이름 붙은 구현체), `RegistryError`, `discover`, `check`, `import_violations`.
+- 공개면: `Feature`·`JobSpec`·`Hook`·`SseKey`·`HealthArea`·`StatusSection`·`TelegramCommand`·`ToolCommand`·`StageRule`·`OriginSpec`·`QueueKind`·`SessionKind`(세션 종류: 에이전트·프롬프트 절·스키마·타임아웃 키·`runs` kind·상한 키·감속 등급·FAKE·stdin 보충)·`AgentDef`(에이전트 md 경로 + 출력 스키마)·`StageRule`(`ToolCommand.stage_rules` 의 단계 전제조건)·`OriginSpec`(주문 출처: 리스크·주문 단계 이름·결정 행 유무·게이트 면제·멱등 단위)·`ToolCommand`(`trader tool` 하위 명령, `handler` 가 `Typer` 면 그룹)·`Port`(부트가 `build(boot)` 로 조립하는 이름 붙은 구현체). `Feature` 의 M4 추가 필드: `tools`·`origins`·`session_kinds`·`agents`·`ports`, `RegistryError`, `discover`, `check`, `import_violations`.
 - 규약:
   - `discover()` 는 `trader.features` 아래 각 패키지의 `feature.FEATURE` 를 `importlib`+`pkgutil` 로 동적 import 한다. kernel 이 features 를 import 하는 유일한 경로다.
   - import 3층 규칙: `kernel` ← 서비스 기능 ← 레인. 다른 기능은 `api.py` 로만, 레인은 기능 import 금지, 커널은 기능 import 금지(`discover` 제외). `import_violations` 가 AST 로 검사하며 `from pkg import features`·상대 import 형태도 잡는다.
-  - `check(features, roots=None)`: `roots` 기본값은 `trader.features.__path__`. 기능 id·잡 id·큐 kind·SSE 키·origin 중복, 기능 폴더 README 존재, 마이그레이션 규칙을 메시지 목록으로 돌려준다.
+  - `check(features, roots=None)`: `roots` 기본값은 `trader.features.__path__`. 기능 id·잡 id·큐 kind·SSE 키·origin·에이전트·포트 중복, 기능 폴더 README 존재, 마이그레이션 규칙을 메시지 목록으로 돌려준다.
   - 훅: `hooks.by_point(features)` 가 각 `Feature.hooks` 를 포인트별 튜플로 묶고(기능 순서·선언 순서 유지), `hooks.run(hooks, point, **kw)` 가 차례로 부른다. 훅 하나의 예외는 기록하고 다음 훅을 계속하며(실패 격리), 훅마다 `{"hook","result"}` 또는 `{"hook","error"}` 한 건을 돌려준다. 포인트는 `news.post_ingest` 등. 커널은 훅 내용을 모른다.
+  - `contracts.KERNEL_MODULES` 가 커널 모듈 마이그레이션(session v4·execution v5)을 `all_migrations` 에 합친다. `check` 는 origin·에이전트 이름·포트 이름 중복, `tier=lane` ↔ `LANES` 교차, `OriginSpec.origin` 이 `orders.origin` CHECK(`ORIGIN_CHECK`) 안인지도 검사한다.
   - 이름이 `features` 인 기능 폴더는 두지 않는다(루트 추론이 `<root>/features` 존재에 의존).
 - 테스트: `tests/kernel/registry/` (합성 fixture 는 `tests/fixtures/`)
 
@@ -117,14 +154,16 @@
 
 ## cli
 
-- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 을 둔다.
-- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`).
+- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 과 `tool` 루트를 둔다.
+- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`).
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
   - 설정 오류는 `config_errors` 데코레이터가 사용자용 메시지로 바꾼다.
   - cli 는 `features` 를 정적 import 하지 않는다. 기능은 `discover()` 를 거쳐 sub-app 으로 마운트된다.
   - `selfcheck` 는 JSON 1줄(파이썬 버전·루트·원장 버전·기능 목록·웹 dist 유무). `init` 은 템플릿 중 없는 파일만 복사한다.
   - 콘솔 UTF-8 강제는 `TraderApp` 진입점에서 한다.
+  - `trader tool` 루트(`tool_cmd`): 기능이 선언한 `ToolCommand` 를 모아 단 하나의 그룹으로 마운트한다(이름 중복은 `RegistryError`). 출력은 JSON 1줄뿐이고 `emit` 은 `ok: false` 면 종료 코드 1, `run_tool` 은 예외를 `{"ok": false, "error": "<Type>: <msg>"}` 로 바꾼다. 세션의 허용 명령은 `bundle.tool_command()`(번들 `trader tool` / 개발 `python -m trader tool`)와 같은 문자열이고, 세션 PATH 앞에 `bundle.tool_bin_dir()`(`platform.bundle`, 번들은 실행파일 폴더·개발은 venv bin)를 둔다. claude 실행파일 탐색은 `platform.claude_bin`(`find_claude`·`child_path`·`ClaudeNotFound`).
+  - `boot(ports=True, …)` 는 settings·secrets·conn 을 함의하고 모든 `Feature.ports` 를 이름으로 조립해 `Boot.ports` 에 담는다. 텔레그램 `CommandContext.ports` 도 같은 맵이라 핸들러(`/approve` 등)가 `ctx.ports["accounts"]` 로 계좌·브로커·정책을 받는다.
 - 테스트: `tests/kernel/cli/`
 
 ## notify
@@ -143,11 +182,10 @@
   - `notify.enabled=false` 면 `NullNotifier` 이고 수신기는 없다(리허설).
 - 테스트: `tests/kernel/notify/`
 - 알려진 차이:
-  - 옛 `expire_approvals` 훅은 M4 가 더한다.
-  - 데몬 `telegram_poll`·outbox flush 잡은 M4.
+  - 승인 만료는 훅이 아니라 spot 의 `approvals_expire` 잡(M4)과 `approvals list`·`approve` 가 처리한다. 데몬 `telegram_poll`·outbox flush 잡은 M5 로 이연.
   - 옛 `telegram` 로거 이름은 `trader.notify` 로 바뀌었다.
-  - `/status` 는 절 하나가 실패하면 전체가 실패한다. `SCALP_EXIT` 표는 이식하지 않았다(M5/M9). `DecisionBrief`·주문·승인 문구는 M4(실행 코어)가 옮겼다.
+  - `/status` 는 절 하나가 실패하면 전체가 실패한다. `SCALP_EXIT` 표는 이식하지 않았다(M5/M9). `DecisionBrief`·주문·승인 문구는 M4(실행 코어)가 옮겼다. 종목 표기가 필요한 `approval_line` 은 spot `messages.py` 가 소유한다.
 
 ## features 층
 
-`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
