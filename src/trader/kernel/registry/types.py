@@ -36,6 +36,8 @@ class JobSpec:
     start_soon_s: int
     body: Callable[..., Any]
     teardown: Callable[..., None] | None = None
+    # cron 요일 제한(APScheduler day_of_week 표기, 예: "mon-sat"). None 이면 매일
+    days: str | None = None
 
 
 @dataclass(frozen=True)

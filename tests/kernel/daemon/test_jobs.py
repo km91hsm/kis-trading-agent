@@ -123,3 +123,29 @@ def test_out_of_scope_attributes_pass_through_untouched():
 def test_per_market_id_without_market_placeholder_raises():
     with pytest.raises(ConfigError, match="scan"):
         run_build([feat(spec(id="scan"))])
+
+
+def test_list_schedule_value_expands_to_numbered_jobs_with_days():
+    """schedule_key 값이 "HH:MM" 리스트면 시각마다 잡 하나(`id`, `id_1`, …), spec.days 는 요일."""
+    s = spec(id="fills_sync", per_market=False, schedule_key="fills.times", days="mon-sat")
+    sched = SimpleNamespace(fills=SimpleNamespace(times=["16:10", "07:10"]))
+    jobs = run_build([feat(s)], schedule=sched)
+    assert [j.id for j in jobs] == ["fills_sync", "fills_sync_1"]
+    assert jobs[0].trigger_kwargs == {
+        "hour": 16, "minute": 10, "timezone": KST, "day_of_week": "mon-sat",
+    }  # fmt: skip
+    assert jobs[1].trigger_kwargs["hour"] == 7 and jobs[1].cron["day_of_week"] == "mon-sat"
+
+
+def test_single_string_keeps_one_job_and_days_is_optional():
+    s = spec(id="one", per_market=False, schedule_key="reflect")
+    (j,) = run_build([feat(s)])
+    assert j.id == "one" and "day_of_week" not in j.trigger_kwargs
+    (d,) = run_build([feat(spec(id="d", per_market=False, schedule_key="reflect", days="sat"))])
+    assert d.trigger_kwargs["day_of_week"] == "sat"
+
+
+def test_bad_time_in_list_is_config_error():
+    s = spec(id="x", per_market=False, schedule_key="fills.times")
+    with pytest.raises(ConfigError):
+        run_build([feat(s)], schedule=SimpleNamespace(fills=SimpleNamespace(times=["16:10", "7"])))

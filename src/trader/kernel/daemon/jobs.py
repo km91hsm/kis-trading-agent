@@ -54,9 +54,26 @@ def _lookup(schedule: Any, path: str) -> Any:
     return cur
 
 
-def _cron_kwargs(schedule: Any, key: str) -> dict[str, Any]:
-    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`)을 가진 매핑·객체다. tz 기본은 KST."""
+def _cron_kwargs_list(schedule: Any, key: str, days: str | None) -> list[dict[str, Any]]:
+    """schedule 항목이 "HH:MM" 리스트면 시각마다 kwargs 하나, 아니면 하나짜리 목록."""
     entry = _lookup(schedule, key)
+    if isinstance(entry, (list, tuple)):
+        if not entry:
+            raise ConfigError(f"schedule '{key}' 은 비어 있을 수 없습니다")
+        out = [_cron_kwargs(schedule, key, entry=e) for e in entry]
+    else:
+        out = [_cron_kwargs(schedule, key)]
+    if days:
+        for kw in out:
+            kw["day_of_week"] = days
+    return out
+
+
+def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any]:
+    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`)을 가진 매핑·객체다. tz 기본은 KST.
+    entry 를 주면 조회 대신 그 값을 쓴다(리스트 원소)."""
+    if entry is None:
+        entry = _lookup(schedule, key)
     tz: Any = None
     if isinstance(entry, str):
         hm = entry
@@ -123,8 +140,12 @@ def build(
                         if spec.per_market
                         else spec.schedule_key
                     )
-                    kwargs = _cron_kwargs(schedule, key)
-                else:
-                    kwargs = {"seconds": _interval_seconds(spec, schedule)}
+                    # 리스트 값은 시각마다 `id`, `id_1`, … 로 펼친다
+                    for i, kwargs in enumerate(_cron_kwargs_list(schedule, key, spec.days)):
+                        out.append(
+                            ScheduledJob(ident if i == 0 else f"{ident}_{i}", spec, market, kwargs)
+                        )
+                    continue
+                kwargs = {"seconds": _interval_seconds(spec, schedule)}
                 out.append(ScheduledJob(ident, spec, market, kwargs))
     return out
