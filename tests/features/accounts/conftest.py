@@ -10,7 +10,9 @@ from trader.kernel.registry.contracts import all_migrations
 
 def make_account(id: str, env: str, mode: str, markets=None, **kw) -> Account:
     """합성 계좌(cano 자리표시자, markets 기본 [KR])."""
-    return Account(id=id, env=env, cano="00000000", mode=mode, markets=markets or ["KR"], **kw)
+    return Account(
+        id=id, env=env, cano="00000000", mode=mode, markets=markets or ["KR"], **kw
+    )
 
 
 @pytest.fixture

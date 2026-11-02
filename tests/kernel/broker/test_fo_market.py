@@ -118,15 +118,8 @@ def test_option_chain_caps_calls(real_client, respx_mock):
     )
     big = [
         fo_master.Contract(
-            code=f"205W11{i:03d}",
-            std_code="",
-            name="",
-            kind="CALL",
-            weekly=False,
-            strike=Decimal(i),
-            expiry_ym="202611",
-            underlying="K200",
-            atm_flag=None,
+            code=f"205W11{i:03d}", std_code="", name="", kind="CALL", weekly=False,
+            strike=Decimal(i), expiry_ym="202611", underlying="K200", atm_flag=None,
             product_type="C",
         )
         for i in range(30)
@@ -154,30 +147,10 @@ def test_kospi200_returns_time(real_client, respx_mock):
 
 def test_fake_market_fo_methods():
     q = FoQuote(
-        code="105W11",
-        kind="FUTURES",
-        price=Decimal("350"),
-        bid=None,
-        ask=None,
-        change_pct=0.0,
-        volume=0,
-        open_interest=None,
-        basis=None,
-        upper=None,
-        lower=None,
-        last_trade_date=None,
-        days_left=None,
-        hist_vol=None,
-        iv=None,
-        delta=None,
-        gamma=None,
-        theta=None,
-        vega=None,
-        strike=None,
-        underlying=None,
-        underlying_asof=None,
-        quote_asof=None,
-        received_at=T0,
+        code="105W11", kind="FUTURES", price=Decimal("350"), bid=None, ask=None, change_pct=0.0,
+        volume=0, open_interest=None, basis=None, upper=None, lower=None, last_trade_date=None,
+        days_left=None, hist_vol=None, iv=None, delta=None, gamma=None, theta=None, vega=None,
+        strike=None, underlying=None, underlying_asof=None, quote_asof=None, received_at=T0,
     )
     m = FakeMarket(fo_quotes={"105W11": q}, kospi200=(Decimal("349.8"), T0), fail={"get_fo_daily"})
     assert m.get_fo_price("105W11", "FUTURES").price == Decimal("350")

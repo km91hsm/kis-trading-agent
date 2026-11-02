@@ -137,7 +137,9 @@ def checkpoint_write_cmd(
     def go(ctx: tools.ToolContext, **kw) -> dict:
         return tools.checkpoint_write(ctx, payload=_payload(json_text), **kw)
 
-    _run(go, ticker=ticker, market=market, date=date, stage=stage, agent=agent, model=model)
+    _run(
+        go, ticker=ticker, market=market, date=date, stage=stage, agent=agent, model=model
+    )
 
 
 @checkpoint_app.command("bundle")

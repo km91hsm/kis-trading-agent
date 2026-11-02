@@ -126,7 +126,9 @@ def test_duplicate_port_names_reported():
 
     alpha, beta = _ok()
     p = Port(name="broker", build=lambda b: None)
-    msgs = contracts.check([replace(alpha, ports=(p,)), replace(beta, ports=(p,))], roots=[OK_ROOT])
+    msgs = contracts.check(
+        [replace(alpha, ports=(p,)), replace(beta, ports=(p,))], roots=[OK_ROOT]
+    )
     assert "포트 중복: broker" in msgs
 
 

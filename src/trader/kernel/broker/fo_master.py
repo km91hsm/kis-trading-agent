@@ -190,12 +190,16 @@ def last_trade_date(contract: Contract, quote: Any | None) -> date | None:
     return est
 
 
-def of_product(contracts: Iterable[Contract], product: FoProduct, kind: FoKind) -> list[Contract]:
+def of_product(
+    contracts: Iterable[Contract], product: FoProduct, kind: FoKind
+) -> list[Contract]:
     """상품(접두)·종류의 월물 계약만(위클리 제외)."""
     return _of_product(contracts, product, kind)
 
 
-def _of_product(contracts: Iterable[Contract], product: FoProduct, kind: FoKind) -> list[Contract]:
+def _of_product(
+    contracts: Iterable[Contract], product: FoProduct, kind: FoKind
+) -> list[Contract]:
     prefix = {
         "FUTURES": product.futures_prefix,
         "CALL": product.call_prefix,

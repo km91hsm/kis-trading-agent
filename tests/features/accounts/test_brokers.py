@@ -8,17 +8,11 @@ from trader.kernel.broker import factory
 from trader.kernel.broker.creds import key_fingerprint
 from trader.kernel.config.secrets import Secrets
 
-SECRETS = Secrets.model_validate(
-    {
-        "KIS_REAL_APP_KEY": "shared-k",
-        "KIS_REAL_APP_SECRET": "shared-s",
-        "KIS_REAL_CANO": "11111111",
-        "KIS_HTS_ID": "me",
-        "KIS_REAL_2_APP_KEY": "k2",
-        "KIS_REAL_2_APP_SECRET": "s2",
-        "KIS_REAL_2_CANO": "22222222",
-    }
-)
+SECRETS = Secrets.model_validate({
+    "KIS_REAL_APP_KEY": "shared-k", "KIS_REAL_APP_SECRET": "shared-s", "KIS_REAL_CANO": "11111111",
+    "KIS_HTS_ID": "me", "KIS_REAL_2_APP_KEY": "k2", "KIS_REAL_2_APP_SECRET": "s2",
+    "KIS_REAL_2_CANO": "22222222",
+})
 
 
 def _acct(id_, env="real", **kw):
@@ -71,11 +65,8 @@ def test_missing_key_account_is_skipped_with_warning(caplog):
 
 def test_warnings_never_leak_key_values(caplog):
     sec = Secrets(KIS_PAPER_APP_KEY="pk-SECRET", KIS_PAPER_APP_SECRET="ps-SECRET")
-    accts = [
-        _acct("paper-main", env="paper"),
-        _acct("paper-2", env="paper"),
-        _acct("real-main"),
-    ]  # 같은 키 공유 경고 + 키 없는 계좌 건너뜀 경고
+    accts = [_acct("paper-main", env="paper"), _acct("paper-2", env="paper"),
+             _acct("real-main")]  # 같은 키 공유 경고 + 키 없는 계좌 건너뜀 경고
     with caplog.at_level(logging.DEBUG, logger="trader.accounts"):
         brokers.build_brokers(sec, accts)
     assert any("같은 앱키" in r.message for r in caplog.records)
@@ -87,7 +78,9 @@ def test_market_falls_back_to_first_real_stock_account_key():
     only = Secrets.model_validate({"KIS_REAL_2_APP_KEY": "k2", "KIS_REAL_2_APP_SECRET": "s2"})
     assert brokers.market_creds(only, [_acct("real-2")]).app_key == "k2"
     assert brokers.market_creds(SECRETS, [_acct("real-2")]).app_key == "shared-k"
-    fo_only = Secrets.model_validate({"KIS_REAL_FO_APP_KEY": "kf", "KIS_REAL_FO_APP_SECRET": "sf"})
+    fo_only = Secrets.model_validate(
+        {"KIS_REAL_FO_APP_KEY": "kf", "KIS_REAL_FO_APP_SECRET": "sf"}
+    )
     fo_acct = _acct("real-fo", asset="fo", acnt_prdt_cd="03", markets=["KR"])
     assert brokers.market_creds(fo_only, [fo_acct]).app_key is None
 
