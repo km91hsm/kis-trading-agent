@@ -27,15 +27,9 @@ def yml(tmp_path):
 
 @pytest.fixture
 def db(conn):
-    """테스트 전용 최소 스키마 — 주문·승인·잔고·파생 테이블은 M4 이후 실제 스키마로 바꾼다."""
+    """orders·approvals·positions_snapshot 은 v5 실제 스키마, fo_positions 만 최소 스키마(M10)."""
     conn.executescript(
         """
-        CREATE TABLE orders(account_id TEXT, ticker TEXT, market TEXT, side TEXT, qty INTEGER,
-            order_type TEXT, status TEXT, mode TEXT, created_at TEXT);
-        CREATE TABLE approvals(decision_id INTEGER, account_id TEXT, order_json TEXT,
-            status TEXT, requested_at TEXT, expires_at TEXT);
-        CREATE TABLE positions_snapshot(account_id TEXT, date TEXT, ticker TEXT, market TEXT,
-            qty INTEGER, created_at TEXT);
         CREATE TABLE fo_positions(account_id TEXT, code TEXT, kind TEXT, contract_side TEXT,
             direction TEXT, vehicle TEXT, status TEXT, created_at TEXT);
         """
@@ -181,7 +175,7 @@ def test_remove_allowed_with_dead_orders(yml, db):
 def test_remove_blocked_by_pending_approval(yml, db):
     db.execute(
         "INSERT INTO approvals(decision_id, account_id, order_json, status, requested_at,"
-        " expires_at) VALUES (1,'real-main','{}','pending','t','t')"
+        " expires_at, fingerprint) VALUES (1,'real-main','{}','pending','t','t','fp')"
     )
     db.commit()
     with pytest.raises(accounts_io.AccountInUse, match="승인"):

@@ -22,12 +22,12 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from trader.kernel.config import ConfigError
-from trader.kernel.config.time import KST, MARKET_TZ
+from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger import runs
 from trader.kernel.platform import bundle, paths, procs
 from trader.kernel.platform import claude_bin as claude_bin_mod
@@ -269,21 +269,13 @@ def run_claude(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
-def _day_bounds(d: date, market: str | None) -> tuple[str, str]:
-    """시장 현지 날짜 d 하루의 UTC ISO 경계 [start, end). 시장이 없거나 모르면 KST.
-    (Task 5 가 `execution.ledger.day_bounds` 로 옮기면 그쪽을 import 한다.)"""
-    tz = MARKET_TZ[market] if market in MARKET_TZ else KST  # type: ignore[index]
-    start = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(UTC)
-    return start.isoformat(), (start + timedelta(days=1)).isoformat()
-
-
 def _guard_repeated_timeouts(conn, spec: SessionSpec, kind: SessionKind, settings: Any) -> None:
     """같은 운영일 같은 종목이 타임아웃으로 `timeout_retry_max` 번 실패했으면 다시 띄우지 않는다 —
     600초씩 같은 종목을 반복하며 구독만 쓰던 문제(2026-10-29, 000660 3회)."""
     if conn is None or kind.kind != "analyze" or len(spec.tickers) != 1:
         return
     ticker = spec.tickers[0].get("ticker")
-    lo, hi = _day_bounds(spec.date, spec.market)
+    lo, hi = day_bounds(spec.date, spec.market)
     n = conn.execute(
         "SELECT COUNT(*) FROM agent_calls WHERE ticker = ? AND market = ? AND status = 'error' "
         "AND error LIKE '세션 타임아웃%' AND created_at >= ? AND created_at < ?",

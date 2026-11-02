@@ -8,6 +8,8 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from trader.kernel.execution.migrations import EXECUTION
+from trader.kernel.execution.types import ORIGIN_CHECK
 from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
 from trader.kernel.ledger.migrations import KERNEL, Migration
@@ -15,10 +17,6 @@ from trader.kernel.ledger.migrations import check as check_migrations
 from trader.kernel.registry.types import Feature
 from trader.kernel.session.migrations import SESSION
 
-# orders.origin CHECK 허용값 (Task 5 가 execution.types 로 옮기고 여기서 re-export)
-ORIGIN_CHECK = (
-    "llm", "stop", "hedge", "scalp", "rebalance", "reprice", "park", "external", "fo",
-)  # fmt: skip
 # 다른 기능에서 import 할 수 있는 유일한 공개면.
 PUBLIC_MODULE = "api"
 # 커널 중 기능 패키지를 동적으로 import 하는 유일한 파일.
@@ -26,7 +24,7 @@ KERNEL_EXEMPT = Path("registry") / "discover.py"
 
 
 # ledger.migrations.KERNEL(v1)에 넣지 않는 커널 모듈 소유 마이그레이션
-KERNEL_MODULES: list[Migration] = [SESSION]
+KERNEL_MODULES: list[Migration] = [SESSION, EXECUTION]
 
 
 def _dups(items: Iterable[str]) -> list[str]:

@@ -78,12 +78,12 @@ def test_contracts_reject_duplicate_migration_version():
 def test_interleaved_migration_versions_across_features_are_accepted():
     alpha, beta = _ok()
     alpha = replace(
-        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(5, "a5", owner="alpha"))
+        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(6, "a6", owner="alpha"))
     )
     beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
     msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
     assert not any("마이그레이션" in m for m in msgs)
-    assert [m.version for m in contracts.all_migrations([alpha, beta])] == [1, 2, 3, 4, 5]
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == [1, 2, 3, 4, 5, 6]
 
 
 def test_duplicate_version_still_reported_with_interleaving():
