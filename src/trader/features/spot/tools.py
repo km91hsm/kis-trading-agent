@@ -1,8 +1,10 @@
-"""LLM 세션이 쓰는 spot 도구 구현 (status·checkpoint list/read/write/bundle/summarize·재시세).
+"""LLM 세션이 쓰는 spot 도구 구현 (status·checkpoint list/read/write/bundle/summarize·재시세·
+submit-decision).
 
 모든 도구는 예외 대신 {"ok": bool, ...} dict 를 돌려준다(CLI 가 JSON 1줄로 그대로 출력).
 순서 강제는 프롬프트가 아니라 `StageRule` 전제조건이 맡는다(`kernel.session.stages.check_rule`).
-submit-decision 은 Task 11 이 더한다(`SUBMIT_RULE` 만 여기서 정의).
+submit-decision 은 `SUBMIT_RULE` 을 본 뒤 결정을 저장하고 `executor.execute` 로 계좌별 실행을
+넘긴다.
 """
 
 from __future__ import annotations
@@ -23,13 +25,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from trader.features.spot import costs, rules, schemas, tradability
+from trader.features.spot import costs, executor, rules, schemas, tradability
+from trader.features.spot import ledger as spot_ledger
 from trader.features.spot import summary as summary_mod
 from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier, make_notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import calls
+from trader.kernel.session import calls, runner
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -843,6 +846,247 @@ def trade_block(inputs: dict) -> str | None:
         return tradability.block_reason(inputs["technical"]["quote"]["data"])
     except (KeyError, TypeError):
         return None
+
+
+# --- submit-decision ------------------------------------------------------------------
+
+
+def _ingest_run(ctx: ToolContext, d: Path, day: date, market: str, ticker: str) -> None:
+    """리포트·토론·결정 체크포인트를 원장 테이블에 멱등 적재한다 (메트릭·UI 용)."""
+    if ctx.conn is None:
+        return
+    for stage in list_checkpoints(d):
+        cp = read_checkpoint(d, stage)
+        if isinstance(cp, dict):
+            spot_ledger.ingest_checkpoint(ctx.conn, day, market, ticker, stage, cp)
+
+
+def _account_finished(
+    ctx: ToolContext, d: Path, risk_stage: str, stages: list[str], day: date, market: str,
+    ticker: str,
+) -> bool:  # fmt: skip
+    """재개 판단: 이 계좌의 실행이 끝났는가. 판정(40_)만 있고 **통과했는데 주문·승인 흔적이 없으면**
+    (판정 저장 뒤 주문 전에 끊김) 끝나지 않은 것으로 본다. 재실행은 executor 의 살아 있는 주문·
+    승인 중복 방지와 실행 키가 지킨다. dry-run 판정은 지금 실전이면 실행이 아니다."""
+    v = (read_checkpoint(d, risk_stage) or {}).get("data") or {}
+    if v.get("dry_run") and not ctx.dry_run:
+        return False
+    if not v.get("approved") or v.get("dry_run") or v.get("mode") == "off":
+        return True
+    acct = risk_stage[len("40_risk_check_") :]
+    if f"50_order_{acct}" in stages:
+        return True
+    if v.get("mode") == "approve" and ctx.conn is not None:
+        did = spot_ledger.decision_id(ctx.conn, day, market, ticker)
+        row = ctx.conn.execute(
+            "SELECT 1 FROM approvals WHERE decision_id=? AND account_id=? LIMIT 1", (did, acct)
+        ).fetchone()
+        return row is not None
+    return False
+
+
+def _no_policy(conn: Any, account: Any) -> tuple[str, str | None]:
+    return "off", "계좌 정책 포트 없음: 주문 없음"
+
+
+def _exec_ctx_of(ctx: ToolContext) -> executor.ExecContext:
+    """도구 컨텍스트 → 실행 컨텍스트. FAKE 세션은 가짜 브로커 잔고를 기록하지 않는다."""
+    assert ctx.conn is not None
+    return executor.ExecContext(
+        settings=ctx.settings,
+        accounts=ctx.accounts,
+        conn=ctx.conn,
+        brokers=ctx.brokers,
+        policy=ctx.policy or _no_policy,
+        paused=ctx.paused or (lambda _c: False),
+        notifier=ctx.notifier or NullNotifier(),
+        state=ctx.state,
+        now=ctx.now,
+        holiday_fn=ctx.holiday_fn,
+        record_portfolio=not runner.is_fake(),
+        market_client=ctx.market_client,
+    )
+
+
+def _execute(
+    ctx: ToolContext,
+    d: date,
+    market: str,
+    decision: schemas.Decision,
+    inputs: dict,
+    price: Decimal,
+    *,
+    resume_round: int | None = None,
+    skip_accounts: frozenset[str] = frozenset(),
+    extra_note: str | None = None,
+    change_pct: float | None = None,
+) -> list[dict]:
+    """리스크 게이트·계좌별 실행(주문은 executor → 커널 코어 안에서만). 결정은 1회, 판정·주문은
+    계좌마다. 재평가 라운드는 41_/51_ 체크포인트 이름에 들어간다. (메모리 기록은 M8)"""
+    return executor.execute(
+        _exec_ctx_of(ctx),
+        decision,
+        date=d,
+        market=market,
+        price=price,
+        exchange=(inputs.get("meta") or {}).get("exchange"),
+        dry_run=ctx.dry_run,
+        resume_round=resume_round,
+        skip_accounts=skip_accounts,
+        extra_note=extra_note,
+        change_pct=change_pct,
+        trade_block=trade_block(inputs),
+    )
+
+
+def _resume_saved(
+    ctx: ToolContext, d: Path, stages: list[str], day: date, market: str, ticker: str
+) -> dict:
+    """같은 날 재제출(세션 재시도·재실행): 기존 결정을 돌려주고 실행을 반복하지 않는다(멱등).
+    단 판정(40_risk_check_*)이 끝나지 않은 계좌가 있으면(저장 뒤 execute 가 끊김) 그 계좌만
+    실행을 재개한다(`resumed_execution`)."""
+    existing = read_checkpoint(d, "30_decision") or {}
+    out: dict[str, Any] = {
+        "ok": True,
+        "already": True,
+        "path": str(d / "30_decision.json"),
+        "action": (existing.get("data") or {}).get("action"),
+        "message": "30_decision 이 이미 있어 기존 결정을 유지함",
+    }
+    executed = {
+        s[len("40_risk_check_") :]
+        for s in stages
+        if s.startswith("40_risk_check_")
+        and _account_finished(ctx, d, s, stages, day, market, ticker)
+    }
+    wanted = {a.id for a in ctx.accounts if market in a.markets}
+    if executed and not (wanted - executed):
+        return out
+    try:
+        decision = schemas.Decision.model_validate(existing.get("data") or {})
+    except ValidationError as e:
+        return out | {
+            "message": f"기존 30_decision 을 해석할 수 없어 실행 생략: 오류 {e.error_count()}건"
+        }
+    inputs = read_checkpoint(d, "00_inputs") or {}
+    price, note, change_pct = requote(
+        ctx, market, ticker, (inputs.get("meta") or {}).get("exchange"), inputs, ctx.now()
+    )
+    if price is None:
+        return out | {"message": "00_inputs 에 현재가가 없어 실행을 재개하지 못함"}
+    if decision.stop_loss is not None and Decimal(str(decision.stop_loss)) >= price:
+        why = f"손절선 {decision.stop_loss} 이 재시세 {price} 이상이라 실행 생략"
+        return out | {"message": why}
+    _ingest_run(ctx, d, day, market, ticker)
+    executions = _execute(
+        ctx, day, market, decision, inputs, price,
+        skip_accounts=frozenset(executed), extra_note=note, change_pct=change_pct,
+    )  # fmt: skip
+    logger.warning("미실행 결정의 실행 재개 %s %s: %s", market, ticker, decision.action)
+    return out | {
+        "resumed_execution": True,
+        "message": "30_decision 은 있었지만 판정이 없어 실행을 재개함",
+        "executions": executions,
+    }
+
+
+@_guarded
+def submit_decision(
+    ctx: ToolContext,
+    *,
+    ticker: str,
+    market: str,
+    date: date,
+    payload: dict,
+    agent: str = "trader",
+    call_meta: dict | None = None,
+    stage: str | None = None,
+) -> dict:
+    """결정 제출: 전제조건(`SUBMIT_RULE`) → 스키마 → ticker 일치 → 현재가(재시세) → 손절선 검사 →
+    `30_decision` 저장 → 원장 적재 → 계좌별 실행. stage 가 `31_decision_r<n>` 이면 재평가
+    (30_decision 이 있어야 함; 트리거 가격은 M5 — 지금은 입력가 + 재시세).
+
+    같은 날 `30_decision` 이 이미 있으면 기존 결정을 돌려주고(`already`), 실행이 끝나지 않은 계좌만
+    재개한다. 원장 연결이 없으면 `30_decision` 을 쓰기 전에 거부한다(재시도가 멱등 분기에 걸리지
+    않게). 반환 {ok, path, stage, action, price, requote, dry_run, executions, resumed_execution?,
+    already?}."""
+    d = _dir(ctx, ticker, market, date)
+    stages = list_checkpoints(d)
+    resume_stage = None
+    if stage is not None and stage != "30_decision":
+        if not _RESUME_RE.match(stage):
+            return {"ok": False, "error": f"stage 는 30_decision 또는 31_decision_r<n>: {stage!r}"}
+        if "30_decision" not in stages:
+            return {"ok": False, "error": "재평가는 30_decision 이 있어야 합니다"}
+        if stage in stages:
+            return {"ok": False, "error": f"{stage} 이 이미 있습니다 (다음 번호를 쓰세요)"}
+        resume_stage = stage
+    if ctx.conn is None:
+        return {"ok": False, "error": "원장 연결이 없어 계좌별 실행을 할 수 없음"}
+    if resume_stage is None and "30_decision" in stages:
+        return _resume_saved(ctx, d, stages, date, market, ticker)
+    missing = check_rule(SUBMIT_RULE, "30_decision", stages)
+    if missing:
+        return {"ok": False, "error": "전제조건 미충족: " + ", ".join(missing)}
+    try:
+        decision = schemas.Decision.model_validate(_unescape(payload))
+    except ValidationError as e:
+        msgs = "; ".join(
+            f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
+        )
+        return {"ok": False, "error": f"스키마 검증 실패(30_decision): {msgs}"}
+    if decision.ticker != ticker:
+        return {"ok": False, "error": f"ticker 불일치: {decision.ticker} ≠ {ticker}"}
+    inputs = read_checkpoint(d, "00_inputs") or {}
+    meta = inputs.get("meta") or {}
+    price, note, change_pct = requote(ctx, market, ticker, meta.get("exchange"), inputs, ctx.now())
+    if price is None:
+        return {
+            "ok": False,
+            "error": "00_inputs 의 technical.quote 에 현재가가 없어 판정할 수 없음",
+        }
+    if decision.stop_loss is not None and Decimal(str(decision.stop_loss)) >= price:
+        # 게이트는 BUY/ADD 주문만 막지만 저장된 결정의 손절선은 monitor 가 모든 action 에 대해
+        # 읽어 즉시 전량 매도하므로, 저장 전에 action 과 무관하게 거부한다
+        return {
+            "ok": False,
+            "error": (
+                f"손절선 {decision.stop_loss} 이 현재가 {price} 이상: 모니터가 즉시 손절 매도함. "
+                "현재가 아래로 다시 제출하거나 stop_loss 를 비우세요"
+            ),
+        }
+    stage_name = resume_stage or "30_decision"
+    path = write_checkpoint(d, stage_name, _wrap(decision.model_dump(), _call(agent, call_meta)))
+    _ingest_run(ctx, d, date, market, ticker)
+    # 수집이 알아낸 종목명·US 거래소를 원장에 남긴다 (표기·만기 스냅샷용)
+    spot_ledger.upsert_ticker_name(ctx.conn, market, ticker, meta.get("name"), "inputs")
+    spot_ledger.upsert_ticker_exchange(ctx.conn, market, ticker, meta.get("exchange"))
+    if resume_stage:  # 재평가 결정이 최신 결정이 되도록 마지막에 적재
+        spot_ledger.ingest_checkpoint(
+            ctx.conn, date, market, ticker, resume_stage, read_checkpoint(d, resume_stage) or {}
+        )
+    m_round = _RESUME_RE.match(resume_stage) if resume_stage else None
+    # 합의로 토론을 생략했는지 원장 결정에 남긴다(전후 비교용)
+    summ = read_checkpoint(d, "25_research_summary") or {}
+    skipped = bool((summ.get("data") or summ).get("skipped_debate"))
+    if (did := spot_ledger.decision_id(ctx.conn, date, market, ticker)) is not None:
+        spot_ledger.set_skipped_debate(ctx.conn, did, skipped)
+    executions = _execute(
+        ctx, date, market, decision, inputs, price,
+        resume_round=int(m_round.group(1)) if m_round else None,
+        extra_note=note, change_pct=change_pct,
+    )  # fmt: skip
+    logger.info("결정 저장 %s %s: %s (계좌 %d)", market, ticker, decision.action, len(executions))
+    return {
+        "ok": True,
+        "path": str(path),
+        "stage": stage_name,
+        "action": decision.action,
+        "price": str(price),
+        "requote": note,
+        "dry_run": ctx.dry_run,
+        "executions": executions,
+    }
 
 
 # --- status -----------------------------------------------------------------------

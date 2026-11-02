@@ -1,7 +1,8 @@
-"""`trader tool` 의 spot 명령: status·collect·checkpoint {list,read,write,bundle,summarize}.
+"""`trader tool` 의 spot 명령: status·collect·checkpoint {list,read,write,bundle,summarize}·
+submit-decision.
 
 출력은 stdout JSON 1줄뿐이다(콘솔 로그는 stderr). 옵션 이름은 LLM 세션 프롬프트가 쓰는
-옛 `tool` 명령과 같다. submit-decision 은 Task 11 이 더한다."""
+옛 `tool` 명령과 같다. dry_run 은 인자가 아니라 env `TRADER_DRY_RUN` 으로만 정한다(`tool_ctx`)."""
 
 from __future__ import annotations
 
@@ -171,8 +172,24 @@ def checkpoint_summarize_cmd(
     _run(tools.checkpoint_summarize, ticker=ticker, market=market, date=date)
 
 
+def submit_cmd(
+    ticker: str = typer.Option(..., "--ticker"),
+    market: str = typer.Option(..., "--market"),
+    date: str = typer.Option(..., "--date"),
+    json_text: str | None = typer.Option(None, "--json", help="Decision JSON (없으면 stdin)"),
+    stage: str | None = typer.Option(None, "--stage", help="재평가면 31_decision_r<n>"),
+) -> None:
+    """결정 제출 → 계좌별 리스크 판정·실행(주문은 executor 코어에서만). JSON 1줄."""
+
+    def go(ctx: tools.ToolContext, **kw) -> dict:
+        return tools.submit_decision(ctx, payload=_payload(json_text), **kw)
+
+    _run(go, ticker=ticker, market=market, date=date, stage=stage)
+
+
 TOOLS = (
     ToolCommand("status", status_cmd, ()),
     ToolCommand("collect", collect_cmd, ()),
     ToolCommand("checkpoint", checkpoint_app, WRITE_RULES),
+    ToolCommand("submit-decision", submit_cmd, (SUBMIT_RULE,)),
 )
