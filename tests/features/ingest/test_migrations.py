@@ -13,5 +13,5 @@ def test_news_items_schema_columns(conn):
     assert [r[1] for r in rows] == COLUMNS
 
 
-def test_version_is_three(conn):
-    assert db.current_version(conn) == 3
+def test_version_includes_ingest_v3(conn):
+    assert db.current_version(conn) >= 3

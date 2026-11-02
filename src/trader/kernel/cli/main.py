@@ -14,6 +14,7 @@ import uvicorn
 from trader.kernel.cli import init_cmd, selfcheck
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
+from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
@@ -121,6 +122,7 @@ def build_command_ctx(boot_: Boot, *, echo) -> CommandContext:
         notifier=make_notifier(boot_.secrets, enabled=boot_.settings.notify.enabled),
         features=boot_.features,
         echo=echo,
+        ports=boot_.ports,
     )
 
 
@@ -143,7 +145,7 @@ telegram_app = typer.Typer(help="텔레그램 수신 (승인 명령 폴링)")
 
 
 def _telegram_run(*, interval: int | None, max_iterations: int | None) -> None:
-    b = boot(settings=True, secrets=True, conn=True, log_name="telegram")
+    b = boot(ports=True, log_name="telegram")
     try:
         receiver = make_receiver(b.secrets, enabled=b.settings.notify.enabled)
         if receiver is None:
@@ -194,6 +196,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root.command("notify-test")(notify_test)
     root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")
+    root.add_typer(build_tool_app(features), name="tool")
     for f in features:
         if f.cli is not None:
             root.add_typer(f.cli, name=f.id)

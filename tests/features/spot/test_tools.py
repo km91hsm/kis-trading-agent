@@ -1,0 +1,1115 @@
+"""spot 도구(status·checkpoint list/read/write/bundle/summarize·requote·CLI) 테스트.
+
+옛 `tests/orchestrator/test_tools.py` 에서 이식. submit-decision·재개·재시세 12건은 Task 11 이
+더했다(메모리 `memory_entries` 단언은 M8)."""
+
+import json
+from datetime import date
+from decimal import Decimal
+
+import pytest
+
+from tests.features.spot.conftest import T0, D, make_account
+from tests.features.spot.helpers import ok_decision, ok_report, ok_turn
+from trader.features.accounts import api as accounts_api
+from trader.features.spot import tools
+from trader.kernel.execution import ledger as exec_ledger
+from trader.kernel.session import run_store
+from trader.kernel.session.run_store import read_checkpoint, run_dir
+
+
+@pytest.fixture
+def ctx(project, conn, settings):
+    accounts = [
+        make_account("paper-main", "paper", "auto", markets=["KR", "US"]),
+        make_account("real-main", "real", "off", markets=["KR"]),
+    ]
+    return tools.ToolContext(
+        settings=settings,
+        accounts=accounts,
+        conn=conn,
+        state=project / "state",
+        now=lambda: T0,
+        policy=accounts_api.effective_mode,
+        paused=accounts_api.is_paused,
+    )
+
+
+def _inputs(project, ticker="005930", market="KR"):
+    d = run_dir(D, market, ticker)
+    run_store.write_checkpoint(
+        d,
+        "00_inputs",
+        {
+            "meta": {
+                "ticker": ticker,
+                "market": market,
+                "name": "삼성전자",
+                "asof": T0.isoformat(),
+            },
+            "technical": {"quote": {"data": {"price": "71500"}, "received_at": "", "error": None}},
+            "fundamental": {},
+            "news_macro": {},
+            "sentiment": {},
+            "errors": [],
+        },
+    )
+    return d
+
+
+def test_checkpoint_write_ok_and_list(ctx, project):
+    _inputs(project)
+    r = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="10_analyst_technical",
+        payload=ok_report(),
+        agent="analyst-technical",
+    )
+    assert r["ok"] is True and r["path"].endswith("10_analyst_technical.json")
+    saved = read_checkpoint(run_dir(D, "KR", "005930"), "10_analyst_technical")
+    assert saved["schema_version"] == 1 and saved["data"]["signal"] == "BUY"
+    assert saved["call"]["agent"] == "analyst-technical"
+    r = tools.checkpoint_list(ctx, ticker="005930", market="KR", date=D)
+    assert r == {"ok": True, "stages": ["00_inputs", "10_analyst_technical"]}
+
+
+def test_checkpoint_write_rejects_invalid(ctx, project):
+    _inputs(project)
+    r = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="10_analyst_technical",
+        payload=ok_report(score=2.0),
+        agent="analyst-technical",
+    )
+    assert r["ok"] is False and "score" in r["error"]
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "10_analyst_technical") is None
+    r = tools.checkpoint_write(
+        ctx, ticker="005930", market="KR", date=D, stage="99_unknown", payload={}, agent="x"
+    )
+    assert r["ok"] is False and "알 수 없는" in r["error"]
+
+
+def test_checkpoint_write_rejects_decision_stage(ctx, project):
+    """LLM 이 30_decision 을 직접 써서 submit-decision 전제조건을 우회할 수 없다 (리뷰 C1)."""
+    _inputs(project)
+    r = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="30_decision",
+        payload=ok_decision(),
+        agent="trader",
+    )
+    assert r["ok"] is False and "submit-decision" in r["error"]
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "30_decision") is None
+    r = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="25_research_summary",
+        payload={},
+        agent="x",
+    )
+    assert r["ok"] is False
+
+
+def test_checkpoint_write_rejects_name_payload_mismatch(ctx, project):
+    _inputs(project)
+    w = lambda stage, payload: tools.checkpoint_write(  # noqa: E731
+        ctx, ticker="005930", market="KR", date=D, stage=stage, payload=payload, agent="a"
+    )
+    # 전제조건(애널리스트 2개)을 먼저 채워 아래 거부가 불일치 때문임을 보인다
+    for role in ("technical", "fundamental"):
+        assert w(f"10_analyst_{role}", ok_report(role=role))["ok"] is True
+    r = w("10_analyst_news_macro", ok_report(role="sentiment"))
+    assert r["ok"] is False and "role" in r["error"] and "불일치" in r["error"]
+    r = w("10_analyst_news_macro", ok_report(role="news_macro", ticker="000660"))
+    assert r["ok"] is False and "ticker 불일치" in r["error"]
+    r = w("10_analyst_bogus", ok_report(role="technical"))
+    assert r["ok"] is False and "알 수 없는" in r["error"]
+    r = w("20_debate_r0_bull", ok_turn("bear"))
+    assert r["ok"] is False and "불일치" in r["error"]
+    r = w("20_debate_r1_bull", ok_turn("bull", round=0))
+    assert r["ok"] is False and "불일치" in r["error"]
+    r = w("20_debate_r2_bull", ok_turn("bull", round=2))  # debate_rounds=1
+    assert r["ok"] is False and "넘습니다" in r["error"]
+    names = sorted(p.name for p in run_dir(D, "KR", "005930").glob("1*_*.json"))
+    assert names == ["10_analyst_fundamental.json", "10_analyst_technical.json"]
+    assert list(run_dir(D, "KR", "005930").glob("20_debate_*")) == []
+    assert w("20_debate_r1_bull", ok_turn("bull", round=1))["ok"] is True
+
+
+def test_tools_reject_path_traversal(ctx, project):
+    """ticker·market·stage 가 경로로 쓰이므로 state/ 밖·토큰 캐시를 가리킬 수 없다 (리뷰 C2)."""
+    _inputs(project)
+    (project / "state" / "kis_token_real.json").write_text(
+        '{"access_token": "SECRET"}', encoding="utf-8"
+    )
+    r = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="../../../../kis_token_real"
+    )
+    assert r["ok"] is False and "SECRET" not in json.dumps(r)
+    assert tools.checkpoint_list(ctx, ticker="../../..", market="KR", date=D)["ok"] is False
+    assert tools.checkpoint_list(ctx, ticker="005930", market="../etc", date=D)["ok"] is False
+    assert tools.checkpoint_list(ctx, ticker="005930", market="XX", date=D)["ok"] is False
+    assert not (project / "state" / "etc").exists()
+    assert tools.checkpoint_list(ctx, ticker="BRK.B", market="US", date=D)["ok"] is True
+
+
+def test_checkpoint_write_unescapes_html_entities(ctx, project):
+    """Claude Code 가 서브에이전트 출력을 이스케이프하므로 &lt; 등을 되돌려 저장한다 (리뷰 I7)."""
+    _inputs(project)
+    tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="10_analyst_technical",
+        payload=ok_report(bullets=["종가 &lt; SMA20 &amp; MACD&gt;0"]),
+        agent="a",
+    )
+    saved = read_checkpoint(run_dir(D, "KR", "005930"), "10_analyst_technical")
+    assert saved["data"]["bullets"] == ["종가 < SMA20 & MACD>0"]
+
+
+def test_status_does_not_create_placeholder_dir(ctx, project):
+    _inputs(project)
+    tools.status(ctx, market="KR", date=D)
+    assert not (project / "state" / "runs" / "2026-10-09" / "KR" / "_").exists()
+    r = tools.status(ctx, market="US", date=D)
+    assert r["ok"] and r["tickers"] == {}
+
+
+def test_checkpoint_read_section(ctx, project):
+    _inputs(project)
+    r = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section="technical"
+    )
+    assert r["ok"] and r["data"]["quote"]["data"]["price"] == "71500"
+    r = tools.checkpoint_read(ctx, ticker="005930", market="KR", date=D, stage="30_decision")
+    assert r["ok"] is False
+    r = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section="trader_context"
+    )
+    assert (
+        r["ok"]
+        and r["data"]["costs_bp"] == 30
+        and r["data"]["portfolio"]["paper-main"]["positions"] == []
+    )
+    assert r["data"]["risk_limits"]["max_position_pct"] == 0.25
+
+
+def _big_inputs(project, ticker="005930", market="KR"):
+    """실기 크기의 00_inputs: 일봉 260·분봉 120·호가 10단·뉴스 20+10·커뮤니티 50."""
+    d = run_dir(D, market, ticker)
+    candle = {
+        "date": "2026-10-08",
+        "open": "1",
+        "high": "2",
+        "low": "1",
+        "close": "1.5",
+        "volume": 1000,
+        "time": None,
+    }
+    news = [
+        {
+            "title": "제목 " * 10,
+            "summary": "요약 " * 100,
+            "source": "s",
+            "published_at": "2026-10-08T00:00:00+00:00",
+            "url": f"https://x/{i}",
+            "received_at": "",
+        }
+        for i in range(20)
+    ]
+    posts = [
+        {
+            "title": "글 " * 20,
+            "body": "본문 " * 200,
+            "author": "a",
+            "posted_at": "2026-10-08T00:00:00+00:00",
+            "url": f"https://c/{i}",
+            "received_at": "",
+            "source": "clien",
+        }
+        for i in range(50)
+    ]
+    sec = lambda data: {"data": data, "received_at": "", "error": None}  # noqa: E731
+    run_store.write_checkpoint(
+        d,
+        "00_inputs",
+        {
+            "meta": {
+                "ticker": ticker,
+                "market": market,
+                "name": "삼성전자",
+                "asof": T0.isoformat(),
+            },
+            "technical": {
+                "quote": sec({"price": "71500"}),
+                "daily": sec([candle] * 260),
+                "minute": sec([{**candle, "time": "153000"}] * 120),
+                "orderbook": sec({"asks": [["1", 1]] * 10, "bids": [["1", 1]] * 10}),
+                "indicators": sec({"sma_5": 1.0}),
+            },
+            "fundamental": {"ratios": sec({"ROE": 0.1})},
+            "news_macro": {
+                "news": sec({"stock": news, "macro": news[:10], "sources": {"google_rss": "ok"}}),
+                "macro": {"vix": sec({"value": 15.0, "date": "2026-10-08"})},
+            },
+            "sentiment": {
+                "investor_flow": sec(
+                    [
+                        {
+                            "date": "2026-10-08",
+                            "foreign_net": 1,
+                            "institution_net": 1,
+                            "individual_net": 1,
+                        }
+                    ]
+                    * 20
+                ),
+                "community": sec({"posts": posts, "sources": {"clien": "ok"}}),
+            },
+            "errors": [],
+        },
+    )
+
+
+def test_checkpoint_read_section_is_compact(ctx, project):
+    """서브에이전트에 넘길 절은 Claude Code Bash 출력 한도(약 30KB)보다 훨씬 작아야 한다."""
+    _big_inputs(project)
+    for section in ("technical", "fundamental", "news_macro", "sentiment"):
+        r = tools.checkpoint_read(
+            ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section=section
+        )
+        assert r["ok"], section
+        assert len(json.dumps(r["data"], ensure_ascii=False)) < 12_000, section
+    t = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section="technical"
+    )["data"]
+    assert len(t["daily"]["data"]) == 30 and len(t["minute"]["data"]) == 20
+    assert len(t["orderbook"]["data"]["asks"]) == 5 and t["indicators"]["data"]["sma_5"] == 1.0
+    assert t["daily"]["note"].startswith("최근 30")
+    n = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section="news_macro"
+    )["data"]
+    assert len(n["news"]["data"]["stock"]) == 15 and len(n["news"]["data"]["macro"]) == 8
+    assert all(len(i["summary"]) <= 120 and "url" not in i for i in n["news"]["data"]["stock"])
+    s = tools.checkpoint_read(
+        ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section="sentiment"
+    )["data"]
+    assert len(s["community"]["data"]["posts"]) == 20
+    assert all(len(p["body"]) <= 200 for p in s["community"]["data"]["posts"])
+    # 절 없이 전체를 읽으면 압축하지 않는다 (파일 내용 그대로)
+    full = tools.checkpoint_read(ctx, ticker="005930", market="KR", date=D, stage="00_inputs")[
+        "data"
+    ]
+    assert len(full["technical"]["daily"]["data"]) == 260
+
+
+def _realistic_reports_and_turns(ctx, project):
+    """실기 크기(리포트 ≈3.6KB, 턴 ≈2KB)로 체크포인트를 채운다."""
+    _big_inputs(project)
+    for role in ("technical", "fundamental", "news_macro", "sentiment"):
+        payload = ok_report(  # 실기 리포트 ≈ 3.6KB
+            role=role,
+            summary="요약 " * 60,
+            bullets=["근거 " * 20] * 6,
+            key_risks=["위험 " * 15] * 3,
+            counter_evidence=["반대 " * 15] * 2,
+            data_gaps=["공백 " * 10] * 2,
+            evidence=[{"claim": "주장 " * 15, "source_id": f"{role}.x"}] * 5,
+        )
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=payload,
+            agent="a",
+        )
+    for rnd in (0, 1):
+        for side in ("bull", "bear"):
+            payload = ok_turn(  # 실기 턴 ≈ 2KB
+                side,
+                round=rnd,
+                arguments=["논거 " * 30] * 5,
+                rebuttals=["반박 " * 30] * 5 if rnd else [],
+                what_would_change_my_mind=["조건 " * 10] * 3,
+            )
+            tools.checkpoint_write(
+                ctx,
+                ticker="005930",
+                market="KR",
+                date=D,
+                stage=f"20_debate_r{rnd}_{side}",
+                payload=payload,
+                agent="r",
+            )
+    tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+
+
+def test_bundle_researcher_round0_has_reports_no_opponent(ctx, project):
+    """파이썬이 입력을 묶어 주면 오케스트레이터가 요약할 여지가 없다 (실기 3차 반영)."""
+    _realistic_reports_and_turns(ctx, project)
+    r = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=0, side="bull"
+    )
+    assert r["ok"]
+    b = r["data"]
+    assert b["round"] == 0 and b["side"] == "bull" and len(b["reports"]) == 4
+    assert b["own_previous"] is None and b["opponent_previous"] is None
+    assert b["reports"][0]["role"] in ("technical", "fundamental", "news_macro", "sentiment")
+    assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < 24_000
+
+
+def test_bundle_researcher_round1_has_both_previous_turns(ctx, project):
+    _realistic_reports_and_turns(ctx, project)
+    b = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=1, side="bear"
+    )["data"]
+    assert b["own_previous"]["side"] == "bear" and b["own_previous"]["round"] == 0
+    assert b["opponent_previous"]["side"] == "bull" and b["opponent_previous"]["round"] == 0
+    assert len(b["reports"]) == 4
+    assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < 24_000
+
+
+def test_bundle_trader_has_reports_summary_context_within_limit(ctx, project):
+    _realistic_reports_and_turns(ctx, project)
+    r = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")
+    assert r["ok"]
+    b = r["data"]
+    assert len(b["reports"]) == 4 and b["research_summary"]["preferred"] in ("round0", "final")
+    assert "round0" in b["research_summary"] and "final" in b["research_summary"]
+    assert (
+        b["context"]["costs_bp"] == 30
+        and b["context"]["portfolio"]["paper-main"]["positions"] == []
+    )
+    assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < 24_000
+    assert "market_view" not in b["context"]  # 시장 세션 제안은 이연(README 알려진 차이)
+    assert "note" not in b  # 실기 크기에서는 손실 축약 없이 들어가야 한다
+    assert "evidence" not in b["reports"][0]  # 트레이더 묶음은 evidence 를 뺀다
+    assert set(b["research_summary"]["round0"]["bull"]) < set(
+        b["research_summary"]["final"]["bull"]
+    )
+
+
+def test_bundle_requires_prerequisites(ctx, project):
+    _inputs(project)
+    assert (
+        tools.checkpoint_bundle(
+            ctx, ticker="005930", market="KR", date=D, kind="researcher", round=0, side="bull"
+        )["ok"]
+        is False
+    )
+    assert (
+        tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")["ok"]
+        is False
+    )
+    assert (
+        tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="nope")["ok"]
+        is False
+    )
+
+
+def test_summarize_requires_both_sides(ctx, project):
+    _inputs(project)
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] is False
+
+
+def test_status_lists_tickers_and_sessions(ctx, project):
+    _inputs(project)
+    _inputs(project, ticker="000660")
+    r = tools.status(ctx, market="KR", date=D)
+    assert r["ok"] and set(r["tickers"]) == {"005930", "000660"}
+    assert r["tickers"]["005930"] == ["00_inputs"]
+    assert r["sessions_today"] == 0 and r["cap"] == ctx.settings.llm.daily_session_cap
+
+
+def test_cli_tool_outputs_json_only(project, monkeypatch):
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    _inputs(project)
+    r = CliRunner().invoke(
+        app,
+        [
+            "tool",
+            "checkpoint",
+            "list",
+            "--ticker",
+            "005930",
+            "--market",
+            "KR",
+            "--date",
+            "2026-10-09",
+        ],
+    )
+    assert r.exit_code == 0, r.stdout
+    assert json.loads(r.stdout) == {"ok": True, "stages": ["00_inputs"]}
+    r = CliRunner().invoke(
+        app,
+        [
+            "tool",
+            "checkpoint",
+            "write",
+            "--ticker",
+            "005930",
+            "--market",
+            "KR",
+            "--date",
+            "2026-10-09",
+            "--stage",
+            "10_analyst_technical",
+            "--agent",
+            "analyst-technical",
+            "--json",
+            json.dumps(ok_report()),
+        ],
+    )
+    assert r.exit_code == 0 and json.loads(r.stdout)["ok"] is True
+
+
+def test_cli_tool_error_is_json_exit1(project):
+    """전제조건 위반은 JSON 1줄 + exit 1. (옛 테스트는 submit-decision)"""
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    r = CliRunner().invoke(
+        app,
+        [
+            "tool",
+            "checkpoint",
+            "write",
+            "--ticker",
+            "005930",
+            "--market",
+            "KR",
+            "--date",
+            "2026-10-09",
+            "--stage",
+            "20_debate_r0_bull",
+            "--json",
+            json.dumps(ok_turn("bull")),
+        ],
+    )
+    assert r.exit_code == 1
+    out = json.loads(r.stdout)
+    assert out["ok"] is False and "전제조건" in out["error"]
+
+
+def test_trader_bundle_includes_portfolio_per_account(ctx, project):
+    _inputs(project)
+    for role in ("technical", "fundamental"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role),
+            agent="a",
+        )
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    exec_ledger.snapshot_positions(
+        ctx.conn,
+        account_id="paper-main",
+        d=D,
+        market="KR",
+        nav=Decimal("1000000"),
+        cash=Decimal("500000"),
+        positions=[
+            {
+                "ticker": "005930",
+                "market": "KR",
+                "qty": 5,
+                "avg_price": "70000",
+                "current_price": "71500",
+                "eval_amount": "357500",
+            }
+        ],
+    )
+    r = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")
+    pf = r["data"]["context"]["portfolio"]
+    assert pf["paper-main"]["nav"] == "1000000" and pf["paper-main"]["positions"][0]["qty"] == 5
+    assert pf["paper-main"]["mode"] == "auto" and pf["real-main"]["positions"] == []
+
+
+def test_checkpoint_write_records_model(ctx, project):
+    _inputs(project)
+    r = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="10_analyst_technical",
+        payload=ok_report(),
+        agent="analyst-technical",
+        model="haiku",
+    )
+    assert r["ok"]
+    saved = read_checkpoint(run_dir(D, "KR", "005930"), "10_analyst_technical")
+    assert saved["call"]["model"] == "haiku"
+
+
+def test_validate_ids_rejects_dots():
+    for bad in (".", "..", "..."):
+        with pytest.raises(tools.ToolInputError):
+            tools._validate_ids(bad, "KR")
+    tools._validate_ids("BRK.B", "US")  # 점이 섞인 정상 티커는 허용
+
+
+def test_market_dir_helper_creates_dir(project):
+    d = run_store.market_dir(date(2026, 10, 9), "KR", None, create=True)
+    assert d.is_dir() and d.name == "KR" and d.parent.name == "2026-10-09"
+    assert not run_store.market_dir(date(2026, 10, 10), "US", None).exists()
+
+
+def _ready_for_submit(ctx, project):
+    """보고서 2개·토론·요약·00_inputs 를 만들어 submit-decision 전제조건을 채운다."""
+    _inputs(project)
+    for role in ("technical", "fundamental"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role),
+            agent="a",
+        )
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+
+
+def test_bundle_without_decision_has_no_previous_decision(ctx, project):
+    _ready_for_submit(ctx, project)
+    b = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")
+    assert b["ok"] and b["data"].get("previous_decision") is None
+
+
+def test_section_read_for_fundamental_and_sentiment_includes_quote(ctx, project):
+    """두 md 가 '함께 오는 quote 는 현재가' 라고 하므로 절 출력에 현재가를 실어 준다."""
+    _inputs(project)
+    for section in ("fundamental", "sentiment"):
+        r = tools.checkpoint_read(
+            ctx, ticker="005930", market="KR", date=D, stage="00_inputs", section=section
+        )
+        assert r["ok"] and r["data"]["quote"]["data"]["price"] == "71500", section
+
+
+def test_requote_returns_change_pct(ctx, project):
+    """Phase 25: 재시세 값의 당일 등락률을 함께 돌려준다(없으면 입력 시세의 값)."""
+    from datetime import timedelta
+
+    from trader.kernel.broker.fake import FakeMarket
+
+    inputs = {
+        "meta": {"asof": T0.isoformat()},
+        "technical": {"quote": {"data": {"price": "100", "change_pct": 0.02}}},
+    }
+    ctx.market_client = None
+    assert tools.requote(ctx, "KR", "005930", None, inputs, ctx.now()) == (
+        Decimal("100"),
+        None,
+        0.02,
+    )
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("112")})
+    ctx.now = lambda: T0 + timedelta(minutes=11)
+    price, note, pct = tools.requote(ctx, "KR", "005930", None, inputs, ctx.now())
+    assert price == Decimal("112") and note == "재시세 100→112"
+    assert pct == ctx.market_client._quote("005930", "KR").change_pct
+
+
+ROLES4 = ("technical", "fundamental", "news_macro", "sentiment")
+
+
+def _write_reports(ctx, signals, conf=0.8):
+    for role, sig in zip(ROLES4, signals, strict=True):
+        r = tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role, signal=sig, confidence=conf),
+            agent=f"analyst-{role}",
+        )
+        assert r["ok"], r
+
+
+def test_summarize_skips_debate_on_consensus(ctx, project):
+    _inputs(project)
+    _write_reports(ctx, ["BUY"] * 4)
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] and r["skipped_debate"] is True and r["reason"]
+    s = read_checkpoint(run_dir(D, "KR", "005930"), "25_research_summary")["data"]
+    assert s["skipped_debate"] is True and s["sycophantic"] is None
+    # 트레이더 묶음은 생략 요약을 그대로 싣는다
+    b = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")
+    assert b["ok"] and b["data"]["research_summary"]["skipped_debate"] is True
+    # submit-decision 전제조건(리포트 2개 + 25_research_summary)은 그대로 통과
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"], r
+    assert ctx.conn.execute("SELECT COUNT(*) FROM debate_turns").fetchone()[0] == 0
+    # 생략 여부를 원장에 남긴다 — 전후 비교가 run 디렉터리 보존 기간에 묶이지 않게
+    # (옛 memory_entries.skipped_debate 단언은 M8 메모리 몫)
+    assert ctx.conn.execute("SELECT skipped_debate FROM decisions").fetchone()[0] == 1
+    rnd = ctx.conn.execute("SELECT skipped_debate FROM decision_rounds WHERE round=0").fetchone()
+    assert rnd[0] == 1
+
+
+def test_summarize_requires_debate_without_consensus(ctx, project):
+    _inputs(project)
+    _write_reports(ctx, ["BUY", "BUY", "BUY", "SELL"])
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] is False and r["debate_required"] is True
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "25_research_summary") is None
+
+
+def test_summarize_low_confidence_requires_debate(ctx, project):
+    _inputs(project)
+    _write_reports(ctx, ["BUY"] * 4, conf=0.6)
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] is False and r["debate_required"] is True
+
+
+def test_summarize_skip_disabled_requires_debate(ctx, project):
+    from trader.features.spot.settings import DebateCfg
+
+    ctx.settings = ctx.settings.model_copy(update={"debate": DebateCfg(skip_on_consensus=False)})
+    _inputs(project)
+    _write_reports(ctx, ["BUY"] * 4)
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] is False and r["debate_required"] is True
+
+
+def test_summarize_with_debate_turns_uses_debate_even_on_consensus(ctx, project):
+    """토론 턴이 이미 있으면(합의여도) 수렴 감시를 포함한 정상 요약을 만든다."""
+    _inputs(project)
+    _write_reports(ctx, ["BUY"] * 4)
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    r = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert r["ok"] and not r.get("skipped_debate")
+    s = read_checkpoint(run_dir(D, "KR", "005930"), "25_research_summary")["data"]
+    assert "skipped_debate" not in s and isinstance(s["sycophantic"], bool)
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"], r
+    assert ctx.conn.execute("SELECT skipped_debate FROM decisions").fetchone()[0] == 0
+
+
+def test_trader_bundle_counts_evidence_before_dropping_it(ctx, project):
+    """L10: 트레이더 묶음은 evidence 를 떼지만, 떼기 전 원본에서 역할별 근거 항목 수·출처 수·
+    data_gaps 수·방향과 방향 일치도를 파이썬이 센다(검증된 근거 수가 아님을 정의에 명시)."""
+    _realistic_reports_and_turns(ctx, project)
+    b = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")["data"]
+    st = b["context"]["evidence_stats"]
+    assert "검증" in st["definition"]
+    tech = st["roles"]["technical"]
+    assert tech == {
+        "evidence": 5,
+        "sources": 1,
+        "data_gaps": 2,
+        "counter_evidence": 2,
+        "key_risks": 3,
+        "direction": "BULLISH",
+    }
+    assert st["missing_roles"] == [] and st["directions"] == {"BULLISH": 4}
+    assert st["agreement"] == 1.0
+    assert "evidence" not in b["reports"][0]
+
+
+def test_trader_bundle_holding_context_shows_min_hold(ctx, project):
+    """19번(iii): 재평가 입력에 보유 거래일·최소 보유 충족 여부를 싣는다 — 익절가 도달이 최소 보유
+    전이면 SELL/TRIM 이 게이트에서 거부될 수 있음을 트레이더가 안다."""
+    _realistic_reports_and_turns(ctx, project)
+    oid = exec_ledger.insert_order(
+        ctx.conn,
+        decision_id=None,
+        account_id="paper-main",
+        ticker="005930",
+        market="KR",
+        side="BUY",
+        qty=1,
+        order_type="LIMIT",
+        price=Decimal("70000"),
+        status="filled",
+        order_no="1",
+        message="",
+        mode="auto",
+        created_at=f"{D.isoformat()}T01:00:00+00:00",
+    )
+    ctx.conn.execute(
+        "INSERT INTO fills(order_id, account_id, qty, price, filled_at) VALUES (?, ?, ?, ?, ?)",
+        (oid, "paper-main", 1, "70000", f"{D.isoformat()}T01:00:00+00:00"),
+    )
+    ctx.conn.commit()
+    b = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")["data"]
+    h = b["context"]["holding"]["paper-main"]
+    assert h["held_trading_days"] == 0 and h["min_hold_days"] == 3 and h["sell_allowed"] is False
+
+
+# --- submit-decision·재개·재시세 (Task 11) ---------------------------------------------
+
+
+def _cash_brokers(ctx):
+    from trader.features.accounts.settings import to_broker_account
+    from trader.kernel.broker.fake import FakeBroker
+    from trader.kernel.broker.models import Cash
+
+    cash = {"KR": Cash(currency="KRW", available=Decimal("10000000"), total=Decimal("10000000"))}
+    return {a.id: FakeBroker(to_broker_account(a), cash=cash) for a in ctx.accounts}
+
+
+def _ready_for_submit(ctx, project):
+    """보고서 2개·토론·요약·00_inputs 를 만들어 submit-decision 전제조건을 채운다."""
+    _inputs(project)
+    for role in ("technical", "fundamental"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role),
+            agent="a",
+        )
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+
+
+def test_submit_requires_reports_and_summary(ctx, project):
+    _inputs(project)
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] is False and "전제조건" in r["error"]
+    for role in ("technical", "fundamental"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role),
+            agent="a",
+        )
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] is False and "25_research_summary" in r["error"]
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    assert tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)["ok"]
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] is True and len(r["executions"]) == 2
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "30_decision")["data"]["action"] == "BUY"
+    rc = read_checkpoint(run_dir(D, "KR", "005930"), "40_risk_check_paper-main")
+    assert isinstance(rc["data"]["approved"], bool) and rc["data"]["dry_run"] is True
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "40_risk_check_real-main") is not None
+    assert read_checkpoint(run_dir(D, "US", "005930"), "40_risk_check_x") is None
+    # 결정·리포트·토론이 원장에 적재된다
+    assert ctx.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 1
+    assert ctx.conn.execute("SELECT COUNT(*) FROM analyst_reports").fetchone()[0] == 2
+    assert ctx.conn.execute("SELECT COUNT(*) FROM debate_turns").fetchone()[0] == 2
+
+
+def test_submit_decision_runs_executor(ctx, project):
+    """ctx.dry_run=False + 브로커가 있으면 submit-decision 이 모의 auto 계좌에 주문한다."""
+    _ready_for_submit(ctx, project)
+    ctx.brokers = _cash_brokers(ctx)
+    ctx.dry_run = False
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] and r["executions"][0]["order"]["accepted"]
+    assert len(ctx.brokers["paper-main"].orders) == 1  # 수량은 지정가 71000 기준 → 14주
+    assert ctx.brokers["paper-main"].orders[0].qty == 14
+    assert ctx.brokers["real-main"].orders == []
+    # 같은 날 재제출은 기존 결정을 돌려주고 다시 실행하지 않는다
+    r2 = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r2["ok"] and r2.get("already") is True
+    assert len(ctx.brokers["paper-main"].orders) == 1
+
+
+def test_submit_decision_records_us_exchange_from_inputs_meta(ctx, project):
+    """00_inputs.meta.exchange 를 원장 `ticker_exchanges` 에 남긴다(유니버스 밖 US 결정 종목의
+    만기 스냅샷용). 결정 자체는 dry_run 이라 주문 없음."""
+    d = _inputs(project, ticker="RIVN", market="US")
+    payload = run_store.read_checkpoint(d, "00_inputs")
+    payload["meta"]["exchange"] = "NAS"
+    run_store.write_checkpoint(d, "00_inputs", payload)
+    for role in ("technical", "fundamental"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="RIVN",
+            market="US",
+            date=D,
+            stage=f"10_analyst_{role}",
+            payload=ok_report(role=role, ticker="RIVN"),
+            agent="a",
+        )
+    for side in ("bull", "bear"):
+        tools.checkpoint_write(
+            ctx,
+            ticker="RIVN",
+            market="US",
+            date=D,
+            stage=f"20_debate_r0_{side}",
+            payload=ok_turn(side),
+            agent="r",
+        )
+    tools.checkpoint_summarize(ctx, ticker="RIVN", market="US", date=D)
+    r = tools.submit_decision(
+        ctx,
+        ticker="RIVN",
+        market="US",
+        date=D,
+        payload=ok_decision(ticker="RIVN", limit_price=11.0, stop_loss=9.0, take_profit=14.0),
+    )
+    assert r["ok"]
+    rows = ctx.conn.execute(
+        "SELECT ticker, exchange FROM ticker_exchanges WHERE market='US'"
+    ).fetchall()
+    assert {x["ticker"]: x["exchange"] for x in rows} == {"RIVN": "NAS"}
+
+
+def test_submit_rejects_invalid_decision(ctx, project):
+    _ready_for_submit(ctx, project)
+    r = tools.submit_decision(
+        ctx, ticker="005930", market="KR", date=D, payload=ok_decision(target_weight=0.9)
+    )
+    assert r["ok"] is False and read_checkpoint(run_dir(D, "KR", "005930"), "30_decision") is None
+
+
+def test_submit_resumes_execution_when_decision_saved_but_not_executed(ctx, project):
+    """30_decision 저장 뒤 execute 가 끊겼으면 재제출이 판정·주문을 마쳐야 한다.
+    (옛 memory_entries 1행 단언은 M8 메모리 몫이라 뺐다)"""
+    from trader.features.spot.schemas import Decision
+
+    _ready_for_submit(ctx, project)
+    d = run_dir(D, "KR", "005930")
+    dec = Decision(**ok_decision())
+    run_store.write_checkpoint(d, "30_decision", {"schema_version": 1, "data": dec.model_dump()})
+    assert read_checkpoint(d, "40_risk_check_paper-main") is None
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] and r["already"] is True and r["resumed_execution"] is True
+    assert r["executions"] and r["executions"][0]["account_id"] == "paper-main"
+    assert read_checkpoint(d, "40_risk_check_paper-main") is not None
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM risk_checks").fetchone()["n"] >= 1
+    # 판정이 있으면 재제출은 실행을 반복하지 않는다
+    r2 = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r2["ok"] and r2["already"] is True and "resumed_execution" not in r2
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM risk_checks").fetchone()["n"] == (
+        r["executions"].__len__()
+    )
+
+
+def test_submit_without_ledger_connection_does_not_leave_decision_file(ctx, project):
+    """원장 연결이 없으면 30_decision 을 쓰기 전에 거부해야 재시도가 멱등 분기에 걸리지 않는다."""
+    _ready_for_submit(ctx, project)
+    ctx.conn = None
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] is False and "원장" in r["error"]
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "30_decision") is None
+
+
+def test_submit_rejects_stop_loss_at_or_above_price_for_any_action(ctx, project):
+    """손절선이 현재가 이상이면 action 과 무관하게 제출을 거부한다(저장된 결정의 손절선은 monitor
+    가 모든 action 에 대해 읽어 즉시 전량 매도한다)."""
+    _ready_for_submit(ctx, project)
+    for action in ("HOLD", "ADD"):
+        r = tools.submit_decision(
+            ctx,
+            ticker="005930",
+            market="KR",
+            date=D,
+            payload=ok_decision(action=action, stop_loss=72000.0, target_weight=0.1),
+        )
+        assert r["ok"] is False and "손절선" in r["error"], action
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "30_decision") is None
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"] == 0
+
+
+def test_dry_run_risk_checks_do_not_block_live_resume(ctx, project):
+    """아침 `--dry-run`(또는 FAKE) 이 남긴 40_ 판정은 실행이 아니다 — 실전 세션의 재제출은 실행을
+    재개해야 한다."""
+    _ready_for_submit(ctx, project)
+    d = run_dir(D, "KR", "005930")
+    ctx.dry_run = True
+    first = tools.submit_decision(
+        ctx, ticker="005930", market="KR", date=D, payload=ok_decision(action="HOLD")
+    )
+    assert first["ok"] and not first.get("already")
+    assert read_checkpoint(d, "40_risk_check_paper-main")["data"]["dry_run"] is True
+    ctx.dry_run = False
+    second = tools.submit_decision(
+        ctx, ticker="005930", market="KR", date=D, payload=ok_decision(action="HOLD")
+    )
+    assert second["ok"] and second["already"] and second.get("resumed_execution") is True
+    assert read_checkpoint(d, "40_risk_check_paper-main")["data"]["dry_run"] is False
+    third = tools.submit_decision(
+        ctx, ticker="005930", market="KR", date=D, payload=ok_decision(action="HOLD")
+    )
+    assert third["already"] and not third.get("resumed_execution")
+
+
+def test_resume_runs_only_accounts_without_risk_check(ctx, project):
+    """한 계좌의 판정만 남고 끊겼으면 재제출은 나머지 계좌만 실행한다(있는 판정은 덮지 않음)."""
+    from trader.features.spot.schemas import Decision
+
+    ctx.dry_run = False
+    _ready_for_submit(ctx, project)
+    d = run_dir(D, "KR", "005930")
+    dec = Decision(**ok_decision())
+    run_store.write_checkpoint(d, "30_decision", {"schema_version": 1, "data": dec.model_dump()})
+    run_store.write_checkpoint(
+        d, "40_risk_check_paper-main", {"schema_version": 1, "data": {"approved": False, "x": 1}}
+    )
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["resumed_execution"] is True
+    assert [e["account_id"] for e in r["executions"]] == ["real-main"]
+    assert read_checkpoint(d, "40_risk_check_paper-main")["data"] == {"approved": False, "x": 1}
+
+
+def test_submit_decision_requotes_when_inputs_are_stale(ctx, project):
+    """00_inputs.meta.asof 가 10분 넘게 늙었고 시세 클라이언트가 있으면 제출 때 현재가를 다시 받아
+    게이트 수량·손절 검사에 쓴다. 신선하면 그대로, 실패하면 입력가."""
+    from datetime import timedelta
+
+    from trader.kernel.broker.fake import FakeMarket
+
+    _ready_for_submit(ctx, project)  # quote 71500, asof T0
+    ctx.brokers = _cash_brokers(ctx)
+    ctx.dry_run = False
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("80000")})
+    # 신선한 입력(T0 + 1분): 재시세 없음
+    ctx.now = lambda: T0 + timedelta(minutes=1)
+    dec = ok_decision(order_type="MARKET", limit_price=None, take_profit=95000.0)
+    inputs = read_checkpoint(run_dir(D, "KR", "005930"), "00_inputs")
+    assert tools.requote(ctx, "KR", "005930", None, inputs, ctx.now()) == (
+        Decimal("71500"),
+        None,
+        None,
+    )
+    # 11분 지남 + 재시세가 손절선 아래면 저장 전에 거부(30_decision 없음)
+    ctx.now = lambda: T0 + timedelta(minutes=11)
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("60000")})
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=dec)
+    assert not r["ok"] and "현재가 60000 이상" in r["error"]
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "30_decision") is None
+    # 80000 으로 재시세 → 시장가 수량이 71500 기준 13주가 아니라 80000 기준 12주
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("80000")})
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=dec)
+    assert r["ok"] and r["price"] == "80000" and r["requote"] == "재시세 71500→80000"
+    assert ctx.brokers["paper-main"].orders[0].qty == 12
+    rc = read_checkpoint(run_dir(D, "KR", "005930"), "40_risk_check_paper-main")["data"]
+    assert "재시세 71500→80000" in (rc.get("note") or "")
+    # 시세 실패 → 입력가 유지
+    ctx.market_client = FakeMarket(prices={}, fail={"get_price_kr"})
+    stale = {
+        "meta": {"asof": T0.isoformat()},
+        "technical": {"quote": {"data": {"price": "1"}}},
+    }
+    assert tools.requote(ctx, "KR", "005930", None, stale, ctx.now()) == (
+        Decimal("1"),
+        None,
+        None,
+    )
+
+
+def test_resume_reruns_account_whose_order_never_went_out(ctx, project):
+    """통과 판정(40_)만 남고 주문(50_)·승인 흔적이 없으면 재제출이 그 계좌를 다시 실행한다
+    (예전엔 40_ 만 보고 그날 주문을 영구 생략)."""
+    from trader.features.spot.schemas import Decision
+
+    ctx.dry_run = False
+    _ready_for_submit(ctx, project)
+    d = run_dir(D, "KR", "005930")
+    dec = Decision(**ok_decision())
+    run_store.write_checkpoint(d, "30_decision", {"schema_version": 1, "data": dec.model_dump()})
+    for acct in ("paper-main", "real-main"):
+        run_store.write_checkpoint(
+            d,
+            f"40_risk_check_{acct}",
+            {"schema_version": 1, "data": {"approved": True, "mode": "auto", "dry_run": False}},
+        )
+    run_store.write_checkpoint(d, "50_order_real-main", {"schema_version": 1, "data": {}})
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["resumed_execution"] is True
+    assert [e["account_id"] for e in r["executions"]] == ["paper-main"]
+
+
+def test_fake_session_submit_does_not_record_portfolio(ctx, project, monkeypatch):
+    """FAKE_CLAUDE=1 제출은 가짜 브로커 잔고를 positions_snapshot 에 남기지 않는다."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    _ready_for_submit(ctx, project)
+    ctx.brokers = _cash_brokers(ctx)
+    ctx.dry_run = False
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] and r["executions"][0]["approved"]
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM positions_snapshot").fetchone()["n"] == 0
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM account_nav").fetchone()["n"] == 0  # v5
+
+
+def test_submit_with_policy_but_no_paused_callback_places_no_order(ctx, project):
+    """도구 컨텍스트에 정책만 있고 일시정지 콜백이 없으면 fail-closed(일시정지) — 주문 없음."""
+    _ready_for_submit(ctx, project)
+    ctx.brokers = _cash_brokers(ctx)
+    ctx.dry_run = False
+    ctx.paused = None
+    r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
+    assert r["ok"] and r["executions"][0]["order"] is None
+    assert ctx.brokers["paper-main"].orders == []

@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import typer
@@ -36,6 +36,7 @@ class Boot:
     schedule: Any | None = None
     registry: SectionRegistry | None = None
     secrets: Any | None = None
+    ports: dict[str, Any] = field(default_factory=dict)
 
 
 def build_registry(features: list[Feature]) -> SectionRegistry:
@@ -53,9 +54,14 @@ def boot(
     conn: bool = False,
     schedule: bool = False,
     secrets: bool = False,
+    ports: bool = False,
     log_name: str | None = None,
 ) -> Boot:
-    """로깅 → discover → 계약 검사(위반이면 ConfigError) → 레지스트리 → 설정 → 원장 순서."""
+    """로깅 → discover → 계약 검사(위반이면 ConfigError) → 레지스트리 → 설정 → 원장 → 포트 순서.
+
+    ports=True 는 settings·secrets·conn 을 함의하고, 모든 Feature.ports 를 이름으로 조립한다."""
+    if ports:
+        settings = secrets = conn = True
     logging_setup.configure(paths.state_dir(), name=log_name)
     features = discover()
     errs = check(features)
@@ -69,7 +75,21 @@ def boot(
     if conn:
         connection = db.connect()
         db.init_schema(connection, all_migrations(features))
-    return Boot(settings_obj, connection, features, schedule_obj, registry, secrets_obj)
+    boot_ = Boot(settings_obj, connection, features, schedule_obj, registry, secrets_obj)
+    if not ports:
+        return boot_
+    built: dict[str, Any] = {}
+    for f in features:
+        for port in f.ports:
+            try:
+                built[port.name] = port.build(boot_)
+            except Exception as e:  # noqa: BLE001 - 어떤 조립 실패도 설정 오류로 알린다
+                if connection is not None:
+                    connection.close()
+                raise ConfigError(
+                    f"포트 {port.name} 조립 실패: {type(e).__name__}: {e}"
+                ) from e
+    return replace(boot_, ports=built)
 
 
 def config_errors(fn):

@@ -86,6 +86,11 @@ class SessionKind:
     extra_cap_key: str | None
     throttle: Literal["hard", "soft"]
     fake: Callable[..., Any]
+    # spec -> stdin 에 더할 키(없으면 기본 페이로드만)
+    stdin_extra: Callable[[Any], dict] | None = None
+    # True 면 같은 운영일 같은 종목이 세션 타임아웃으로 `llm.timeout_retry_max` 번 실패한 뒤
+    # 다시 띄우지 않는다(단일 종목 세션만). 커널은 세션 이름이 아니라 이 선언만 본다
+    retry_guard: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,17 +104,23 @@ class TelegramCommand:
 
 @dataclass(frozen=True)
 class StageRule:
-    """도구 명령이 허용되는 단계 전제조건."""
+    """도구 명령이 허용되는 단계 전제조건.
+
+    pattern: 쓸 수 있는 단계 이름 glob. requires: 이미 있어야 하는 정확한 단계 이름.
+    min_counts: (glob, n) — glob 에 맞는 기존 단계가 n 개 이상이어야 한다."""
 
     pattern: str
-    requires: tuple[str, ...]
+    requires: tuple[str, ...] = ()
+    min_counts: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
 class ToolCommand:
+    """`trader tool <name>`. handler 가 typer.Typer 면 하위 명령 그룹, callable 이면 단일 명령."""
+
     name: str
-    handler: Callable[..., Any]
-    stage_rules: tuple[StageRule, ...]
+    handler: Any
+    stage_rules: tuple[StageRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,6 +152,23 @@ class Hook:
 
 
 @dataclass(frozen=True)
+class AgentDef:
+    """LLM 에이전트 정의 파일 하나. schema: 그 에이전트 결과의 pydantic 모델(없으면 None)."""
+
+    name: str
+    path: Path
+    schema: type | None = None
+
+
+@dataclass(frozen=True)
+class Port:
+    """부트가 조립하는 이름 붙은 구현체. build(boot) -> 구현체."""
+
+    name: str
+    build: Callable[[Any], Any]
+
+
+@dataclass(frozen=True)
 class Feature:
     """기능 하나의 전체 등록 선언. 커널은 이 필드를 순회할 뿐 기능 이름을 모른다."""
 
@@ -162,4 +190,5 @@ class Feature:
     control_namespaces: tuple[str, ...] = ()
     origins: tuple[OriginSpec, ...] = ()
     session_kinds: tuple[SessionKind, ...] = ()
-    agents: tuple[Path, ...] = ()
+    agents: tuple[AgentDef, ...] = ()
+    ports: tuple[Port, ...] = ()

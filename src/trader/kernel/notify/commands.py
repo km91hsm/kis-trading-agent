@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ class CommandContext:
     notifier: Notifier
     features: list[Feature]
     echo: Callable[[str], None] = lambda s: None
+    ports: dict[str, Any] = field(default_factory=dict)  # 기능이 내놓은 포트(이름 → 구현)
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
@@ -84,7 +85,8 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
     cmds = registry(ctx.features)
     offset = get_flag(conn, OFFSET_FLAG)
     updates = receiver.poll(offset)
-    # 승인 만료 처리는 M4 가 훅으로 더한다
+    # 승인 만료는 여기서 하지 않는다: `approvals list`·`approvals_expire` 잡이 바꾸고, 승인 실행
+    # (`execution.core.approve`)도 만료된 요청을 스스로 거부한다
     handled = 0
     failed = 0
     for u in updates:

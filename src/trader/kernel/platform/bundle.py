@@ -71,6 +71,11 @@ def tool_command() -> str:
     return "trader tool" if is_frozen() else "python -m trader tool"
 
 
+def tool_bin_dir() -> Path:
+    """도구 명령이 풀리도록 세션 PATH 앞에 둘 디렉터리: 번들은 실행파일 폴더, 개발은 venv bin."""
+    return cli_executable().parent
+
+
 def cli_argv() -> list[str]:
     """`trader <명령>` 을 하위 프로세스로 띄울 때의 접두 argv: 번들은 콘솔 CLI, 개발 환경은
     `python -m trader` (번들의 sys.executable 은 `-m` 을 모른다)."""

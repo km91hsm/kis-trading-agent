@@ -2,6 +2,20 @@
 
 from trader.kernel.notify import messages
 from trader.kernel.notify.commands import CommandContext, poll_once
+from trader.kernel.notify.messages import (
+    DecisionBrief,
+    approval_rejected,
+    approval_request,
+    approval_tampered,
+    approve_hint,
+    bookkeeping_failure,
+    execution_failure,
+    open_buys_cancelled,
+    opinion_lines,
+    order,
+    order_unknown,
+    throttle_skip,
+)
 from trader.kernel.notify.telegram import (
     Notifier,
     NullNotifier,
@@ -15,14 +29,26 @@ from trader.kernel.notify.telegram import (
 
 __all__ = [
     "CommandContext",
+    "DecisionBrief",
     "Notifier",
     "NullNotifier",
     "TelegramNotifier",
     "TelegramReceiver",
     "Update",
+    "approval_rejected",
+    "approval_request",
+    "approval_tampered",
+    "approve_hint",
+    "bookkeeping_failure",
+    "execution_failure",
     "make_notifier",
     "make_receiver",
     "messages",
+    "open_buys_cancelled",
+    "opinion_lines",
+    "order",
+    "order_unknown",
     "parse_command",
     "poll_once",
+    "throttle_skip",
 ]

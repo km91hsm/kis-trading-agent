@@ -4,12 +4,20 @@
 `TelegramNotifier.send` 가 한다(여기서는 평문). 금액은 KR '71,500원', US '$227.55'.
 
 어투: 안내·결과 문장은 해요체, 제목·항목 줄은 명사구. 내부 코드값(`auto`·`bear`·`RISK_OFF` 등)은
-아래 표로 한글로 바꿔 보이고 그대로 내보내지 않는다. 기능별 문구(주문·승인·결정)는 각 기능이 더한다.
+아래 표로 한글로 바꿔 보이고 그대로 내보내지 않는다. 주문·승인 문구는 실행 코어
+(`kernel/execution`)가 쓰므로 여기 두고, 그 밖의 기능별 문구는 각 기능이 더한다.
+
+주문·승인·재평가 주문은 항목 줄 뒤에 빈 줄 하나를 두고 최종 의견(`DecisionBrief`)을 붙인다:
+
+    최종 의견: 매수 · 목표 비중 15% · 확신 0.62
+    근거: 첫 두 문장
+    목표가 80,000원 · 손절가 65,000원
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -67,16 +75,78 @@ def kst_hhmm(iso: str | None) -> str:
         return str(iso)
 
 
+@dataclass(frozen=True)
+class DecisionBrief:
+    """알림에 붙이는 최종 의견 요약."""
+
+    action: str
+    target_weight: float | None = None
+    confidence: float | None = None
+    rationale: str | None = None
+    take_profit: Any = None
+    stop_loss: Any = None
+    horizon_days: int | None = None
+
+    @classmethod
+    def of(cls, decision: Any) -> DecisionBrief | None:
+        """결정 모델(BaseModel)·dict(결정 행 data) 어느 쪽이든. 없거나 action 이 없으면 None."""
+        if decision is None:
+            return None
+        get = (
+            decision.get
+            if isinstance(decision, dict)
+            else lambda k, d=None: getattr(decision, k, d)
+        )
+        action = get("action")
+        if not action:
+            return None
+        return cls(
+            action=str(action),
+            target_weight=get("target_weight"),
+            confidence=get("confidence"),
+            rationale=get("rationale"),
+            take_profit=get("take_profit"),
+            stop_loss=get("stop_loss"),
+            horizon_days=get("horizon_days"),
+        )
+
+
+def opinion_lines(o: DecisionBrief, market: str | None) -> list[str]:
+    head = f"최종 의견: {ACTION.get(o.action, o.action)}"
+    if o.target_weight is not None:
+        head += f" · 목표 비중 {pct(o.target_weight)}"
+    if o.confidence is not None:
+        head += f" · 확신 {float(o.confidence):.2f}"
+    out = [head]
+    why = first_sentences(o.rationale)
+    if why:
+        out.append(f"근거: {why}")
+    prices = []
+    if o.take_profit is not None:
+        prices.append(f"목표가 {money(o.take_profit, market)}")
+    if o.stop_loss is not None:
+        prices.append(f"손절가 {money(o.stop_loss, market)}")
+    if o.horizon_days:
+        prices.append(f"보유 {o.horizon_days}일")
+    if prices:
+        out.append(" · ".join(prices))
+    return out
+
+
 def render(
     tag: str,
     title: str = "",
     lines: list[str] | tuple[str, ...] = (),
     *,
+    opinion: DecisionBrief | None = None,
+    market: str | None = None,
     action: str | None = None,
 ) -> str:
-    """공통 틀. 빈 줄은 버리고, 행동 안내 앞에는 빈 줄 하나."""
+    """공통 틀. 빈 줄은 버리고, 의견·행동 안내 앞에는 빈 줄 하나."""
     parts = [f"[{tag}] {title}".rstrip()]
     parts += [ln for ln in lines if ln]
+    if opinion is not None:
+        parts += ["", *opinion_lines(opinion, market)]
     if action:
         parts += ["", action]
     return "\n".join(parts)
@@ -95,3 +165,149 @@ def failure(tag: str, scope: str, err: Any) -> str:
 
 def mode_changed(*, account: str, mode: str) -> str:
     return render("모드", f"{account} → {MODE.get(mode, mode)}")
+
+
+def throttle_skip(*, market: str, why: str) -> str:
+    """구독 사용률 감속으로 그날 분석을 쉰다(하루 1번). 오류가 아니라 설정된 브레이크."""
+    return render(
+        "분석 생략: 사용량 감속",
+        market,
+        (why, "보유 재평가는 계속돼요. 설정 화면 'Claude 사용량 감속'에서 끌 수 있어요"),
+    )
+
+
+def _order_line(side: str, qty: Any, price: Any, market: str | None) -> str:
+    where = f"@{money(price, market)}" if price is not None else "시장가"
+    return f"{SIDE.get(str(side), str(side))} {qty}주 {where}"
+
+
+def _amount(qty: Any, price: Any, market: str | None) -> str:
+    try:
+        return money(Decimal(str(qty)) * Decimal(str(price)), market)
+    except (InvalidOperation, ValueError, TypeError):
+        return ""
+
+
+# --- 주문·승인 -----------------------------------------------------------------------------
+
+
+def order(
+    *,
+    account: str,
+    market: str,
+    label: str,
+    side: str,
+    qty: Any,
+    price: Any,
+    mode: str,
+    accepted: bool,
+    order_no: str | None,
+    message: str | None,
+    opinion: DecisionBrief | None = None,
+    kind: str = "",
+) -> str:
+    """주문 접수/실패. kind 는 제목 꼬리('재평가'·'헤지'·'재호가' 등)."""
+    tag = ("주문" if accepted else "주문 실패") + (f" · {kind}" if kind else "")
+    lines = [
+        f"{_order_line(side, qty, price, market)} · {MODE.get(mode, mode)}",
+        f"접수번호 {order_no or '—'}" + (f" · {message}" if message else ""),
+    ]
+    return render(
+        tag, f"{account} · {label}", lines, opinion=opinion if accepted else None, market=market
+    )
+
+
+def order_unknown(*, account: str, market: str, label: str, side: str, qty: Any, err: str) -> str:
+    return render(
+        "주문 상태 미확인",
+        f"{account} · {label}",
+        [
+            f"{SIDE.get(side, side)} {qty}주 — 응답을 받지 못했어요",
+            f"사유: {err}",
+            "KIS 앱에서 확인하세요. 체결 동기화(fills sync)가 확정해요.",
+        ],
+    )
+
+
+def bookkeeping_failure(
+    *, account: str, label: str, side: str, qty: Any, order_no: str | None, status: str, err: Any
+) -> str:
+    return render(
+        "긴급: 주문 기록 실패",
+        f"{account} · {label}",
+        [
+            f"{SIDE.get(side, side)} {qty}주 · 접수번호 {order_no or '—'} ({status})",
+            f"원장에 없으니 수동 확인이 필요해요: {err}",
+        ],
+    )
+
+
+def execution_failure(*, account: str, market: str, label: str, err: Any) -> str:
+    return failure("실행 실패", f"{account} · {market} {label}", err)
+
+
+def approve_hint(approval_id: int, env: str | None) -> str:
+    """승인·거부 명령 안내. 실전은 확인어를 붙여야 실행된다(전체 검토 T2)."""
+    ok = f"/approve {approval_id}" + (f" {REAL_CONFIRM}" if env == "real" else "")
+    return f"{ok} · /reject {approval_id}"
+
+
+def approval_request(
+    *,
+    approval_id: int,
+    account: str,
+    market: str,
+    label: str,
+    side: str,
+    qty: Any,
+    price: Any,
+    reasons: list[str],
+    opinion: DecisionBrief | None = None,
+    kind: str = "",
+    env: str | None = None,
+    quote_price: Any = None,
+    expires_at: str | None = None,
+) -> str:
+    """승인 요청: 모의/실전·금액·리스크 판정·의견·만료 시각(KST) — 폰에서 판단에 필요한 것만."""
+    tag = f"승인 요청 #{approval_id}" + (f" · {ENV[env]}" if env in ENV else "")
+    tag += f" · {kind}" if kind else ""
+    line = _order_line(side, qty, price, market)
+    amt = _amount(qty, price if price is not None else quote_price, market)
+    if amt:
+        line += f" = {amt}" + (" (현재가 기준)" if price is None else "")
+    judged = "; ".join(reasons)
+    until = f" — {kst_hhmm(expires_at)} KST 까지" if expires_at else " (30분 안)"
+    return render(
+        tag,
+        f"{account} · {label}",
+        [line, f"리스크 판정: {judged}" if judged else "리스크 한도 통과"],
+        opinion=opinion,
+        market=market,
+        action=approve_hint(approval_id, env) + until,
+    )
+
+
+def approval_rejected(*, approval_id: int, account: str, label: str) -> str:
+    return render("거부", f"승인 요청 #{approval_id} · {account} · {label}")
+
+
+def approval_tampered(*, approval_id: int, account: str, label: str) -> str:
+    return render(
+        "긴급: 승인 지문 불일치",
+        f"승인 요청 #{approval_id} · {account} · {label}",
+        ["요청 뒤 주문 내용이 바뀌었어요 — 주문하지 않고 실패로 닫았어요. 원장을 확인하세요."],
+    )
+
+
+def open_buys_cancelled(
+    *, account: str, label: str, reason: str, cancelled: int, left: list[str]
+) -> str:
+    """결정이 매수에서 돌아서 당일 미체결 BUY 를 거둔 결과(전체 검토 2026-10-27)."""
+    return render(
+        "미체결 매수 취소",
+        f"{account} · {label}",
+        [
+            f"{reason} — 당일 미체결 매수 {cancelled}건 취소",
+            f"취소하지 못함: {', '.join(left)} — 증권사 앱에서 직접 취소하세요" if left else "",
+        ],
+    )
