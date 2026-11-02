@@ -15,19 +15,27 @@ from trader.features.spot import (
     executor,
     fills,
     labels,
+    locks,
     monitor,
     notice,
     reconcile,
     reprice,
+    resume,
 )
+from trader.features.spot import ledger as spot_ledger
 from trader.kernel.broker import factory
-from trader.kernel.config.market_hours import REGULAR
+from trader.kernel.config.market_hours import REGULAR, session_over
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
+from trader.kernel.daemon.runner import STALE_SESSION_AGE
+from trader.kernel.execution import core
+from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
+from trader.kernel.notify import messages
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec, QueueKind
+from trader.kernel.session import calls
 from trader.kernel.session.run_store import run_date_for
 from trader.kernel.session.runner import run_session
 
@@ -326,12 +334,147 @@ class ReconcileParams(BaseModel):
     market: str | None = None
 
 
+# --- 큐 reevaluate (옛 daemon `_reevaluate_request`) ----------------------------------
+
+
+class ReevaluateParams(BaseModel):
+    """재평가 요청. 모양은 `monitor._enqueue` 가 넣는 것과 같다. dry_run 칸은 없다 — 데몬의
+    `--dry-run` 을 요청이 뒤집지 못한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    market: str
+    ticker: str
+    exchange: str | None = None
+    trigger_id: int
+    trigger_ids: list[int] = []
+
+
+def _close_stale_sessions(deps) -> int:
+    """1시간 넘게 running 인 세션 행을 error 로 닫는다(세션이 중간에 죽으면 남는다)."""
+    conn = deps.conn_factory()
+    try:
+        n = calls.close_stale_running(
+            conn, older_than=(deps.now() - STALE_SESSION_AGE).isoformat()
+        )
+    finally:
+        conn.close()
+    if n:
+        logger.warning("stale running 세션 %d건을 error 로 정리", n)
+    return n
+
+
+def _recollect(deps, market: str, ticker: str, exchange: str | None) -> None:
+    """뉴스 재평가: 입력을 강제 재수집한다. 포트가 없거나 실패하면 기존 입력으로 재평가."""
+    inputs = deps.ports.get("inputs")
+    if inputs is None:
+        logger.warning("뉴스 재평가 재수집 생략 %s %s: 수집 포트 없음", market, ticker)
+        return
+    market_client = None
+    accounts = deps.ports.get("accounts")
+    if accounts is not None:
+        try:
+            market_client = accounts.market_client()
+        except Exception as e:  # noqa: BLE001 - 시세 없이도 수집은 돈다
+            logger.warning("뉴스 재평가 시세 클라이언트 확인 실패: %s", type(e).__name__)
+    try:
+        inputs.collect(
+            ticker=ticker,
+            market=market,
+            exchange=exchange,
+            asof=deps.now(),
+            force=True,
+            conn_factory=deps.conn_factory,
+            market_client=market_client,
+            state=deps.state,
+        )
+    except Exception as e:  # noqa: BLE001 - 재수집 실패면 기존 입력으로 재평가
+        logger.warning("뉴스 재평가 재수집 실패 %s %s: %s", market, ticker, e)
+
+
+def reevaluate_request(deps, params: dict, progress) -> dict:
+    """큐 `reevaluate` 1건: 트리거 행을 읽어 `resume.reevaluate` 세션을 돈다. 이미 처리된
+    트리거·장 마감(장 없는 날 포함)·종료 중이면 세션 없이 건너뛴다. 세션은 같은 종목 분석과
+    겹치지 않게 종목 락(`locks.lock_for`) 안에서 돌고, 끝나면 형제 트리거도 같은 표시로 닫는다."""
+    _close_stale_sessions(deps)
+    market, ticker = params["market"], params["ticker"]
+    exchange = params.get("exchange")
+    trigger_id = int(params["trigger_id"])
+    tids = [trigger_id] + [int(t) for t in params.get("trigger_ids") or []]
+    conn = deps.conn_factory()
+    try:
+        trig = spot_ledger.get_trigger(conn, trigger_id)
+        if trig is None:
+            return {"error": f"트리거 없음 #{trigger_id}"}
+        if trig.get("handled_at"):
+            return {"skipped": "이미 처리된 트리거"}
+        if session_over(market, deps.now()):
+            return {"skipped": "장 마감"}
+        today = run_date_for(market, deps.now())
+        if trig["kind"] == "news":
+            # 뉴스 재평가(Phase 23): 트레이더가 새 뉴스를 보도록 00_inputs 를 다시 수집한다
+            _recollect(deps, market, ticker, exchange)
+        if deps.stop_event.is_set():  # 재수집(최대 수 분) 사이 종료 요청이면 세션을 띄우지 않는다
+            return {"skipped": "종료 중"}
+        lane = LaneContext(
+            settings=deps.settings,
+            conn=conn,
+            state=deps.state,
+            now=deps.now,
+            dry_run=bool(deps.dry_run),
+            notifier=deps.notifier or NullNotifier(),
+            ports=deps.ports,
+        )
+        try:
+            with locks.lock_for(market, ticker):  # 같은 종목 analyze 와 겹치지 않게
+                res = resume.reevaluate(
+                    lane,
+                    market=market,
+                    date=today,
+                    ticker=ticker,
+                    exchange=exchange,
+                    trigger_id=trigger_id,
+                    trigger={
+                        "kind": trig["kind"],
+                        "price": str(trig["price"]) if trig.get("price") is not None else None,
+                        "detail": trig.get("detail") or {},
+                    },
+                    session_runner=run_session,
+                    cancel=deps.stop_event,
+                )
+        except Exception as e:  # 기동 실패: 트리거를 '실패:' 로 닫아 30분 뒤 재시도하게 한다
+            logger.exception("재평가 세션 기동 실패 %s %s", market, ticker)
+            for tid in tids:
+                spot_ledger.mark_trigger_handled(
+                    conn, tid, f"실패: {type(e).__name__}: {e}"[:200],
+                    handled_at=deps.now().isoformat(),
+                )  # fmt: skip
+            label = labels.label(ticker, labels.resolve(conn, market, ticker))
+            core.notify_quietly(
+                lane.notifier, messages.reevaluation_failed(market=market, label=label, err=e)
+            )
+            raise
+        for tid in tids[1:]:  # 같은 세션이 나머지 트리거도 처리한 것으로 표시(실패도 같은 표시)
+            spot_ledger.mark_trigger_handled(
+                conn, tid, resume.handled_marker(res), handled_at=deps.now().isoformat()
+            )
+    finally:
+        conn.close()
+    out: dict[str, Any] = {"ticker": ticker, "ok": res.ok, "session_id": res.session_id}
+    if not res.ok:
+        out["error"] = res.error or "재평가 세션 실패"
+    return out
+
+
 QUEUE_KINDS = (
     QueueKind(
         "fills_sync", EmptyParams, "체결 동기화", "fast", 0, False, True, fills_then_balance
     ),
     QueueKind(
         "reconcile", ReconcileParams, "대사", "fast", 0, False, True, reconcile_request
+    ),
+    QueueKind(
+        "reevaluate", ReevaluateParams, "재평가", "reeval", 10, True, False, reevaluate_request
     ),
 )
 
