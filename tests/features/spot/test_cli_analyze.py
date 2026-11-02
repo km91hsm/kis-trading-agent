@@ -99,16 +99,54 @@ def test_rerun_only_missing_stages(quiet_project, monkeypatch):
     assert "새로 쓴 단계: 20_debate_r1_bear, 25_research_summary, 30_decision" in r.stdout
 
 
-def test_cli_analyze_without_dry_run_records_nondry_verdict(quiet_project, monkeypatch):
-    """--dry-run 없이 FAKE 세션: 판정이 dry_run=False 로 기록된다. 브로커(앱키)가 없으면
-    잔고를 못 봐 판정 불가(fail-closed)이고 어떤 계좌에도 주문 기록이 없다(FAKE 는 HOLD)."""
+def _inject_fake_broker(monkeypatch):
+    """accounts 포트가 paper-main 용 FakeBroker 를 돌려주게 한다(앱키 없이 non-dry 경로 검증)."""
+    from decimal import Decimal
+
+    from trader.features.accounts.ports import AccountsPortImpl
+    from trader.features.accounts.settings import to_broker_account
+    from trader.kernel.broker.fake import FakeBroker
+    from trader.kernel.broker.models import Cash
+
+    def brokers(self):
+        out = {}
+        for a in self.accounts():
+            out[a.id] = FakeBroker(
+                to_broker_account(a),
+                cash={
+                    "KR": Cash(
+                        currency="KRW", available=Decimal("10000000"), total=Decimal("10000000")
+                    ),
+                    "US": Cash(currency="USD", available=Decimal("10000"), total=Decimal("10000")),
+                },
+            )
+        return out
+
+    monkeypatch.setattr(AccountsPortImpl, "brokers", brokers)
+
+
+def test_cli_analyze_without_dry_run_executes_via_fake_broker(quiet_project, monkeypatch):
+    """--dry-run 없이 FAKE 세션: 판정이 dry_run=False 로 기록되고(FAKE 는 HOLD) 주문 기록은 없다."""
+    _inject_fake_broker(monkeypatch)
     monkeypatch.setenv("FAKE_CLAUDE", "1")
     r = _run(["--ticker", "005930", "--asof", ASOF])
     assert r.exit_code == 0, r.output
     d = run_dir(DAY, "KR", "005930")
     rc = read_checkpoint(d, "40_risk_check_paper-main")
     assert rc is not None and rc["data"]["dry_run"] is False
-    assert rc["data"]["approved"] is False and "NO_BROKER" in rc["data"]["reasons"][0]
+    assert rc["data"]["approved"] is False and "HOLD" in rc["data"]["reasons"][0]
+    assert read_checkpoint(d, "50_order_paper-main") is None
+
+
+def test_cli_analyze_without_broker_records_no_broker(quiet_project, monkeypatch):
+    """브로커(앱키)가 없으면 잔고를 못 봐 판정 불가(fail-closed), 주문 기록 없음."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    r = _run(["--ticker", "005930", "--asof", ASOF])
+    assert r.exit_code == 0, r.output
+    d = run_dir(DAY, "KR", "005930")
+    rc = read_checkpoint(d, "40_risk_check_paper-main")
+    assert rc["data"]["dry_run"] is False and rc["data"]["approved"] is False
+    assert "NO_BROKER" in rc["data"]["reasons"][0]
     assert read_checkpoint(d, "50_order_paper-main") is None
 
 

@@ -140,3 +140,20 @@ def test_common_rules_identical_prefix_across_fixtures():
     d = _defs()
     a, o = (ag.common_rules(ag.load_agent(x).prompt) for x in d.values())
     assert a == o and len(a) == 6
+
+
+def test_common_rules_strips_trailing_period_before_or_after_parenthesis(tmp_path):
+    """끝 마침표가 괄호 앞(`…한다. (보충)`)·뒤(`…한다 (보충).`)여도 같은 prefix 가 된다."""
+    rule = "1. 제공된 데이터만 근거로 판단한다"
+    tail = "\n".join(f"{i}. 규칙{i}" for i in range(2, 7))
+    a = tmp_path / "a.md"
+    b = tmp_path / "b.md"
+    a.write_text(f"# 공통 규칙\n{rule}. (보충 A)\n{tail}\n", encoding="utf-8")
+    b.write_text(f"# 공통 규칙\n{rule} (보충 B).\n{tail}\n", encoding="utf-8")
+    c = tmp_path / "c.md"
+    c.write_text(f"# 공통 규칙\n{rule}.\n{tail}\n", encoding="utf-8")
+    got = {
+        tuple(ag.common_rules(ag.load_agent(AgentDef(p.stem, p)).prompt)) for p in (a, b, c)
+    }
+    assert len(got) == 1
+    assert next(iter(got))[0] == rule
