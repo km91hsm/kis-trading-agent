@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from trader.features.accounts.gates import GATES
-from trader.kernel.config import ConfigError
+from trader.kernel.config import ConfigError, market_hours
 from trader.kernel.config.market_hours import is_us_holiday
 from trader.kernel.daemon.gates import should_skip
 from trader.kernel.daemon.jobs import build
@@ -119,7 +119,7 @@ def test_monitor_job_runs_only_in_window(project):
     deps = make_deps(project, datetime(2026, 10, 8, 3, 0, tzinfo=UTC))  # 12:00 KST
     assert run(deps, "KR", "monitor") == {"ran": 1}
     deps.now.t = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)  # 19:00 KST
-    assert run(deps, "KR", "monitor") == {"skipped": "장외"}
+    assert run(deps, "KR", "monitor") == {"skipped": "창 밖"}
     deps.now.t = datetime(2026, 10, 8, 16, 0, tzinfo=UTC)  # 12:00 EDT → US 창 안
     assert run(deps, "US", "monitor") == {"ran": 1}
     # interval 잡은 건너뜀·성공 모두 runs 행을 남기지 않는다
@@ -141,7 +141,7 @@ def test_monitor_window_in_market_timezone(project):
     deps = make_deps(project, datetime(2026, 10, 8, 14, 0, tzinfo=UTC))  # 10:00 EDT
     assert run(deps, "US", "monitor") == {"ran": 1}
     deps.now.t = datetime(2026, 10, 8, 13, 0, tzinfo=UTC)  # 09:00 EDT, 개장 전
-    assert run(deps, "US", "monitor") == {"skipped": "장외"}
+    assert run(deps, "US", "monitor") == {"skipped": "창 밖"}
 
 
 def test_us_holiday_skipped(project):
@@ -154,6 +154,9 @@ def test_us_holiday_skipped(project):
     assert skip(date(2026, 7, 3)) == "휴장일"  # 7/4 토요일 대체
     assert skip(date(2027, 6, 18)) == "휴장일"
     assert skip(date(2026, 12, 24)) is None
+    assert len(market_hours.us_holidays(2026) | market_hours.us_holidays(2027)) == 20
+    kr = should_skip("KR", date(2026, 12, 25), paused=lambda: False, is_holiday=lambda d: False)
+    assert kr is None  # KR 휴장은 KIS 조회(holiday_fn) 소관
     deps = make_deps(project, datetime(2026, 12, 25, 15, 0, tzinfo=UTC))
     assert run(deps, "US", "market") == {"skipped": "휴장일"}
     deps.now.t = datetime(2026, 12, 24, 15, 0, tzinfo=UTC)
@@ -182,10 +185,13 @@ def test_run_closes_stale_running_calls(project):
     conn.commit()
     conn.close()
     seen = []
+    holder = []
     feature = Feature(
-        id="f", tier="lane", hooks=(Hook("daemon.bootstrap", lambda deps: seen.append(deps)),)
-    )
+        id="f", tier="lane",
+        hooks=(Hook("daemon.bootstrap", lambda deps: seen.append((deps, holder[0]._scheduler))),),
+    )  # fmt: skip
     d = Daemon([feature], replace(deps, hooks=hooks.by_point([feature])))
+    holder.append(d)
     try:
         assert d.start(install_signals=False) is True
     finally:
@@ -195,5 +201,32 @@ def test_run_closes_stale_running_calls(project):
     conn.close()
     assert [r["status"] for r in rows] == ["error", "running"]
     assert "재기동" in rows[0]["error"]
-    assert seen == [d.deps]  # bootstrap 훅이 deps= 로 호출됨
+    assert seen == [(d.deps, None)]  # deps= 로 호출, 잡 등록(스케줄러 생성) 전
 
+
+
+def test_start_without_lock_runs_no_bootstrap_or_stale_cleanup(project):
+    deps = make_deps(project, datetime(2026, 10, 10, 1, 0, tzinfo=UTC))
+    seen = []
+    feature = Feature(
+        id="f", tier="lane", hooks=(Hook("daemon.bootstrap", lambda deps: seen.append(1)),)
+    )
+    first = Daemon([Feature(id="g", tier="lane")], deps)
+    second = Daemon([feature], replace(deps, hooks=hooks.by_point([feature])))
+    try:
+        assert first.start(install_signals=False) is True
+        conn = deps.conn_factory()
+        conn.execute(
+            "INSERT INTO agent_calls(agent, status, created_at) "
+            "VALUES ('orchestrator','running','2026-10-09T20:00:00+00:00')"
+        )
+        conn.commit()
+        conn.close()
+        assert second.start(install_signals=False) is False
+    finally:
+        second.shutdown(wait=False)
+        first.shutdown(wait=False)
+    conn = deps.conn_factory()
+    (status,) = conn.execute("SELECT status FROM agent_calls").fetchone()
+    conn.close()
+    assert seen == [] and status == "running"

@@ -145,8 +145,6 @@ class Daemon:
     def start(self, *, install_signals: bool = True) -> bool:
         """잡 정의 검증 → 잠금 → 스케줄러 등록·기동 → 하트비트. 잠금을 못 잡으면 False."""
         deps = self.deps
-        hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
-        self._close_stale_sessions()
         self._jobs = build(
             self.features, schedule=deps.schedule, settings=deps.settings,
             markets=deps.markets, ctx=deps,
@@ -155,6 +153,9 @@ class Daemon:
             return False
         sched = BackgroundScheduler(timezone=KST)
         try:
+            # 잠금을 잡은 뒤에만: 둘째 데몬이 실행 중인 데몬의 running 행을 닫으면 안 된다
+            hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
+            self._close_stale_sessions()
             _quiet_scheduler()
             for job in self._jobs:
                 sched.add_job(

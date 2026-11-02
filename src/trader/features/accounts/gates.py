@@ -45,7 +45,7 @@ def build_monitor_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
             return reason
         window = getattr(deps.schedule, job.market.lower()).monitor
         local = deps.now().astimezone(MARKET_TZ.get(job.market, KST))
-        return None if in_window(local.time(), window.start, window.end) else "장외"
+        return None if in_window(local.time(), window.start, window.end) else "창 밖"
 
     return gate
 
