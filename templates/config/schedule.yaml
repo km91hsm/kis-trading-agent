@@ -1,4 +1,6 @@
 # 데몬 잡 주기
+job_queue:
+  interval_s: 10     # 큐 틱(job_queue·fast·reeval·info) 주기(초)
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
 kr:

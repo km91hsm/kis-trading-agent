@@ -14,6 +14,7 @@ import uvicorn
 from trader.kernel.cli import init_cmd, selfcheck
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
+from trader.kernel.cli.jobs_cmd import build_jobs_app
 from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
@@ -202,6 +203,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")
     root.add_typer(build_tool_app(features), name="tool")
+    root.add_typer(build_jobs_app(features), name="jobs")
     for f in features:
         if f.cli is not None:
             root.add_typer(f.cli, name=f.id)

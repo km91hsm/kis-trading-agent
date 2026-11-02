@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from trader.kernel.daemon import heartbeat as hb_mod
 from trader.kernel.daemon.jobs import build
+from trader.kernel.daemon.queue_jobs import QUEUE_JOB_IDS
 from trader.kernel.daemon.runner import Daemon, DaemonDeps, run_job
 from trader.kernel.ledger import connect, init_schema
 from trader.kernel.registry import discover
@@ -79,7 +80,7 @@ def rows(conn):
 def test_deps_is_frozen_with_exact_field_order(deps):
     assert [f.name for f in fields(DaemonDeps)] == [
         "settings", "schedule", "conn_factory", "state", "now", "markets", "gates", "stop_event",
-        "dry_run", "notifier", "secrets", "registry", "hooks", "ports",
+        "dry_run", "notifier", "secrets", "registry", "hooks", "ports", "queue",
     ]  # fmt: skip
     with pytest.raises(FrozenInstanceError):
         deps.dry_run = True  # type: ignore[misc]
@@ -233,9 +234,9 @@ def test_daemon_start_registers_jobs_heartbeat_and_shutdown(project):
     try:
         assert daemon.start(install_signals=False) is True
         ids = {j.id for j in daemon._scheduler.get_jobs()}
-        assert ids == {"a", "p", "daemon_heartbeat"}
+        assert ids == {"a", "p", "daemon_heartbeat"} | QUEUE_JOB_IDS
         data = json.loads((d.state / hb_mod.FILE_NAME).read_text(encoding="utf-8"))
-        assert set(data["jobs"]) == {"a", "p"} and data["jobs"]["a"]["next_run"]
+        assert set(data["jobs"]) == {"a", "p"} | QUEUE_JOB_IDS and data["jobs"]["a"]["next_run"]
         assert (d.state / "daemon.lock").exists()
     finally:
         daemon.shutdown(wait=False)
@@ -266,7 +267,7 @@ def test_tick_runs_job_and_updates_heartbeat(project):
     daemon = make_daemon(d, spec(id="a"))
     try:
         assert daemon.start(install_signals=False) is True
-        (job,) = daemon._jobs
+        (job,) = [j for j in daemon._jobs if j.id not in QUEUE_JOB_IDS]
         daemon._tick(job)
         c = d.conn_factory()
         assert rows(c)[0]["status"] == "ok"

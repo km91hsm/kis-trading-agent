@@ -8,11 +8,13 @@ import signal
 import sqlite3
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from apscheduler import events as aps_events
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -52,6 +54,8 @@ class DaemonDeps:
     registry: Any = None
     hooks: Any = None
     ports: dict[str, Any] = field(default_factory=dict)
+    # 큐 상태(`queue_jobs.QueueState`: kind 표·heavy 락·양보 카운터). Daemon 이 없으면 만든다
+    queue: Any = None
 
 
 class _DropMaxInstances(logging.Filter):
@@ -86,7 +90,8 @@ def run_job(
 ) -> dict:
     """잡 본체를 감싼다. cron 잡은 runs 에 시작·종료를 남기고, interval 잡은 오류일 때만 남긴다
     (분 단위 행 폭주 방지). 예외는 error 행으로 기록하고 삼킨다. body 가 `{"skipped": 사유}` 를
-    돌려주거나 게이트가 사유를 주면 skipped, `{"error": …}` 면 error 로 기록한다."""
+    돌려주거나 게이트가 사유를 주면 skipped, `{"error": …}` 면 error 로 기록한다.
+    `spec.heavy` 잡은 `queue_jobs.heavy` 로 heavy 락을 기다렸다 돈다(ctx.queue 가 있을 때)."""
     spec = job.spec
     if stop_event.is_set():
         return {"skipped": "데몬 종료 중"}
@@ -104,7 +109,12 @@ def run_job(
                 return result
 
         run_id = None if interval else runs.start(conn, job.kind, job.market)
-        raw = spec.body(ctx, job)
+        if spec.heavy and getattr(ctx, "queue", None) is not None:
+            from trader.kernel.daemon.queue_jobs import heavy
+
+            raw = heavy(ctx, lambda: spec.body(ctx, job), cron=True)
+        else:
+            raw = spec.body(ctx, job)
     except Exception as e:  # noqa: BLE001 - 잡 하나의 실패가 데몬을 죽이지 않는다
         logger.exception("잡 실패 %s", job.id)
         msg = f"{type(e).__name__}: {e}"
@@ -130,7 +140,12 @@ def _trigger(job: ScheduledJob) -> Any:
 
 class Daemon:
     def __init__(self, features: list[Feature], deps: DaemonDeps) -> None:
+        from trader.kernel.daemon.queue import kinds_of
+        from trader.kernel.daemon.queue_jobs import QueueState
+
         self.features = features
+        if deps.queue is None:
+            deps = replace(deps, queue=QueueState(kinds=kinds_of(features)))
         self.deps = deps
         self._jobs: list[ScheduledJob] = []
         self._scheduler: BackgroundScheduler | None = None
@@ -143,10 +158,13 @@ class Daemon:
         self._old_handlers: dict[int, Any] = {}
 
     def start(self, *, install_signals: bool = True) -> bool:
-        """잡 정의 검증 → 잠금 → 스케줄러 등록·기동 → 하트비트. 잠금을 못 잡으면 False."""
+        """잡 정의 검증 → 잠금 → bootstrap 훅·큐 복구·stale 정리 → 놓친 cron 따라잡기 →
+        스케줄러 등록(기능 잡 + 큐 잡 4개)·기동 → 하트비트. 잠금을 못 잡으면 False."""
+        from trader.kernel.daemon import queue_jobs as qj
+
         deps = self.deps
         self._jobs = build(
-            self.features, schedule=deps.schedule, settings=deps.settings,
+            [*self.features, qj.QUEUE_FEATURE], schedule=deps.schedule, settings=deps.settings,
             markets=deps.markets, ctx=deps,
         )  # fmt: skip
         if not self._lock.acquire():
@@ -155,13 +173,27 @@ class Daemon:
         try:
             # 잠금을 잡은 뒤에만: 둘째 데몬이 실행 중인 데몬의 running 행을 닫으면 안 된다
             hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
+            qj.bootstrap_queue(deps)
             self._close_stale_sessions()
+            deps.queue.heartbeat = self._hb
+            try:
+                qj.catch_up_missed(deps, self._jobs)
+            except Exception as e:  # noqa: BLE001 - 따라잡기 실패가 기동을 막지 않는다
+                logger.warning("기동 따라잡기 실패: %s", e)
             _quiet_scheduler()
             for job in self._jobs:
+                extra: dict[str, Any] = {}
+                if job.spec.trigger == "interval" and job.spec.start_soon_s > 0:
+                    extra["next_run_time"] = deps.now() + timedelta(seconds=job.spec.start_soon_s)
                 sched.add_job(
                     self._tick, _trigger(job), args=[job], id=job.id, name=job.id,
                     max_instances=1, coalesce=True,
+                    misfire_grace_time=qj.misfire_grace_for(job.spec), **extra,
                 )  # fmt: skip
+            sched.add_listener(
+                partial(qj.on_scheduler_event, deps, self._hb, {j.id: j for j in self._jobs}),
+                aps_events.EVENT_JOB_MISSED | aps_events.EVENT_JOB_MAX_INSTANCES,
+            )
             sched.add_job(
                 self._hb.beat, IntervalTrigger(seconds=HEARTBEAT_INTERVAL_S, timezone=KST),
                 id=HEARTBEAT_JOB_ID, name=HEARTBEAT_JOB_ID, max_instances=1, coalesce=True,

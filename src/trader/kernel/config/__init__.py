@@ -82,6 +82,14 @@ class LlmSettings(BaseModel):
         return int(self.timeout_by_kind.get(kind, self.timeout_s))
 
 
+class JobQueueSchedule(BaseModel):
+    """schedule.yaml 의 job_queue: 데몬 큐 틱(4레인 공통) 주기."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(default=10, ge=1)
+
+
 KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "markets", list[Market], lambda: ["KR", "US"]),
     Section("settings", "web", WebSettings, WebSettings),
@@ -90,6 +98,7 @@ KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "models", dict[str, str], dict),
     Section("settings", "claude_bin", str | None, lambda: None),
     Section("settings", "anonymize", bool, lambda: False),
+    Section("schedule", "job_queue", JobQueueSchedule, JobQueueSchedule),
 )
 
 
@@ -107,6 +116,7 @@ __all__ = [
     "ConfigError",
     "ConfigFile",
     "Env",
+    "JobQueueSchedule",
     "LlmSettings",
     "Market",
     "NotifySettings",
