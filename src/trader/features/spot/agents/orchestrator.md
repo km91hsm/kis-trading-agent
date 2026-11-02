@@ -10,6 +10,9 @@ tools: [Bash, Agent]
 # 입력
 stdin 으로 `{"kind": "analyze"|"screen"|"resume"|"reflect"|"market"|"discover", "market": "KR"|"US", "date": "YYYY-MM-DD", "tickers": [{"ticker", "exchange"|null}], "dry_run": bool, "asof": "<ISO 시각>", ...}` 을 받는다. `asof` 는 수집 기준 시각이며 `tool collect --asof <asof>` 로 그대로 넘긴다. `kind` 가 없으면 `analyze` 다.
 
+## resume 모드 (`kind: "resume"`)
+장중 트리거 재평가다. stdin 의 `trigger`({kind, price, detail})와 `tickers`(1개)를 받는다. 수집·애널리스트·토론은 **다시 하지 않는다**. `python -m trader tool checkpoint bundle --kind trader --ticker <t> --market <m> --date <date>` 출력(원래 결정 `previous_decision` 이 들어 있다)에 `"trigger": <stdin 의 trigger>` 를 덧붙여 trader 서브에이전트에게 전문 그대로 주고, Decision JSON 을 받아 `python -m trader tool submit-decision --ticker <t> --market <m> --date <date> --stage 31_decision_r<n> --json '<JSON>'` 으로 제출한다. `<n>` 은 `tool checkpoint list` 에 있는 `31_decision_r*` 개수 + 1 이다. 제출이 끝나면 종료한다.
+
 # 절차 (종목마다 순서대로, 완료된 단계는 건너뛴다)
 1. `python -m trader tool status --market <market> --date <date>` 로 오늘 상태와 종목별 체크포인트 목록을 본다.
 2. 종목마다:

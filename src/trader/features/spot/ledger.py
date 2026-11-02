@@ -40,6 +40,7 @@ def ingest_checkpoint(
     if not isinstance(data, dict):
         return
     day, now, js = d.isoformat(), now_iso(), _js(data)
+    m_round = None
     if m := _ANALYST_RE.match(stage):
         conn.execute(
             "INSERT INTO analyst_reports(decision_date, market, ticker, role, signal, score, "
@@ -77,7 +78,9 @@ def ingest_checkpoint(
                 now,
             ),
         )
-    elif _DECISION_RE.match(stage):
+    elif _DECISION_RE.match(stage) or (m_round := _ROUND_RE.match(stage)) is not None:
+        # 30_decision 과 재평가 31_decision_r<n> 모두 (date, market, ticker) 결정 행을 덮어쓴다
+        # (옛 동작: 최신 결정이 행이 된다). 손절 바닥은 아래 라운드 행(stop_loss)에서 유지한다
         conn.execute(
             "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
             "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
@@ -106,13 +109,30 @@ def ingest_checkpoint(
             ),
         )
         did = decision_id(conn, d, market, ticker)
-        if did is not None:
+        if did is not None and m_round is None:
             _upsert_round(conn, did, 0, data, js, now)
-    elif m := _ROUND_RE.match(stage):
-        did = decision_id(conn, d, market, ticker)
-        if did is not None:
-            _upsert_round(conn, did, int(m.group(1)), data, js, now)
+        elif did is not None:
+            rdata, rjs = _with_stop_floor(conn, did, market, ticker, data, js)
+            _upsert_round(conn, did, int(m_round.group(1)), rdata, rjs, now)
     conn.commit()
+
+
+def _with_stop_floor(
+    conn: sqlite3.Connection, did: int, market: str, ticker: str, data: dict, js: str
+) -> tuple[dict, str]:
+    """재평가 라운드(BUY/ADD/HOLD)의 손절가를 같은 날 앞선 라운드들의 바닥(`max_stop_since`)
+    이상으로 올린다 — 재평가 HOLD 가 손절가를 비우거나 낮춰도 아침 손절선이 산다(Ruling 13).
+    SELL/TRIM 은 바닥 대상이 아니라 손대지 않는다. 바닥이 없거나 이미 높으면 그대로."""
+    if data.get("action") not in ("BUY", "ADD", "HOLD"):
+        return data, js
+    floor = max_stop_since(conn, market, ticker, did)
+    if floor is None:
+        return data, js
+    cur = data.get("stop_loss")
+    if cur is not None and Decimal(str(cur)) >= floor:
+        return data, js
+    raised = {**data, "stop_loss": float(floor)}
+    return raised, _js(raised)
 
 
 def _upsert_round(

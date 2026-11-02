@@ -10,7 +10,7 @@ from trader.features.spot.jobs import (
     RECONCILE,
 )
 from trader.features.spot.migrations import MIGRATIONS
-from trader.features.spot.session_kinds import AGENTS, ANALYZE
+from trader.features.spot.session_kinds import AGENTS, ANALYZE, RESUME
 from trader.features.spot.settings import SCHEDULE_SECTIONS, SECTIONS
 from trader.features.spot.telegram import TELEGRAM_COMMANDS
 from trader.features.spot.tool_cli import TOOLS
@@ -25,7 +25,7 @@ FEATURE = Feature(
     tools=TOOLS,
     origins=ORIGINS,
     agents=AGENTS,
-    session_kinds=(ANALYZE,),
+    session_kinds=(ANALYZE, RESUME),
     telegram_commands=TELEGRAM_COMMANDS,
     jobs=(APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE),
     queue_kinds=QUEUE_KINDS,

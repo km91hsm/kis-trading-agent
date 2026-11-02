@@ -193,6 +193,26 @@ def run_fake_analyze(lane_ctx: LaneContext, spec: SessionSpec) -> list[str]:
     return written
 
 
+def run_fake_resume(lane_ctx: LaneContext, spec: SessionSpec) -> list[str]:
+    """`SessionKind.fake` 진입점(resume): 종목마다 `31_decision_r<n>` 을 제출한다."""
+    ctx = tools.ctx_from_ports(
+        settings=lane_ctx.settings,
+        conn=lane_ctx.conn,
+        state=lane_ctx.state,
+        ports=lane_ctx.ports,
+        notifier=lane_ctx.notifier,
+        dry_run=spec.dry_run,
+        now=lane_ctx.now,
+    )
+    rounds = int(getattr(lane_ctx.settings, "debate_rounds", 0))
+    written: list[str] = []
+    for t in spec.tickers:
+        written += run_fake_ticker(
+            ctx, t["ticker"], spec.market, spec.date, rounds, trigger=spec.extra["trigger"]
+        )
+    return written
+
+
 __all__ = [
     "ANALYST_ROLES",
     "FAKE_MODEL",
@@ -200,5 +220,6 @@ __all__ = [
     "fake_report",
     "fake_turn",
     "run_fake_analyze",
+    "run_fake_resume",
     "run_fake_ticker",
 ]
