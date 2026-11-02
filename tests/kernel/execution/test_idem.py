@@ -198,3 +198,33 @@ def test_list_locks(conn, store):
     assert [r["key"] for r in rows] == ["a", "b"]  # 오래된 순
     assert rows[0]["sent_at"] == NOW and rows[0]["order_id"] is None
     assert set(rows[0]) == {"key", "created_at", "order_id", "approval_id", "sent_at"}
+
+
+def test_claim_reserved_takeover_replaces_old_reservation(conn, store):
+    assert _reserve(store, "k", "100")[0]
+    oid = _order(conn, "accepted")
+    store.bind("k", order_id=oid)
+    claimed, _ = _reserve(store, "k", "700")  # 살아 있는 주문 -> 넘겨받기 실패, 옛 예약 유지
+    assert not claimed
+    row = conn.execute("SELECT amount, bound_at FROM buy_reservations WHERE key='k'").fetchone()
+    assert row["amount"] == "100" and row["bound_at"] is not None
+    assert _lock(conn, "k")["order_id"] == oid
+    conn.execute("UPDATE orders SET status='cancelled' WHERE id=?", (oid,))
+    conn.commit()
+    assert _reserve(store, "k", "700")[0]  # 죽은 주문 -> 넘겨받기
+    rows = conn.execute("SELECT amount, bound_at FROM buy_reservations WHERE key='k'").fetchall()
+    assert [(r["amount"], r["bound_at"]) for r in rows] == [("700", None)]
+    assert _lock(conn, "k")["order_id"] is None
+
+
+def test_claim_commits_pending_caller_writes(conn, store):
+    assert store.claim("k", now=NOW)
+    _order(conn)  # commit 됨
+    conn.execute(
+        "INSERT INTO orders(account_id, ticker, market, side, qty, order_type, status, mode, "
+        "created_at) VALUES ('a','X','KR','BUY',1,'LIMIT','accepted','auto',?)",
+        (NOW,),
+    )  # 미커밋 쓰기
+    assert not store.claim("k", now=NOW)  # IntegrityError 경로
+    conn.rollback()
+    assert conn.execute("SELECT COUNT(*) FROM orders WHERE ticker='X'").fetchone()[0] == 1

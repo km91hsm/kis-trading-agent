@@ -87,7 +87,13 @@ class ExecKeyStore:
         return True
 
     def claim(self, key: str, *, now: str) -> bool:
-        """처음 넣은 프로세스만 True. 살아 있는 키가 있으면 False(넘겨받기 규칙은 `_TAKEOVER`)."""
+        """처음 넣은 프로세스만 True. 살아 있는 키가 있으면 False(넘겨받기 규칙은 `_TAKEOVER`).
+
+        전제: 호출 전에 열려 있던 트랜잭션은 먼저 commit 한다(실패 INSERT 뒤 rollback 이
+        호출자의 미커밋 쓰기를 버리지 않게; `claim_reserved` 와 같다).
+        """
+        if self.conn.in_transaction:
+            self.conn.commit()
         try:
             self.conn.execute("INSERT INTO exec_locks(key, created_at) VALUES (?, ?)", (key, now))
         except sqlite3.IntegrityError:
