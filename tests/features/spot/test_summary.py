@@ -163,7 +163,6 @@ def test_flip_without_verifiable_sources_is_review_not_verdict():
     assert s["convergence_review"] is True
 
 
-@pytest.mark.xfail(strict=False, reason="Task 12 md")
 def test_bear_prompt_no_longer_forbids_bullish():
     """2-L21: 약세 리서처의 BULLISH 금지를 역할 설명·출력 규칙 양쪽에서 푼다."""
     md = (
