@@ -122,7 +122,8 @@ def _upsert_round(
         "skipped_debate, data_json, created_at) "
         "SELECT id, ?, ?, ?, source, skipped_debate, ?, ? FROM decisions WHERE id=? "
         "ON CONFLICT(decision_id, round) DO UPDATE SET action=excluded.action, "
-        "stop_loss=excluded.stop_loss, data_json=excluded.data_json",
+        "stop_loss=excluded.stop_loss, source=excluded.source, "
+        "skipped_debate=excluded.skipped_debate, data_json=excluded.data_json",
         (rnd, data.get("action"), _txt(data.get("stop_loss")), js, now, did),
     )
 
@@ -167,6 +168,10 @@ def latest_decision(
 def set_skipped_debate(conn: sqlite3.Connection, decision_id: int, flag: bool) -> None:
     """결정 행에 토론 생략 여부(합의 시 생략)를 남긴다."""
     conn.execute("UPDATE decisions SET skipped_debate=? WHERE id=?", (int(bool(flag)), decision_id))
+    conn.execute(
+        "UPDATE decision_rounds SET skipped_debate=? WHERE decision_id=? AND round=0",
+        (int(bool(flag)), decision_id),
+    )
     conn.commit()
 
 

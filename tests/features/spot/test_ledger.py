@@ -102,3 +102,24 @@ def test_decision_upsert_keeps_row_id(conn):
     ledger.ingest_checkpoint(conn, D, "KR", "005930", "30_decision", cp(ok_decision(action="ADD")))
     assert ledger.decision_id(conn, D, "KR", "005930") == a
     assert ledger.get_decision(conn, a)["action"] == "ADD"
+
+
+def test_round0_stays_in_sync_with_decision_row(conn):
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "30_decision", cp(ok_decision()))
+    did = ledger.decision_id(conn, D, "KR", "005930")
+    ledger.set_skipped_debate(conn, did, True)
+    conn.execute("UPDATE decisions SET source='hedge' WHERE id=?", (did,))
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "30_decision", cp(ok_decision(action="ADD")))
+
+    def both():
+        d = conn.execute("SELECT source, skipped_debate FROM decisions").fetchone()
+        r = conn.execute(
+            "SELECT source, skipped_debate, action FROM decision_rounds WHERE round=0"
+        ).fetchone()
+        return tuple(d), tuple(r)
+
+    d, r = both()
+    assert d == r[:2] == ("hedge", 1) and r[2] == "ADD"
+    ledger.set_skipped_debate(conn, did, False)
+    d, r = both()
+    assert d[1] == r[1] == 0
