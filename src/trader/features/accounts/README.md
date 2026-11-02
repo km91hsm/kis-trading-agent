@@ -17,6 +17,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 
 - 같은 값으로 모드를 다시 설정하면 쓰기를 하지 않는다(`set_account_mode`; 실전 auto 를 같은 confirm 으로 재확인하면 확인 시각 `at` 이 바뀌어 다시 쓴다). `effective_mode` 는 실전 계좌가 `auto` 인데 LIVE 미확인이면 **`off`** 로 취급하고(`LIVE_UNCONFIRMED_NOTE`) 설명을 붙인다. 실전 파생 계좌는 주문이 없다(`REAL_FO_OFF_NOTE`).
 - 키 규칙: 공용 `KIS_PAPER_*`/`KIS_REAL_*`, 계좌 전용 `KIS_<ID 대문자, 영숫자 외는 _>_*`(`account_prefix`; 예 `real-2` → `KIS_REAL_2_`). 계좌의 `credentials` 로 접두사를 직접 지정할 수 있다(`KIS_…_` 형식). id 에서 유도한 접두사가 예약 접두사 `KIS_PAPER_`/`KIS_REAL_` 와 같은 계좌 id 는 `accounts add` 가 거부한다(`accounts_io._check_spec`). 전용 접두사에 `APP_KEY` 가 없으면 env 공용 키로 폴백한다.
+- 레인 포트(`ports.py` `AccountsPortImpl`, `Boot.ports["accounts"]`)는 현물 레인용이라 **현물 계좌만** 다룬다: 받은 목록을 `split_accounts(...)[0]` 로 걸러 `accounts()`·`brokers()`·`market_client()` 가 같은 현물 목록에서 나온다. `policy()` 는 `account_mode`(실전 파생 항상 off + 실전 auto LIVE 미확인 off)다.
 - 시세 키(`market_creds`) 폴백 순서: 공용 실전 키 → 첫 실전 현물 계좌의 전용 키 → 공용(없음). 파생 계좌 키는 쓰지 않는다.
 - 같은 키를 여러 계좌가 쓰면 경고(주식 WARNING, 파생 INFO). 키가 없는 계좌, `fo_product` 가 없는 파생 계좌는 경고 후 건너뛴다.
 - 시크릿 값은 로그·stdout·예외 메시지에 넣지 않는다(이름과 '설정됨' 여부만). 로거는 `trader.config`(옛 호환)·`trader.accounts`.

@@ -16,10 +16,13 @@ logger = logging.getLogger("trader.accounts")
 
 
 class AccountsPortImpl:
-    """계좌 목록과 그로부터 조립한 브로커·시세. 모드·일시정지는 원장 조회."""
+    """현물 계좌 목록과 그로부터 조립한 브로커·시세. 모드·일시정지는 원장 조회.
+
+    이 포트는 현물 레인용이라 파생(fo) 계좌는 받는 즉시 걸러 낸다 — 계좌·브로커·시세가 모두
+    같은 현물 목록에서 나온다."""
 
     def __init__(self, accounts: list[Account], secrets: Secrets) -> None:
-        self._accounts = accounts
+        self._accounts = api.split_accounts(accounts)[0]
         self._secrets = secrets
 
     def accounts(self) -> list[Account]:
@@ -38,8 +41,8 @@ class AccountsPortImpl:
             return None
 
     def policy(self, conn: sqlite3.Connection, account: Account) -> tuple[str, str | None]:
-        """(실효 모드, 설명). 실전 auto 인데 LIVE 미확인이면 off."""
-        return api.effective_mode(conn, account)
+        """(주문 경로 모드, 설명). 실전 파생은 항상 off, 실전 auto 인데 LIVE 미확인이면 off."""
+        return api.account_mode(conn, account)
 
     def paused(self, conn: sqlite3.Connection) -> bool:
         return api.is_paused(conn)

@@ -27,3 +27,15 @@ def test_brokers_skip_accounts_without_keys(caplog):
     assert any("paper-1" in r.message and "건너뜀" in r.message for r in caplog.records)
     assert AccountsPortImpl([a, b], Secrets()).brokers() == []
     assert AccountsPortImpl([a], Secrets()).market_client() is None  # 시세 키 없음
+
+
+def test_port_is_stock_only_and_real_fo_policy_off(conn):
+    """현물 레인 포트는 현물 계좌만 내놓고, 정책은 `account_mode`(실전 파생은 항상 off)를 쓴다."""
+    stock = make_account("paper-1", "paper", "approve")
+    fo = make_account("real-fo", "real", "approve", asset="fo")
+    port = AccountsPortImpl([stock, fo], Secrets())
+    assert port.accounts() == [stock]
+    assert port.policy(conn, fo) == api.account_mode(conn, fo)
+    assert port.policy(conn, fo)[0] == "off"
+    s = Secrets(**{"KIS_REAL_FO_APP_KEY": "k", "KIS_REAL_FO_APP_SECRET": "s"})
+    assert AccountsPortImpl([fo], s).brokers() == []  # 파생 계좌 브로커는 만들지 않는다
