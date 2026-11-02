@@ -17,3 +17,8 @@ us:
     end: "16:00"
 fills_sync:
   times: ["16:10", "07:10"]   # 체결 동기화(KST, 월~토): KR 마감 뒤, US 마감 뒤
+reconcile:
+  kr: {time: "15:45"}                             # 야간 대사: KR 마감(15:30 KST) 뒤
+  us: {time: "16:15", tz: America/New_York}       # US 마감(16:00 ET) 뒤
+balance_refresh:
+  interval_s: 300   # 잔고 스냅샷 갱신 주기(초): 장중 매 틱, 장 밖은 30분 넘은 스냅샷만

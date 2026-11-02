@@ -131,4 +131,39 @@ class FillsSyncSchedule(BaseModel):
         return v
 
 
-SCHEDULE_SECTIONS = (Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),)
+_HM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class ReconcileAt(BaseModel):
+    """대사 시각: "HH:MM" 과 시간대(기본 KST)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    time: str = Field(pattern=_HM)
+    tz: str | None = None
+
+
+class ReconcileSchedule(BaseModel):
+    """schedule.yaml `reconcile`: 시장별 야간 대사 시각. 마감 뒤(US 는 뉴욕 시각)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: ReconcileAt = Field(default_factory=lambda: ReconcileAt(time="15:45"))
+    us: ReconcileAt = Field(
+        default_factory=lambda: ReconcileAt(time="16:15", tz="America/New_York")
+    )
+
+
+class BalanceRefreshSchedule(BaseModel):
+    """schedule.yaml `balance_refresh`: 잔고 갱신 틱 주기(초)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(default=300, ge=1)
+
+
+SCHEDULE_SECTIONS = (
+    Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),
+    Section("schedule", "reconcile", ReconcileSchedule, ReconcileSchedule),
+    Section("schedule", "balance_refresh", BalanceRefreshSchedule, BalanceRefreshSchedule),
+)

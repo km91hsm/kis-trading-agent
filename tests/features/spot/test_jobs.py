@@ -59,9 +59,9 @@ def test_fills_sync_declaration():
         "fills_sync", "fills_sync", "cron", False, "fills_sync.times", "mon-sat",
     )  # fmt: skip
     assert (s.gate, s.misfire, s.catch_up) == ("none", "idempotent", "queue")
-    (q,) = spot_jobs.QUEUE_KINDS
+    q = {k.kind: k for k in spot_jobs.QUEUE_KINDS}["fills_sync"]
     assert (q.kind, q.lane, q.restart_requeue, q.body) == (
-        "fills_sync", "fast", True, spot_jobs.fills_request,
+        "fills_sync", "fast", True, spot_jobs.fills_then_balance,
     )  # fmt: skip
 
 
@@ -91,10 +91,11 @@ def test_fills_failure_is_top_level_error(project, conn, settings):
     assert "체결 조회 실패" in out["error"] and "paper-main KR" in out["error"]
 
 
-def test_fills_request_is_sync_only(project, conn, settings):
+def test_fills_queue_body_still_syncs(project, conn, settings):
     accounts = [make_account("paper-main", "paper", "off")]
     deps = _fills_deps(settings, accounts, fake_brokers(accounts))
-    out = spot_jobs.fills_request(deps, {}, lambda t: None)
+    deps.markets = ["KR"]
+    out = spot_jobs.fills_then_balance(deps, {}, lambda t: None)
     assert "error" not in out and out["paper-main"]["failed_markets"] == []
 
 
@@ -104,5 +105,5 @@ def test_fills_body_errors_without_accounts_port(project, conn, settings):
     deps.ports = {}
     out = spot_jobs.fills_body(deps, None)
     assert "계좌 포트 없음" in out["error"]
-    assert spot_jobs.fills_request(deps, {}, lambda t: None) == out
+    assert spot_jobs.fills_then_balance(deps, {}, lambda t: None) == out
     assert spot_jobs.fills_body(_fills_deps(settings, [], {}), None) == {}

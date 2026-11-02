@@ -2,7 +2,13 @@
 
 from trader.features.spot.cli import spot_app
 from trader.features.spot.executor import ORIGINS
-from trader.features.spot.jobs import APPROVALS_EXPIRE, FILLS_SYNC, QUEUE_KINDS
+from trader.features.spot.jobs import (
+    APPROVALS_EXPIRE,
+    BALANCE_REFRESH,
+    FILLS_SYNC,
+    QUEUE_KINDS,
+    RECONCILE,
+)
 from trader.features.spot.migrations import MIGRATIONS
 from trader.features.spot.session_kinds import AGENTS, ANALYZE
 from trader.features.spot.settings import SCHEDULE_SECTIONS, SECTIONS
@@ -21,6 +27,6 @@ FEATURE = Feature(
     agents=AGENTS,
     session_kinds=(ANALYZE,),
     telegram_commands=TELEGRAM_COMMANDS,
-    jobs=(APPROVALS_EXPIRE, FILLS_SYNC),
+    jobs=(APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE),
     queue_kinds=QUEUE_KINDS,
 )

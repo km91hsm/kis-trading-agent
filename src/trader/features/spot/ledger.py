@@ -358,3 +358,35 @@ def max_stop_since(
         (market, ticker, since_decision_id),
     ).fetchall()
     return max((Decimal(r["stop_loss"]) for r in rows), default=None)
+
+
+def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:
+    """해당 계좌·시장의 최신 스냅샷 날짜 포지션 `{date, nav, cash, positions}`. 없으면 None.
+    nav·cash 는 같은 날짜의 `account_nav` 행(없으면 None)."""
+    row = conn.execute(
+        "SELECT date FROM positions_snapshot WHERE account_id=? AND market=? "
+        "ORDER BY date DESC, id DESC LIMIT 1",
+        (account_id, market),
+    ).fetchone()
+    if row is None:
+        return None
+    d = row["date"]
+    nav = conn.execute(
+        "SELECT nav, cash FROM account_nav WHERE account_id=? AND market=? AND date=?",
+        (account_id, market, d),
+    ).fetchone()
+    positions = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT ticker, market, qty, avg_price, current_price, eval_amount "
+            "FROM positions_snapshot WHERE account_id=? AND market=? AND date=? "
+            "AND ticker NOT LIKE '\\_CASH%' ESCAPE '\\' ORDER BY ticker",
+            (account_id, market, d),
+        )
+    ]
+    return {
+        "date": d,
+        "nav": nav["nav"] if nav else None,
+        "cash": nav["cash"] if nav else None,
+        "positions": positions,
+    }
