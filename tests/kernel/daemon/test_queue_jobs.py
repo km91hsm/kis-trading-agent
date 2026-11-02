@@ -651,3 +651,47 @@ def test_restart_requeued_trading_request_rechecks_market_gate(env, conn):
     done = next(x for x in jobq.list_recent(conn) if x["id"] == row["id"])
     assert done["status"] == "skipped" and done["result"] == {"skipped": "주말"}
     assert env.ran == []
+
+
+def test_tick_records_error_when_run_job_fails_before_body(env, conn, monkeypatch):
+    """run_job 이 본체 전에 실패하면(runs 기록 실패 등) 요청도 error — skipped 가 아니다."""
+    from trader.kernel.daemon import runner
+
+    rid = enqueue(env, conn, "train", {})
+    hb = env.hb()
+    calls = {"n": 0}
+    real_start = runner.runs.start
+
+    def flaky_start(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("database is locked")
+        return real_start(*a, **kw)
+
+    monkeypatch.setattr(runner.runs, "start", flaky_start)
+    assert env.tick("slow") == {"request": rid, "kind": "train"}
+    req = jobq.list_recent(conn)[0]
+    assert req["status"] == "error" and "database is locked" in req["error"]
+    assert env.ran == []
+    assert hb._data["jobs"]["train"]["last_status"] == "error"
+
+
+def test_tick_conn_factory_failure_does_not_leave_request_running(env, conn):
+    """claim 뒤 연결이 실패해도 꺼낸 요청은 error 로 닫히고 하트비트가 running 으로 남지 않는다."""
+    rid = enqueue(env, conn, "train", {})
+    hb = env.hb()
+    real = env.deps.conn_factory
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 2:  # 1: claim, 2: run_job 용 연결
+            raise OSError("연결 실패")
+        return real()
+
+    deps = replace(env.deps, conn_factory=flaky)
+    with pytest.raises(OSError):
+        qj.queue_tick(deps, lanes=frozenset({"slow"}))
+    row = next(r for r in jobq.list_recent(conn) if r["id"] == rid)
+    assert row["status"] == "error" and "연결 실패" in row["error"]
+    assert hb._data["jobs"]["train"]["last_status"] == "error"

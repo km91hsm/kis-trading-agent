@@ -296,18 +296,41 @@ def _tick_locked(deps: Any, lanes: frozenset[str]) -> dict:
     if hb is not None:
         hb.job_started(name)
     status, error = "error", None
-    conn = deps.conn_factory()
+    out: dict | None = None
     try:
-        out = run_job(conn, _request_job(name, req, wrapped), deps, stop_event=deps.stop_event)
+        conn = deps.conn_factory()  # 실패해도 아래 finally 가 꺼낸 요청을 닫는다
+        try:
+            job = _request_job(name, req, wrapped)
+            out = run_job(conn, job, deps, stop_event=deps.stop_event)
+        finally:
+            conn.close()
         error = str(out["error"]) if out.get("error") else None
         status = "error" if error else ("skipped" if "skipped" in out else "ok")
+    except BaseException as e:
+        error = f"{type(e).__name__}: {e}"
+        raise
     finally:
-        conn.close()
-        if not done["v"]:  # run_job 이 본체 전에 멈췄다(종료 신호) — 요청을 열어 두지 않는다
-            _finish("skipped", error="데몬 종료 중")
+        if not done["v"]:  # 본체가 돌지 않았다 — 요청을 running 으로 남기지 않는다
+            _close_unrun(deps, _finish, out, error)
         if hb is not None:
             hb.job_finished(name, status, error)
     return {"request": req_id, "kind": kind}
+
+
+def _close_unrun(
+    deps: Any, finish: Callable[..., None], out: dict | None, error: str | None
+) -> None:
+    """본체 전에 끝난 요청의 최종 상태: run_job 의 오류면 error, 종료 신호로 멈췄으면 skipped,
+    그 밖(연결 실패 등)은 error. 닫기 자체가 실패해도 예외를 더 올리지 않는다(다음 기동이 정리)."""
+    try:
+        if out is not None and out.get("error"):
+            finish("error", error=str(out["error"]))
+        elif deps.stop_event.is_set() or (out is not None and "skipped" in out):
+            finish("skipped", error="데몬 종료 중")
+        else:
+            finish("error", error=error or "본체 실행 전 중단")
+    except Exception:  # noqa: BLE001
+        logger.exception("큐 요청 종료 기록 실패")
 
 
 def _queue_body(lanes: frozenset[str]) -> Callable[[Any, Any], dict]:
