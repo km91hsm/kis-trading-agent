@@ -54,16 +54,17 @@ def test_production_worker_blob_download_uses_issued_filename(tmp_path):
     extension = tmp_path / "extension"
     shutil.copytree(source, extension)
     manifest_path = extension / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["permissions"].remove("nativeMessaging")
     manifest["background"]["service_worker"] = "probe-worker.js"
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     native_setup, runner = _WRAPPER.split("void (async()=>{", 1)
-    (extension / "probe-native.js").write_text(native_setup)
+    (extension / "probe-native.js").write_text(native_setup, encoding="utf-8")
     (extension / "probe-worker.js").write_text(
         "import './probe-native.js';\n"
         "import {tick as productionTick} from './worker.js';\n"
-        "void (async()=>{" + runner
+        "void (async()=>{" + runner,
+        encoding="utf-8",
     )
     html = (
         '<html><head><meta charset="utf-8"></head><body>'
@@ -93,7 +94,8 @@ def test_production_worker_blob_download_uses_issued_filename(tmp_path):
                     "directory_upgrade": True,
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
     with sync_playwright() as playwright:
         if not Path(playwright.chromium.executable_path).is_file():

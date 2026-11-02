@@ -15,7 +15,8 @@ def test_import_and_status_and_query_need_no_browser_or_broker(project):
                 "observed_at": "2026-10-25T00:00:00Z",
                 "items": [{"id": "x", "title": "속보", "tickers": ["AAPL"]}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     runner = CliRunner()
     imported = runner.invoke(app, ["saveticker", "import-capture", str(p)])
@@ -31,7 +32,7 @@ def test_import_and_status_and_query_need_no_browser_or_broker(project):
 
 def test_invalid_capture_does_not_echo_input_secrets(project):
     p = project / "capture.json"
-    p.write_text('{"password":"NEVER_ECHO_THIS"}')
+    p.write_text('{"password":"NEVER_ECHO_THIS"}', encoding="utf-8")
     result = CliRunner().invoke(app, ["saveticker", "import-capture", str(p)])
     assert result.exit_code == 1
     assert "NEVER_ECHO_THIS" not in result.output

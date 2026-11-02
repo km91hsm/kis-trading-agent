@@ -76,7 +76,9 @@ def test_community_live_accepts_only_explicit_disabled_equivalence(tmp_path):
     message["selection"]["regular_disabled"] = True
     saved = client.handle(message)
     assert saved["ok"] and saved["count"] == 1
-    data = json.loads((tmp_path / "data/latest/community_index_live.json").read_text())
+    data = json.loads(
+        (tmp_path / "data/latest/community_index_live.json").read_text(encoding="utf-8")
+    )
     assert data["view"]["requested_regular"] is False
     assert "실시간과 정규장 기준이 같아요" in data["items"][0]["basis"]
 
@@ -104,10 +106,10 @@ def test_selection_diagnostics_store_only_comparisons_not_page_values(tmp_path):
     )
     assert client.handle(message)["error"] == "selection_mismatch"
     path = tmp_path / "runtime/selection-market.json"
-    diagnostic = json.loads(path.read_text())
+    diagnostic = json.loads(path.read_text(encoding="utf-8"))
     assert diagnostic["matches"] == {"tab": False, "regular": True}
     assert diagnostic["loaded"] is True
-    assert "PRIVATE_SENTINEL" not in path.read_text()
+    assert "PRIVATE_SENTINEL" not in path.read_text(encoding="utf-8")
 
 
 def test_unknown_stream_and_invalid_request_are_fixed_errors(tmp_path):
@@ -181,7 +183,7 @@ def test_json_persists_canonical_items_without_payload(tmp_path):
     ]
     result = client.handle(message)
     assert result["count"] == 1
-    saved = json.loads((tmp_path / "data/latest/market_gain_live.json").read_text())
+    saved = json.loads((tmp_path / "data/latest/market_gain_live.json").read_text(encoding="utf-8"))
     assert saved["items"][0]["price"] == "123"
     assert "PRIVATE_SENTINEL" not in (tmp_path / "data/feed.sqlite3").read_bytes().decode(
         errors="ignore"
@@ -242,7 +244,7 @@ def test_serve_frames_errors_then_ping_and_cleans_up_on_eof(tmp_path):
     second = data[4 + size :]
     assert json.loads(second[4:]) == {"id": 2, "type": "pong", "ok": True}
     assert (
-        json.loads((tmp_path / "runtime/service.json").read_text())["reason"]
+        json.loads((tmp_path / "runtime/service.json").read_text(encoding="utf-8"))["reason"]
         == "extension_disconnected"
     )
     from trader.kernel.daemon.lock import Lock
@@ -371,7 +373,7 @@ def test_repeated_news_list_keeps_prior_successful_detail(tmp_path):
         }
     )
     assert result["ok"] is True
-    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text())
+    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["body"] == "Previously collected full body"
     assert latest["items"][0]["detail_status"] == "ok"
     assert datetime.fromisoformat(latest["items"][0]["published_at"]) == datetime(
@@ -397,7 +399,7 @@ def test_auth_snapshot_keeps_last_good_and_never_records_arbitrary_reason(tmp_pa
     message.pop("selection")
     assert client.handle(message)["status"] == "auth_required"
     assert latest_path.read_bytes() == last_good
-    assert "SECRET_HTML" not in (tmp_path / "data/status.json").read_text()
+    assert "SECRET_HTML" not in (tmp_path / "data/status.json").read_text(encoding="utf-8")
 
 
 def test_stale_json_generation_uses_dom_instead_of_stale_quote(tmp_path):
@@ -416,7 +418,7 @@ def test_stale_json_generation_uses_dom_instead_of_stale_quote(tmp_path):
         }
     ]
     assert client.handle(message)["count"] == 1
-    data = json.loads((tmp_path / "data/latest/market_gain_live.json").read_text())
+    data = json.loads((tmp_path / "data/latest/market_gain_live.json").read_text(encoding="utf-8"))
     assert data["items"][0]["tickers"] == ["LOCAL"]
     assert data["status"] == "partial"
 
@@ -434,7 +436,7 @@ def test_json_auth_response_persists_block_and_consumes_job(tmp_path):
     ]
     result = client.handle(message)
     assert result["ok"] is True and result["status"] == "auth_required"
-    state = json.loads((tmp_path / "runtime/runner-market.json").read_text())
+    state = json.loads((tmp_path / "runtime/runner-market.json").read_text(encoding="utf-8"))
     assert state["state"] == "auth_required"
     assert client.handle(message)["error"] == "invalid_job"
 
@@ -500,10 +502,10 @@ def test_expired_pdf_and_reconnected_session_reject_old_ticket(tmp_path, monkeyp
 def test_ping_replaces_old_supervisor_heartbeat_with_native_backend(tmp_path):
     runtime = tmp_path / "runtime"
     runtime.mkdir()
-    (runtime / "runner.json").write_text('{"pid": -1, "state": "stopped"}')
+    (runtime / "runner.json").write_text('{"pid": -1, "state": "stopped"}', encoding="utf-8")
     result = session(tmp_path).handle({"id": 1, "type": "ping"})
     assert result["type"] == "pong"
-    row = json.loads((runtime / "runner.json").read_text())
+    row = json.loads((runtime / "runner.json").read_text(encoding="utf-8"))
     assert row["pid"] > 0 and row["backend"] == "extension" and row["state"] == "collecting"
 
 
@@ -564,5 +566,5 @@ def test_failed_snapshot_is_not_a_collecting_lane(tmp_path):
     message = snapshot(client, status="error", reason="selection_mismatch")
     result = client.handle(message)
     assert result["ok"] is True and result["status"] == "error"
-    row = json.loads((tmp_path / "runtime/runner-market.json").read_text())
+    row = json.loads((tmp_path / "runtime/runner-market.json").read_text(encoding="utf-8"))
     assert row["state"] == "error"

@@ -25,7 +25,9 @@ def prepared(tmp_path, monkeypatch):
         monkeypatch.setattr(bundle, "resource_dir", lambda: source)
     project = tmp_path / "project"
     (project / "secrets").mkdir(parents=True)
-    (project / "secrets/saveticker.env").write_text("SYNTHETIC_CREDENTIAL_ONLY=1\n")
+    (project / "secrets/saveticker.env").write_text(
+        "SYNTHETIC_CREDENTIAL_ONLY=1\n", encoding="utf-8"
+    )
     destination = tmp_path / "package"
     result = bridge_install.prepare(destination, project_home=project)
     return project, destination, result
@@ -34,10 +36,10 @@ def prepared(tmp_path, monkeypatch):
 def test_prepare_is_reviewable_without_registering_or_activating(prepared, tmp_path):
     project, destination, result = prepared
     assert result["extension_id"] == EXTENSION_ID
-    manifest = json.loads((destination / "extension/manifest.json").read_text())
+    manifest = json.loads((destination / "extension/manifest.json").read_text(encoding="utf-8"))
     assert set(manifest["permissions"]) == {"alarms", "storage", "nativeMessaging", "downloads"}
     assert manifest["host_permissions"] == ["https://www.saveticker.com/*"]
-    host = json.loads((destination / "native-host.json").read_text())
+    host = json.loads((destination / "native-host.json").read_text(encoding="utf-8"))
     assert host["allowed_origins"] == [f"chrome-extension://{EXTENSION_ID}/"]
     assert Path(host["path"]).is_file()
     assert not (project / "state/external/saveticker/runtime/bridge-config.json").exists()
@@ -52,16 +54,21 @@ def test_install_and_uninstall_restore_credentials_without_reading_values(prepar
     assert result["ok"] is True
     registration = Path(result["registration"])
     assert registration.is_file()
-    assert json.loads(registration.read_text())["allowed_origins"] == [
+    assert json.loads(registration.read_text(encoding="utf-8"))["allowed_origins"] == [
         f"chrome-extension://{EXTENSION_ID}/"
     ]
     root = project / "state/external/saveticker"
-    assert json.loads((root / "runtime/bridge-config.json").read_text())["backend"] == "extension"
+    assert (
+        json.loads((root / "runtime/bridge-config.json").read_text(encoding="utf-8"))["backend"]
+        == "extension"
+    )
     assert not (project / "secrets/saveticker.env").exists()
     assert (project / "secrets/saveticker.env.extension-backup").exists()
     bridge_install.uninstall_host(destination, user_home=user)
     assert not registration.exists()
-    assert (project / "secrets/saveticker.env").read_text() == "SYNTHETIC_CREDENTIAL_ONLY=1\n"
+    assert (project / "secrets/saveticker.env").read_text(
+        encoding="utf-8"
+    ) == "SYNTHETIC_CREDENTIAL_ONLY=1\n"
     assert not (project / "secrets/saveticker.env.extension-backup").exists()
     assert not (root / "runtime/bridge-config.json").exists()
 
@@ -69,20 +76,20 @@ def test_install_and_uninstall_restore_credentials_without_reading_values(prepar
 def test_backup_collision_does_not_overwrite_either_file(prepared, tmp_path):
     project, destination, _ = prepared
     backup = project / "secrets/saveticker.env.extension-backup"
-    backup.write_text("SYNTHETIC_PREEXISTING_BACKUP")
+    backup.write_text("SYNTHETIC_PREEXISTING_BACKUP", encoding="utf-8")
     with pytest.raises(bridge_install.InstallError, match="backup_exists"):
         bridge_install.install_host(destination, user_home=tmp_path / "user")
-    assert backup.read_text() == "SYNTHETIC_PREEXISTING_BACKUP"
+    assert backup.read_text(encoding="utf-8") == "SYNTHETIC_PREEXISTING_BACKUP"
     assert (project / "secrets/saveticker.env").exists()
 
 
 def test_uninstall_refuses_to_overwrite_new_credentials(prepared, tmp_path):
     project, destination, _ = prepared
     bridge_install.install_host(destination, user_home=tmp_path / "user")
-    (project / "secrets/saveticker.env").write_text("SYNTHETIC_NEW_FILE")
+    (project / "secrets/saveticker.env").write_text("SYNTHETIC_NEW_FILE", encoding="utf-8")
     with pytest.raises(bridge_install.InstallError, match="credentials_conflict"):
         bridge_install.uninstall_host(destination, user_home=tmp_path / "user")
-    assert (project / "secrets/saveticker.env").read_text() == "SYNTHETIC_NEW_FILE"
+    assert (project / "secrets/saveticker.env").read_text(encoding="utf-8") == "SYNTHETIC_NEW_FILE"
     assert (project / "secrets/saveticker.env.extension-backup").exists()
 
 
@@ -107,7 +114,9 @@ def test_extension_backend_never_restarts_playwright_without_credentials(tmp_pat
 
     root = tmp_path / "collector"
     (root / "runtime").mkdir(parents=True)
-    (root / "runtime/bridge-config.json").write_text(json.dumps({"backend": "extension"}))
+    (root / "runtime/bridge-config.json").write_text(
+        json.dumps({"backend": "extension"}), encoding="utf-8"
+    )
     monkeypatch.setattr(automation, "service_elsewhere", lambda: False)
     allowed, reason = automation.should_start(root, tmp_path / "missing.env", now=datetime.now(UTC))
     assert allowed is False
@@ -136,8 +145,8 @@ def test_frozen_prepare_contains_independent_native_runtime(tmp_path, monkeypatc
     bridge_install.prepare(dest, project_home=home)
     copied = dest / "native-runtime/Trader.app/Contents/MacOS/trader"
     assert copied.read_bytes() == b"synthetic packaged executable"
-    host = json.loads((dest / "native-host.json").read_text())
-    launcher = Path(host["path"]).read_text()
+    host = json.loads((dest / "native-host.json").read_text(encoding="utf-8"))
+    launcher = Path(host["path"]).read_text(encoding="utf-8")
     assert str(copied) in launcher
     assert str(exe) not in launcher
     shutil.rmtree(app)
@@ -149,7 +158,7 @@ def test_direct_service_cannot_start_playwright_in_extension_mode(tmp_path, monk
 
     root = tmp_path / "collector"
     (root / "runtime").mkdir(parents=True)
-    (root / "runtime/bridge-config.json").write_text('{"backend":"extension"}')
+    (root / "runtime/bridge-config.json").write_text('{"backend":"extension"}', encoding="utf-8")
     monkeypatch.setattr(chromium, "ensure", lambda *_: pytest.fail("Playwright started"))
     automation.service(root)
     assert not (root / "data/feed.sqlite3").exists()

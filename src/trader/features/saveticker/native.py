@@ -578,7 +578,7 @@ class NativeSession:
     def _reports(self):
         path = self.root / "data/latest/news_reports.json"
         try:
-            return Capture.model_validate_json(path.read_text())
+            return Capture.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
 

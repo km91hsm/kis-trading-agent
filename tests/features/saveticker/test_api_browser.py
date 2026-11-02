@@ -26,10 +26,10 @@ def test_hidden_production_api_pipeline(tmp_path):
     job = client.handle({"id": 1, "type": "api_begin", "stream": "news_all"})
     assert job["ok"]
     manifest_path = extension / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["permissions"].remove("nativeMessaging")
     manifest["background"]["service_worker"] = "probe-worker.js"
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     setup = """
 const event=()=>({listeners:[],addListener(fn){this.listeners.push(fn)}});
 globalThis.apiCalls=[];globalThis.focusCalls=[];
@@ -44,7 +44,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
  queueMicrotask(()=>p.onMessage.listeners.forEach(f=>f(r)));
 }};return p;};
 """.replace("VIEW", json.dumps(view)).replace("JOB", json.dumps(job))
-    (extension / "probe-native.js").write_text(setup)
+    (extension / "probe-native.js").write_text(setup, encoding="utf-8")
     (extension / "probe-worker.js").write_text(
         "import './probe-native.js';import {tick} from './worker.js';"
         "void (async()=>{await chrome.storage.local.set({enabled:false,backend:'api',"
@@ -53,7 +53,8 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
         "await chrome.windows.update(tab.windowId,{state:'minimized'});"
         "await chrome.storage.local.set({enabled:true});await tick();"
         "return {calls:apiCalls,focus:focusCalls,window:await chrome.windows.get(tab.windowId)};};"
-        "globalThis.probeReady=true;})();"
+        "globalThis.probeReady=true;})();",
+        encoding="utf-8",
     )
     profile = tmp_path / "profile"
     profile.mkdir()
@@ -83,7 +84,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
             while not endpoint.exists():
                 assert time.monotonic() < deadline, "isolated browser startup"
                 time.sleep(0.05)
-            port = endpoint.read_text().splitlines()[0]
+            port = endpoint.read_text(encoding="utf-8").splitlines()[0]
             browser = playwright.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{port}", no_defaults=True
             )
@@ -157,7 +158,9 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
             assert "author_secret" not in json.dumps(messages[0])
             saved = client.handle(messages[0])
             assert saved["ok"] and saved["count"] == 1
-            latest = json.loads((tmp_path / "collector/data/latest/news_all.json").read_text())
+            latest = json.loads(
+                (tmp_path / "collector/data/latest/news_all.json").read_text(encoding="utf-8")
+            )
             assert latest["items"][0]["title"] == "Hidden news"
             assert latest["status"] == "partial"
         finally:
@@ -174,10 +177,10 @@ def test_production_api_recovers_after_isolated_browser_restart(tmp_path):
     extension = tmp_path / "restart-extension"
     shutil.copytree(source, extension)
     manifest_path = extension / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["permissions"].remove("nativeMessaging")
     manifest["background"]["service_worker"] = "restart-worker.js"
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     request_url = (
         "https://www.saveticker.com/api/news/list?"
         "page=1&page_size=20&sort=created_at_desc&label_group=1&label_name=1"
@@ -198,11 +201,13 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
   request:{method:'GET',kind:'news',max_bytes:2097152,url:URL_VALUE}});
  queueMicrotask(()=>p.onMessage.listeners.forEach(fn=>fn(r)));
 }};return p;};
-""".replace("URL_VALUE", json.dumps(request_url))
+""".replace("URL_VALUE", json.dumps(request_url)),
+        encoding="utf-8",
     )
     (extension / "restart-worker.js").write_text(
         "import './restart-native.js';import {tick} from './worker.js';"
-        "globalThis.productionTick=tick;globalThis.restartReady=true;"
+        "globalThis.productionTick=tick;globalThis.restartReady=true;",
+        encoding="utf-8",
     )
     profile = tmp_path / "restart-profile"
     profile.mkdir()
@@ -236,7 +241,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
                 while not endpoint.exists():
                     assert time.monotonic() < deadline, "restart browser startup"
                     time.sleep(0.05)
-                port = endpoint.read_text().splitlines()[0]
+                port = endpoint.read_text(encoding="utf-8").splitlines()[0]
                 browser = playwright.chromium.connect_over_cdp(
                     f"http://127.0.0.1:{port}", no_defaults=True
                 )

@@ -71,11 +71,11 @@ def _probe_content_handoff(tmp_path: Path, *, dispatch: bool = False) -> dict:
         if path.is_file() and path.suffix in {".js", ".json", ".html", ".css"}:
             shutil.copy2(path, extension / path.name)
     manifest_path = extension / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["permissions"] = ["storage"]
     manifest["name"] = "SaveTicker isolated content diagnostic"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False))
-    (extension / "worker.js").write_text(_WORKER)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    (extension / "worker.js").write_text(_WORKER, encoding="utf-8")
     html = (
         '<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>'
         '<button aria-label="프로필 메뉴">프로필</button>'
@@ -159,7 +159,9 @@ def _probe_content_handoff(tmp_path: Path, *, dispatch: bool = False) -> dict:
                 "page_button_clicks": page.evaluate("()=>window.probeClicks"),
                 "events": events,
             }
-            (tmp_path / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+            (tmp_path / "result.json").write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             worker.evaluate(
                 """async ({owner,nonce})=>{
                     const [tab]=await chrome.tabs.query({url:'https://www.saveticker.com/*'});

@@ -109,7 +109,7 @@ def test_credentials_missing_never_echoes_values(tmp_path):
     from trader.kernel.config import ConfigError
 
     p = tmp_path / "saveticker.env"
-    p.write_text("SAVETICKER_EMAIL='private@example.com'\n")
+    p.write_text("SAVETICKER_EMAIL='private@example.com'\n", encoding="utf-8")
     with pytest.raises(ConfigError) as exc:
         credentials(p)
     assert "private@example.com" not in str(exc.value)
@@ -119,7 +119,10 @@ def test_credentials_preserves_dollar_signs_without_env_interpolation(tmp_path):
     from trader.features.saveticker.browser import credentials
 
     p = tmp_path / "saveticker.env"
-    p.write_text("SAVETICKER_EMAIL='test@example.com'\nSAVETICKER_PASSWORD='${HOME}literal'\n")
+    p.write_text(
+        "SAVETICKER_EMAIL='test@example.com'\nSAVETICKER_PASSWORD='${HOME}literal'\n",
+        encoding="utf-8",
+    )
     assert credentials(p)[1] == "${HOME}literal"
 
 

@@ -99,7 +99,9 @@ def test_news_detail_is_native_issued_correlated_and_saved(tmp_path):
         details=[detail],
     )
     assert saved["ok"]
-    item = json.loads((tmp_path / "data/latest/news_all.json").read_text())["items"][0]
+    item = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))[
+        "items"
+    ][0]
     assert item["body"] == "Full body" and item["detail_status"] == "ok"
     job = send(client, "api_begin", stream="news_all")
     prepared = send(client, "api_prepare", stream="news_all", job_id=job["job_id"], response=base)
@@ -250,6 +252,6 @@ def test_explicit_regular_request_and_server_basis(tmp_path, stream, tab):
         response=response(job["request"]["url"], data),
     )
     assert saved["ok"] and saved["count"] == 1
-    latest = json.loads((tmp_path / f"data/latest/{stream}.json").read_text())
+    latest = json.loads((tmp_path / f"data/latest/{stream}.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["basis"] == "regular"
     assert latest["view"]["requested_regular"] is True

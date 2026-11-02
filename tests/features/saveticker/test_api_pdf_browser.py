@@ -26,11 +26,12 @@ def test_hidden_api_pdf_uses_real_native_ticket_and_attachment(
     extension = tmp_path / "extension"
     shutil.copytree(source, extension)
     manifest_path = extension / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["permissions"].remove("nativeMessaging")
     manifest["background"]["service_worker"] = "native-http-worker.js"
-    manifest_path.write_text(json.dumps(manifest))
-    (extension / "native-http.js").write_text("""
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (extension / "native-http.js").write_text(
+        """
 const event=()=>({listeners:[],addListener(fn){this.listeners.push(fn)}});
 globalThis.nativeTransportErrors=[];
 chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(),
@@ -41,7 +42,9 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
  .catch(()=>{nativeTransportErrors.push('synthetic_transport_failed');
   p.onDisconnect.listeners.forEach(fn=>fn());});
 }};return p;};
-""")
+""",
+        encoding="utf-8",
+    )
     (extension / "native-http-worker.js").write_text(
         "import './native-http.js';import {tick} from './worker.js';"
         "void(async()=>{await chrome.storage.local.set({enabled:false,backend:'api',"
@@ -51,7 +54,8 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
         "await chrome.windows.update(tab.windowId,{state:'minimized'});"
         "await chrome.storage.local.set({enabled:true});await tick();await tick();"
         "return {state:await chrome.storage.local.get(null),"
-        "window:await chrome.windows.get(tab.windowId),errors:nativeTransportErrors};};})();"
+        "window:await chrome.windows.get(tab.windowId),errors:nativeTransportErrors};};})();",
+        encoding="utf-8",
     )
     home = tmp_path / "home"
     downloads = home / "Downloads"
@@ -75,7 +79,8 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
                     "directory_upgrade": True,
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
     with sync_playwright() as playwright:
         if not Path(playwright.chromium.executable_path).is_file():
@@ -102,7 +107,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
             while not endpoint.exists():
                 assert time.monotonic() < deadline, "temporary browser startup"
                 time.sleep(0.05)
-            port = endpoint.read_text().splitlines()[0]
+            port = endpoint.read_text(encoding="utf-8").splitlines()[0]
             browser = playwright.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{port}", no_defaults=True
             )
@@ -192,7 +197,9 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
             assert result["window"]["state"] == "minimized"
             assert page.evaluate("document.visibilityState") == "hidden"
             assert result["state"].get("pdfState") == "saved", result
-            latest = json.loads((tmp_path / "collector/data/latest/news_reports.json").read_text())
+            latest = json.loads(
+                (tmp_path / "collector/data/latest/news_reports.json").read_text(encoding="utf-8")
+            )
             attachment = latest["items"][0]["attachment"]
             assert attachment["pages"] == 1
             assert (tmp_path / "collector/data" / attachment["pdf_path"]).read_bytes() == pdf_bytes
@@ -209,7 +216,8 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
                         "native_pdf_saved": True,
                         "pages": attachment["pages"],
                     }
-                )
+                ),
+                encoding="utf-8",
             )
         finally:
             if browser:

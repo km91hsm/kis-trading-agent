@@ -16,11 +16,12 @@ def test_normal_html_reload_keeps_window_minimized_and_never_replays(tmp_path, r
     extension = tmp_path / "extension"
     shutil.copytree(source, extension)
     path = extension / "manifest.json"
-    manifest = json.loads(path.read_text())
+    manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["permissions"].remove("nativeMessaging")
     manifest["background"]["service_worker"] = "html-probe-worker.js"
-    path.write_text(json.dumps(manifest))
-    (extension / "html-native.js").write_text("""
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    (extension / "html-native.js").write_text(
+        """
 const event=()=>({listeners:[],addListener(fn){this.listeners.push(fn)}});
 globalThis.htmlCalls=[];
 chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(),disconnect(){},
@@ -30,7 +31,9 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
  if(m.type==='api_begin')Object.assign(r,{job_id:'b'.repeat(32),expires_at:new Date(Date.now()+120000).toISOString(),request:{method:'GET',kind:'news',max_bytes:2097152,url:'https://www.saveticker.com/api/news/list?page=1&page_size=20&sort=created_at_desc&label_group=1&label_name=1'}});
  queueMicrotask(()=>p.onMessage.listeners.forEach(fn=>fn(r)));
 }};return p;};
-""")
+""",
+        encoding="utf-8",
+    )
     probe = """
 import './html-native.js';import {tick} from './worker.js';
 import {beginHtmlTrial} from './html-refresh.js';
@@ -57,7 +60,7 @@ globalThis.beginHtmlProbe=async()=>{const [tab]=await chrome.tabs.query({url:'ht
             "autoRecheck:true,hostBlocked:true",
             "autoRecheck:true,hostBlocked:true,repeatRecheck:true,keepMinimized:true",
         )
-    (extension / "html-probe-worker.js").write_text(probe)
+    (extension / "html-probe-worker.js").write_text(probe, encoding="utf-8")
     profile = tmp_path / "profile"
     profile.mkdir()
     with sync_playwright() as playwright:
@@ -85,7 +88,7 @@ globalThis.beginHtmlProbe=async()=>{const [tab]=await chrome.tabs.query({url:'ht
             while not endpoint.exists():
                 assert time.monotonic() < deadline, "browser startup"
                 time.sleep(0.05)
-            port = endpoint.read_text().splitlines()[0]
+            port = endpoint.read_text(encoding="utf-8").splitlines()[0]
             browser = playwright.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{port}", no_defaults=True
             )

@@ -120,7 +120,7 @@ def test_native_api_job_is_separate_and_single_use(tmp_path):
     )
     result = client.handle(message)
     assert result["ok"] and result["status"] == "partial"
-    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text())
+    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["title"] == "test"
     assert "never" not in json.dumps(latest)
     assert not client.handle(message)["ok"]

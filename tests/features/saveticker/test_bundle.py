@@ -197,7 +197,7 @@ def test_kill_leftovers_targets_live_collector_lanes(tmp_path, monkeypatch):
         "runner-background": {"pid": 505, "proc_start": "s505"},
     }
     for name, row in rows.items():
-        (tmp_path / "runtime" / f"{name}.json").write_text(json.dumps(row), "utf-8")
+        (tmp_path / "runtime" / f"{name}.json").write_text(json.dumps(row), encoding="utf-8")
     monkeypatch.setattr(automation, "collector_alive", lambda pid: pid != 502)
     monkeypatch.setattr(procs, "process_start", lambda pid: f"s{pid}")
     killed = []

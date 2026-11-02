@@ -174,7 +174,7 @@ def test_interrupted_jsonl_export_recovers_from_sqlite(tmp_path):
     store = Store(tmp_path)
     store.save(capture([{"id": "a", "title": "첫 기사"}]))
     p = tmp_path / "2026-10-25" / "news.jsonl"
-    with p.open("a") as f:
+    with p.open("a", encoding="utf-8") as f:
         f.write('{"interrupted')
     store.save(capture([{"id": "b", "title": "다음 기사"}], when="2026-10-25T00:01:00Z"))
     rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
