@@ -2,6 +2,7 @@
 
 from trader.features.spot.migrations import MIGRATIONS
 from trader.features.spot.settings import SECTIONS
+from trader.features.spot.tool_cli import TOOLS
 from trader.kernel.registry.types import Feature
 
-FEATURE = Feature(id="spot", tier="lane", sections=SECTIONS, migrations=MIGRATIONS)
+FEATURE = Feature(id="spot", tier="lane", sections=SECTIONS, migrations=MIGRATIONS, tools=TOOLS)

@@ -24,3 +24,4 @@
 
 ## 알려진 차이 (옛 저장소 대비)
 
+- 도구(`tools.py`·`tool_cli.py`): `trader tool status|collect|checkpoint list|read|write|bundle|summarize`. 쓰기 허용·전제조건은 `WRITE_RULES`(fnmatch glob) + 스키마·파일명↔페이로드 일치·`debate_rounds` 상한이다. `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding 만 싣는다(memory·calibration·quant·regime·theme·market_view 는 이연). `submit-decision` 은 뒤 Task.
