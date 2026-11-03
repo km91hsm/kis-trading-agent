@@ -230,3 +230,18 @@ def test_start_without_lock_runs_no_bootstrap_or_stale_cleanup(project):
     (status,) = conn.execute("SELECT status FROM agent_calls").fetchone()
     conn.close()
     assert seen == [] and status == "running"
+
+
+def test_monitor_gate_ignores_paused_but_market_gate_skips(project):
+    """Ruling 20(a): paused 여도 monitor 게이트는 창만 본다 — 손절선 도달 시 `stop_paused` 알림·
+    트리거 기록은 `monitor_once` 가 맡는다(주문은 내지 않음). 주문 경로(market 게이트)는 멈춘다."""
+    deps = make_deps(project, datetime(2026, 10, 8, 3, 0, tzinfo=UTC))  # 12:00 KST
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    conn.close()
+    assert run(deps, "KR", "market") == {"skipped": "일시정지"}
+    assert run(deps, "KR", "monitor") == {"ran": 1}
+    deps.now.t = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)  # 19:00 KST
+    assert run(deps, "KR", "monitor") == {"skipped": "창 밖"}
+    deps.now.t = datetime(2026, 10, 9, 3, 0, tzinfo=UTC)  # 휴장일
+    assert run(deps, "KR", "monitor") == {"skipped": "휴장일"}

@@ -184,3 +184,88 @@ def test_monitor_body_uses_market_run_date(project, conn, settings, monkeypatch)
     assert seen["ctx"].enqueue_reevaluate is not None and seen["ctx"].session_runner is not None
     spot_jobs.monitor_body(_monitor_deps(settings, port, at), SimpleNamespace(market="KR"))
     assert seen["today"] == date(2026, 10, 28)
+
+
+# --- Review Focus 1: 데몬 경로(게이트 → monitor_body) ------------------------------------
+
+
+class _Sent:
+    def __init__(self):
+        self.msgs: list[str] = []
+
+    def send(self, text, *, escape=True):
+        self.msgs.append(text)
+        return True
+
+
+def test_paused_daemon_monitor_tick_notifies_stop_paused_once(project, conn, settings):
+    """Ruling 20(a): paused 상태의 데몬 monitor 틱은 게이트에서 건너뛰지 않고 `monitor_body` 가
+    돈다 — 손절선 도달 종목은 주문 없이 `stop_paused` 를 두 틱에 걸쳐 1회만, 다른 종목 트리거는
+    기록(재평가 큐 없음)."""
+    import threading
+    from decimal import Decimal
+
+    from tests.features.spot.helpers import ok_decision
+    from trader.features.accounts.gates import GATES
+    from trader.features.spot import ledger as spot_ledger
+    from trader.features.spot.schemas import Decision
+    from trader.kernel.broker.models import Position
+    from trader.kernel.cli.boot import build_registry
+    from trader.kernel.config.loader import load
+    from trader.kernel.daemon.jobs import build
+    from trader.kernel.daemon.runner import DaemonDeps, run_job
+    from trader.kernel.ledger import control
+    from trader.kernel.platform.bundle import templates_dir
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.types import Feature
+
+    at = datetime(2026, 10, 27, 2, 0, tzinfo=UTC)  # 화 11:00 KST, KR 장중
+    today = date(2026, 10, 27)
+    for ticker, over in (
+        ("005930", {"stop_loss": 65000.0}),
+        ("000660", {"take_profit": 110000.0, "stop_loss": 90000.0}),
+    ):
+        dec = Decision(**ok_decision(ticker=ticker, **over))
+        spot_ledger.ingest_checkpoint(
+            conn, today, "KR", ticker, "30_decision", {"data": dec.model_dump()}
+        )
+
+    def pos(ticker, avg, cur):
+        return Position(
+            ticker=ticker, market="KR", qty=10, avg_price=Decimal(avg),
+            current_price=Decimal(cur), eval_amount=Decimal(cur) * 10,
+            pnl_pct=float(Decimal(cur) / Decimal(avg) - 1),
+        )  # fmt: skip
+
+    accounts = [make_account("paper-main", "paper", "auto")]
+    brokers = fake_brokers(accounts)
+    brokers["paper-main"].positions = [
+        pos("005930", "70000", "63000"),
+        pos("000660", "100000", "112000"),
+    ]
+    market = FakeMarket(prices={"005930": Decimal("63000"), "000660": Decimal("112000")})
+    port = _MonitorPort(accounts, brokers, market)
+    schedule = load(
+        "schedule", build_registry(discover()), path=templates_dir() / "config" / "schedule.yaml"
+    )
+    sent = _Sent()
+    deps = DaemonDeps(
+        settings=settings, schedule=schedule, conn_factory=db.connect, state=project / "state",
+        now=lambda: at, markets=["KR"], gates={}, stop_event=threading.Event(), dry_run=False,
+        notifier=sent, ports={"accounts": port},
+    )  # fmt: skip
+    for g in GATES:
+        deps.gates[g.name] = g.build(None, deps)
+    control.set_flag(conn, "paused", True)
+    feature = Feature(id="spot_monitor_only", tier="lane", jobs=(spot_jobs.MONITOR,))
+    (job,) = build([feature], schedule=schedule, settings=settings, markets=["KR"], ctx=deps)
+    outs = [run_job(conn, job, deps, stop_event=deps.stop_event) for _ in range(2)]
+    assert all("skipped" not in o for o in outs), outs  # 게이트가 일시정지로 건너뛰지 않는다
+    assert all(o["checked"] == 2 and o["stop_loss_orders"] == 0 for o in outs)
+    paused_msgs = [m for m in sent.msgs if "일시정지" in m and "손절" in m]
+    assert len(paused_msgs) == 1
+    assert brokers["paper-main"].orders == [] and brokers["paper-main"].cancelled == []
+    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    rows = conn.execute("SELECT ticker, kind, handled_at FROM triggers").fetchall()
+    assert {r["ticker"] for r in rows} == {"000660"} and all(r["handled_at"] is None for r in rows)
+    assert "queued" not in outs[0]
