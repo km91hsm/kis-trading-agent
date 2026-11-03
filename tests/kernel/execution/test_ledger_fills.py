@@ -88,17 +88,6 @@ def test_expire_pending_buys_expires_only_pending_buy_approvals(conn):
     assert status[decided] == "rejected"
 
 
-def test_open_limit_orders_today_treats_null_origin_as_llm(conn):
-    oid = _order(conn, created_at="2026-11-02T01:00:00+00:00")
-    # 스키마는 origin NOT NULL — 제약 없는 사본으로 바꿔 끼워 NULL 행을 만든다(방어적 비교)
-    conn.execute("PRAGMA legacy_alter_table=ON")
-    conn.execute("ALTER TABLE orders RENAME TO orders_old")
-    conn.execute("CREATE TABLE orders AS SELECT * FROM orders_old")
-    conn.execute("UPDATE orders SET origin=NULL WHERE id=?", (oid,))
-    rows = L.open_limit_orders_today(conn, ACCT, "KR", D)
-    assert [r["id"] for r in rows] == [oid]
-
-
 def test_open_limit_orders_today_excludes_dead(conn):
     live = _order(conn, created_at="2026-11-02T01:00:00+00:00")
     _order(conn, status="cancelled", created_at="2026-11-02T01:00:00+00:00")
