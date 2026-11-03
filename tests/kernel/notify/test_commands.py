@@ -209,3 +209,26 @@ def test_run_untrusted_refused_and_not_registrable(conn):
     bad = Feature(id="x", tier="service", telegram_commands=(cmd,))
     with pytest.raises(RegistryError):
         commands.registry([bad])
+
+
+def test_status_message_isolates_failing_section(conn):
+    feat = Feature(
+        id="demo",
+        tier="service",
+        status_sections=(
+            StatusSection("A", lambda c: ["- a"]),
+            StatusSection("B", lambda c: 1 / 0),
+            StatusSection("C", lambda c: ["- c"]),
+        ),
+    )
+    ctx = commands.CommandContext(
+        conn=conn,
+        settings=None,
+        state=None,
+        now=lambda: datetime(2026, 10, 28, 1, 0, tzinfo=UTC),
+        notifier=Sent(),
+        features=[feat],
+    )
+    text = commands.status_message(ctx)
+    assert "- a" in text and "- c" in text
+    assert "- B: 조회 실패(ZeroDivisionError" in text

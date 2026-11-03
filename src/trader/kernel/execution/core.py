@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -60,9 +61,9 @@ __all__ = [
 
 NAME_KEY = "name"  # 승인 order 의 표시용 종목명(OrderRequest 에는 없다, 지문에서도 뺀다)
 
-# 주문 체크포인트 접두 → 알림 제목 꼬리 ('[주문 · 재평가]'). 옛 표 그대로 — `order_stage` 를
-# '_r' 로 잘라 찾으므로 '_r' 로 시작하는 꼬리가 있는 단계(예: 53_order_rebalance)는 꼬리가 비는
-# 옛 동작을 그대로 둔다(README 「알려진 차이」에 적는다).
+# 주문 체크포인트 접두 → 알림 제목 꼬리 ('[주문 · 재평가]'). `order_stage` 끝의 라운드(`_r2`)·
+# 단타 다리(`_entry`·`_exit`) 꼬리를 벗긴 이름으로 찾는다(옛 저장소는 '_r' 접두 매치라
+# 53_order_rebalance·57_order_scalp_* 는 꼬리가 비었다).
 _STAGE_KIND = {
     "51_order": "재평가",
     "52_order_reprice": "재호가",
@@ -74,7 +75,8 @@ _STAGE_KIND = {
 
 
 def _kind(order_stage: str) -> str:
-    return _STAGE_KIND.get(order_stage.split("_r")[0], "")
+    base = re.sub(r"_(r\d+|entry|exit)$", "", order_stage)
+    return _STAGE_KIND.get(base, "")
 
 
 def approval_fingerprint(account_id: str, decision_id: int | None, order: dict) -> str:

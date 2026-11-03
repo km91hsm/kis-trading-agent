@@ -7,7 +7,7 @@ import pytest
 
 from tests.features.spot.helpers import ok_decision
 from tests.features.spot.test_rules import _eval, _portfolio, _pos
-from trader.features.spot import tradability
+from trader.kernel.broker import tradability
 
 
 def test_rules_killswitch_blocks_new_buys_only():

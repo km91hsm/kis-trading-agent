@@ -45,3 +45,10 @@ def test_bookkeeping_error_message():
     e = types.OrderBookkeepingError("0001", ValueError("디스크"))
     assert e.order_no == "0001" and "접수번호 0001" in str(e) and "디스크" in str(e)
     assert "접수번호 -" in str(types.OrderBookkeepingError(None, ValueError("x")))
+
+
+def test_open_statuses_constant():
+    from trader.kernel.execution.types import DEAD_STATUSES, OPEN_STATUSES
+
+    assert OPEN_STATUSES == ("accepted", "unknown", "partial")
+    assert not set(OPEN_STATUSES) & set(DEAD_STATUSES)

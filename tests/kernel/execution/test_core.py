@@ -532,3 +532,10 @@ def test_request_approval_bind_failure_still_reports_has_approval(deps, conn, mo
     with pytest.raises(RuntimeError):
         core.request_approval(deps, _intent(), env="paper")
     assert _lock(conn)["approval_id"] is None and deps.idem.has_approval(KEY)
+
+
+def test_kind_strips_leg_and_round_suffix():
+    assert core._kind("57_order_scalp_entry") == "단타"
+    assert core._kind("57_order_scalp_exit") == "단타"
+    assert core._kind("51_order_r2") == "재평가"
+    assert core._kind("50_order") == ""

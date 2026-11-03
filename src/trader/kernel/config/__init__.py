@@ -66,6 +66,7 @@ class LlmSettings(BaseModel):
     timeout_by_kind: dict[str, int] = Field(
         default_factory=lambda: {
             "screen": 300, "discover": 300, "resume": 600, "fo_resume": 600, "reflect": 600,
+            "market": 600,
         }
     )  # fmt: skip
     # 같은 운영일 같은 종목이 타임아웃으로 이만큼 실패하면 그날은 다시 띄우지 않는다
