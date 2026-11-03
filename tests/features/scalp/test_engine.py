@@ -3,6 +3,8 @@
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
+
 from tests.features.scalp.conftest import NOW, D, Notes, bars, scan_checkpoint
 from trader.features.accounts import api as accounts_api
 from trader.features.accounts import modes
@@ -11,11 +13,23 @@ from trader.features.regime import tools as regime_tools
 from trader.features.scalp import engine
 from trader.features.scalp.state import load_state
 from trader.features.scan import watchlist
-from trader.kernel.broker.models import Position
+from trader.kernel.broker.models import Fill, Position
 from trader.kernel.ledger.control import set_flag
 from trader.kernel.session.run_store import read_checkpoint, run_dir
 
 PAPER_QTY = {"paper-main": 49, "paper-two": 49}  # 1천만 × 5% / 10050 지정가 — 모의 계좌마다
+
+
+def _fill(order_no, side, qty, price, at):
+    return Fill(
+        order_no=order_no,
+        ticker="005930",
+        market="KR",
+        side=side,
+        qty=qty,
+        price=Decimal(price),
+        filled_at=at,
+    )
 
 
 def test_tick_enters_on_signal_paper_only_and_once_per_ticker(scalp_ctx, market, conn, project):
@@ -148,6 +162,62 @@ def test_digest_kept_when_send_fails(scalp_ctx, market, project):
     ctx.now = lambda: NOW + timedelta(minutes=1)
     engine.tick(ctx, market="KR", today=D)
     assert len(sent) == 1 and "진입 005930" in sent[0]
+    assert load_state(state, D, "KR")["outbox"] == []
+
+
+def test_tick_exits_on_take_profit_and_halts_on_daily_stop(
+    scalp_ctx, market, brokers, conn, project
+):
+    state = project / "state"
+    scan_checkpoint(project, "KR", ["005930"])
+    market.minutes["005930"] = bars(burst=True)
+    market.prices["005930"] = Decimal("10050")
+    ctx = scalp_ctx()
+    engine.tick(ctx, market="KR", today=D)
+    # 체결됐다고 치고 모의 브로커 보유에 반영 (매도 수량은 브로커 잔고에서 온다)
+    brokers["paper-main"].positions = [
+        Position(
+            ticker="005930",
+            market="KR",
+            qty=49,
+            avg_price=Decimal("10050"),
+            current_price=Decimal("10300"),
+            eval_amount=Decimal("10300") * 49,
+            pnl_pct=2.5,
+        )
+    ]
+    fills = brokers["paper-main"].fills
+    fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10050", NOW + timedelta(minutes=1))]
+    market.prices["005930"] = Decimal("10300")  # +2.5% ≥ 1.5%
+    later = NOW + timedelta(minutes=5)
+    ctx.now = lambda: later
+    out = engine.tick(ctx, market="KR", today=D)
+    assert out["exits"] == []  # 청산 주문 접수 — 체결을 기다린다
+    fills[("KR", D)].append(_fill("FAKE-2", "SELL", 49, "10300", later))
+    out = engine.tick(ctx, market="KR", today=D)
+    assert out["exits"] == [
+        {"ticker": "005930", "reason": "take_profit", "ret": pytest.approx(0.0249, abs=1e-3)}
+    ]
+    # 첫 묶음 5분 뒤 청산은 묶음 주기(30분) 안이라 모아 둔다 — 틱마다 오지 않는다
+    assert sum(m.startswith("[단타]") for m in ctx.notifier.msgs) == 1
+    assert load_state(state, D, "KR")["outbox"][0]["leg"] == "exit"
+    st = load_state(state, D, "KR")
+    assert st["open"] == [] and st["closed"][0]["exit_price"] == "10300"
+    sells = conn.execute("SELECT side, order_type FROM orders WHERE side='SELL'").fetchall()
+    assert len(sells) == 1 and sells[0]["order_type"] == "MARKET"
+    assert read_checkpoint(run_dir(D, "KR", "005930", state), "57_order_scalp_exit_paper-main")
+    # 손실 누적으로 일일 한도: 청산 수익률 × 비중 합 ≤ −1% → 중단
+    st["closed"] = [{"ret": -0.11, "ticker": "x"}, {"ret": -0.1, "ticker": "y"}]
+    engine.save_state(state, D, "KR", st)
+    scan_checkpoint(project, "KR", ["000660"])
+    market.minutes["000660"] = bars(burst=True)
+    out3 = engine.tick(ctx, market="KR", today=D)
+    assert out3["entries"] == [] and "실현" in load_state(state, D, "KR")["halted"]
+    assert "skipped" in engine.tick(ctx, market="KR", today=D)
+    assert any("[단타 중단]" in m for m in ctx.notifier.msgs)
+    # 중단 때는 모아 둔 청산을 즉시 보낸다 (한글 사유·영문 코드 없음)
+    digest = [m for m in ctx.notifier.msgs if m.startswith("[단타]")][-1]
+    assert "청산 005930 @10,300원 · 익절" in digest and "take_profit" not in digest
     assert load_state(state, D, "KR")["outbox"] == []
 
 

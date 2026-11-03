@@ -245,7 +245,44 @@ def test_judge_timeout_no_entry(judged_ctx, project):
     assert st["pending"] == {} and st["open"] == []
 
 
-@pytest.mark.xfail(strict=True, reason="청산 단계(exits.check_exits)는 Task 6 이 채운다")
+def test_stop_loss_exits_immediately_while_advice_pending(
+    judged_ctx, market, brokers, conn, project
+):
+    ctx = judged_ctx(
+        lambda k, p, s: (
+            GO if s is ScalpVerdict else ScalpAdvice(action="hold", reason="r", confidence=0.5)
+        ),
+    )
+    engine.tick(ctx, market="KR", today=D)
+    engine.tick(ctx, market="KR", today=D)
+
+    class Pending(SyncJudge):
+        def poll(self, key):
+            return "pending"
+
+    fill_all(conn, brokers, market)
+    ctx.judge = Pending(GO)
+    market.prices["005930"] = Decimal("9800")  # 손절선 −1% 아래
+    engine.tick(ctx, market="KR", today=D)  # 판정 대기와 무관하게 청산 주문
+    fill_all(conn, brokers, market)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert out["exits"] and out["exits"][0]["reason"] == "stop"
+
+
+def test_advice_exit_closes_early(judged_ctx, brokers, market, conn, project):
+    advice = ScalpAdvice(action="exit", reason="VWAP 이탈", confidence=0.8)
+    ctx = judged_ctx(lambda k, p, s: GO if s is ScalpVerdict else advice)
+    engine.tick(ctx, market="KR", today=D)
+    engine.tick(ctx, market="KR", today=D)  # 진입
+    fill_all(conn, brokers, market)
+    ctx.now = lambda: ENGINE_NOW + timedelta(minutes=6)
+    engine.tick(ctx, market="KR", today=D)  # 조언 제출(동기 판정)
+    engine.tick(ctx, market="KR", today=D)  # 회수 → 조기 청산 주문
+    fill_all(conn, brokers, market)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert out["exits"] and out["exits"][0]["reason"] == "judge_exit"
+
+
 def test_report_go_vs_nogo_summary(scalp_ctx, settings, market, brokers, conn, project):
     scan_checkpoint(project, "KR", ["005930", "000660"])
     market.minutes.update({"005930": bars(burst=True), "000660": bars(burst=True)})
