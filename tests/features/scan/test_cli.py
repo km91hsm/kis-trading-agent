@@ -16,6 +16,7 @@ def test_theme_show_cli_json(project, conn):
     res = CliRunner().invoke(app, ["scan", "theme", "show", "--market", "KR"])
     assert res.exit_code == 0, res.output
     assert json.loads(res.output)["date"] == "2026-10-26"
+    assert len(res.output.strip().splitlines()) == 1  # JSON 1줄 규약
     res = CliRunner().invoke(app, ["scan", "theme", "show", "--market", "US"])
     out = json.loads(res.output)
     assert out["themes"] == [] and "아직 결과 없음" in out["note"]
@@ -43,6 +44,7 @@ def test_events_show_prints_detected(project, conn):
     )
     res = CliRunner().invoke(app, ["scan", "events", "show", "--market", "KR"])
     assert res.exit_code == 0, res.output
+    assert len(res.output.strip().splitlines()) == 1  # JSON 1줄 규약
     out = json.loads(res.output)
     assert out["enabled"] is True and out["market"] == "KR"
     assert [e["id"] for e in out["detected"]] == ["war_geopolitics"]

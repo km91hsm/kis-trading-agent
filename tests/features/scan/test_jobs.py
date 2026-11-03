@@ -72,6 +72,13 @@ def test_build_jobs_registers_theme_when_enabled(project, settings):
     got = built(settings)
     assert got["kr_theme"].kind == "theme" and got["kr_theme"].interval_s == 1800
     assert got["kr_theme"].spec.gate == "monitor" and not got["kr_theme"].spec.heavy
+    sched = project / "config" / "schedule.yaml"
+    sched.write_text("theme:\n  interval_s: 600\n", encoding="utf-8")
+    custom = load("schedule", registry, path=sched)
+    out = daemon_jobs.build(
+        [FEATURE], schedule=custom, settings=settings, markets=["KR"], ctx=ctx
+    )
+    assert out[0].interval_s == 600  # schedule.theme.interval_s 를 읽는다
     off = built(settings.model_copy(update={"theme": ThemeCfg(enabled=False)}), ("KR",))
     assert not any(j.kind == "theme" for j in off.values())
 

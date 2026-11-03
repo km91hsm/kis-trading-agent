@@ -22,9 +22,7 @@ def theme_body(deps, job) -> dict:
     게이트 `monitor` 가 본다). 시세는 `ports["accounts"]`, 세이브티커 폴더는 sources.yaml."""
     market = job.market
     port = (deps.ports or {}).get("accounts")
-    root = saveticker_api.resolve_dir(
-        saveticker_api.load_cfg(registry=deps.registry).dir
-    )
+    root = saveticker_api.resolve_dir(saveticker_api.load_cfg(registry=deps.registry).dir)
     conn = deps.conn_factory()
     try:
         heat = theme.compute(

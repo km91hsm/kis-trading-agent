@@ -48,9 +48,7 @@ def theme_show(
             except Exception:  # noqa: BLE001 - 키가 없으면 순위 없이
                 mc = None
             now = datetime.now(UTC)
-            root = saveticker_api.resolve_dir(
-        saveticker_api.load_cfg(registry=b.registry).dir
-    )
+            root = saveticker_api.resolve_dir(saveticker_api.load_cfg(registry=b.registry).dir)
             out = theme.compute(
                 b.conn,
                 b.settings,
@@ -86,6 +84,5 @@ def events_show(market: str = typer.Option("KR", "--market", help="KR|US")) -> N
         json.dumps(
             {"enabled": cfg.enabled, "market": market, "detected": found},
             ensure_ascii=False,
-            indent=1,
         )
     )
