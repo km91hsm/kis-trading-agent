@@ -745,3 +745,38 @@ def expire_pending_buys(
         ).fetchall()
     ]
     return [i for i in ids if decide_approval(conn, i, "expired", decided_at=now)]
+
+
+def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:
+    """해당 계좌·시장의 최신 스냅샷 날짜 포지션 `{date, nav, cash, positions}`. 없으면 None.
+    날짜는 positions_snapshot·account_nav 중 최신(전량 청산일은 빈 positions).
+    nav·cash 는 같은 날짜의 `account_nav` 행(없으면 None)."""
+    # 전량 청산한 날은 positions_snapshot 행이 없다 → 날짜는 두 표 중 최신(NAV 행이 항상 남는다)
+    row = conn.execute(
+        "SELECT MAX(d) AS date FROM ("
+        "SELECT MAX(date) AS d FROM positions_snapshot WHERE account_id=? AND market=? "
+        "UNION ALL SELECT MAX(date) FROM account_nav WHERE account_id=? AND market=?)",
+        (account_id, market, account_id, market),
+    ).fetchone()
+    if row is None or row["date"] is None:
+        return None
+    d = row["date"]
+    nav = conn.execute(
+        "SELECT nav, cash FROM account_nav WHERE account_id=? AND market=? AND date=?",
+        (account_id, market, d),
+    ).fetchone()
+    positions = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT ticker, market, qty, avg_price, current_price, eval_amount "
+            "FROM positions_snapshot WHERE account_id=? AND market=? AND date=? "
+            "AND ticker NOT LIKE '\\_CASH%' ESCAPE '\\' ORDER BY ticker",
+            (account_id, market, d),
+        )
+    ]
+    return {
+        "date": d,
+        "nav": nav["nav"] if nav else None,
+        "cash": nav["cash"] if nav else None,
+        "positions": positions,
+    }
