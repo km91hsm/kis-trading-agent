@@ -46,3 +46,31 @@ def test_cli_reflect_fake(project, conn, monkeypatch):
     assert "반성 1건 (FAKE), 정리 0건 삭제" in r.stdout
     assert store.get_entry(conn, eid)["reflection"] is not None
     assert CliRunner().invoke(app, ["evaluation", "reflect", "--market", "JP"]).exit_code == 1
+
+
+def test_cli_rl_train_models_promote_demote(project, conn, monkeypatch):
+    from tests.features.ml.helpers import synthetic_features
+    from trader.features.evaluation.rl.policy import FixedPolicy
+    from trader.features.ml import api as ml_api
+
+    ml_api.write_rows(synthetic_features(3, 400, signal=True))
+    monkeypatch.setattr(
+        "trader.features.evaluation.rl.learners.fit",
+        lambda s, c, *, seed, backend=None: (FixedPolicy(0.1), "fake"),
+    )
+    runner = CliRunner()
+    out = runner.invoke(app, ["evaluation", "rl", "train", "--seeds", "1"])
+    assert out.exit_code == 0, out.stdout
+    v = json.loads(out.stdout.strip().splitlines()[-1])["version"]
+    assert "미승격" in runner.invoke(app, ["evaluation", "rl", "models"]).stdout
+    assert runner.invoke(app, ["evaluation", "rl", "promote", v]).exit_code == 0
+    assert ml_api.registry_latest("rl_sizer") is not None
+    assert runner.invoke(app, ["evaluation", "rl", "demote", v]).exit_code == 0
+    assert ml_api.registry_latest("rl_sizer") is None
+    assert runner.invoke(app, ["evaluation", "rl", "promote", "19990101_000000"]).exit_code == 1
+
+
+def test_cli_rl_train_seeds_range(project):
+    runner = CliRunner()
+    assert runner.invoke(app, ["evaluation", "rl", "train", "--seeds", "0"]).exit_code == 2
+    assert runner.invoke(app, ["evaluation", "rl", "train", "--seeds", "11"]).exit_code == 2

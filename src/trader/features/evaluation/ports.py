@@ -1,5 +1,5 @@
 """evaluation 포트: 레인이 `Boot.ports["evaluation"]` 로 받는 판단 기억·보정·서킷브레이커
-(커널 `execution.ports.EvaluationPort`). RL 사이저 `rl_propose`·`rl_record` 는 뒤 Task."""
+(커널 `execution.ports.EvaluationPort`). RL 사이저 `rl_*` 포함."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 from trader.features.evaluation import calibration
 from trader.features.evaluation.memory import store
 from trader.features.evaluation.memory import vector as vec
+from trader.features.evaluation.rl import shadow as rl_shadow
 from trader.features.ml import api as ml_api
 from trader.kernel.config import KST
 from trader.kernel.config.market_hours import MARKET_CLOSE
@@ -212,7 +213,62 @@ class EvaluationPortImpl:
             return None
 
     def rl_sizer(self, state: Path | None) -> Any | None:
-        return None  # Task 11 이 채운다
+        """승격된 RL 사이저(`ml.yaml rl_sizer.enabled` 일 때만). 로드 실패는 경고 후 None."""
+        try:
+            return rl_shadow.load(ml_api.load_ml(self._registry), state)
+        except Exception as e:  # noqa: BLE001 - 사이저는 선택 기능
+            logger.warning("RL 사이저 로드 건너뜀: %s", e)
+            return None
+
+    def rl_propose(
+        self,
+        sizer: Any,
+        *,
+        state: Path | None,
+        ticker: str,
+        market: str,
+        decision: dict,
+        portfolio: Any,
+        nav_hist: list[tuple[str, Decimal]],
+        base: list[float] | None,
+    ) -> tuple[list[float], float, list[float]]:
+        """(관측 16차원, 제안 비중, 기준 14차원). base 를 주면 피처 스토어를 다시 읽지 않는다."""
+        base = base or rl_shadow.base_observation(
+            state, ticker=ticker, market=market, decision=decision
+        )
+        obs = rl_shadow.observe(
+            state,
+            ticker=ticker,
+            market=market,
+            decision=decision,
+            portfolio=portfolio,
+            nav_hist=nav_hist,
+            base=base,
+        )
+        return obs, rl_shadow.propose(sizer, obs), base
+
+    def rl_record(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        decision_id: int,
+        account_id: str,
+        model_version: str,
+        obs: list[float],
+        llm_weight: float,
+        proposed_weight: float,
+        applied: bool,
+    ) -> int:
+        return rl_shadow.record(
+            conn,
+            decision_id=decision_id,
+            account_id=account_id,
+            model_version=model_version,
+            obs=obs,
+            llm_weight=llm_weight,
+            proposed_weight=proposed_weight,
+            applied=applied,
+        )
 
 
 def build_port(boot: Any) -> EvaluationPortImpl:

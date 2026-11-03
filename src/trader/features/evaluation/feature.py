@@ -6,6 +6,7 @@ from trader.features.evaluation.jobs import (
     PAPER_REVIEW,
     QUEUE_KINDS,
     REFLECT_JOB,
+    RL_TRAIN,
     shadow_record_hook,
 )
 from trader.features.evaluation.migrations import MIGRATIONS
@@ -25,7 +26,7 @@ FEATURE = Feature(
     cli=evaluation_app,
     control_namespaces=("memory_breaker", "vix_last"),
     ports=(PORT,),
-    jobs=(DAILY_REPORT, PAPER_REVIEW, REFLECT_JOB),
+    jobs=(DAILY_REPORT, PAPER_REVIEW, REFLECT_JOB, RL_TRAIN),
     queue_kinds=QUEUE_KINDS,
     session_kinds=(REFLECT,),
     agents=AGENTS,

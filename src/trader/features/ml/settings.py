@@ -102,7 +102,7 @@ class CalibrationCfg(BaseModel):
 
 
 class RlSizerCfg(BaseModel):
-    """RL 사이저 (스펙 §9.4, 실험). 모의 계좌 한정, 승격은 `trader rl promote` 수동."""
+    """RL 사이저 (스펙 §9.4, 실험). 모의 계좌 한정, 승격은 `trader evaluation rl promote` 수동."""
 
     model_config = ConfigDict(extra="forbid")
 

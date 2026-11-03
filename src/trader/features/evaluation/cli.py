@@ -11,6 +11,8 @@ from trader.features.accounts import api as accounts_api
 from trader.features.evaluation import backtest, calibration, paper_review, readiness
 from trader.features.evaluation.memory import outcomes, store
 from trader.features.evaluation.reflect import pending, run_reflect
+from trader.features.evaluation.rl import report as rl_report
+from trader.features.evaluation.rl import train as rl_train_mod
 from trader.features.ml import api as ml_api
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import KST, ConfigError
@@ -21,6 +23,10 @@ from trader.kernel.session.runner import PipelineError
 evaluation_app = typer.Typer(help="평가·복기·준비도·백테스트·RL 사이저", no_args_is_help=True)
 calibration_app = typer.Typer(help="보정 리포트", no_args_is_help=True)
 evaluation_app.add_typer(calibration_app, name="calibration")
+rl_app = typer.Typer(
+    help="RL 사이저 학습·레지스트리 (실험, 모의 계좌 한정, 승격 수동)", no_args_is_help=True
+)
+evaluation_app.add_typer(rl_app, name="rl")
 
 
 @evaluation_app.command("readiness")
@@ -142,3 +148,95 @@ def reflect_cmd(
         raise typer.Exit(code=1) from e
     finally:
         b.conn.close()
+
+
+def _rl_version_exists(version: str) -> bool:
+    return any(m.get("version") == version for m in ml_api.registry_list("rl_sizer"))
+
+
+@rl_app.command("train")
+@config_errors
+def rl_train(
+    market: str | None = typer.Option(None, "--market", help="KR|US (기본 전체)"),
+    seeds: int | None = typer.Option(None, "--seeds", min=1, max=10, help="시드 수 (기본 ml.yaml)"),
+) -> None:
+    """스텝 데이터로 사이저를 워크포워드×시드 학습·기준선 비교·저장한다 (자동 승격 없음)."""
+    if market is not None and market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US: {market}")
+    b = boot(conn=True)
+    try:
+        cfg = ml_api.load_ml(b.registry)
+        if seeds is not None:
+            rl_cfg = cfg.models.rl_sizer.model_copy(update={"seeds": seeds})
+            cfg = cfg.model_copy(
+                update={"models": cfg.models.model_copy(update={"rl_sizer": rl_cfg})}
+            )
+        r = rl_train_mod.train_sizer(cfg, b.conn, state=paths.state_dir(), market=market)
+    finally:
+        b.conn.close()
+    typer.echo(json.dumps(r, ensure_ascii=False, default=str))
+
+
+@rl_app.command("models")
+@config_errors
+def rl_models() -> None:
+    """레지스트리의 rl_sizer 모델 목록."""
+    metas = ml_api.registry_list("rl_sizer")
+    if not metas:
+        typer.echo("모델 없음")
+        return
+    for m in metas:
+        s = m.get("summary") or {}
+        rl, fx = s.get("rl") or {}, s.get("fixed") or {}
+        typer.echo(
+            f"{m['version']}  {m.get('backend', '-')}/{m.get('source', '-')}  "
+            f"RL {rl.get('return_mean', '-')}±{rl.get('return_std', '-')}  "
+            f"고정 {fx.get('return_mean', '-')}  스텝 {m.get('steps', '-')}  "
+            f"{'승격' if m.get('promoted') else '미승격'}"
+        )
+
+
+@rl_app.command("report")
+@config_errors
+def rl_report_cmd(
+    account: str = typer.Option("paper-main", "--account", help="모의 계좌 id"),
+    weeks: int = typer.Option(8, "--weeks", min=1, max=52),
+    market: str | None = typer.Option(None, "--market", help="KR|US (기본 전체)"),
+) -> None:
+    """모델 요약 + 최근 N주 섀도 실적(제안 vs LLM 비중의 가상 실현수익) JSON 1줄."""
+    b = boot(conn=True)
+    try:
+        if not any(a.id == account for a in accounts_api.load_accounts()):
+            raise ConfigError(f"알 수 없는 계좌: {account}")
+        r = rl_report.comparison(b.conn, None, account_id=account, market=market, weeks=weeks)
+    finally:
+        b.conn.close()
+    typer.echo(json.dumps(r, ensure_ascii=False, default=str))
+
+
+@rl_app.command("promote")
+@config_errors
+def rl_promote(
+    version: str = typer.Argument(..., help="YYYYMMDD_HHMMSS"),
+    reason: str = typer.Option("manual", "--reason"),
+) -> None:
+    """사이저를 수동 승격한다 (이후 ml.yaml rl_sizer.enabled 가 켜져 있으면 모의 계좌 섀도)."""
+    if not _rl_version_exists(version):
+        typer.echo(f"오류: 모델 없음: {version}", err=True)
+        raise typer.Exit(code=1)
+    m = ml_api.registry_promote("rl_sizer", version, reason=reason)
+    typer.echo(f"승격: rl_sizer {m['version']} ({reason})")
+
+
+@rl_app.command("demote")
+@config_errors
+def rl_demote(
+    version: str = typer.Argument(..., help="YYYYMMDD_HHMMSS"),
+    reason: str = typer.Option("manual", "--reason"),
+) -> None:
+    """승격을 해제한다 (다른 승격 버전이 없으면 섀도 비활성)."""
+    if not _rl_version_exists(version):
+        typer.echo(f"오류: 모델 없음: {version}", err=True)
+        raise typer.Exit(code=1)
+    m = ml_api.registry_demote("rl_sizer", version, reason=reason)
+    typer.echo(f"승격 해제: rl_sizer {m['version']} ({reason})")

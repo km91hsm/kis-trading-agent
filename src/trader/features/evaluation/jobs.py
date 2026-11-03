@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from trader.features.accounts.api import split_accounts
 from trader.features.evaluation import daily_report, open_window, paper_review, shadow
 from trader.features.evaluation.memory import outcomes, store
 from trader.features.evaluation.reflect import pending, run_reflect
+from trader.features.evaluation.rl import train as rl_train_mod
 from trader.features.ingest.api import load_universe
 from trader.features.ml import api as ml_api
 from trader.features.regime import api as regime_api
@@ -257,6 +258,63 @@ REFLECT_JOB = JobSpec(
     days="mon-fri",
 )  # fmt: skip
 
+def rl_train_body(deps, job=None, *, market: str | None = None, seeds: int | None = None):
+    """사이저 학습(승격은 `trader evaluation rl promote` 수동). `rl_sizer.enabled` 는 적용
+    스위치이지 학습 스위치가 아니라 주간 학습은 늘 돈다. 데이터 부족은 로그만, 실패는 통보."""
+    try:
+        cfg = ml_api.load_ml(deps.registry)
+        if seeds is not None:
+            rl_cfg = cfg.models.rl_sizer.model_copy(update={"seeds": seeds})
+            cfg = cfg.model_copy(
+                update={"models": cfg.models.model_copy(update={"rl_sizer": rl_cfg})}
+            )
+        conn = deps.conn_factory()
+        try:
+            r = rl_train_mod.train_sizer(cfg, conn, state=deps.state, now=deps.now, market=market)
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - 실험 학습 실패가 데몬을 막지 않는다
+        logger.exception("RL 사이저 학습 실패")
+        deps.notifier.send(messages.failure("RL 학습 실패", "", e))
+        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+    if r.get("status") == "insufficient_data":
+        logger.info("RL 사이저 학습 생략: %s", r.get("promote_reason") or "데이터 부족")
+        return r
+    s = (r.get("summary") or {}).get("rl") or {}
+    deps.notifier.send(
+        ml_api.ml_trained(
+            kind="RL 사이저",
+            version=r.get("version"),
+            trained=r.get("status") == "trained",
+            detail=f"RL 수익 평균 {s.get('return_mean', '-')}",
+            promoted=None,
+            note="승격은 `trader evaluation rl promote` 로 수동이에요.",
+        )
+    )
+    return r
+
+
+class RlTrainParams(BaseModel):
+    """큐 `rl_train` 요청: 시장(없으면 전체)·시드 수(없으면 ml.yaml)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    market: Market | None = None
+    seeds: int | None = Field(None, ge=1, le=10)
+
+
+def rl_train_request(deps, params: dict, progress) -> dict:
+    """큐 `rl_train` 본문."""
+    return rl_train_body(deps, market=params.get("market"), seeds=params.get("seeds")) or {}
+
+
+RL_TRAIN = JobSpec(
+    id="rl_train", kind="rl_train", trigger="cron", per_market=False,
+    schedule_key="rl_train", interval_s=None, enabled=None, gate="none", heavy=True,
+    misfire="idempotent", catch_up="none", start_soon_s=0, body=rl_train_body,
+)  # fmt: skip
+
 QUEUE_KINDS = (
     QueueKind("reflect", ReflectParams, "복기", "slow", 0, False, False, reflect_request),
+    QueueKind("rl_train", RlTrainParams, "RL 학습", "slow", 0, False, False, rl_train_request),
 )

@@ -22,9 +22,14 @@ from trader.features.evaluation.memory.vector import DIMS, cosine, situation_vec
 from trader.features.evaluation.metrics import convergence_rate, decision_distribution
 from trader.features.evaluation.performance import benchmarks, metrics_of, nav_series
 from trader.features.evaluation.readiness import MIN_SHADOW_PAIRS, interval_kinds_of
+from trader.features.evaluation.rl import report as rl_report
+from trader.features.evaluation.rl import shadow as rl_shadow
 from trader.features.evaluation.settings import MemorySettings
 
 lots_report = lots.report
+rl_comparison = rl_report.comparison
+rl_current_model = rl_report.current_model
+rl_recent = rl_shadow.recent
 shadow_rows = shadow.rows
 shadow_mature = shadow.mature
 index_table = shadow.index_table
@@ -62,6 +67,9 @@ __all__ = [
     "record_decision",
     "readiness_check",
     "retrieve",
+    "rl_comparison",
+    "rl_current_model",
+    "rl_recent",
     "shadow_mature",
     "shadow_rows",
     "situation_vector",

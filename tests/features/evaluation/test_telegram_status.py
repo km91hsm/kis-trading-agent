@@ -66,7 +66,8 @@ def test_status_section_perf_lines(conn, monkeypatch):
     for d, v in zip(trading_days(3, start=date(2026, 10, 20)), (100, 110, 99), strict=True):
         _nav(conn, d, v)
     lines = status.render(_ctx(conn, Sent()))
-    assert lines == ["- paper-main KR: 30일 -1.00% · MDD -10.00%"]
+    assert lines[0] == "- paper-main KR: 30일 -1.00% · MDD -10.00%"
+    assert "rl_sizer 없음" in lines[1]
     assert status.STATUS_SECTION.title == "성과"
     assert status.STATUS_SECTION in FEATURE.status_sections
     assert "paper-main KR: 30일" in commands.status_message(_ctx(conn, Sent()))
@@ -81,7 +82,7 @@ def test_jobs_registered(project):
             [FEATURE], schedule=schedule, settings=None, markets=["KR", "US"], ctx=ctx
         )
     }
-    assert set(got) == {"kr_daily_report", "us_daily_report", "paper_review", "reflect"}
+    assert set(got) == {"kr_daily_report", "us_daily_report", "paper_review", "reflect", "rl_train"}
     assert str(got["us_daily_report"].trigger_kwargs["timezone"]) == "America/New_York"
     assert got["kr_daily_report"].cron["day_of_week"] == "mon-fri"
     assert got["paper_review"].cron == {"hour": 9, "minute": 0, "day_of_week": "sat"}
