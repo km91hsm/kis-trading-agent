@@ -135,7 +135,7 @@ def ask_json(
         return None
     loaded = agents.load_agent(agent)
     model = agents.model_for(agent.name, settings.models, loaded.model)
-    prompt = loaded.prompt.rstrip("\n") + "\n\n스키마: " + agents.json_schema(schema) + "\n"
+    prompt = agents.with_schema(loaded.prompt, schema)
     session_id = str(uuid.uuid4())
     call_id = calls.start_call(
         conn, None, agent=call_agent, model=model, ticker=str(payload.get("ticker") or ""),
@@ -231,6 +231,10 @@ def probe_usage(
     if rate is None:
         finish("error", cost=data.get("total_cost_usd"), error="rate_limit_event 없음")
         return {"error": "rate_limit_event 없음"}
-    usage.record_rate_limit(conn, rate, now=now(), source="probe")
+    try:
+        usage.record_rate_limit(conn, rate, now=now(), source="probe")
+    except Exception as e:  # noqa: BLE001 - 기록 실패도 행을 running 으로 남기지 않는다
+        finish("error", cost=data.get("total_cost_usd"), error=f"{type(e).__name__}: {e}"[:500])
+        return {"error": f"{type(e).__name__}: {e}"}
     finish("ok", cost=data.get("total_cost_usd"))
     return {"ok": True}

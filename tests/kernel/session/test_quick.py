@@ -174,3 +174,15 @@ def test_probe_usage_failure_is_recorded_not_raised(conn):
     )
     assert "error" in out
     assert conn.execute("SELECT status FROM agent_calls").fetchone()[0] == "error"
+
+
+def test_probe_usage_record_failure_closes_row(conn, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr(quick.usage, "record_rate_limit", boom)
+    out = quick.probe_usage(
+        _Settings(), conn, runner=_runner("ok"), claude_bin=Path("claude"), now=lambda: NOW
+    )
+    assert "error" in out
+    assert conn.execute("SELECT status FROM agent_calls").fetchone()[0] == "error"
