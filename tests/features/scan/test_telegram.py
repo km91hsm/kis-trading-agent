@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from trader.features.scan.watchlist import get_watchlist
 from trader.kernel.notify import commands
 from trader.kernel.notify.telegram import Update
 from trader.kernel.registry import discover
@@ -34,16 +35,17 @@ def _ctx(conn, sent):
 
 
 def test_telegram_watch_add_remove_list(conn):
+    """옛 `test_telegram_pause_resume_mode_watch` 의 watch 단언(입력·get_watchlist 4개) 그대로."""
     sent = Sent()
     ctx = _ctx(conn, sent)
-    commands.poll_once(ctx, Recv(["/watch add 005930"]))
-    assert "005930" in sent.msgs[-1]
-    commands.poll_once(ctx, Recv(["/watch add 000660", "/watch list"]))
-    assert "005930" in sent.msgs[-1] and "000660" in sent.msgs[-1]
-    commands.poll_once(ctx, Recv(["/watch remove 005930"]))
-    assert "005930" not in sent.msgs[-1] and "000660" in sent.msgs[-1]
-    commands.poll_once(ctx, Recv(["/watch add !!bad"]))
-    assert sent.msgs[-1].startswith("거부")
+    commands.poll_once(ctx, Recv(["/watch add 000660", "/watch add AAPL", "/watch add 000660"]))
+    assert get_watchlist(conn) == ["000660", "AAPL"]
+    commands.poll_once(ctx, Recv(["/watch remove 000660", "/watch list"]))
+    assert get_watchlist(conn) == ["AAPL"]
+    assert "AAPL" in sent.msgs[-1]
+    commands.poll_once(ctx, Recv(["/watch add bad/ticker"]))
+    assert get_watchlist(conn) == ["AAPL"]
+    # 새 단언: 사용법·기본 list
     commands.poll_once(ctx, Recv(["/watch zzz"]))
     assert "사용법" in sent.msgs[-1]
     commands.poll_once(ctx, Recv(["/watch"]))

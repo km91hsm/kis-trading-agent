@@ -144,3 +144,24 @@ def test_discover_request_skips_without_novel_news(conn, project):
     assert triggers.discover_request(deps, {"market": "KR"}, lambda t: None) == {
         "skipped": "새 뉴스 없음"
     }
+
+
+def test_discover_request_closes_stale_running_calls_first(conn, project):
+    """발굴 요청 시작 시 1시간 넘게 running 인 agent_calls 행을 error 로 닫는다(새 뉴스 없어도)."""
+    from datetime import timedelta
+
+    from tests.features.scan.test_triggers import NOW as TNOW
+    from tests.features.scan.test_triggers import trigger_deps
+    from trader.features.scan import triggers
+
+    for when in (TNOW - timedelta(hours=2), TNOW - timedelta(minutes=5)):
+        conn.execute(
+            "INSERT INTO agent_calls(agent, status, created_at) VALUES ('orchestrator', "
+            "'running', ?)",
+            (when.isoformat(),),
+        )
+    conn.commit()
+    deps = trigger_deps(project, conn)
+    triggers.discover_request(deps, {"market": "KR"}, lambda t: None)
+    rows = conn.execute("SELECT status FROM agent_calls ORDER BY id").fetchall()
+    assert [r["status"] for r in rows] == ["error", "running"]

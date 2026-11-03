@@ -22,13 +22,14 @@ from trader.features.scan.session_kinds import DISCOVER, agents_for_runner
 from trader.features.scan.settings import load_events
 from trader.features.scan.watchlist import get_watchlist
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
+from trader.kernel.daemon.runner import STALE_SESSION_AGE
 from trader.kernel.execution import horizon
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control, names
 from trader.kernel.notify import messages as kmessages
 from trader.kernel.platform import paths
-from trader.kernel.session import run_store, usage
+from trader.kernel.session import calls, run_store, usage
 from trader.kernel.session.run_store import read_checkpoint, run_date_for
 from trader.kernel.session.runner import SessionSpec, is_fake, run_session
 
@@ -318,10 +319,25 @@ def post_ingest(
     return out
 
 
+def _close_stale_sessions(deps: Any) -> int:
+    """1시간 넘게 running 인 세션 행을 error 로 닫는다(세션이 중간에 죽으면 남는다)."""
+    conn = deps.conn_factory()
+    try:
+        n = calls.close_stale_running(
+            conn, older_than=(deps.now() - STALE_SESSION_AGE).isoformat()
+        )
+    finally:
+        conn.close()
+    if n:
+        logger.warning("stale running 세션 %d건을 error 로 정리", n)
+    return n
+
+
 def discover_request(deps: Any, params: dict, progress: Any) -> dict:
     """큐 `discover` 본문(옛 `_discover_body`, Phase 23): 새 내용 뉴스만 실은 발굴 입력 → scout
     1단계 세션(kind=discover) → `_discovery` 후보를 재분석 큐로(오늘 결정 있으면 재평가). 세션
     상한은 `run_session` 이 본다."""
+    _close_stale_sessions(deps)
     market = params["market"]
     universe = ingest_api.load_universe()
     today = run_date_for(market, deps.now())
