@@ -43,7 +43,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - [x] Task 9 `accounts_io`·`secrets_io`·add·remove·secrets import
 - [x] Task 10 텔레그램 명령 `/pause /resume /mode`
 - [x] Task 11 문서·체크리스트·공개면 점검
-- [ ] PR·CI(ubuntu+windows)·머지
+- [x] PR·CI(ubuntu+windows)·머지 (#3, main 36b5c2a)
 - 이연(M0 리뷰):
   - `contracts._default_roots` 동적 import 를 discover 경유로
   - `import_violations` 루트 추론을 명시 키워드로
@@ -189,7 +189,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 11 scan 트리거(뉴스/공시 재분석)·큐 kind `discover`·텔레그램 `/watch`
 - [x] Task 12 spot `{market}_scan_analyze`·큐 kind `scan_analyze`/`analyze_ticker`·`05_quant`·`sector_of`·스케줄
 - [x] Task 13 문서·템플릿·체크리스트·전체 재검증
-- [ ] PR·CI(ubuntu+windows)·머지
+- [ ] PR·CI(ubuntu+windows)·머지 (#8 열림, 머지는 사용자)
 - Ruling(M7): A1 랭커는 scan 소유(ml→scan 순환 방지, `ml.api` 소비) · K1 `AnalystRole` 은 4종 유지, `QuantReport.role="quant"` 별도 · S1 `regime` 스케줄을 `07:25`/`08:25 ET` 로 앞당겨 scan 앞에 둠 · `features/jobs` 는 커널 큐로 흡수(QueueKind 만 추가, `/run` 은 커널 내장) · `universe_pit` 는 ml 소유
 - Ruling(M7, 실행 중 추가): L1 lightgbm 은 선택 의존이고 `import` 가 OSError(libomp 없음)여도 sklearn 으로 대체 · P1 `ROUND_TRIP_BP` 는 scan 백테스트에 복제(레인 `costs` 를 못 씀) · P2 플랜이 강제한 옛 결함(mkdir-on-read·promote 미강등·`max_event` 8/0·`schema_version` 1·`news_trigger_at` 선갱신)은 동작 보존 · T6-1 `peer_medians` 는 옛 `_peer_section` 모양 유지 · T9-1 발굴 세이브티커 폴더는 `saveticker_api.load_cfg().dir` · T10-1 옛 `scan_line` TypeError 는 고침 · T10-2 `run_scan` http 는 `ingest_api.owned_client(ctx.ext.get("http"), timeout=15)`
 - 이연(M2, M7 가 한 것): watchlist·`/watch`(옛 `test_control` watchlist 2건)
