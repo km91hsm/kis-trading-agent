@@ -81,7 +81,7 @@ def test_jobs_registered(project):
             [FEATURE], schedule=schedule, settings=None, markets=["KR", "US"], ctx=ctx
         )
     }
-    assert set(got) == {"kr_daily_report", "us_daily_report", "paper_review"}
+    assert set(got) == {"kr_daily_report", "us_daily_report", "paper_review", "reflect"}
     assert str(got["us_daily_report"].trigger_kwargs["timezone"]) == "America/New_York"
     assert got["kr_daily_report"].cron["day_of_week"] == "mon-fri"
     assert got["paper_review"].cron == {"hour": 9, "minute": 0, "day_of_week": "sat"}

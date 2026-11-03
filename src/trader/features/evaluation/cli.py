@@ -9,10 +9,14 @@ import typer
 
 from trader.features.accounts import api as accounts_api
 from trader.features.evaluation import backtest, calibration, paper_review, readiness
+from trader.features.evaluation.memory import outcomes, store
+from trader.features.evaluation.reflect import pending, run_reflect
 from trader.features.ml import api as ml_api
 from trader.kernel.cli.boot import boot, config_errors
-from trader.kernel.config import KST
+from trader.kernel.config import KST, ConfigError
+from trader.kernel.lane.types import LaneContext
 from trader.kernel.platform import paths
+from trader.kernel.session.runner import PipelineError
 
 evaluation_app = typer.Typer(help="평가·복기·준비도·백테스트·RL 사이저", no_args_is_help=True)
 calibration_app = typer.Typer(help="보정 리포트", no_args_is_help=True)
@@ -93,3 +97,48 @@ def calibration_build() -> None:
     typer.echo(
         json.dumps(r or {"active": False, "min_decisions": cfg.min_decisions}, ensure_ascii=False)
     )
+
+
+@evaluation_app.command("reflect")
+@config_errors
+def reflect_cmd(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="결과 채우기까지만 (세션 없음)"),
+) -> None:
+    """만기 결정의 결과를 채우고(피처 스토어 종가) reflector 세션으로 복기를 받는다 (스펙 §6.5)."""
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    b = boot(ports=True)
+    try:
+        state = paths.state_dir()
+        today = datetime.now(KST).date()
+        matured = outcomes.mature(b.conn, state=state, today=today)
+        typer.echo(f"결과 채움 {len(matured)}건")
+        n_pending = len(pending(b.conn, market=market))
+        if dry_run:
+            typer.echo(f"대기 중 반성 {n_pending}건 (--dry-run: 세션 생략)")
+            return
+        ctx = LaneContext(
+            b.settings,
+            b.conn,
+            state=state,
+            now=lambda: datetime.now(UTC),
+            dry_run=True,
+            notifier=None,
+            ports=b.ports,
+            ext={"registry": b.registry},
+        )
+        res = run_reflect(ctx, market=market, date=today)
+        if not res.ok:
+            typer.echo(f"세션 실패: {res.error}", err=True)
+            raise typer.Exit(code=1)
+        pr = store.promote_and_prune(b.conn, now=datetime.now(UTC), settings=b.settings.memory)
+        typer.echo(
+            f"반성 {n_pending}건 ({'FAKE' if res.fake else 'session=' + str(res.session_id)}), "
+            f"정리 {pr['deleted']}건 삭제"
+        )
+    except PipelineError as e:
+        typer.echo(f"오류: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    finally:
+        b.conn.close()

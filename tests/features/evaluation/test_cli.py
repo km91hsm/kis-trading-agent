@@ -27,3 +27,22 @@ def test_cli_paper_review_json(project, conn):
     out = json.loads(r.stdout)
     assert {"since", "until", "items", "alerts"} <= set(out)
     assert CliRunner().invoke(app, ["evaluation", "paper-review", "--days", "0"]).exit_code != 0
+
+
+def test_cli_reflect_fake(project, conn, monkeypatch):
+    from datetime import UTC, datetime
+
+    from trader.features.evaluation.memory import store
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    (eid,) = seed_matured(conn, 1, now=datetime.now(UTC))
+    conn.commit()
+    r = CliRunner().invoke(app, ["evaluation", "reflect", "--market", "KR", "--dry-run"])
+    assert r.exit_code == 0, r.stdout
+    assert "결과 채움 0건" in r.stdout and "대기 중 반성 1건 (--dry-run: 세션 생략)" in r.stdout
+    assert store.get_entry(conn, eid)["reflection"] is None
+    r = CliRunner().invoke(app, ["evaluation", "reflect", "--market", "KR"])
+    assert r.exit_code == 0, r.stdout
+    assert "반성 1건 (FAKE), 정리 0건 삭제" in r.stdout
+    assert store.get_entry(conn, eid)["reflection"] is not None
+    assert CliRunner().invoke(app, ["evaluation", "reflect", "--market", "JP"]).exit_code == 1
