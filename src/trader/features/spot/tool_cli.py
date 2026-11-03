@@ -81,11 +81,13 @@ def _collect(
     when_day = run_store.run_date_for(market, when)
     d = run_store.run_dir(when_day, market, ticker, ctx.state)
     quant = tools.ensure_quant(ctx, ticker=ticker, market=market, date=when_day)
+    c = tools.ensure_calibration(ctx, ticker=ticker, market=market, date=when_day)
     return {
         "ok": True,
         "path": str(d / "00_inputs.json"),
         "errors": (payload or {}).get("errors", []),
         "quant": bool(quant),
+        "calibration": bool(c),
     }
 
 

@@ -7,7 +7,8 @@
 `ports["scan"]` 로 받고, 포트가 없으면 bull·기울기 0·킬스위치/블랙아웃 없음·테마 규칙 생략으로
 본다. 알림·로그에는 계좌 id 만 쓴다.
 
-메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다(README 「알려진 차이」).
+메모리 서킷브레이커·RL 사이저(모의 계좌·BUY/ADD 섀도/적용)는 `ports["evaluation"]` 으로 받는다
+(포트가 없으면 생략). 섹터 자동분류(M11)는 아직 없다(README 「알려진 차이」).
 """
 
 from __future__ import annotations
@@ -417,6 +418,8 @@ def build_portfolio(
     regime: Any | None = None,
     cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
     notifier: Any | None = None,
+    evaluation: Any | None = None,
+    breaker_account: bool = False,
 ) -> rules.Portfolio:
     """브로커 잔고·현금 + 원장 집계로 Portfolio 를 만들고(`record` 면) positions_snapshot 을 남긴다.
     now 가 있으면 만료된 승인 요청은 현금 예약에서 뺀다. 계좌 `capital_cap` 이 있으면 게이트가
@@ -428,7 +431,10 @@ def build_portfolio(
     당일 미체결 BUY 를 거둔다 — 게이트는 새 주문만 막는다. `hedge_tickers`(헤지·현금 운용 ETF)는
     거두지 않고 종목 수·섹터 계산에서도 뺀다(옛 `on_killswitch`). 관측이 킬스위치를 **새로** 켜면
     `notifier` 로 포트의 `killswitch_message` 문구를 한 번 보낸다(Ruling P11 — 문구는 포트가 만든다,
-    레인은 regime 을 import 하지 않는다)."""
+    레인은 regime 을 import 하지 않는다).
+
+    `evaluation`(EvaluationPort) 이 있고 `record`·`breaker_account`(모의 계좌) 면 스냅샷을 남긴 뒤
+    이 계좌 최근 30일 NAV 로 그 시장의 메모리 서킷브레이커를 갱신한다(실패는 경고만)."""
     pos_list, cash = _balance(broker, market)
     positions = {p.ticker: p for p in pos_list}
     for p in positions.values():  # 잔고 응답의 종목명·US 거래소는 추가 호출 없이 얻는 관측값
@@ -485,6 +491,15 @@ def build_portfolio(
                 for p in positions.values()
             ],
         )
+    if evaluation is not None and record and breaker_account:
+        try:
+            evaluation.update_breaker(
+                conn,
+                market=market,
+                nav_series=xledger.nav_history(conn, account.id, market, days=30, today=today),
+            )
+        except Exception as e:  # noqa: BLE001 - 브레이커 갱신 실패는 판정을 막지 않는다
+            logger.warning("서킷브레이커 갱신 실패 %s: %s", account.id, e)
     sizing_nav, available = nav, cash.available
     cap = (getattr(account, "capital_cap", None) or {}).get(market)
     if cap is not None and nav > cap:
@@ -773,6 +788,16 @@ def execute(
     deps = deps_of(ctx)
     results: list[dict] = []
     bookkeeping_error: OrderBookkeepingError | None = None
+    ev = ctx.ports.get("evaluation")
+    sizer = ev.rl_sizer(ctx.state) if ev is not None else None
+    rl_eligible = (
+        sizer is not None
+        and decision_id is not None
+        and origin.origin not in ("stop", "hedge", "park", "scalp")
+        and not dry_run  # dry-run·FAKE 세션의 제안은 실험 집계를 오염시킨다
+        and decision.action in ("BUY", "ADD")
+    )
+    rl_base = _RlBase()
     for account in ctx.accounts:
         if market not in account.markets or account.id in skip:
             continue
@@ -798,6 +823,8 @@ def execute(
                     hedge_weight=hedge_weight,
                     exec_tag=exec_tag,
                     gates=gates,
+                    rl=(ev, sizer) if rl_eligible else None,
+                    rl_base=rl_base,
                 )
             )
         except OrderBookkeepingError as e:  # 접수 뒤 기록 실패: 다른 계좌를 마친 뒤 올린다
@@ -846,6 +873,85 @@ def execute(
     return results
 
 
+class _RlBase:
+    """계좌 간에 공유하는 RL 기준 관측(첫 계좌가 만든다)."""
+
+    value: list[float] | None = None
+
+
+@dataclass
+class _RlProposal:
+    obs: list[float]
+    proposed: float
+    apply: bool
+    note: str | None
+
+
+def _rl_size(
+    ctx: ExecContext,
+    rl: tuple[Any, Any],
+    account: Any,
+    decision: Decision,
+    market: str,
+    portfolio: rules.Portfolio,
+    base: list[float] | None,
+) -> tuple[Decision, _RlProposal | None, list[float] | None]:
+    """RL 사이저 관측·제안(모의 계좌·BUY/ADD 전용, 호출자가 조건을 건다). `rl` 은 (evaluation 포트,
+    Sizer). 반환: (판정에 넘길 결정, 제안, 재사용할 base 관측). 기록은 게이트 판정 뒤 `_rl_record`.
+    실패는 경고 후 RL 없이 진행한다."""
+    ev, sizer = rl
+    try:
+        obs, proposed, base = ev.rl_propose(
+            sizer,
+            state=ctx.state,
+            ticker=decision.ticker,
+            market=market,
+            decision=decision.model_dump(),
+            portfolio=portfolio,
+            nav_hist=xledger.nav_history(ctx.conn, account.id, market, days=30),
+            base=base,
+        )
+    except Exception as e:  # noqa: BLE001 - 실험 기능이 주문 판정을 막지 않는다
+        logger.warning("RL 사이저 건너뜀 %s %s: %s", account.id, decision.ticker, e)
+        return decision, None, base
+    apply = sizer.cfg.mode == "apply"
+    if not apply:
+        return decision, _RlProposal(obs, proposed, False, None), base
+    note = f"RL 사이저 적용: {decision.target_weight:.2f} → {proposed:.2f} (v{sizer.version})"
+    sized = decision.model_copy(update={"target_weight": proposed})
+    return sized, _RlProposal(obs, proposed, True, note), base
+
+
+def _rl_record(
+    ctx: ExecContext,
+    rl: tuple[Any, Any],
+    account: Any,
+    decision: Decision,
+    decision_id: int,
+    prop: _RlProposal,
+    verdict: rules.RiskVerdict,
+) -> rules.RiskVerdict:
+    """게이트 판정 뒤 rl_shadow 기록. applied 는 apply 모드이면서 게이트가 승인했을 때만."""
+    ev, sizer = rl
+    applied = prop.apply and verdict.approved
+    try:
+        ev.rl_record(
+            ctx.conn,
+            decision_id=decision_id,
+            account_id=account.id,
+            model_version=sizer.version,
+            obs=prop.obs,
+            llm_weight=decision.target_weight,
+            proposed_weight=prop.proposed,
+            applied=applied,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("RL 섀도 기록 실패 %s %s: %s", account.id, decision.ticker, e)
+    if prop.note:
+        return verdict.model_copy(update={"reasons": [prop.note, *verdict.reasons]})
+    return verdict
+
+
 def _reject(verdict: rules.RiskVerdict, *reasons: str) -> rules.RiskVerdict:
     return verdict.model_copy(
         update={"approved": False, "adjusted_qty": 0, "reasons": verdict.reasons + list(reasons)}
@@ -873,10 +979,12 @@ def _execute_account(
     hedge_weight: float | None,
     exec_tag: str | None,
     gates: _Gates,
+    rl: tuple[Any, Any] | None = None,
+    rl_base: _RlBase | None = None,
 ) -> dict:
     """계좌 하나: 정책 → 성향 → 포트폴리오(킬스위치 관측·미체결 BUY 회수) → 게이트 → 결정 단위
     멱등 → 수량 상한 → 실행 키 → 판정 기록 → 계획 → 승인 요청/주문(코어). 반환은 results 항목
-    하나."""
+    하나. `rl`(evaluation 포트, Sizer) 이 있으면 모의 계좌만 RL 사이저 제안으로 비중을 본다."""
     is_stop_loss = origin.origin == "stop"
     is_hedge = origin.origin in ("hedge", "park")
     mode, note = ctx.policy(ctx.conn, account)
@@ -886,6 +994,8 @@ def _execute_account(
     portfolio: rules.Portfolio | None = None
     gate: Callable[[rules.Portfolio], rules.RiskVerdict] | None = None
     port = ctx.ports.get("regime")
+    rl_prop: _RlProposal | None = None
+    rl_base = rl_base if rl_base is not None else _RlBase()
 
     cancel = killswitch_canceller(ctx)
     try:
@@ -907,7 +1017,14 @@ def _execute_account(
             regime=port,
             cancel_fn=cancel,
             notifier=ctx.notifier,
+            evaluation=ctx.ports.get("evaluation"),
+            breaker_account=(account.env == "paper"),
         )
+        sized = decision
+        if rl is not None and account.env == "paper":
+            sized, rl_prop, rl_base.value = _rl_size(
+                ctx, rl, account, decision, market, portfolio, rl_base.value
+            )
         # 재판정(gate)은 쓰기 트랜잭션 안에서 돈다 — 휴장일 조회·킬스위치는 여기서 한 번만
         hol = _holidays_between(
             ctx.holiday_fn, market, portfolio.held_since.get(decision.ticker), date
@@ -916,7 +1033,7 @@ def _execute_account(
 
         def gate(pf: rules.Portfolio) -> rules.RiskVerdict:
             return rules.evaluate(
-                decision,
+                sized,
                 pf,
                 limits=ctx.settings.risk,
                 stance=st,
@@ -1004,6 +1121,8 @@ def _execute_account(
     verdict = verdict.model_copy(
         update={"mode": mode, "note": note, "stance": st, "dry_run": dry_run}
     )
+    if rl_prop is not None and decision_id is not None and rl is not None:
+        verdict = _rl_record(ctx, rl, account, decision, decision_id, rl_prop, verdict)
     entry: dict[str, Any] = {
         "account_id": account.id,
         "mode": mode,

@@ -342,8 +342,10 @@ def _regime_context(ctx: ToolContext, market: str) -> dict | None:
 
 def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: dict) -> dict:
     """트레이더 입력의 파이썬 제공분: quote·risk_limits·costs_bp·portfolio·holding·regime·
-    market_view(`ports["regime"]` 가 없으면 둘 다 None)·quant(`05_quant` 체크포인트, 없으면 None).
-    (memory·calibration·theme 은 이연 — README 알려진 차이)"""
+    market_view(`ports["regime"]` 가 없으면 둘 다 None)·quant(`05_quant` 체크포인트, 없으면 None)·
+    memory·memory_status(`ports["evaluation"]` 의 유사 과거 판단, 포트·원장이 없으면 빈 목록·
+    warmup)·calibration(`35_calibration` 체크포인트, 주입이 꺼져 있으면 None). (theme 은 이연 —
+    README 알려진 차이)"""
     quote = ((inputs.get("technical") or {}).get("quote") or {}).get("data")
     return {
         "quote": quote,
@@ -354,7 +356,29 @@ def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: 
         "regime": _regime_context(ctx, market),
         "market_view": _market_view_context(ctx, market),
         "quant": _quant_context(ctx, market, d, ticker),
+        **_memory_context(ctx, inputs, market, d),
+        "calibration": _calibration_context(ctx, market, d, ticker),
     }
+
+
+def _memory_context(ctx: ToolContext, inputs: dict, market: str, d: date) -> dict:
+    """{memory, memory_status} — `ports["evaluation"]` 가 없거나 원장이 없으면 빈 목록·warmup."""
+    ev = ctx.ports.get("evaluation")
+    if ev is None or ctx.conn is None:
+        return {"memory": [], "memory_status": {"warmup": True, "breaker": None}}
+    out = ev.memory_context(
+        ctx.conn, inputs=inputs, market=market, asof_date=d, now=ctx.now(), state=ctx.state
+    )
+    return {"memory": out.get("memory", []), "memory_status": out.get("memory_status")}
+
+
+def _calibration_context(ctx: ToolContext, market: str, d: date, ticker: str) -> dict | None:
+    """`35_calibration` 체크포인트의 data. 포트가 없거나 주입이 꺼져 있으면 None."""
+    ev = ctx.ports.get("evaluation")
+    if ev is None or not ev.calibration_injected():
+        return None
+    saved = read_checkpoint(_dir(ctx, ticker, market, d), "35_calibration")
+    return saved["data"] if saved is not None else None
 
 
 def _quant_context(ctx: ToolContext, market: str, d: date, ticker: str) -> dict | None:
@@ -399,6 +423,37 @@ def ensure_quant(ctx: ToolContext, *, ticker: str, market: str, date: date) -> d
         return None
     write_checkpoint(d, "05_quant", _wrap(data, _call("quant", {"model": data["model"]})))
     return data
+
+
+def ensure_calibration(ctx: ToolContext, *, ticker: str, market: str, date: date) -> dict | None:
+    """보정 주입(`ml.yaml calibration.enabled ∧ inject`)이 켜졌고 결과 엔트리가 min_decisions
+    이상이면 35_calibration 을 쓴다(이미 있으면 그대로). 리포트는 `ports["evaluation"]` 이 만든다
+    — 포트·원장이 없거나 주입이 꺼져 있으면 None."""
+    ev = ctx.ports.get("evaluation")
+    if ev is None or ctx.conn is None:
+        return None
+    try:
+        if not ev.calibration_injected():  # 주입은 사람이 켠다(결정 14번) — 기존 것도 무시
+            return None
+        d = _dir(ctx, ticker, market, date)
+        existing = read_checkpoint(d, "35_calibration")
+        if existing is not None:
+            return existing.get("data")
+        report = ev.calibration_report(
+            ctx.conn,
+            ticker=ticker,
+            market=market,
+            asof_date=date,
+            state=ctx.state,
+            now_iso=ctx.now().isoformat(),
+        )
+        if report is None:
+            return None
+        write_checkpoint(d, "35_calibration", _wrap(report, _call("calibration", None)))
+    except Exception as e:  # noqa: BLE001 - 보정은 선택 입력
+        logger.warning("35_calibration 생략 %s %s: %s", market, ticker, e)
+        return None
+    return report
 
 
 # --- 절 압축 ----------------------------------------------------------------------
@@ -883,7 +938,8 @@ def _execute(
     change_pct: float | None = None,
 ) -> list[dict]:
     """리스크 게이트·계좌별 실행(주문은 executor → 커널 코어 안에서만). 결정은 1회, 판정·주문은
-    계좌마다. 재평가 라운드는 41_/51_ 체크포인트 이름에 들어간다. (메모리 기록은 M8)"""
+    계좌마다. 재평가 라운드는 41_/51_ 체크포인트 이름에 들어간다. 메모리 기록은 호출자가
+`_record_memory` 로 한다."""
     return executor.execute(
         _exec_ctx_of(ctx),
         decision,
@@ -897,6 +953,35 @@ def _execute(
         extra_note=extra_note,
         change_pct=change_pct,
         trade_block=trade_block(inputs),
+    )
+
+
+def _record_memory(
+    ctx: ToolContext,
+    decision: schemas.Decision,
+    market: str,
+    d: date,
+    *,
+    round_no: int,
+    skipped_debate: bool | None,
+    now: datetime | None = None,
+) -> int | None:
+    """결정 1건(라운드별)을 `ports["evaluation"]` 의 메모리 엔트리로 기록한다. 포트·원장이 없으면
+    None. `now` 는 실행 직전 시각(그 뒤의 주문이 체결가 채점 창이 된다) — 없으면 지금."""
+    ev = ctx.ports.get("evaluation")
+    if ev is None or ctx.conn is None:
+        return None
+    return ev.record_decision(
+        ctx.conn,
+        decision=decision.model_dump(),
+        ticker=decision.ticker,
+        market=market,
+        date=d,
+        round_no=round_no,
+        now=now or ctx.now(),
+        state=ctx.state,
+        accounts=ctx.accounts,
+        skipped_debate=skipped_debate,
     )
 
 
@@ -939,15 +1024,20 @@ def _resume_saved(
         why = f"손절선 {decision.stop_loss} 이 재시세 {price} 이상이라 실행 생략"
         return out | {"message": why}
     _ingest_run(ctx, d, day, market, ticker)
+    decided_at = ctx.now()  # 메모리 decided_at 은 실행 직전 시각
     executions = _execute(
         ctx, day, market, decision, inputs, price,
         skip_accounts=frozenset(executed), extra_note=note, change_pct=change_pct,
     )  # fmt: skip
+    memory_entry_id = _record_memory(
+        ctx, decision, market, day, round_no=0, skipped_debate=None, now=decided_at
+    )
     logger.warning("미실행 결정의 실행 재개 %s %s: %s", market, ticker, decision.action)
     return out | {
         "resumed_execution": True,
         "message": "30_decision 은 있었지만 판정이 없어 실행을 재개함",
         "executions": executions,
+        "memory_entry_id": memory_entry_id,
     }
 
 
@@ -970,8 +1060,9 @@ def submit_decision(
 
     같은 날 `30_decision` 이 이미 있으면 기존 결정을 돌려주고(`already`), 실행이 끝나지 않은 계좌만
     재개한다. 원장 연결이 없으면 `30_decision` 을 쓰기 전에 거부한다(재시도가 멱등 분기에 걸리지
-    않게). 반환 {ok, path, stage, action, price, requote, dry_run, executions, resumed_execution?,
-    already?}."""
+    않게). 반환 {ok, path, stage, action, price, requote, dry_run, executions, memory_entry_id,
+    resumed_execution?, already?} — `memory_entry_id` 는 `ports["evaluation"]` 메모리 엔트리(없으면
+    None)."""
     d = _dir(ctx, ticker, market, date)
     stages = list_checkpoints(d)
     resume_stage = None
@@ -1044,10 +1135,15 @@ def submit_decision(
     skipped = bool((summ.get("data") or summ).get("skipped_debate"))
     if (did := spot_ledger.decision_id(ctx.conn, date, market, ticker)) is not None:
         spot_ledger.set_skipped_debate(ctx.conn, did, skipped)
+    decided_at = ctx.now()  # 메모리 decided_at 은 실행 직전 시각
     executions = _execute(
         ctx, date, market, decision, inputs, price,
         resume_round=int(m_round.group(1)) if m_round else None,
         extra_note=note, change_pct=change_pct,
+    )  # fmt: skip
+    memory_entry_id = _record_memory(
+        ctx, decision, market, date, round_no=int(m_round.group(1)) if m_round else 0,
+        skipped_debate=skipped, now=decided_at,
     )  # fmt: skip
     logger.info("결정 저장 %s %s: %s (계좌 %d)", market, ticker, decision.action, len(executions))
     return {
@@ -1059,6 +1155,7 @@ def submit_decision(
         "requote": note,
         "dry_run": ctx.dry_run,
         "executions": executions,
+        "memory_entry_id": memory_entry_id,
     }
 
 

@@ -146,7 +146,8 @@ def _ensure_quant(deps, ticker: str, market: str, today: date) -> None:
             now=deps.now,
         )
         tools.ensure_quant(ctx, ticker=ticker, market=market, date=today)
-    except Exception as e:  # noqa: BLE001 - 05_quant 는 선택 입력
+        tools.ensure_calibration(ctx, ticker=ticker, market=market, date=today)
+    except Exception as e:  # noqa: BLE001 - 05_quant·35_calibration 은 선택 입력
         logger.warning("05_quant 생성 실패 %s %s: %s", market, ticker, e)
     finally:
         conn.close()
