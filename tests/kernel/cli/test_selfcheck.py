@@ -19,5 +19,5 @@ def test_selfcheck_json_has_version_and_features(project):
     assert data["python"] == ".".join(str(x) for x in sys.version_info[:3])
     assert Path(data["root"]) == project.resolve()
     assert data["ledger_version"] == max(m.version for m in all_migrations(discover()))
-    assert data["features"] == ["accounts", "ingest", "regime", "saveticker", "spot"]
+    assert data["features"] == ["accounts", "ingest", "regime", "saveticker", "scan", "spot"]
     assert data["web_dist"] is False

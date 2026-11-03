@@ -134,3 +134,11 @@ rebalance:
   enabled: true
   band_pct: 0.05
   lookback_days: 30
+
+# 테마 열기 감지(scan 기능): 오늘 불이 붙은 테마를 점수로 고른다 — 감지·알림·scout 입력만, 매매는 분석 세션.
+# 주기는 schedule.yaml theme.interval_s
+theme:
+  enabled: true
+  top_n: 3                  # 알림·scout·게이트가 보는 상위 테마 수 (1~10)
+  min_cluster_titles: 3     # 키워드 테마: 새 뉴스 제목 공출현 최소 건수 (≥2)
+  weights: {news: 0.35, rank: 0.25, flow: 0.15, saveticker: 0.10, vol: 0.15}
