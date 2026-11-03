@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from decimal import Decimal
 
 from tests.features.spot.conftest import D
 from tests.features.spot.helpers import ok_decision, ok_report, ok_turn
@@ -123,3 +124,58 @@ def test_round0_stays_in_sync_with_decision_row(conn):
     ledger.set_skipped_debate(conn, did, False)
     d, r = both()
     assert d[1] == r[1] == 0
+
+
+def test_stop_loss_floor_survives_same_day_reevaluation(conn):
+    """전체 검토 2차 2-O1: 매수 당일 BUY(손절 65000) 뒤 오후 재평가 `31_decision_r1` HOLD 가
+    손절가를 비워도(같은 (date, market, ticker) 행을 덮어쓴다) 아침 손절선이 살아 있어야 한다."""
+    first = cp(ok_decision(stop_loss=65000.0))
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "30_decision", first)
+    did = ledger.decision_id(conn, D, "KR", "005930")
+    ledger.ingest_checkpoint(
+        conn,
+        D,
+        "KR",
+        "005930",
+        "31_decision_r1",
+        cp(ok_decision(action="HOLD", target_weight=0.0, stop_loss=None)),
+    )
+    assert ledger.get_decision(conn, did)["action"] == "HOLD"  # 행은 덮였다
+    assert ledger.max_stop_since(conn, "KR", "005930", did) == Decimal("65000.0")
+    r1 = conn.execute("SELECT stop_loss FROM decision_rounds WHERE round=1").fetchone()
+    assert Decimal(r1["stop_loss"]) == Decimal("65000")  # 라운드 행 손절가가 바닥 이상으로 올라간다
+    # 더 높은 손절가는 그대로 두고, SELL 은 바닥에 넣지도 올리지도 않는다
+    ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "31_decision_r2", cp(ok_decision(action="ADD", stop_loss=68000.0))
+    )
+    ledger.ingest_checkpoint(
+        conn,
+        D,
+        "KR",
+        "005930",
+        "31_decision_r3",
+        cp(ok_decision(action="SELL", target_weight=0.0, stop_loss=1000.0)),
+    )
+    assert ledger.max_stop_since(conn, "KR", "005930", did) == Decimal("68000.0")
+    r3 = conn.execute("SELECT stop_loss FROM decision_rounds WHERE round=3").fetchone()
+    assert Decimal(r3["stop_loss"]) == Decimal("1000")
+
+
+def test_stop_floor_ignores_later_rounds_on_reingest(conn):
+    """submit_decision 은 제출마다 모든 체크포인트를 다시 적재한다. 뒤 라운드(r2=68000)가 앞선
+    라운드 행(r1)을 소급해 올리면 안 된다 — r1 은 그 시점의 바닥(65000)만 본다."""
+    stages = [
+        ("30_decision", ok_decision(stop_loss=65000.0)),
+        ("31_decision_r1", ok_decision(action="HOLD", target_weight=0.0, stop_loss=None)),
+        ("31_decision_r2", ok_decision(action="ADD", stop_loss=68000.0)),
+        ("31_decision_r3", ok_decision(action="SELL", target_weight=0.0, stop_loss=None)),
+    ]
+    for _ in range(2):  # 제출 때마다 전체 재적재
+        for stage, dec in stages:
+            ledger.ingest_checkpoint(conn, D, "KR", "005930", stage, cp(dec))
+    rows = conn.execute(
+        "SELECT round, action, stop_loss FROM decision_rounds ORDER BY round"
+    ).fetchall()
+    got = [(r["round"], r["action"], r["stop_loss"]) for r in rows]
+    assert got == [(0, "BUY", "65000.0"), (1, "HOLD", "65000.0"), (2, "ADD", "68000.0"),
+                   (3, "SELL", None)]  # fmt: skip

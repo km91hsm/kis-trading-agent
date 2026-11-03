@@ -190,6 +190,7 @@ class FakeBroker:
         self.calls: list[str] = []
         self.orders: list[OrderRequest] = []
         self.cancelled: list[str] = []
+        self.cancel_kwargs: list[dict] = []
 
     def _record(self, name: str) -> None:
         self.calls.append(name)
@@ -221,9 +222,10 @@ class FakeBroker:
             order_no=f"FAKE-{len(self.orders)}", accepted=True, message="가짜 접수", org_no="00000"
         )
 
-    def cancel_order(self, order_no: str, *, market: Market = "KR", **_: object) -> OrderResult:
+    def cancel_order(self, order_no: str, *, market: Market = "KR", **kw: object) -> OrderResult:
         self._record("cancel_order")
         self.cancelled.append(order_no)
+        self.cancel_kwargs.append({"market": market, **kw})
         return OrderResult(order_no=order_no, accepted=True, message="가짜 취소")
 
 

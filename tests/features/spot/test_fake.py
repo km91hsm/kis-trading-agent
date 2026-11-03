@@ -3,13 +3,16 @@
 옛 `tests/orchestrator/test_session.py` 의 FAKE 4건과 `tests/agents/test_registry.py` 의 md 2건을
 이식했다. 세션은 커널 `run_session` 을 통해 돌리므로 runs·agent_calls 기록도 같이 본다."""
 
+from decimal import Decimal
+
 import pytest
 
 from tests.features.spot.conftest import T0, D, make_account
 from tests.features.spot.helpers import ok_report
 from trader.features.accounts.ports import AccountsPortImpl
+from trader.features.spot import ledger, resume
 from trader.features.spot.feature import FEATURE
-from trader.features.spot.session_kinds import AGENT_NAMES, ANALYZE
+from trader.features.spot.session_kinds import AGENT_NAMES, ANALYZE, RESUME
 from trader.kernel.config import Secrets
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.notify import NullNotifier
@@ -173,5 +176,53 @@ def test_role_specific_rules():
 
 def test_orchestrator_has_no_other_lane_modes():
     p = load_agent(by_name(FEATURE.agents)["orchestrator"]).prompt
-    for mode in ("resume", "reflect", "market", "fo", "fo_resume", "discover", "screen"):
+    for mode in ("reflect", "market", "fo", "fo_resume", "discover", "screen"):
         assert f"## {mode} 모드" not in p
+
+
+def test_fake_resume_session_writes_31_decision(lane_ctx, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    d = _inputs()
+    assert _run(lane_ctx).ok  # 아침 분석(30_decision)
+    tid = ledger.insert_trigger(
+        lane_ctx.conn,
+        market="KR",
+        ticker="005930",
+        kind="take_profit",
+        detail={"level": "80000"},
+        price=Decimal("80000"),
+        decision_id=ledger.decision_id(lane_ctx.conn, D, "KR", "005930"),
+        account_id="paper-main",
+        created_at=T0.isoformat(),
+    )
+
+    def go():
+        return resume.reevaluate(
+            lane_ctx,
+            market="KR",
+            date=D,
+            ticker="005930",
+            exchange=None,
+            trigger_id=tid,
+            trigger={"kind": "take_profit", "price": "80000", "detail": {}},
+        )
+
+    res = go()
+    assert res.ok and "31_decision_r1" in list_checkpoints(d)
+    row = lane_ctx.conn.execute("SELECT handled_at, session_id FROM triggers").fetchone()
+    assert row["handled_at"] and row["session_id"] == "fake"
+    assert resume.handled_marker(res) == "fake"
+    res2 = go()
+    assert res2.ok and "31_decision_r2" in list_checkpoints(d)
+
+
+def test_resume_kind_declaration():
+    assert RESUME.kind == "resume" and RESUME.agents == AGENT_NAMES
+    assert RESUME.prompt_section == "resume" and RESUME.timeout_key == "resume"
+    assert RESUME.runs_kind == "resume" and RESUME.extra_cap_key is None
+    assert RESUME.throttle == "soft" and RESUME.retry_guard is False
+    spec = _spec(kind="resume", extra={"trigger": {"kind": "news"}})
+    assert RESUME.stdin_extra(spec) == {"trigger": {"kind": "news"}}
+    assert FEATURE.session_kinds == (ANALYZE, RESUME)
+    p = load_agent(by_name(FEATURE.agents)["orchestrator"]).prompt
+    assert "## resume 모드" in p and "31_decision_r<n>" in p

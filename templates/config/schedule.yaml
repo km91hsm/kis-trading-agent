@@ -1,3 +1,24 @@
 # 데몬 잡 주기
+job_queue:
+  interval_s: 10     # 큐 틱(job_queue·fast·reeval·info) 주기(초)
+telegram_poll:
+  interval_s: 30     # 텔레그램 명령 폴링·알림 재전송 주기(초)
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
+kr:
+  monitor:
+    interval_s: 60     # 장중 감시 주기(초)
+    start: "09:00"     # 감시 창(시장 현지 시각)
+    end: "15:30"
+us:
+  monitor:
+    interval_s: 60
+    start: "09:30"
+    end: "16:00"
+fills_sync:
+  times: ["16:10", "07:10"]   # 체결 동기화(KST, 월~토): KR 마감 뒤, US 마감 뒤
+reconcile:
+  kr: "15:45"                                     # 야간 대사: KR 마감(15:30 KST) 뒤
+  us: {time: "16:15", tz: America/New_York}       # US 마감(16:00 ET) 뒤
+balance_refresh:
+  interval_s: 300   # 잔고 스냅샷 갱신 주기(초): 장중 매 틱, 장 밖은 30분 넘은 스냅샷만

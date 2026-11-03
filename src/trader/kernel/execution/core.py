@@ -30,9 +30,11 @@ from trader.kernel.execution.ledger import (
     expire_pending,
     get_approval,
     insert_order,
+    set_order_status,
 )
 from trader.kernel.execution.types import (
     APPROVAL_TTL,
+    DEAD_STATUSES,
     ExecPolicy,
     OrderBookkeepingError,
     OrderIntent,
@@ -49,6 +51,7 @@ __all__ = [
     "OrderIntent",
     "approval_fingerprint",
     "approve",
+    "cancel",
     "expire_approvals",
     "reject",
     "request_approval",
@@ -116,6 +119,59 @@ def notify_quietly(notifier: Notifier, text: str) -> None:
 
 
 # --- 전송 ---------------------------------------------------------------------------------
+
+
+def cancel(
+    deps: ExecDeps,
+    *,
+    order_id: int,
+    order_no: str,
+    market: str,
+    broker: Any,
+    dry_run: bool,
+    reason: str,
+    exchange: str | None = None,
+) -> dict:
+    """미체결 주문 1건을 취소한다. 브로커 취소 1회, 접수(accepted)되면 cancelled 로 바꾼다.
+
+    US 취소에는 org_no·ticker·qty 가 필요해 주문 행에서 읽어 넘긴다(exchange 는 호출자가 준다).
+    이미 끝난 주문(`DEAD_STATUSES`)은 브로커를 부르지 않고 `ok=False`.
+    dry_run 은 브로커도 상태도 건드리지 않고 현재 상태만 돌려준다. 브로커가 거부하면 상태를
+    두고 `ok=False`, 예외는 상태를 그대로 두고 다시 올린다(취소 여부를 모르는 채 적지 않는다)."""
+    row = deps.conn.execute(
+        "SELECT org_no, ticker, qty, status FROM orders WHERE id=?", (order_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"주문 #{order_id} 없음")
+    if row["status"] in DEAD_STATUSES:  # 이미 끝난 주문: KIS 에 보낼 것이 없다
+        logger.info("주문 #%d 이미 %s — 취소 생략: %s", order_id, row["status"], reason)
+        return {
+            "ok": False,
+            "order_id": order_id,
+            "status": row["status"],
+            "message": f"이미 끝난 주문({row['status']})",
+        }
+    if dry_run:
+        logger.info("취소 건너뜀(dry_run) 주문 #%d: %s", order_id, reason)
+        return {"ok": True, "dry_run": True, "order_id": order_id, "status": row["status"]}
+    try:
+        res = broker.cancel_order(
+            order_no,
+            market=market,
+            org_no=row["org_no"],
+            ticker=row["ticker"],
+            exchange=exchange,
+            qty=int(row["qty"]),
+        )
+    except Exception:
+        logger.warning("주문 #%d 취소 실패(상태 유지): %s", order_id, reason)
+        raise
+    if not res.accepted:
+        logger.warning("주문 #%d 취소 거부(상태 유지): %s", order_id, res.message)
+        return {"ok": False, "order_id": order_id, "status": row["status"], "message": res.message}
+    set_order_status(deps.conn, order_id, "cancelled")
+    logger.info("주문 #%d 취소: %s", order_id, reason)
+    return {"ok": True, "order_id": order_id, "status": "cancelled"}
 
 
 def transmit(

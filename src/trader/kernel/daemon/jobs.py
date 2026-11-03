@@ -54,9 +54,26 @@ def _lookup(schedule: Any, path: str) -> Any:
     return cur
 
 
-def _cron_kwargs(schedule: Any, key: str) -> dict[str, Any]:
-    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`)을 가진 매핑·객체다. tz 기본은 KST."""
+def _cron_kwargs_list(schedule: Any, key: str, days: str | None) -> list[dict[str, Any]]:
+    """schedule 항목이 "HH:MM" 리스트면 시각마다 kwargs 하나, 아니면 하나짜리 목록."""
     entry = _lookup(schedule, key)
+    if isinstance(entry, (list, tuple)):
+        if not entry:
+            raise ConfigError(f"schedule '{key}' 은 비어 있을 수 없습니다")
+        out = [_cron_kwargs(schedule, key, entry=e) for e in entry]
+    else:
+        out = [_cron_kwargs(schedule, key)]
+    if days:
+        for kw in out:
+            kw["day_of_week"] = days
+    return out
+
+
+def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any]:
+    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`)을 가진 매핑·객체다. tz 기본은 KST.
+    entry 를 주면 조회 대신 그 값을 쓴다(리스트 원소)."""
+    if entry is None:
+        entry = _lookup(schedule, key)
     tz: Any = None
     if isinstance(entry, str):
         hm = entry
@@ -76,18 +93,20 @@ def _cron_kwargs(schedule: Any, key: str) -> dict[str, Any]:
     return {"hour": int(m.group(1)), "minute": int(m.group(2)), "timezone": zone}
 
 
-def _interval_seconds(spec: JobSpec, schedule: Any) -> int:
+def _interval_seconds(spec: JobSpec, schedule: Any, tag: str | None = None) -> int:
     """interval 잡 주기(초). schedule_key 가 가리키는 값(정수 ≥ 1)을 우선하고, 키가 없거나 값이
-    None 이면 spec.interval_s 로 폴백한다. 둘 다 없으면 ConfigError."""
+    None 이면 spec.interval_s 로 폴백한다. 둘 다 없으면 ConfigError. per_market 잡은 schedule_key
+    의 {market} 을 소문자 시장(tag)으로 채운다(id 와 같은 규칙)."""
     if spec.schedule_key:
+        key = spec.schedule_key.format(market=tag) if spec.per_market else spec.schedule_key
         try:
-            value = _lookup(schedule, spec.schedule_key)
+            value = _lookup(schedule, key)
         except ConfigError:
             value = None
         if value is not None:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ConfigError(
-                    f"schedule '{spec.schedule_key}' 은 1 이상의 정수(초)여야 합니다: {value!r}"
+                    f"schedule '{key}' 은 1 이상의 정수(초)여야 합니다: {value!r}"
                 )
             return value
     if not spec.interval_s:
@@ -99,7 +118,7 @@ def build(
     features: list[Feature], *, schedule: Any, settings: Any, markets: list[str], ctx: Any
 ) -> list[ScheduledJob]:
     """기능이 선언한 JobSpec 을 ScheduledJob 으로 펼친다.
-    per_market 이면 시장마다 `id.format(market=m)`,
+    per_market 이면 시장마다 `id.format(market=m.lower())`(schedule_key 도 소문자 — yaml `kr.…`),
     `enabled(settings)` 가 False 면 제외. 선언 오류(schedule_key·interval_s·미등록 게이트)는
     ConfigError. heavy·misfire·catch_up 등은 손대지 않고 spec 에 그대로 둔다."""
     gates = getattr(ctx, "gates", None) or {}
@@ -113,17 +132,22 @@ def build(
             if spec.per_market and "{market}" not in spec.id:
                 raise ConfigError(f"잡 {spec.id}: per_market 잡의 id 에 {{market}} 가 필요합니다")
             for market in markets if spec.per_market else [None]:
-                ident = spec.id.format(market=market) if spec.per_market else spec.id
+                tag = market.lower() if market else None
+                ident = spec.id.format(market=tag) if spec.per_market else spec.id
                 if spec.trigger == "cron":
                     if not spec.schedule_key:
                         raise ConfigError(f"잡 {spec.id}: cron 잡에는 schedule_key 가 필요합니다")
                     key = (
-                        spec.schedule_key.format(market=market)
+                        spec.schedule_key.format(market=tag)
                         if spec.per_market
                         else spec.schedule_key
                     )
-                    kwargs = _cron_kwargs(schedule, key)
-                else:
-                    kwargs = {"seconds": _interval_seconds(spec, schedule)}
+                    # 리스트 값은 시각마다 `id`, `id_1`, … 로 펼친다
+                    for i, kwargs in enumerate(_cron_kwargs_list(schedule, key, spec.days)):
+                        out.append(
+                            ScheduledJob(ident if i == 0 else f"{ident}_{i}", spec, market, kwargs)
+                        )
+                    continue
+                kwargs = {"seconds": _interval_seconds(spec, schedule, tag)}
                 out.append(ScheduledJob(ident, spec, market, kwargs))
     return out

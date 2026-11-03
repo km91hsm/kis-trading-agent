@@ -1,5 +1,5 @@
 """`trader spot` — 현물 레인 운영 명령: 종목 분석 세션(`analyze`)과 실행 키 조회·수동 해제
-(`exec-key list|release`), 승인 요청 처리(`approvals list|approve|reject`).
+(`exec-key list|release`), 승인 요청 처리(`approvals list|approve|reject`), 장중 감시(`monitor`).
 
 보낸 뒤(sent_at) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이라 같은 결정·계좌·방향의 주문이 다시
 나가지 않는다 — 사람이 KIS 주문 유무를 확인한 뒤 사유와 함께 푼다. 해제 기록은 control
@@ -7,12 +7,20 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, date, datetime
+
 import typer
 
 from trader.features.spot import analyze as analyze_mod
-from trader.features.spot import executor
+from trader.features.spot import balance as balance_mod
+from trader.features.spot import executor, fills
+from trader.features.spot import ledger as spot_ledger
+from trader.features.spot import monitor as monitor_mod
+from trader.features.spot import reconcile as reconcile_mod
 from trader.features.spot.messages import approval_line
 from trader.kernel.cli.boot import boot, config_errors
+from trader.kernel.config import ConfigError
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.idem import ExecKeyStore
 from trader.kernel.ledger import control
@@ -26,6 +34,10 @@ exec_key_app = typer.Typer(help="실행 키(멱등 선점) 조회·수동 해제
 spot_app.add_typer(exec_key_app, name="exec-key")
 approvals_app = typer.Typer(help="승인 요청 조회·승인·거부", no_args_is_help=True)
 spot_app.add_typer(approvals_app, name="approvals")
+fills_app = typer.Typer(help="체결 조회 → fills 적재·주문 상태 갱신", no_args_is_help=True)
+spot_app.add_typer(fills_app, name="fills")
+balance_app = typer.Typer(help="잔고 스냅샷 갱신", no_args_is_help=True)
+spot_app.add_typer(balance_app, name="balance")
 
 
 def _cell(v: object) -> str:
@@ -156,3 +168,143 @@ def approvals_reject(approval_id: int = typer.Argument(..., help="승인 id")) -
         typer.echo(f"거부 실패 #{approval_id}: {r.get('error') or r.get('status')}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"거부 #{approval_id}")
+
+
+@fills_app.command("sync")
+@config_errors
+def fills_sync(
+    account: str | None = typer.Option(None, "--account", help="특정 계좌 id 만"),
+    day: str | None = typer.Option(
+        None, "--date", help="YYYY-MM-DD (기본: 시장별 현지 오늘 — US 는 뉴욕 날짜)"
+    ),
+) -> None:
+    """계좌별 체결을 원장에 적재한다(멱등). 계좌마다 JSON 한 줄."""
+    try:
+        d: date | datetime = date.fromisoformat(day) if day else datetime.now(UTC)
+    except ValueError as e:
+        typer.echo(f"오류: --date 는 YYYY-MM-DD 여야 합니다: {day}", err=True)
+        raise typer.Exit(code=1) from e
+    b = boot(ports=True)
+    try:
+        ectx = executor.exec_ctx(b)
+        failed = False
+        for a in ectx.accounts:
+            broker = ectx.brokers.get(a.id)
+            if broker is None or (account and a.id != account):
+                continue
+            r = fills.sync_fills(b.conn, broker, a, d, notifier=ectx.notifier)
+            failed = failed or bool(r["failed_markets"])
+            typer.echo(json.dumps(r, ensure_ascii=False))
+    finally:
+        b.conn.close()
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@balance_app.command("refresh")
+@config_errors
+def balance_refresh(
+    market: str | None = typer.Option(None, "--market", help="KR|US (기본: 모든 시장)"),
+    force: bool = typer.Option(False, "--force", help="장 밖·최근 스냅샷이어도 읽는다"),
+) -> None:
+    """브로커 잔고를 읽어 positions_snapshot 을 갱신한다(조회만). 시장별 JSON 한 줄."""
+    b = boot(ports=True)
+    try:
+        ectx = executor.exec_ctx(b)
+        now = datetime.now(UTC)
+        markets = [market] if market else ["KR", "US"]
+        failed = False
+        for m in markets:
+            r = balance_mod.refresh(
+                b.conn,
+                accounts=ectx.accounts,
+                brokers=ectx.brokers,
+                market=m,
+                settings=b.settings,
+                now=now,
+                state=ectx.state,
+                only_stale=not force and not balance_mod.open_markets([m], now),
+                stale_after=balance_mod.OFF_HOURS_EVERY,
+            )
+            failed = failed or bool(r["errors"])
+            typer.echo(json.dumps({m: r}, ensure_ascii=False))
+    finally:
+        b.conn.close()
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@spot_app.command("monitor")
+@config_errors
+def monitor_cmd(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    once: bool = typer.Option(False, "--once", help="1회만 점검하고 종료"),
+    interval: int = typer.Option(60, "--interval", help="반복 주기(초)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="손절 주문·재평가 주문 없이 기록만"),
+    max_iterations: int | None = typer.Option(None, "--max-iterations", hidden=True),
+) -> None:
+    """보유종목 장중 점검: 손절 즉시 매도, 트리거 → 재평가 세션 (스펙 §5.2). 틱마다 JSON 한 줄.
+    자동 주문이 나가므로 사용자 전용."""
+    import time
+
+    from trader.kernel.session.run_store import run_date_for
+    from trader.kernel.session.runner import run_session
+
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    b = boot(ports=True, log_name="monitor")  # 데몬과 다른 로그 파일 (오래 사는 명령)
+    try:
+        ectx = executor.exec_ctx(b)
+        if ectx.market_client is None:
+            raise ConfigError("시세 클라이언트 생성 실패 — monitor 를 돌릴 수 없습니다")
+        ctx = monitor_mod.MonitorContext(
+            exec=ectx,
+            market_client=ectx.market_client,
+            session_runner=run_session,
+            exchanges=(
+                spot_ledger.ticker_exchanges(ectx.conn, market) if market == "US" else {}
+            ),
+            dry_run=dry_run,
+            ports=b.ports,
+        )
+        n = 0
+        while True:
+            today = run_date_for(market, datetime.now(UTC))
+            r = monitor_mod.monitor_once(ctx, market=market, today=today)
+            typer.echo(
+                json.dumps({"market": market, "date": today.isoformat(), **r}, ensure_ascii=False)
+            )
+            n += 1
+            if once or (max_iterations is not None and n >= max_iterations):
+                break
+            time.sleep(interval)
+    finally:
+        b.conn.close()
+
+
+@spot_app.command("reconcile")
+@config_errors
+def reconcile_cmd(
+    market: str = typer.Option(..., "--market", help="KR|US"),
+) -> None:
+    """브로커 보유 vs 원장 스냅샷 대사(불일치는 스냅샷만 보정, 주문 유지). 계좌·시장마다 JSON."""
+    from trader.kernel.session.run_store import run_date_for
+
+    b = boot(ports=True)
+    try:
+        ectx = executor.exec_ctx(b)
+        out = reconcile_mod.reconcile_all(
+            b.conn,
+            ectx.brokers,
+            ectx.accounts,
+            market=market,
+            today_for=lambda m: run_date_for(m, datetime.now(UTC)),
+            notifier=ectx.notifier,
+        )
+    finally:
+        b.conn.close()
+    for k, v in out.items():
+        brief = {x: v[x] for x in ("ok", "error") if x in v}
+        typer.echo(json.dumps({k: brief}, ensure_ascii=False))
+    if any("error" in v for v in out.values()):
+        raise typer.Exit(code=1)

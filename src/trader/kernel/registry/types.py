@@ -36,6 +36,8 @@ class JobSpec:
     start_soon_s: int
     body: Callable[..., Any]
     teardown: Callable[..., None] | None = None
+    # cron 요일 제한(APScheduler day_of_week 표기, 예: "mon-sat"). None 이면 매일
+    days: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,18 @@ class Port:
 
 
 @dataclass(frozen=True)
+class GateSpec:
+    """데몬 게이트 공급자. name 은 JobSpec.gate 가 가리키는 이름(market|monitor).
+
+    build(boot, deps) -> gate(job) -> 건너뜀 사유 또는 None. 러너는 `gate(job)` 만 부르므로,
+    게이트는 deps(now·conn_factory·ports·schedule)를 build 시점에 붙잡는다. `build_daemon_deps`
+    가 deps 를 gates={} 로 먼저 만든 뒤 `deps.gates[name] = build(boot, deps)` 로 채운다."""
+
+    name: Literal["market", "monitor"]
+    build: Callable[[Any, Any], Callable[[Any], str | None]]
+
+
+@dataclass(frozen=True)
 class Feature:
     """기능 하나의 전체 등록 선언. 커널은 이 필드를 순회할 뿐 기능 이름을 모른다."""
 
@@ -192,3 +206,4 @@ class Feature:
     session_kinds: tuple[SessionKind, ...] = ()
     agents: tuple[AgentDef, ...] = ()
     ports: tuple[Port, ...] = ()
+    gates: tuple[GateSpec, ...] = ()

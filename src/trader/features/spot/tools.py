@@ -812,6 +812,21 @@ def _input_change_pct(inputs: dict) -> float | None:
         return None
 
 
+def _trigger_change_pct(inputs: dict, price: Decimal, run_date: date) -> float | None:
+    """트리거 가격의 당일 등락률(소수): `00_inputs.technical.daily` 에서 운영일 전 마지막 일봉
+    종가 대비. 직전 종가를 모르면 None — 아침 시세의 등락률로 트리거 가격을 판정하지 않는다
+    (PR #26 리뷰: 아침 +12% 가 장중 되돌린 가격의 재평가를 막지 않게)."""
+    try:
+        rows = inputs["technical"]["daily"]["data"] or []
+        prev = [r for r in rows if str(r.get("date") or "") < run_date.isoformat()]
+        close = Decimal(str(prev[-1]["close"]))
+        if close > 0:
+            return float(price / close - 1)
+    except (KeyError, TypeError, ValueError, IndexError, InvalidOperation, AttributeError):
+        pass
+    return None
+
+
 def requote(
     ctx: ToolContext,
     market: str,
@@ -1017,7 +1032,8 @@ def submit_decision(
 ) -> dict:
     """결정 제출: 전제조건(`SUBMIT_RULE`) → 스키마 → ticker 일치 → 현재가(재시세) → 손절선 검사 →
     `30_decision` 저장 → 원장 적재 → 계좌별 실행. stage 가 `31_decision_r<n>` 이면 재평가
-    (30_decision 이 있어야 함; 트리거 가격은 M5 — 지금은 입력가 + 재시세).
+    (30_decision 이 있어야 함). 재평가의 현재가·손절·추격 게이트 가격은 오늘 가장 최근
+    트리거 가격(`latest_trigger_price`)이고, 가격 없는 트리거(뉴스)면 입력가 + 재시세다.
 
     같은 날 `30_decision` 이 이미 있으면 기존 결정을 돌려주고(`already`), 실행이 끝나지 않은 계좌만
     재개한다. 원장 연결이 없으면 `30_decision` 을 쓰기 전에 거부한다(재시도가 멱등 분기에 걸리지
@@ -1052,7 +1068,18 @@ def submit_decision(
         return {"ok": False, "error": f"ticker 불일치: {decision.ticker} ≠ {ticker}"}
     inputs = read_checkpoint(d, "00_inputs") or {}
     meta = inputs.get("meta") or {}
-    price, note, change_pct = requote(ctx, market, ticker, meta.get("exchange"), inputs, ctx.now())
+    trig = (
+        spot_ledger.latest_trigger_price(ctx.conn, market, ticker, date) if resume_stage else None
+    )
+    if trig is not None:
+        # 재평가의 현재가는 아침 시세가 아니라 장중 트리거 가격이다(트레이더 md 의 "현재가").
+        # 당일 등락률 = 트리거 가격 ÷ 직전 완성 봉 종가 − 1 — None 으로 두면 장중 급등을 쫓는
+        # BUY 가 추격 금지를 지난다
+        price, note, change_pct = trig, None, _trigger_change_pct(inputs, trig, date)
+    else:  # 일반 제출, 그리고 가격 없는 트리거(뉴스) 재평가는 입력 시세 + 재시세
+        price, note, change_pct = requote(
+            ctx, market, ticker, meta.get("exchange"), inputs, ctx.now()
+        )
     if price is None:
         return {
             "ok": False,

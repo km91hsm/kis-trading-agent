@@ -1,10 +1,10 @@
-"""spot 의 LLM 세션 종류와 에이전트 정의(analyze). 다른 세션(resume·reflect·…)은 후속 마일스톤."""
+"""spot 의 LLM 세션 종류와 에이전트 정의(analyze·resume). 다른 세션(reflect·…)은 후속 마일스톤."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from trader.features.spot.fake import run_fake_analyze
+from trader.features.spot.fake import run_fake_analyze, run_fake_resume
 from trader.features.spot.schemas import AnalystReport, DebateTurn, Decision
 from trader.kernel.registry.types import AgentDef, SessionKind
 
@@ -46,4 +46,18 @@ ANALYZE = SessionKind(
     fake=run_fake_analyze,
     stdin_extra=None,
     retry_guard=True,  # 같은 종목 반복 타임아웃 차단(옛 analyze 동작)
+)
+
+RESUME = SessionKind(
+    kind="resume",
+    agents=AGENT_NAMES,
+    prompt_section="resume",
+    schemas=(AnalystReport, DebateTurn, Decision),
+    timeout_key="resume",
+    runs_kind="resume",
+    extra_cap_key=None,
+    throttle="soft",  # 보유 재평가는 soft 감속에서도 허용(kernel.session.usage.RESUME_KINDS)
+    fake=run_fake_resume,
+    stdin_extra=lambda spec: {"trigger": spec.extra["trigger"]},
+    retry_guard=False,
 )

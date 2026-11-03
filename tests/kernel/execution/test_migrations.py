@@ -12,7 +12,7 @@ def test_all_migrations_include_execution_v5(conn):
     assert [m.version for m in migs] == list(range(1, len(migs) + 1))
     assert next(m for m in migs if m.version == 5) is EXECUTION
     assert EXECUTION.owner == "kernel/execution"
-    assert contracts.KERNEL_MODULES[-1] is EXECUTION
+    assert EXECUTION in contracts.KERNEL_MODULES
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {
         "orders", "approvals", "risk_checks", "exec_locks", "buy_reservations",

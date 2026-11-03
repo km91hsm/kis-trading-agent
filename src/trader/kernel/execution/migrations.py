@@ -112,3 +112,17 @@ EXECUTION = Migration(
     ),
     owner="kernel/execution",
 )
+
+EXECUTION_V7 = Migration(
+    7,
+    "execution_fills_dedupe",
+    statements=(
+        "ALTER TABLE fills ADD COLUMN order_no TEXT",
+        "ALTER TABLE fills ADD COLUMN ticker TEXT",
+        "ALTER TABLE fills ADD COLUMN side TEXT",
+        "ALTER TABLE fills ADD COLUMN market TEXT",
+        "ALTER TABLE orders ADD COLUMN filled_qty INTEGER NOT NULL DEFAULT 0",
+        "CREATE UNIQUE INDEX ux_fills_dedupe ON fills(order_id, filled_at, qty, price)",
+    ),
+    owner="kernel",
+)

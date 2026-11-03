@@ -14,6 +14,7 @@ import uvicorn
 from trader.kernel.cli import init_cmd, selfcheck
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
+from trader.kernel.cli.jobs_cmd import build_jobs_app
 from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
@@ -48,7 +49,7 @@ class TraderApp(typer.Typer):
 
 def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
     secrets = boot_.secrets or load_secrets()
-    return DaemonDeps(
+    deps = DaemonDeps(
         settings=boot_.settings,
         schedule=boot_.schedule,
         conn_factory=db.connect,
@@ -62,7 +63,12 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         secrets=secrets,
         registry=boot_.registry,
         hooks=hooks.by_point(boot_.features),
+        ports=boot_.ports,
     )
+    for f in boot_.features:
+        for g in f.gates:
+            deps.gates[g.name] = g.build(boot_, deps)
+    return deps
 
 
 def build_web_deps(boot_: Boot) -> WebDeps:
@@ -80,7 +86,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
 @config_errors
 def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 실행")) -> None:
     """스케줄러 데몬을 시작하고 종료 신호까지 기다린다."""
-    b = boot(settings=True, schedule=True, conn=True, log_name="daemon")
+    b = boot(ports=True, schedule=True, log_name="daemon")
     d = Daemon(b.features, build_daemon_deps(b, dry_run=dry_run))
     try:
         if not d.start():
@@ -197,6 +203,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")
     root.add_typer(build_tool_app(features), name="tool")
+    root.add_typer(build_jobs_app(features), name="jobs")
     for f in features:
         if f.cli is not None:
             root.add_typer(f.cli, name=f.id)

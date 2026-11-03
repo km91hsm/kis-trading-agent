@@ -1,9 +1,10 @@
-"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`.
+"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`.
 
 yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -107,8 +108,72 @@ class DebateCfg(BaseModel):
     consensus_min_conviction: float = Field(default=0.7, ge=0, le=1)
 
 
+class FillNoticeCfg(BaseModel):
+    """KIS 체결통보 웹소켓 리스너(데몬 잡 `notice_listener`). 켜면 env 별 리스너가 통보마다
+    `fills_sync` 를 큐에 넣는다. 실전은 실전 계좌 모드가 off 가 아닐 때만 붙는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 SECTIONS = (
     Section("settings", "risk", RiskLimits, RiskLimits),
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
+    Section("settings", "fill_notice", FillNoticeCfg, FillNoticeCfg),
+)
+
+
+class FillsSyncSchedule(BaseModel):
+    """schedule.yaml `fills_sync`: 체결 동기화 시각(KST "HH:MM", 월~토). KR 마감 뒤·US 마감 뒤."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    times: list[str] = Field(default_factory=lambda: ["16:10", "07:10"], min_length=1)
+
+    @field_validator("times")
+    @classmethod
+    def _hhmm(cls, v: list[str]) -> list[str]:
+        for t in v:
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+                raise ValueError(f"HH:MM 형식이어야 합니다: {t!r}")
+        return v
+
+
+_HM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class ReconcileAt(BaseModel):
+    """대사 시각: "HH:MM" 과 시간대(기본 KST)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    time: str = Field(pattern=_HM)
+    tz: str | None = None
+
+
+class ReconcileSchedule(BaseModel):
+    """schedule.yaml `reconcile`: 시장별 야간 대사 시각. 마감 뒤(US 는 뉴욕 시각)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: str | ReconcileAt = "15:45"  # 문자열이면 KST
+    us: str | ReconcileAt = Field(
+        default_factory=lambda: ReconcileAt(time="16:15", tz="America/New_York")
+    )
+
+
+class BalanceRefreshSchedule(BaseModel):
+    """schedule.yaml `balance_refresh`: 잔고 갱신 틱 주기(초)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(default=300, ge=1)
+
+
+SCHEDULE_SECTIONS = (
+    Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),
+    Section("schedule", "reconcile", ReconcileSchedule, ReconcileSchedule),
+    Section("schedule", "balance_refresh", BalanceRefreshSchedule, BalanceRefreshSchedule),
 )

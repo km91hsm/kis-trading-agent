@@ -128,3 +128,19 @@ def test_cli_telegram_poll_without_config_fails(env, monkeypatch):
     monkeypatch.setattr(cli_main, "make_receiver", lambda *a, **k: None)
     r = CliRunner().invoke(app, ["telegram", "poll"])
     assert r.exit_code == 1
+
+
+def test_cli_fills_sync_prints_json_per_account(env):
+    import json
+
+    broker, _sent, _aid = env
+    r = CliRunner().invoke(app, ["spot", "fills", "sync", "--date", "2026-10-09"])
+    assert r.exit_code == 0
+    line = json.loads(r.stdout.strip().splitlines()[-1])
+    assert line["account_id"] == "paper-main" and line["date"] == "2026-10-09"
+    r = CliRunner().invoke(app, ["spot", "fills", "sync", "--account", "none"])
+    assert r.exit_code == 0 and r.stdout.strip() == ""
+    broker.fail = {"get_fills"}
+    r = CliRunner().invoke(app, ["spot", "fills", "sync", "--date", "2026-10-09"])
+    assert r.exit_code == 1
+    assert CliRunner().invoke(app, ["spot", "fills", "sync", "--date", "x"]).exit_code == 1

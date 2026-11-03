@@ -4,16 +4,16 @@ from pathlib import Path
 from trader.kernel.ledger.migrations import Migration
 from trader.kernel.registry import contracts
 from trader.kernel.registry.discover import discover
-from trader.kernel.registry.types import Feature, OriginSpec, QueueKind, SseKey
+from trader.kernel.registry.types import Feature, GateSpec, OriginSpec, QueueKind, SseKey
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 OK_ROOT = FIXTURES / "features_ok"
 
 
 def _ok() -> list[Feature]:
-    # alpha 가 v2·v3 자리를 채워 커널 모듈 v4(session)와 버전이 연속되게 한다.
+    # alpha 가 v2·v3·v6·v9 자리를 채워 커널 모듈(v4·v5·v7·v8)과 버전이 연속되게 한다.
     alpha, beta = discover("tests.fixtures.features_ok")
-    stubs = (Migration(2, "a2", owner="alpha"), Migration(3, "a3", owner="alpha"))
+    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, 9))
     return [replace(alpha, migrations=stubs), beta]
 
 
@@ -78,12 +78,13 @@ def test_contracts_reject_duplicate_migration_version():
 def test_interleaved_migration_versions_across_features_are_accepted():
     alpha, beta = _ok()
     alpha = replace(
-        alpha, migrations=(Migration(2, "a2", owner="alpha"), Migration(6, "a6", owner="alpha"))
+        alpha,
+        migrations=tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 6, 9)),
     )
     beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
     msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
     assert not any("마이그레이션" in m for m in msgs)
-    assert [m.version for m in contracts.all_migrations([alpha, beta])] == [1, 2, 3, 4, 5, 6]
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 10))
 
 
 def test_duplicate_version_still_reported_with_interleaving():
@@ -156,3 +157,14 @@ def test_stage_rule_defaults():
     r = StageRule(pattern="x")
     assert r.requires == () and r.min_counts == ()
     assert ToolCommand(name="t", handler=print).stage_rules == ()
+
+
+def test_gate_names_unique_and_known():
+    alpha, beta = _ok()
+    mk = lambda name: GateSpec(name, lambda boot, deps: lambda job: None)  # noqa: E731
+    ok = [replace(alpha, gates=(mk("market"), mk("monitor"))), beta]
+    assert contracts.check(ok, roots=[OK_ROOT]) == []
+    dup = [replace(alpha, gates=(mk("market"),)), replace(beta, gates=(mk("market"),))]
+    assert any("게이트 중복" in m and "market" in m for m in contracts.check(dup, roots=[OK_ROOT]))
+    bad = [replace(alpha, gates=(mk("nope"),)), beta]
+    assert any("nope" in m for m in contracts.check(bad, roots=[OK_ROOT]))
