@@ -133,7 +133,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 13 체결통보 리스너(`notice`)
 - [x] Task 14 큐 `reevaluate` 요청·종목 락
 - [x] Task 15 문서·템플릿·체크리스트·골든 재검증
-- [ ] PR·CI(ubuntu+windows)·머지
+- [x] PR·CI(ubuntu+windows)·머지 (#6, main a12d41f)
 - 이연(M2, M5 가 한 것): 체결통보 리스너(`_notice_listeners`)
 - 이연(M5):
   - M6: killswitch·hedge·`cash_park`·`excluded_tickers`(monitor 의 헤지/현금 운용 건너뛰기·`cancel_buys`)
