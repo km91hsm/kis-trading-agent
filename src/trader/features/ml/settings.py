@@ -1,5 +1,5 @@
 """ml 설정 섹션: ml.yaml 의 `label`·`train`·`models`,
-schedule.yaml 의 `ml_train`·`universe_members`.
+schedule.yaml 의 `ml_train`·`universe_members`·`features_snapshot`.
 
 yaml 키를 더하면 `templates/config/ml.yaml` 도 같이 바꾼다."""
 
@@ -149,6 +149,7 @@ SECTIONS = (
 SCHEDULE_SECTIONS = (
     Section("schedule", "ml_train", MlTrainSchedule, MlTrainSchedule),
     Section("schedule", "universe_members", str, lambda: "06:40"),
+    Section("schedule", "features_snapshot", str, lambda: "06:30"),
 )
 
 

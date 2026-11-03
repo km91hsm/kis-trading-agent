@@ -1,4 +1,5 @@
-"""ml 데몬 잡: `ml_train`(주간 퀀트 재학습)·`universe_members`(시점 유니버스 기록)와 큐 kind
+"""ml 데몬 잡: `ml_train`(주간 퀀트 재학습)·`universe_members`(시점 유니버스 기록)·
+`features_snapshot`(일일 피처 스토어 스냅샷)와 큐 kind
 `features_backfill|snapshot|derive`·`ml_train`, 기동 훅 `daemon.bootstrap`(피처 스토어가 비면
 백필+학습 요청).
 
@@ -145,6 +146,11 @@ def features_action(deps, action: str, p: dict, progress) -> dict:
     return {"rows": int(n)}
 
 
+def features_snapshot_body(deps, job=None) -> dict:
+    """일일 피처 스토어 스냅샷(전 시장). 큐 kind 와 같은 `features_action`."""
+    return features_action(deps, "snapshot", {}, lambda *_a, **_k: None)
+
+
 def features_request_for(action: str):
     def body(deps, params: dict, progress) -> dict:
         return features_action(deps, action, params, progress)
@@ -193,6 +199,12 @@ UNIVERSE_MEMBERS = JobSpec(
     id="universe_members", kind="universe_members", trigger="cron", per_market=False,
     schedule_key="universe_members", interval_s=None, enabled=None, gate="none", heavy=False,
     misfire="idempotent", catch_up="direct", start_soon_s=0, body=universe_members_body,
+)  # fmt: skip
+
+FEATURES_SNAPSHOT = JobSpec(
+    id="features_snapshot", kind="features_snapshot", trigger="cron", per_market=False,
+    schedule_key="features_snapshot", interval_s=None, enabled=None, gate="none", heavy=True,
+    misfire="idempotent", catch_up="direct", start_soon_s=0, body=features_snapshot_body,
 )  # fmt: skip
 
 QUEUE_KINDS = (

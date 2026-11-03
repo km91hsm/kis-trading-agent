@@ -83,12 +83,14 @@ def test_build_jobs_registers_ml_train_sat_and_universe_members(project, setting
         ctx=SimpleNamespace(gates={}),
     )  # fmt: skip
     got = {j.id: j for j in out}
-    assert set(got) == {"ml_train", "universe_members"}
+    assert set(got) == {"ml_train", "universe_members", "features_snapshot"}
     assert got["ml_train"].cron == {
         "hour": 10, "minute": 0, "day_of_week": "sat",
     }  # fmt: skip
     assert str(got["ml_train"].trigger_kwargs["timezone"]) == "Asia/Seoul"
     assert got["universe_members"].cron == {"hour": 6, "minute": 40}
+    assert got["features_snapshot"].cron == {"hour": 6, "minute": 30}  # 매일(day_of_week 없음)
+    assert str(got["features_snapshot"].trigger_kwargs["timezone"]) == "Asia/Seoul"
     assert (got["ml_train"].spec.heavy, got["ml_train"].spec.catch_up) == (True, "none")
     assert (got["universe_members"].spec.heavy, got["universe_members"].spec.catch_up) == (
         False, "direct",
@@ -181,6 +183,37 @@ def test_features_action_reports_progress_per_ticker(project, settings, monkeypa
     assert ml_jobs.features_action(deps, "snapshot", {}, msgs.append) == {
         "error": "시세 클라이언트 없음(피처 작업 불가)"
     }
+
+
+def test_features_snapshot_body_calls_snapshot_action(project, settings, monkeypatch):
+    calls = []
+
+    def fake_action(deps, action, p, progress):
+        calls.append((action, p))
+        progress("x")
+        return {"rows": 7}
+
+    monkeypatch.setattr(ml_jobs, "features_action", fake_action)
+    deps = _deps(project, settings, client=object())
+    assert ml_jobs.features_snapshot_body(deps, None) == {"rows": 7}
+    assert calls == [("snapshot", {})]
+
+
+def test_features_snapshot_body_covers_all_markets(project, settings, monkeypatch):
+    seen = {}
+
+    def fake_snapshot(**kw):
+        seen.update(kw)
+        return 3
+
+    monkeypatch.setattr(features, "snapshot", fake_snapshot)
+    monkeypatch.setattr(ingest_api, "build_dart", lambda s: "dart")
+    monkeypatch.setattr(ingest_api, "build_edgar", lambda *a: "edgar")
+    monkeypatch.setattr(ingest_api, "load_sources", lambda r: None)
+    monkeypatch.setattr(ingest_api, "load_universe", lambda: "uni")
+    deps = _deps(project, settings, client=object())
+    assert ml_jobs.features_snapshot_body(deps, None) == {"rows": 3}
+    assert seen["markets"] == list(deps.settings.markets)
 
 
 def test_queue_kinds_declaration():

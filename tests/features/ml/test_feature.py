@@ -16,6 +16,7 @@ def test_feature_declaration():
         ("ml", "models"),
         ("schedule", "ml_train"),
         ("schedule", "universe_members"),
+        ("schedule", "features_snapshot"),
     }
 
 
