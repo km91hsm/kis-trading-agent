@@ -21,6 +21,7 @@ def test_selfcheck_json_has_version_and_features(project):
     assert data["ledger_version"] == max(m.version for m in all_migrations(discover()))
     assert data["features"] == [
         "accounts",
+        "briefing",
         "evaluation",
         "ingest",
         "ml",

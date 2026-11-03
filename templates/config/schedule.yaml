@@ -42,3 +42,4 @@ reflect: "16:30"   # 복기(KST, 평일): 만기 채점 → 복기 세션 → �
 daily_report: {kr: "16:20", us: {time: "16:20", tz: America/New_York}}   # 일일 리포트(시장 현지 마감 뒤, 평일)
 paper_review: {time: "09:00", days: sat}   # 모의 체결 점검(KST, 토)
 rl_train: {time: "10:30", days: sat}   # RL 사이저 주간 학습(KST, 토; ml_train 뒤)
+briefing: "07:20"   # 아침 브리핑(KST, 평일; KR 휴장일·일시정지 제외)

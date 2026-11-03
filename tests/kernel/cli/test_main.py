@@ -54,6 +54,7 @@ def test_boot_loads_settings_and_conn(project):
         assert b.conn is not None
         assert [f.id for f in b.features] == [
             "accounts",
+            "briefing",
             "evaluation",
             "ingest",
             "ml",
