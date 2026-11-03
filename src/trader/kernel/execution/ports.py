@@ -187,7 +187,7 @@ class ScalpPort(Protocol):
     """단타 레인 조회(scalp 제공) — 다른 레인이 단타 보유분을 건드리지 않게 한다."""
 
     def open_tickers(self, state: Path | None, market: str, today: date) -> set[str]:
-        """오늘 단타가 들고 있는(진입·청산 대기 포함) 종목 집합."""
+        """오늘 단타가 들고 있는(`open` — 청산 대기 포함, 판정 대기 `pending` 제외) 종목 집합."""
         ...
 
 

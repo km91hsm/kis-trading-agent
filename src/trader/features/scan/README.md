@@ -12,7 +12,7 @@
 - 큐 kind `discover`(장중 발굴, `jobs.discover_request`)·텔레그램 `/watch`(관심종목). 훅: `news.post_ingest` → `triggers.post_ingest`(시장별 `events_check` 뒤 `deps` 가 있으면 공시·뉴스 트리거).
 - 설정 파일 `events`(`templates/config/events.yaml`, 사건 31개): `enabled`·`lookback_hours`·`max_picks_per_event`·`max_event_picks`·`events`(`EventDef`, id 중복 거부). `load_events()`.
 - 잡(`jobs.py`): `{market}_theme`(`THEME`, interval=`schedule.theme.interval_s`, 게이트 `monitor`, `theme.enabled` 일 때만) — `theme_body` 가 `compute`→`record`→상위가 바뀔 때만 알림.
-- 포트(`ports.py`): `ports["scan"]` = `ScanPortImpl.theme_of(conn, market, today)` → 종목 → 오늘 상위 테마·shock 사건 라벨(없으면 None). spot 게이트가 쓴다.
+- 포트(`ports.py`): `ports["scan"]` = `ScanPortImpl.theme_of(conn, market, today)` → 종목 → 오늘 상위 테마·shock 사건 라벨(없으면 None). spot 게이트가 쓴다. `watchlist(conn, market)` → 런타임 관심종목(`/watch`·웹, market 을 주면 그 시장 종목만 접두사 없이) — scalp 후보 소스(M9).
 - CLI(`cli.py`, `uv run trader scan --help`): `trader scan theme show [--market KR] [--live]`, `trader scan events show [--market KR]`(읽기 전용 JSON), `trader scan run [--market --asof --dry-run]`(`--dry-run` 은 screener 세션 없이 정량 상위만)·`backtest`·`universe check|sectors`(아래 M7 절).
 - 문구(`messages.py`): `theme_heat`·`theme_name`·`event_detected`.
 - 다른 기능의 표를 읽는 데이터 접근: `ingest` 의 `news_items`, `spot` 의 `ticker_names`(`SELECT ticker, name FROM ticker_names WHERE market=?`).
