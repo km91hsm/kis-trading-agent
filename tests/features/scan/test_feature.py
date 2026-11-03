@@ -21,6 +21,8 @@ def test_feature_declares_theme_sections_and_v11():
         "enabled", "lookback_hours", "max_picks_per_event", "max_event_picks", "events",
     }  # fmt: skip
     assert [h.point for h in FEATURE.hooks] == ["news.post_ingest"]
+    assert [q.kind for q in FEATURE.queue_kinds] == ["discover"]
+    assert [c.name for c in FEATURE.telegram_commands] == ["watch"]
     assert [(m.version, m.name, m.owner) for m in FEATURE.migrations] == [
         (11, "scan_theme_heat", "scan")
     ]

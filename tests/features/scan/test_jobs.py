@@ -107,3 +107,40 @@ def test_theme_map_uses_recorded_members(conn, project, settings):
     assert theme.theme_of_map(conn, "KR", date(2026, 10, 26), top_n=3) == {
         "111111": ["섹터:반도체"]
     }
+
+
+def test_discover_request_runs_fake_scout_and_queues_candidates(conn, project, monkeypatch):
+    """옛 `test_discover_body_runs_fake_scout_and_queues_candidates` 이식: 뉴스 트리거가 넣은
+    discover 요청을 본문(`triggers.discover_request`)으로 실행한다."""
+    from tests.features.scan.test_triggers import NOW as TNOW
+    from tests.features.scan.test_triggers import _news, _queued, trigger_deps
+    from trader.features.scan import triggers
+    from trader.kernel.session.run_store import market_dir, read_checkpoint, run_date_for
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    (project / "config" / "universe.yaml").write_text(
+        "kr: ['005930', '000660']\n", encoding="utf-8"
+    )
+    deps = trigger_deps(project, conn, notifier=Sent())
+    _news(conn, [("삼성전자 대형 수주", ["005930"])])
+    uni = SimpleNamespace(kr=["005930", "000660"], us=[], watch=[], exclude=[])
+    triggers.news_trigger(deps, conn, "KR", uni)
+    # analyze_ticker(priority 5)가 먼저 잡히므로 취소하고 discover 만 실행
+    conn.execute("UPDATE job_requests SET status='skipped' WHERE kind='analyze_ticker'")
+    conn.commit()
+    assert [k for k, _, _ in _queued(conn)] == ["discover"]
+    res = triggers.discover_request(deps, {"market": "KR"}, lambda text: None)
+    assert res["novel"] == 1 and res["candidates"] == 1
+    assert res["queued"][0]["ticker"] == "005930" and res["queued"][0]["tier"] == "universe"
+    d = market_dir(run_date_for("KR", TNOW), "KR", deps.state)
+    assert read_checkpoint(d, "_discovery_r1")["data"]["candidates"][0]["ticker"] == "005930"
+
+
+def test_discover_request_skips_without_novel_news(conn, project):
+    from tests.features.scan.test_triggers import trigger_deps
+    from trader.features.scan import triggers
+
+    deps = trigger_deps(project, conn)
+    assert triggers.discover_request(deps, {"market": "KR"}, lambda t: None) == {
+        "skipped": "새 뉴스 없음"
+    }

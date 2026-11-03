@@ -9,7 +9,7 @@
 - 조회: `theme_of_map`·`members_of`(종목 → 상위 테마들, 오늘 기록만).
 - 사건 감지(`events.py`): 뉴스 키워드 건수 ≥ `min_news` 인 사건을 `control.events:<m>` 에 기록(shock 만 테마 안전장치). `events_check`(`jobs.py`)가 감지→기록→처음 본 사건만 알림.
 - 소속 조회(`membership.py`): `of`·`for_ticker` — 종목의 오늘 상위 테마·shock 사건, `asof` 뒤 관측 기록은 제외(룩어헤드 방지).
-- 훅: `news.post_ingest` → `events_post_ingest`(시장별 `events_check`, `notifier` kwarg 사용, 나머지 kwargs 무시).
+- 큐 kind `discover`(장중 발굴)·텔레그램 `/watch`(Task 11). 훅: `news.post_ingest` → `triggers.post_ingest`(시장별 `events_check` 뒤 `deps` 가 있으면 공시·뉴스 트리거).
 - 설정 파일 `events`(`templates/config/events.yaml`, 사건 31개): `enabled`·`lookback_hours`·`max_picks_per_event`·`max_event_picks`·`events`(`EventDef`, id 중복 거부). `load_events()`.
 - 잡(`jobs.py`): `{market}_theme`(`THEME`, interval=`schedule.theme.interval_s`, 게이트 `monitor`, `theme.enabled` 일 때만) — `theme_body` 가 `compute`→`record`→상위가 바뀔 때만 알림.
 - 포트(`ports.py`): `ports["scan"]` = `ScanPortImpl.theme_of(conn, market, today)` → 종목 → 오늘 상위 테마·shock 사건 라벨(없으면 None). spot 게이트가 쓴다.
