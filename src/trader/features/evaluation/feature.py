@@ -1,9 +1,10 @@
 """evaluation 기능 선언 (서비스): 설정 절·원장 v13·제어 네임스페이스. 잡·CLI 는 뒤 Task."""
 
+from trader.features.evaluation.jobs import shadow_record_hook
 from trader.features.evaluation.migrations import MIGRATIONS
 from trader.features.evaluation.ports import PORT
 from trader.features.evaluation.settings import SCHEDULE_SECTIONS, SECTIONS
-from trader.kernel.registry.types import Feature
+from trader.kernel.registry.types import Feature, Hook
 
 FEATURE = Feature(
     id="evaluation",
@@ -12,4 +13,5 @@ FEATURE = Feature(
     migrations=MIGRATIONS,
     control_namespaces=("memory_breaker", "vix_last"),
     ports=(PORT,),
+    hooks=(Hook("scan_analyze.post", shadow_record_hook),),
 )

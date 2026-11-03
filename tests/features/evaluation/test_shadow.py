@@ -1,0 +1,294 @@
+"""섀도 포트폴리오(전체 검토 L1): LLM 선택 vs 같은 후보 1/N·정량 상위 — 쌍 비교로 알파를 잰다."""
+
+from datetime import date
+
+import numpy as np
+import pandas as pd
+
+from tests.features.ml.helpers import trading_days
+from trader.features.evaluation import shadow
+from trader.features.ml import api as ml_api
+
+D0 = date(2026, 9, 1)
+DAYS = trading_days(30, start=D0)
+
+
+def _store(prices: dict[str, list[float]]):
+    rows = []
+    for t, closes in prices.items():
+        for d, c in zip(DAYS[: len(closes)], closes, strict=True):
+            rows.append({"date": d, "ticker": t, "market": "KR", "close": c, "volume": 1})
+    df = pd.DataFrame(rows)
+    for c in ml_api.FEATURE_COLUMNS:
+        if c not in df.columns:
+            df[c] = np.nan
+    ml_api.write_rows(df[ml_api.FEATURE_COLUMNS])
+
+
+def _decision(conn, ticker, action, w, *, source="llm", d=None):
+    conn.execute(
+        "INSERT INTO decisions(date, market, ticker, action, target_weight, confidence, data_json, "
+        "created_at, source) VALUES (?, 'KR', ?, ?, ?, 0.7, '{}', '2026-09-01T00:00:00+00:00', ?)",
+        ((d or DAYS[0]).isoformat(), ticker, action, w, source),
+    )
+    conn.commit()
+
+
+SCAN = {
+    "candidates": [
+        {"ticker": "A", "score": 0.9},
+        {"ticker": "B", "score": 0.5},
+        {"ticker": "C", "score": 0.1},
+        {"ticker": "D", "score": None},  # 피처 없음 → 1/N 에서도 제외
+    ]
+}
+
+
+def test_record_builds_three_portfolios(conn):
+    _decision(conn, "B", "BUY", 0.2)
+    _decision(conn, "C", "HOLD", 0.0)
+    _decision(conn, "X", "BUY", 0.1, source="hedge")  # 헤지는 LLM 선택이 아니다
+    n = shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    assert n == 4  # candidates_1n·quant_topn·llm·llm_all
+    got = {r["strategy"]: r["weights"] for r in shadow.rows(conn, market="KR")}
+    assert got["candidates_1n"] == {"A": 1 / 3, "B": 1 / 3, "C": 1 / 3}
+    assert got["quant_topn"] == {"A": 0.5, "B": 0.5}
+    assert got["llm"] == {"B": 1.0}
+    # 같은 날 재실행(실패 뒤 재시도)은 만기 전 행을 덮어쓴다 — 행 수는 그대로
+    _decision(conn, "A", "ADD", 0.1)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    got = {r["strategy"]: r["weights"] for r in shadow.rows(conn, market="KR")}
+    assert len(shadow.rows(conn, market="KR")) == 4
+    assert got["llm"] == {"A": 1 / 3, "B": 2 / 3}
+
+
+def test_llm_without_buys_is_cash(conn):
+    _decision(conn, "A", "HOLD", 0.0)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    got = {r["strategy"]: r["weights"] for r in shadow.rows(conn, market="KR")}
+    assert got["llm"] == {}
+
+
+def test_mature_fills_forward_return_only_after_horizon(conn, project):
+    _store({"A": [100.0] * 7, "B": [100, 101, 102, 103, 104, 110, 111], "C": [100.0] * 7})
+    _decision(conn, "B", "BUY", 0.2)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    # 만기 봉(DAYS[5]) 전이면 채우지 않는다
+    assert shadow.mature(conn, state=project / "state", today=DAYS[4], horizon=5) == 0
+    assert shadow.mature(conn, state=project / "state", today=DAYS[5], horizon=5) == 4
+    got = {r["strategy"]: r["fwd_ret"] for r in shadow.rows(conn, market="KR")}
+    assert abs(got["llm"] - 0.10) < 1e-9
+    assert abs(got["quant_topn"] - 0.05) < 1e-9
+    assert abs(got["candidates_1n"] - 0.10 / 3) < 1e-9
+    # 멱등, 만기된 행은 재기록이 덮지 않는다
+    assert shadow.mature(conn, state=project / "state", today=DAYS[6], horizon=5) == 0
+    _decision(conn, "A", "BUY", 0.3)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    after = {r["strategy"]: (r["weights"], r["fwd_ret"]) for r in shadow.rows(conn, market="KR")}
+    assert after["llm"] == ({"B": 1.0}, got["llm"])
+
+
+def test_mature_cash_portfolio_is_zero_when_window_closed(conn, project):
+    _store({"A": [100.0] * 7, "B": [100.0] * 7, "C": [100.0] * 7})
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    shadow.mature(conn, state=project / "state", today=DAYS[6], horizon=5)
+    got = {r["strategy"]: r["fwd_ret"] for r in shadow.rows(conn, market="KR")}
+    assert got["llm"] == 0.0
+
+
+def test_mature_holds_when_weighted_ticker_has_no_close_then_marks_partial(conn, project):
+    """전체 검토 2차 2-L1: 비중 있는 종목이 하나라도 종가가 없으면(유니버스 밖 매수 종목의 봉 없음)
+    남은 비중으로 재정규화해 확정하지 않고 만기 + 유예까지 보류한다. 유예가 지나도 없으면 `partial`
+    로 표시해 채우되 `paired_stats` 에서는 뺀다(선택 편향 방지)."""
+    from datetime import timedelta
+
+    _store({"A": [100, 101, 102, 103, 104, 110, 111], "C": [100.0] * 7})  # B 는 종가 없음
+    _decision(conn, "B", "BUY", 0.2)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    # 만기 봉(DAYS[5])이 지났어도 B 가 비어 있는 llm·candidates_1n·quant_topn 은 보류
+    assert shadow.mature(conn, state=project / "state", today=DAYS[6], horizon=5) == 0
+    assert all(r["fwd_ret"] is None for r in shadow.rows(conn, market="KR"))
+    # 유예(GRACE_DAYS)가 지나면 partial 로 채운다 — 있는 종목만의 비중 평균, 전부 없으면 0
+    late = DAYS[5] + timedelta(days=shadow.GRACE_DAYS + 1)
+    assert shadow.mature(conn, state=project / "state", today=late, horizon=5) == 4
+    got = {r["strategy"]: r for r in shadow.rows(conn, market="KR")}
+    assert all(r["partial"] is True for r in got.values())
+    assert abs(got["quant_topn"]["fwd_ret"] - 0.10) < 1e-9  # A 만
+    assert got["llm"]["fwd_ret"] == 0.0
+    assert shadow.paired_stats(conn)["n"] == 0
+    assert shadow.paired_stats(conn, b="quant_topn")["n"] == 0
+
+
+def test_mature_full_rows_are_not_partial(conn, project):
+    _store({"A": [100.0] * 7, "B": [100.0] * 7, "C": [100.0] * 7})
+    _decision(conn, "A", "BUY", 0.2)  # 현금인 날은 선택 효과 쌍에서 빠진다(2-L3)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    shadow.mature(conn, state=project / "state", today=DAYS[6], horizon=5)
+    assert all(r["partial"] is False for r in shadow.rows(conn, market="KR"))
+    assert shadow.paired_stats(conn)["n"] == 1
+
+
+def _seed_matured(conn, diffs: list[float]):
+    for i, dlt in enumerate(diffs):
+        d = date(2026, 1, 1).toordinal() + i
+        day = date.fromordinal(d).isoformat()
+        for strat, ret in (("llm", 0.01 + dlt), ("candidates_1n", 0.01)):
+            conn.execute(
+                "INSERT INTO shadow_portfolios(market, date, strategy, weights_json, created_at, "
+                "fwd_ret, matured_at, def_version) VALUES ('KR', ?, ?, ?, ?, ?, ?, 2)",
+                (day, strat, '{"A": 1.0}', day, ret, day),
+            )
+    conn.commit()
+
+
+def test_paired_stats_ci_positive_when_llm_consistently_better(conn):
+    _seed_matured(conn, [0.004 + 0.001 * (i % 3) for i in range(25)])
+    s = shadow.paired_stats(conn)
+    assert s["n"] == 25
+    assert s["ci_low"] > 0 and s["mean_diff"] > 0
+
+
+def test_paired_stats_ci_straddles_zero_for_noise(conn):
+    _seed_matured(conn, [0.02 if i % 2 else -0.02 for i in range(24)])
+    s = shadow.paired_stats(conn)
+    assert s["ci_low"] < 0 < s["ci_high"]
+
+
+def test_paired_stats_empty(conn):
+    s = shadow.paired_stats(conn)
+    assert s == {"n": 0, "mean_diff": None, "ci_low": None, "ci_high": None}
+
+
+def test_block_bootstrap_is_wider_for_clustered_differences():
+    """연속 운영일의 5거래일 수익은 겹친다 → 블록 부트스트랩 구간이 독립 가정보다 넓다."""
+    d = np.array(([0.02] * 5 + [-0.01] * 5) * 3)
+    iid = shadow._block_bootstrap_means(d, block=1, n_boot=4000, seed=1)
+    blk = shadow._block_bootstrap_means(d, block=5, n_boot=4000, seed=1)
+    assert np.std(blk) > np.std(iid)
+    assert shadow._block_bootstrap_means(d[:2], block=5, n_boot=10, seed=0).shape == (10,)
+
+
+def _index(closes: list[float], days=None):
+    days = days or DAYS
+    return pd.DataFrame({"069500": closes}, index=pd.Index(days[: len(closes)], name="date"))
+
+
+def test_index_baselines_hold_and_trend():
+    """지수 보유·지수 추세(100일선 위면 보유, 아래면 현금) — Stock D-037~039: 규칙이 지수 보유를
+    못 이겼다. LLM 이 지수보다 나은지가 실전 전환의 핵심 질문."""
+    long_days = trading_days(130, start=date(2026, 3, 2))
+    up = _index([100 + i for i in range(130)], long_days)
+    down = _index([300 - i for i in range(130)], long_days)
+    day = long_days[-1]
+    w_up = shadow.index_weights(up, day=day)
+    assert w_up == {"index_hold": {"069500": 1.0}, "index_trend": {"069500": 1.0}}
+    w_down = shadow.index_weights(down, day=day)
+    assert w_down == {"index_hold": {"069500": 1.0}, "index_trend": {}}
+    assert shadow.index_weights(_index([100.0] * 50, long_days), day=day)["index_trend"] == {}
+    assert shadow.index_weights(pd.DataFrame(), day=day) == {}
+
+
+def test_record_and_mature_with_index_table(conn, project):
+    _store({"A": [100.0] * 7, "B": [100.0] * 7, "C": [100.0] * 7})
+    idx = _index([100, 100, 101, 102, 103, 104, 110.0])
+    _decision(conn, "A", "BUY", 0.2)  # 현금인 날은 선택 효과 쌍에서 빠진다(2-L3)
+    n = shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2, index=idx)
+    assert n == 6
+    got = {r["strategy"]: r["weights"] for r in shadow.rows(conn, market="KR")}
+    assert got["index_hold"] == {"069500": 1.0}
+    # 지수 proxy 는 피처 스토어에 없다 → 만기 때 넘겨 준 지수 종가표로 채운다
+    assert (
+        shadow.mature(
+            conn, state=project / "state", today=DAYS[6], horizon=5, index_tables={"KR": idx}
+        )
+        == 6
+    )
+    rets = {r["strategy"]: r["fwd_ret"] for r in shadow.rows(conn, market="KR")}
+    assert abs(rets["index_hold"] - 0.04) < 1e-9  # DAYS[0]=100 → 5거래일 뒤 104
+    assert rets["index_trend"] == 0.0  # 100일 미만 이력 → 현금
+    s = shadow.paired_stats(conn, b="index_hold")
+    assert s["n"] == 1
+
+
+def test_index_table_drops_incomplete_today_bar(conn):
+    """2-P4: 지수 proxy 종가표도 장중의 오늘 봉을 쓰지 않는다(now 를 주면 완성 봉까지)."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from trader.features.regime.api import HedgeCfg
+    from trader.kernel.broker.fake import FakeMarket
+    from trader.kernel.broker.models import Candle
+
+    d0 = date(2026, 10, 20)
+    cs = [
+        Candle(
+            date=d0 + timedelta(days=i),
+            open=Decimal(1),
+            high=Decimal(1),
+            low=Decimal(1),
+            close=Decimal(100 + i),
+            volume=5,
+        )
+        for i in range(4)  # 10-20 ~ 10-23(금)
+    ]
+    m = FakeMarket(candles={"069500": cs})
+    cfg = HedgeCfg()
+    assert len(shadow.index_table(m, cfg, "KR")) == 4
+    mid = datetime(2026, 10, 23, 1, 0, tzinfo=UTC)  # 10:00 KST 장중
+    assert list(shadow.index_table(m, cfg, "KR", now=mid).index) == [c.date for c in cs[:3]]
+    assert len(shadow.index_table(m, cfg, "KR", now=mid + timedelta(hours=6))) == 4
+
+
+def test_paired_stats_ci_none_below_two_blocks(conn):
+    """2-L2: 쌍이 2×블록(10) 미만이면 이동 블록 재표본이 서로 같아 신뢰구간이 `[mean, mean]` 으로
+    보인다 — 평균만 내고 구간은 없음(웹은 '부족', readiness 는 20쌍 조건으로 이미 막힘)."""
+    _seed_matured(conn, [0.01] * 9)
+    s = shadow.paired_stats(conn)
+    assert s["n"] == 9 and abs(s["mean_diff"] - 0.01) < 1e-9
+    assert s["ci_low"] is None and s["ci_high"] is None
+
+
+def test_llm_selection_uses_common_candidates_only(conn):
+    """2-L4: LLM 선택 비교는 같은 후보 집합 안에서만 — 발굴·watch·보유 재분석 종목(후보 밖)은
+    `llm` 에서 빼고 정보용 `llm_all` 에만 남긴다."""
+    _decision(conn, "B", "BUY", 0.2)
+    _decision(conn, "Z", "BUY", 0.2)  # 후보 밖(발굴)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    got = {r["strategy"]: r["weights"] for r in shadow.rows(conn, market="KR")}
+    assert got["llm"] == {"B": 1.0}
+    assert got["llm_all"] == {"B": 0.5, "Z": 0.5}
+
+
+def test_cash_days_are_excluded_from_selection_pairs_and_reported_separately(conn):
+    """2-L3: 공통 후보 안 BUY/ADD 가 없는 날(현금)은 선택 효과 쌍에서 빼고, 현금 효과(0 − 후보
+    1/N)는 따로 잰다 — 하락장 관망이 종목 선택 알파로 잡히지 않게."""
+    for i, (llm_w, cand) in enumerate([("{}", -0.03), ("{}", -0.02), ('{"A": 1.0}', 0.01)]):
+        day = date(2026, 2, 1 + i).isoformat()
+        for strat, w, ret in (
+            ("llm", llm_w, 0.0 if llm_w == "{}" else 0.02),
+            ("candidates_1n", '{"A": 1.0}', cand),
+        ):
+            conn.execute(
+                "INSERT INTO shadow_portfolios(market, date, strategy, weights_json, created_at, "
+                "fwd_ret, matured_at, def_version) VALUES ('KR', ?, ?, ?, ?, ?, ?, 2)",
+                (day, strat, w, day, ret, day),
+            )
+    conn.commit()
+    s = shadow.paired_stats(conn)
+    assert s["n"] == 1 and abs(s["mean_diff"] - 0.01) < 1e-9
+    ce = shadow.cash_effect(conn, market="KR")
+    assert ce["n"] == 2 and abs(ce["mean"] - 0.025) < 1e-9
+
+
+def test_record_writes_current_def_version(conn):
+    """A4: `record` 는 항상 현재 `DEF_VERSION` 을 쓴다(NULL 행은 새 스키마에 없다)."""
+    _decision(conn, "B", "BUY", 0.2)
+    shadow.record(conn, market="KR", day=DAYS[0], scan=SCAN, top_n=2)
+    vers = {
+        r["strategy"]: r["def_version"]
+        for r in conn.execute(
+            "SELECT strategy, def_version FROM shadow_portfolios WHERE date=?",
+            (DAYS[0].isoformat(),),
+        )
+    }
+    assert set(vers.values()) == {shadow.DEF_VERSION}
