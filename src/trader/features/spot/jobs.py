@@ -14,6 +14,7 @@ from trader.features.spot import (
     balance,
     executor,
     fills,
+    hedge,
     labels,
     locks,
     monitor,
@@ -121,7 +122,9 @@ def fills_body(ctx, job) -> dict:
 
 def balance_refresh(ctx, *, force: bool = False) -> dict:
     """시장별 잔고 갱신(조회만). 정규장 시장은 매 틱, 장 밖 시장은 스냅샷이 `OFF_HOURS_EVERY`
-    보다 오래됐을 때만(입출금·이체 반영). force 면 장 밖이어도 바로 읽는다."""
+    보다 오래됐을 때만(입출금·이체 반영). force 면 장 밖이어도 바로 읽는다. `ports["regime"]` 가
+    있으면 킬스위치를 관측하고, dry-run 이 아니면 장중 시장에서 킬스위치 계좌의 당일 미체결 BUY 를
+    거둔다(장 밖엔 거둘 당일 주문이 없다 — 옛 `cancel_buys=not dry_run and m in open_now`)."""
     stop = getattr(ctx, "stop_event", None)
     if stop is not None and stop.is_set():  # 일시정지는 거래 중단일 뿐 — 잔고 조회는 계속
         return {"skipped": "종료 중"}
@@ -133,8 +136,10 @@ def balance_refresh(ctx, *, force: bool = False) -> dict:
     conn = ctx.conn_factory()
     try:
         ectx = executor.exec_ctx_from(
-            ctx.settings, conn, ctx.ports.get("accounts"), ctx.notifier, ctx.now, ctx.state
-        )
+            ctx.settings, conn, ctx.ports.get("accounts"), ctx.notifier, ctx.now, ctx.state,
+            ports=ctx.ports,
+        )  # fmt: skip
+        dry_run = bool(getattr(ctx, "dry_run", True))  # 모르면 취소하지 않는다
         return {
             m: balance.refresh(
                 conn,
@@ -146,6 +151,9 @@ def balance_refresh(ctx, *, force: bool = False) -> dict:
                 state=ctx.state,
                 only_stale=not force and m not in open_now,
                 stale_after=balance.OFF_HOURS_EVERY,
+                regime=ctx.ports.get("regime"),
+                cancel_buys=not dry_run and m in open_now,
+                cancel_fn=executor.killswitch_canceller(ectx),
             )
             for m in markets
         }
@@ -278,10 +286,24 @@ def _reprice_if_due(ctx, ectx, market: str, today) -> dict:
     )
 
 
+def _hedge_if_due(ctx, market: str) -> dict | None:
+    """국면 헤지 틱(`hedge.hedge_tick`, 운영일 1회). 건너뜀(`skipped`)이면 None — 결과에 싣지
+    않는다. 예외는 `[헤지 실패]` 알림 + `{"error": …}` 로 돌려 손절 점검을 막지 않는다."""
+    try:
+        out = hedge.hedge_tick(ctx, market)
+    except Exception as e:  # noqa: BLE001 - 헤지 실패가 손절 점검을 막지 않는다
+        logger.exception("헤지 실행 실패 %s", market)
+        note = messages.failure("헤지 실패", market, e)
+        core.notify_quietly(ctx.notifier or NullNotifier(), note)
+        return {"error": f"{type(e).__name__}: {e}"}
+    return None if "skipped" in out else out
+
+
 def monitor_body(ctx, job) -> dict:
     """`{market}_monitor` interval 잡 본문(장중 창은 게이트 `monitor` 가 본다). 재평가 세션은 틱
     안에서 돌리지 않고 큐 kind `reevaluate` 로 넘긴다 — 세션이 도는 동안 손절 점검이 멈추면 안
-    된다. 운영일은 시장 현지(US 는 뉴욕 날짜)."""
+    된다. 운영일은 시장 현지(US 는 뉴욕 날짜). 손절 점검 전에 국면 헤지(`hedge`, 운영일 1회)와
+    아침 재호가(`reprice`)를 시도하고, 건너뛰지 않았으면 결과에 그 키로 싣는다."""
     market = job.market or "KR"
     port = ctx.ports.get("accounts")
     if port is None:
@@ -296,6 +318,9 @@ def monitor_body(ctx, job) -> dict:
             return {"skipped": "시세 클라이언트 없음"}
         today = run_date_for(market, ctx.now())
         extra: dict[str, Any] = {}
+        hd = _hedge_if_due(ctx, market)
+        if hd is not None:
+            extra["hedge"] = hd
         try:  # 재호가 실패가 손절 점검을 막지 않는다
             rp = _reprice_if_due(ctx, ectx, market, today)
             if not isinstance(rp.get("skipped"), str):  # 건너뜀 사유(문자열)는 싣지 않는다

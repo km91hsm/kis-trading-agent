@@ -225,6 +225,7 @@ def balance_refresh(
                 state=ectx.state,
                 only_stale=not force and not balance_mod.open_markets([m], now),
                 stale_after=balance_mod.OFF_HOURS_EVERY,
+                regime=b.ports.get("regime"),  # 킬스위치 관측만(취소는 데몬 갱신)
             )
             failed = failed or bool(r["errors"])
             typer.echo(json.dumps({m: r}, ensure_ascii=False))

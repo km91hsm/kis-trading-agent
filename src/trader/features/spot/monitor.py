@@ -20,6 +20,7 @@ from typing import Any
 
 from trader.features.spot import executor, fills, horizon, labels, resume
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.monitor_rules import (
     Signal,
     check_position,
@@ -200,11 +201,14 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
 
     재평가 세션 실패는 트리거에 기록하고 다음 종목으로 넘어간다 (손절 점검을 막지 않는다). 한
     종목 점검의 예상 밖 예외도 `result["errors"]` 에 적고 다음 종목으로 넘어간다.
+    `excluded_tickers`(헤지 ETF ∪ 현금 운용 ETF) 보유는 점검하지 않고 `skipped_excluded` 로 센다
+    (하나라도 있을 때만 키가 생긴다).
     """
     ex = ctx.exec
     result: dict[str, Any] = {"checked": 0, "stop_loss_orders": 0, "triggers": 0, "reevaluated": 0}
     quotes: dict[str, Decimal | None] = {}
     pending: list[tuple[Any, Position, list[Signal], dict | None]] = []
+    excluded = excluded_tickers(ex.settings, ctx.ports.get("regime"), market)
     for account in ex.accounts:
         broker = ex.brokers.get(account.id)
         if market not in account.markets or broker is None:
@@ -215,6 +219,10 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
             logger.warning("보유 조회 실패 %s: %s", account.id, e)
             continue
         for pos in positions:
+            if pos.ticker in excluded:
+                # 헤지·현금 운용 ETF 는 국면 해제·현금 운용 규칙으로만 판다(손절·트리거 대상 아님)
+                result["skipped_excluded"] = result.get("skipped_excluded", 0) + 1
+                continue
             try:
                 _check_one(ctx, account, market, pos, today, quotes, pending, result)
             except Exception as e:  # noqa: BLE001 - 한 종목 오류가 다른 종목 손절 점검을 막지 않는다

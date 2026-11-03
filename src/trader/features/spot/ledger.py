@@ -127,6 +127,45 @@ def ingest_checkpoint(
     conn.commit()
 
 
+def insert_hedge_decision(
+    conn: sqlite3.Connection, d: date, market: str, ticker: str, data: dict
+) -> int:
+    """파이썬이 만든 헤지 결정 행(`source='hedge'`). 같은 날·종목이면 갱신하고 행 id 를 돌려준다.
+    라운드 행은 만들지 않는다 — 손절 바닥·분포(llm 결정)에서 빠진다."""
+    conn.execute(
+        "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
+        "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
+        "data_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hedge', ?) "
+        "ON CONFLICT(date, market, ticker) DO UPDATE SET action=excluded.action, "
+        "target_weight=excluded.target_weight, order_type=excluded.order_type, "
+        "limit_price=excluded.limit_price, stop_loss=excluded.stop_loss, "
+        "take_profit=excluded.take_profit, horizon_days=excluded.horizon_days, "
+        "confidence=excluded.confidence, rationale=excluded.rationale, "
+        "data_json=excluded.data_json, source='hedge'",
+        (
+            d.isoformat(),
+            market,
+            ticker,
+            data.get("action"),
+            _txt(data.get("target_weight")),
+            data.get("order_type"),
+            _txt(data.get("limit_price")),
+            _txt(data.get("stop_loss")),
+            _txt(data.get("take_profit")),
+            data.get("horizon_days"),
+            data.get("confidence"),
+            data.get("rationale"),
+            _js(data),
+            now_iso(),
+        ),
+    )
+    conn.commit()
+    did = decision_id(conn, d, market, ticker)
+    if did is None:  # 방금 쓴 행이 없을 수 없다 — 원장 이상
+        raise RuntimeError(f"헤지 결정 행을 찾지 못함: {market} {ticker} {d}")
+    return did
+
+
 def _with_stop_floor(
     conn: sqlite3.Connection, did: int, rnd: int, market: str, ticker: str, data: dict, js: str
 ) -> tuple[dict, str]:

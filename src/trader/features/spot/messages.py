@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from trader.features.spot import labels
 from trader.kernel.notify import messages
 
@@ -17,4 +19,15 @@ def approval_line(a: dict, env: str | None = None) -> str:
     return (
         f"#{a['id']} {who} {side} {shown} {o.get('qty')}주 {price} · "
         f"{messages.kst_hhmm(a.get('expires_at'))} 만료"
+    )
+
+
+def hedge(
+    *, entering: bool, account: str, market: str, label: str, qty: Any, detail: str = ""
+) -> str:
+    """'[헤지 진입] paper-main · 인버스 ETF(114800)' + 수량·국면 줄. 해제는 '[헤지 해제]'."""
+    return messages.render(
+        "헤지 진입" if entering else "헤지 해제",
+        f"{account} · {label}",
+        [f"{'매수' if entering else '매도'} {qty}주", detail],
     )

@@ -6,8 +6,9 @@
 `_proxy_candles`→`inputs.proxy_candles`, `_ksd_body`→`jobs.ksd_body`, `_deps`→`DaemonDeps` +
 `ports["accounts"]` 가짜 포트(`FakeAccountsPort`), `Settings(...)`→`settings.model_copy`,
 `tools.sessions_today` monkeypatch→`kernel.session.calls.sessions_today`. DaemonDeps 는 frozen 이라
-속성 대입 대신 `dataclasses.replace`. 5번의 헤지 진입 단언(`_hedge_body`)은 Task 7(`spot.hedge`)
-몫이라 여기서 뺐다."""
+속성 대입 대신 `dataclasses.replace`. 5번의 헤지 진입 단언(`_hedge_body`)은 regime 이 spot 을
+import 할 수 없어 `tests/features/spot/test_jobs_hedge.py::
+test_market_view_then_hedge_tick_enters_at_proposal_weight` 로 옮겼다."""
 
 import threading
 from dataclasses import replace

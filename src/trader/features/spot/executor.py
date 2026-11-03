@@ -62,6 +62,7 @@ __all__ = [
     "exec_ctx_from",
     "execute",
     "expire_approvals",
+    "killswitch_canceller",
     "origin_of",
     "plan_of",
     "reject",
@@ -334,10 +335,12 @@ def cancel_open_buys(
 ) -> tuple[int, list[str]]:
     """당일(시장 현지) 미체결 주문(기본 BUY)을 `cancel_rows` 로 취소한다 — 결정이 매수에서
     돌아섰을 때·손절 직전 등. (취소 건수, 취소하지 못한 종목들) — 호출자가 알린다. 브로커가 없으면
-    (0, [])."""
+    (0, []). `keep` 종목은 거두지 않는다 — 기본(None)은 `excluded_tickers`(보호용 헤지·현금 운용
+    ETF)."""
     if ctx.brokers.get(account_id) is None:
         return 0, []
-    keep = keep or frozenset()
+    if keep is None:
+        keep = excluded_tickers(ctx.settings, ctx.ports.get("regime"), market)
     rows = [
         r
         for r in xledger.open_orders_today(ctx.conn, account_id, ticker, side, day, market=market)
@@ -347,6 +350,26 @@ def cancel_open_buys(
         ctx, account_id, market, rows, exchange_of=exchange_of,
         reason=reason or f"미체결 {side} 취소",
     )  # fmt: skip
+
+
+def killswitch_canceller(ctx: ExecContext) -> Callable[..., tuple[int, list[str]]]:
+    """`build_portfolio(cancel_fn=…)` 자리: 킬스위치가 켜진 계좌·시장의 당일 미체결 BUY 를
+    `cancel_open_buys` 로 거둔다(옛 `on_killswitch`). US 거래소는 관측 표(`ledger.exchange_of`)."""
+
+    def cancel(
+        account_id: str, market: str, day: date, *, keep: frozenset[str]
+    ) -> tuple[int, list[str]]:
+        return cancel_open_buys(
+            ctx,
+            account_id,
+            market,
+            day,
+            exchange_of=lambda t: spot_ledger.exchange_of(ctx.conn, market, t),
+            keep=keep,
+            reason="킬스위치 미체결 BUY 취소",
+        )
+
+    return cancel
 
 
 # --- 포트폴리오 ------------------------------------------------------------------------
@@ -838,19 +861,7 @@ def _execute_account(
     gate: Callable[[rules.Portfolio], rules.RiskVerdict] | None = None
     port = ctx.ports.get("regime")
 
-    def cancel(
-        account_id: str, market: str, day: date, *, keep: frozenset[str]
-    ) -> tuple[int, list[str]]:
-        return cancel_open_buys(
-            ctx,
-            account_id,
-            market,
-            day,
-            exchange_of=lambda t: spot_ledger.exchange_of(ctx.conn, market, t),
-            keep=keep,
-            reason="킬스위치 미체결 BUY 취소",
-        )
-
+    cancel = killswitch_canceller(ctx)
     try:
         if broker is None:
             raise KisApiError("NO_BROKER", f"계좌 {account.id} 브로커 없음(앱키 미설정)")
