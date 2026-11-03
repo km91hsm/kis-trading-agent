@@ -4,7 +4,7 @@
 
 - 현물(KR·US) 종목 분석 레인(tier=lane): 종목 1개를 분석해 결정(`30_decision`)을 만들고, 계좌마다 리스크를 판정해 주문 또는 승인 요청까지 보낸다. 리스크·주문은 파이썬 코드가 강제하고 LLM 은 `trader tool` 도구만 쓴다.
 - 설정: `settings.yaml` 의 `risk`·`debate_rounds`·`debate`(`settings.py`: `RiskLimits`·`DebateCfg`).
-- 원장 v6 테이블(`migrations.py`/`ledger.py`): `decisions`(날짜·시장·종목당 1행, 금액·비중은 TEXT), `decision_rounds`(라운드별 행, 0 = 최초 결정, `31_decision_r<n>` 은 M5 재평가), `analyst_reports`, `debate_turns`, `ticker_names`, `ticker_exchanges`. 체크포인트(`10_analyst_<role>`, `20_debate_r<n>_<side>`, `30_decision`)를 `ledger.ingest_checkpoint` 가 멱등 적재한다.
+- 원장 v6·v9 테이블(`migrations.py`/`ledger.py`): v9 `triggers`(장중 감시 트리거 — 종류·가격·처리 시각·세션 id), v6 `decisions`(날짜·시장·종목당 1행, 금액·비중은 TEXT), `decision_rounds`(라운드별 행, 0 = 최초 결정, `31_decision_r<n>` 은 M5 재평가), `analyst_reports`, `debate_turns`, `ticker_names`, `ticker_exchanges`. 체크포인트(`10_analyst_<role>`, `20_debate_r<n>_<side>`, `30_decision`)를 `ledger.ingest_checkpoint` 가 멱등 적재한다.
 - 세션: `session_kinds.py` 의 `ANALYZE`(`SessionKind`)·`AGENTS`(애널리스트 4 + bull/bear 리서처 + trader, md 는 `agents/`), `analyze.py`(입력 수집 → 세션 → 결정), `fake.py`(`FAKE_CLAUDE=1` 흉내).
 - 도구: `tool_cli.py` 의 `TOOLS`(`trader tool status|collect|checkpoint list|read|write|bundle|summarize|submit-decision`), 구현은 `tools.py`, 단계 전제조건은 `WRITE_RULES`·`SUBMIT_RULE`(`StageRule`, fnmatch glob).
 - 게이트·실행: `rules.py`(리스크 판정)·`costs.py`·`stance.py`·`stops.py`·`horizon.py`·`tradability.py`·`summary.py`(수렴 감시·합의 토론 생략), `executor.py`(`ExecContext`, 계좌별 판정 → 멱등 claim → 승인 요청 또는 `execution.core.transmit`, `ORIGINS`).
@@ -85,10 +85,11 @@ CLI·명령
 
 장중 감시(`monitor.py`)
 - 헤지 ETF·현금 운용(`excluded_tickers`) 건너뛰기와 헤지·현금 운용 틱은 없다(M6) — 모든 보유가 손절·트리거 대상이다.
-- `close` 무효화 조건의 종가표는 `MonitorContext.close_table(시장, since, until)` 주입이다(옛 피처 스토어 `ml.dataset.close_table` 은 M8). 주입이 없으면 그 조건은 미판정. 데몬·CLI 는 아직 주입하지 않는다.
-- US 거래소는 잔고 응답(`Position.exchange`) 다음 `MonitorContext.exchanges` 만 본다. 옛 `universe.us` 폴백은 없다(유니버스는 ingest 소유 — 데몬·CLI 는 빈 표를 넘긴다).
+- `close` 무효화 조건의 종가표는 `MonitorContext.close_table(시장, since, until)` 주입이다(옛 피처 스토어 `ml.dataset.close_table` 은 M8). 주입이 없으면 그 조건은 미판정. 데몬·CLI 는 아직 주입하지 않으며, 그런 결정이 있으면 시장·운영일당 경고 1회를 남긴다(`close_rule_unchecked:<시장>:<날짜>` 플래그).
+- US 거래소는 잔고 응답(`Position.exchange`) 다음 `MonitorContext.exchanges` 만 본다. 데몬 `monitor_body`·`trader spot monitor`·재호가는 `ledger.ticker_exchanges(conn, 시장)`(관측한 거래소 표)로 채운다. 옛 `universe.us` 폴백은 없다(유니버스는 ingest 소유).
 - 손절 바닥은 `max_stop_since(..., since_date=held_since)` — 보유 묶음 시작일 이후 **날짜**의 결정 라운드 손절가 최고값(옛 `date >= since` 와 같음; 결정 id 순서가 아니라 과거 asof 결정을 나중에 적재해도 바닥에 들어가지 않는다).
-- 손절 전 미체결 SELL·BUY 취소는 `kernel.execution.core.cancel` 을 지난다(옛 `broker.cancel_order` 직접 호출).
+- 손절 전 미체결 SELL·BUY 취소와 결정 전환 시 BUY 취소는 `executor.cancel_rows`/`cancel_open_buys` 한 곳을 지나 `kernel.execution.core.cancel` 로 간다(옛 `broker.cancel_order` 직접 호출). `core.cancel` 은 이미 끝난 주문이면 브로커를 부르지 않는다.
+- 데몬 `{market}_monitor` 의 게이트(`monitor`)는 일시정지를 보지 않는다(주말·휴장·장중 창만) — 옛 데몬은 `market_job` 게이트가 일시정지에 틱 전체를 건너뛰어 `stop_paused` 알림·트리거 기록이 CLI 에서만 났다. 의도한 개선(Ruling 20): 일시정지 중에도 손절선 도달은 하루 1회 알리고 트리거는 기록하되, 주문·취소·재평가는 `monitor_once` 가 막는다. 주문 경로 잡의 `market` 게이트는 그대로 일시정지에 건너뛴다.
 - 재평가 큐 등록은 데몬의 `enqueue_from_job(deps, "reevaluate", …)` — 등록 실패는 경고만 하고 다음 틱에 다시 본다(인라인으로 돌리지 않음). CLI `trader spot monitor` 는 큐가 없어 재평가 세션을 인라인으로 돌린다.
 
 실행·승인
@@ -106,5 +107,5 @@ M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·�
 - fills: `trader spot fills sync` 출력은 계좌마다 JSON 한 줄이다(옛 표 형식 아님). `AUTO_SOURCES` 에 `"restart"` 가 포함된다(Ruling 9). 조회 실패 계좌·시장은 잡 결과의 최상위 `error` 로 올라온다.
 - reconcile: 알림이 라벨이 아닌 티커 표기, `snapshot_age`·nav/cash 는 `account_nav` 기준, `reconcile.us` 는 `{time, tz}` 형태이고 `reconcile.kr` 은 문자열도 허용한다(Ruling 11).
 - resume: `_ingest_run` 이 sorted 순서로 적재해 `31_decision_r10` 이 `r2` 보다 먼저 온다 → `already` 경로에서 라운드가 10개 이상이면 decisions 행이 최신이 아닐 수 있다(옛 결함 그대로). `handled_marker` 실패는 `"실패: <error> (<session_id>)"` 문자열이다.
-- monitor: `check_position(holiday_fn)` 은 받지만 쓰지 않는다(옛 로직에 사용처 없음). 종목별 오류 격리는 `KisApiError`·`ValueError` 만(옛 수준). US `Position.exchange` 는 KIS 잔고 응답에 의존한다. 데몬 `{market}_monitor` 주기는 per_market `schedule_key` 의 `{market}` 포맷(Ruling 15, 커널 수정)으로 `kr/us.monitor.interval_s` 가 실제 적용된다.
-- reprice: `run_once` 반환은 `{repriced, skipped}`(Ruling 17). "개장" 기준은 `monitor.start`(옛 동일). US 거래소 코드는 `ticker_exchanges` 에서 읽는다.
+- monitor: `check_position(holiday_fn)` 은 받지만 쓰지 않는다(옛 로직에 사용처 없음). 종목별 오류 격리: 시세·보유 조회는 `KisApiError`·`ValueError` 를 경고로, 한 종목 점검의 그 밖 예외는 `logger.exception` + 결과 `errors` 에 적고 다음 종목으로 넘어간다(옛은 틱 전체가 멈췄다 — 의도한 개선). US `Position.exchange` 는 KIS 잔고 응답에 의존한다. 데몬 `{market}_monitor` 주기는 per_market `schedule_key` 의 `{market}` 포맷(Ruling 15, 커널 수정)으로 `kr/us.monitor.interval_s` 가 실제 적용된다.
+- reprice: `run_once` 반환은 `{repriced, skipped}`(Ruling 17). "개장" 기준은 `monitor.start`(옛 동일). US 거래소 코드는 `ledger.ticker_exchanges` 에서 읽는다. 이미 재호가로 다시 낸 주문(origin `reprice`)은 후보가 아니다 — 틱 중간 예외로 완료 플래그가 안 서도 재제출분을 다시 쫓지 않는다.
