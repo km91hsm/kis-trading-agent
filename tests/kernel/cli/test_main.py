@@ -55,6 +55,7 @@ def test_boot_loads_settings_and_conn(project):
         assert [f.id for f in b.features] == [
             "accounts",
             "ingest",
+            "ml",
             "regime",
             "saveticker",
             "scan",

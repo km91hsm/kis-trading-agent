@@ -56,3 +56,31 @@ def test_universe_template_loads(project):
     assert len(u.kr) > 100 and u.us
     s = load_sectors()
     assert s.sectors and set(s.kr.values()) <= set(s.sectors)
+
+
+def test_load_sectors_missing_file_is_empty(project):
+    s = load_sectors()
+    assert s.kr == {} and s.us == {} and s.sector_of("005930", "KR") is None
+
+
+def test_sectors_values_must_be_declared(project):
+    (project / "config" / "sectors.yaml").write_text(
+        "sectors: [반도체]\nkr: {'005930': 금융}\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError):
+        load_sectors()
+
+
+def test_sector_map_classify_by_industry():
+    """업종→대분류 표(사람이 관리)로 KIS 업종을 섹터로 바꾼다. 표에 없으면 None (추측하지 않음)."""
+    from trader.features.ingest.universe import SectorMap
+
+    m = SectorMap(
+        sectors=["반도체", "금융"],
+        kr_industry_to_sector={"전기전자": "반도체"},
+        us_industry_to_sector={"710": "반도체", "610": "금융"},
+    )
+    assert m.classify("전기전자", "KR") == "반도체" and m.classify("710", "US") == "반도체"
+    assert m.classify("화학", "KR") is None and m.classify(None, "US") is None
+    with pytest.raises(pydantic.ValidationError):  # 표의 값도 선언된 대분류여야 한다
+        SectorMap.model_validate({"sectors": ["반도체"], "kr_industry_to_sector": {"x": "금융"}})

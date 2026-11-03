@@ -14,7 +14,7 @@ def _repo_home(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.parametrize(
-    "name", ["settings", "schedule", "accounts", "sources", "universe", "sectors", "events"]
+    "name", ["settings", "schedule", "accounts", "sources", "universe", "sectors", "events", "ml"]
 )
 def test_every_template_loads_with_all_sections(name):
     load(name, build_registry(discover()), path=templates_dir() / "config" / f"{name}.yaml")
