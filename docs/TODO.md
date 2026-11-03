@@ -219,14 +219,24 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 12 spot 통합(메모리/보정 컨텍스트·`35_calibration`·`memory_entry_id`·브레이커·RL)
 - [x] Task 13 features/briefing(아침 브리핑, haiku 단발)
 - [x] Task 14 문서·템플릿·TODO·전체 재검증
-- [ ] PR·CI(ubuntu+windows)·머지(머지는 사용자)
+- [x] PR·CI(ubuntu+windows)·머지 (#9, main 766e131)
 - Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
 - Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R2(T9-R1 뒤집음) `readiness.interval_kinds_of` 는 interval 잡 `kind` 수집(커널 잡 큐·내장 잡 포함) · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
 - 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영
 
 ## M9 — features/scalp
-단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과.
-- [ ] 착수 전
+단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m9-scalp.md`(브랜치 `feat/m9-scalp`).
+- [x] 플랜 작성(Task 1~8, Ruling A1~A16)
+- [ ] Task 1 커널·spot·scan 준비(`StockExecPort`·`ScalpPort`·`ScanPort.watchlist`·tradability 승격·`_kind` 접미사·`/status` 절 격리·A15 소수정)
+- [ ] Task 2 scalp 뼈대(feature·settings·schemas·messages·fake·README·템플릿·기능 목록 테스트)
+- [ ] Task 3 signals(진입 신호·청산 규칙·백테스트)
+- [ ] Task 4 state·judge·`scalp-judge` 에이전트
+- [ ] Task 5 engine(허용·후보·진입·판정 회수·틱·digest·report)
+- [ ] Task 6 exits(다리·체결 동기화·취소·흡수·이월)
+- [ ] Task 7 jobs·ports(`{market}_scalp` 잡·outbox flush·teardown·`ScalpPort`·리밸런스 제외)
+- [ ] Task 8 CLI·status·README·CLAUDE.md·TODO·전체 재검증
+- [ ] PR·CI(ubuntu+windows)·머지
+- Ruling(M9 플랜): A1 주문 경로는 spot 이 노출하는 `stock_exec` 포트(execute·cancel·sync_fills; 게이트 복제 기각) · A2 `scalp` origin 은 spot ORIGINS 유지 · A3 JSON 상태 파일 유지·마이그레이션 없음(legacy 테스트 1건 미이식) · A4 잡 `{market}_scalp` kind `scalp` interval `{market}.monitor.interval_s`·게이트 `none`(본문이 창·휴장·일시정지 거르고 outbox flush) · A5 판정자 `quick.ask_json` + `session_allowance(kind="scalp_judge")` · A6 후보 = `_scan` 체크포인트 + `job_requests(source=news)` + `ScanPort.watchlist` · A8 모의 전용 `skip_accounts`, `block_reason` 커널 승격 · A9 `ScalpPort.open_tickers` 로 리밸런스 제외 · A10 `SCALP_EXIT` 에 `carry_over` 추가 · A12 `event.at` 은 주입 시계 · A13 커널 `status_message` 절 격리 · A14 `_kind` 가 `_entry/_exit` 꼬리 제거 · A15 `OPEN_STATUSES` 커널, `DEAD_STATUSES` import, `timeout_by_kind` 기본 `market: 600`, `RebalanceParams`, `market_view trading=False` 유지, `ops_check`/health 는 M12 · A16 판정 컨텍스트 뉴스는 빈 목록(`InputsPort.recent` 는 M11/M12 후보)
 
 ## M10 — features/fo
 파생 Lane(`LegStore`, 커널 executor 코어 위). 완료 기준: 옛 `fo/*` 계열 테스트 이식 통과.
