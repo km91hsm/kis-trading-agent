@@ -330,10 +330,10 @@ def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, setti
         "&lt;/p&gt;</description><pubDate>Thu, 08 Oct 2026 10:00:00 +0900</pubDate>"
         "<link>https://blog.naver.com/x/1</link></item></channel></rss>"
     )
-    cfg = SimpleNamespace(channels=SimpleNamespace(naver_blog=["ranto28"], naver_blog_posts=5))
+    cfg = SimpleNamespace(channels=SimpleNamespace(naver_blog=["blog-test"], naver_blog_posts=5))
     quant = [{"ticker": "005930", "exchange": None, "score": 1.0, "reasons": ["r"]}]
     with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://rss.blog.naver.com/ranto28.xml").respond(200, content=rss.encode())
+        mock.get("https://rss.blog.naver.com/blog-test.xml").respond(200, content=rss.encode())
         with httpx.Client() as http:
             data = discovery.build_inputs(
                 conn,
@@ -350,7 +350,7 @@ def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, setti
             )
             assert data["blog_posts"] == [
                 {
-                    "source": "naver_blog/ranto28",
+                    "source": "naver_blog/blog-test",
                     "title": "반도체 사이클",
                     "excerpt": "메모리 업황",
                     "posted_at": "2026-10-08T01:00:00+00:00",

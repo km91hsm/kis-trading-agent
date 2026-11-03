@@ -195,10 +195,10 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - 이연(M2, M7 가 한 것): watchlist·`/watch`(옛 `test_control` watchlist 2건)
 - 이연(M7):
   - M8: RL 사이저 전부(`ml/rl/*`·`rl_shadow`·executor RL 훅·`trader rl`·`rl_train` kind·옛 테스트 8건·`test_ml_train_job_trains_sizer_even_when_not_enabled`; `ml.yaml` 의 `rl_sizer`·`calibration` 절은 설정만 둠)
-  - M8: 섀도 포트폴리오 기록(`scan_analyze.post` 훅 자리, 옛 `test_scan_analyze_body_records_shadow_portfolios` 2건)·reflect 스냅샷 `snapshot_fn`
+  - M8: 섀도 포트폴리오 기록(`scan_analyze.post` 훅 자리, 옛 `test_scan_analyze_body_records_shadow_portfolios` 2건)·reflect 스냅샷 `snapshot_fn`(그 전까지 일일 스냅샷은 `features_snapshot` cron 06:30 KST)
   - M11: 웹 `/api/features`·`/api/ml`·`RunJobButton`
   - M12: `trader status` ML 절·ops.health `disclosure` 영역(`test_health_disclosure_area_critical_for_held`)
-  - M12: 커널 runner 가 `daemon.bootstrap` 훅을 `bootstrap_queue` 앞에 부름(만료 직전 queued 백필은 다음 기동에 회복) — 순서 교정 후보
+  - M11: 섹터 상한은 yaml 에 없는 종목(유니버스 밖 발굴)에는 적용되지 않음 — `auto_classify` 호출자는 M11
   - M8·M11 이후: `scan_analyze._close_stale`·spot `_close_stale_sessions` 를 커널 공개 헬퍼로 통합
   - 알려진 차이(README 에 기록): `QuantModel` pickle 모듈 경로 변경으로 옛 `state/models/quant/*` 재학습 필요; `ROUND_TRIP_BP` 상수가 scan 백테스트에 중복(spot `costs` 는 레인 모듈)
 

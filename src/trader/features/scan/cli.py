@@ -25,7 +25,7 @@ from trader.kernel.platform import bundle, paths
 from trader.kernel.session.run_store import run_date_for
 from trader.kernel.session.runner import PipelineError
 
-scan_app = typer.Typer(help="테마 열기·사건 수혜 조회", no_args_is_help=True)
+scan_app = typer.Typer(help="테마·사건 조회·스캔 실행·백테스트·유니버스 점검", no_args_is_help=True)
 theme_app = typer.Typer(help="테마 열기 감지: 조회", no_args_is_help=True)
 events_app = typer.Typer(help="사건 수혜: 뉴스 감지 결과 보기", no_args_is_help=True)
 universe_app = typer.Typer(help="유니버스 점검", no_args_is_help=True)

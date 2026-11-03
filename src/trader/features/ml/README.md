@@ -2,12 +2,12 @@
 
 ## 책임
 
-- 설정: `ml.yaml`(`label`·`train`·`models` — `models.quant`·`ranker`·`calibration`·`rl_sizer`)과 `schedule.yaml` 의 `ml_train`(`MlTrainSchedule`, 기본 토요일 10:00 KST)·`universe_members`를 섹션으로 등록한다.
+- 설정: `ml.yaml`(`label`·`train`·`models` — `models.quant`·`ranker`·`calibration`·`rl_sizer`)과 `schedule.yaml` 의 `ml_train`(`MlTrainSchedule`, 기본 토요일 10:00 KST)·`universe_members`·`features_snapshot`(문자열 시각)을 섹션으로 등록한다.
 - 원장 v12 `universe_members`(시점 기준 유니버스 구간)를 소유한다. 기록·조회·학습 데이터 필터링은 `universe_pit.py`(`record`·`members`·`apply`·`effective_day`, 편출 유예 `GRACE` 5일).
 - 피처 스토어(`state/features/<date>.parquet`, 키 (date, ticker), 한 날짜 한 파일, 쓰기는 멱등)와 학습 데이터셋(`dataset`: 적재·라벨·피처 열 선택·`close_table`)을 소유한다(`features.py`).
 - 모델(`models/quant.py` `QuantModel`, 백엔드 sklearn 기본·`lightgbm` 선택)·워크포워드 평가(`walkforward.py`)·학습(`train.py` `train_quant`, 승격 판정 `promotion_decision`)·튜닝(`tune.py` `tune_quant`)·레지스트리(`registry.py`).
 - `05_quant` 리포트(`quant_report.py`: `latest_row`·`build`·`signal_for`, 스키마는 커널 `session.schemas.QuantReport`, `role="quant"`).
-- 잡·큐(`jobs.py`): 잡 `ml_train`(주간 재학습, heavy)·`universe_members`(매일 06:40 KST 기록), 큐 kind `features_backfill`·`features_snapshot`·`features_derive`·`ml_train`(전부 slow 레인), 훅 `daemon.bootstrap` → 시세 클라이언트가 있는데 피처 스토어가 비어 있으면 `features_backfill`(3년)+`ml_train` 을 큐에 넣는다(백필이 24시간 안에 실패했으면 다시 넣지 않음, 어떤 오류도 올리지 않음).
+- 잡·큐(`jobs.py`): 잡 `ml_train`(주간 재학습, heavy)·`universe_members`(매일 06:40 KST 기록)·`features_snapshot`(매일 06:30 KST 피처 스토어 스냅샷, heavy), 큐 kind `features_backfill`·`features_snapshot`·`features_derive`·`ml_train`(전부 slow 레인), 훅 `daemon.bootstrap` → 시세 클라이언트가 있는데 피처 스토어가 비어 있으면 `features_backfill`(3년)+`ml_train` 을 큐에 넣는다(백필이 24시간 안에 실패했으면 다시 넣지 않음, 어떤 오류도 올리지 않음).
 - 포트(`ports.py`): `ports["ml"]` = `MlPortImpl`(커널 `MlPort` — 피처 행·퀀트 리포트·피어 중앙값 `peer_medians`·모델 상태). 다른 기능은 `api.py` 만 import 한다.
 - CLI(`cli.py`, `uv run trader ml --help`): `ml train|tune|models|promote|demote`, `ml features snapshot|backfill|derive`.
 
@@ -19,7 +19,7 @@
 - `ml tune` 은 리포트만 낸다: dev 폴드(마지막 폴드 제외)로 하이퍼파라미터를 고르고 홀드아웃을 보고한다. 설정·레지스트리를 바꾸지 않는다(적용은 사람이 `ml.yaml` 수정).
 - 레지스트리 레이아웃: `state/models/<name>/<버전 YYYYMMDD_HHMMSS>/{model.joblib, meta.json}`(`name` = `quant`). `meta.json` 에 `promoted`·`promote_reason`·지표·학습 시장 등. `latest(promoted_only=True, market=)` 은 시장 전용 모델을 우선하고 없으면 전시장 모델을 쓴다. `latest` 는 깨진 pickle·클래스 변경으로 못 읽는 버전을 경고 후 건너뛴다(파이프라인 보호). `list_models` 는 `meta.json` 만 읽는다(못 읽는 메타는 조용히 건너뛴다).
 - lightgbm 은 선택 의존(`extras`)이다. 이 맥처럼 libomp 가 없으면 `import lightgbm` 이 ImportError 가 아니라 OSError 라 `models/quant.py` 의 가용성 검사가 `except Exception` 으로 감싸고 기본 백엔드는 sklearn 이다(Ruling L1). lightgbm 으로 학습한 모델을 lightgbm 없는 환경에서 못 읽으면 경고(`ml demote` 안내) 후 건너뛴다.
-- 코드는 `kernel/` 과 다른 기능의 `api.py`(`ingest.api`) 만 import 한다(3층 규칙). 로거 `trader.ml`.
+- 코드는 `kernel/` 과 다른 기능의 `api.py`(`ingest.api`·`regime.api`) 만 import 한다(3층 규칙). 로거 `trader.ml`.
 
 ## 알려진 차이 (옛 저장소 대비)
 
@@ -27,9 +27,10 @@
 - `_features_dir` 는 읽기 경로에서도 `state/features` 디렉터리를 만든다(옛 결함 보존, Ruling P2).
 - `promote` 는 다른 버전을 내리지 않는다(옛 동작). 승격 버전이 여럿이면 `latest` 가 가장 최근 것을 쓴다. 정리는 `trader ml demote <version>` 으로 사람이 한다.
 - `ml.yaml` 의 `rl_sizer`·`calibration` 절은 설정만 있고 소비자가 없다(M8). RL 사이저(`ml/rl/*`·`rl_shadow`·`rl_train` kind·`trader rl`)도 M8.
-- reflect 스냅샷 `snapshot_fn` 도 M8(`MlPortImpl.snapshot` 은 포트 구성이 모자라면 RuntimeError).
+- 피처 스토어 일일 스냅샷은 `features_snapshot` cron(06:30 KST, 매일)이 한다 — M8 의 reflect `snapshot_fn` 이 가져가기 전까지(`MlPortImpl.snapshot` 은 포트 구성이 모자라면 RuntimeError).
+- `registry.promote`/`demote` 는 벽시계 시각을 도장으로 찍는다(옛 결함 보존, Ruling P2).
 - 옛 최상위 `trader features …` 는 `trader ml features …` 가 되었다.
-- 스케줄 키 모양: `schedule.yaml ml_train: {time: "10:00", days: sat, tz: null}`(옛 `ml_train_time`/요일 평면 키 아님), `universe_members: "06:40"`(문자열, KST).
+- 스케줄 키 모양: `schedule.yaml ml_train: {time: "10:00", days: sat, tz: null}`(옛 `ml_train_time`/요일 평면 키 아님), `features_snapshot: "06:30"`·`universe_members: "06:40"`(문자열, KST).
 - `peer_medians` 반환은 옛 `_peer_section` 모양(`sector, n, dates, median, mine, diff`)을 유지한다(Ruling T6-1).
-- 커널 runner 는 `daemon.bootstrap` 훅을 `bootstrap_queue`(stale·만료 정리) 앞에 부른다. 만료 직전 queued `features_backfill` 이 남아 있으면 그 기동의 백필 enqueue 가 중복으로 빠지고 다음 기동에 회복된다(옛은 정리 → enqueue 순).
+- 커널 runner 는 `daemon.bootstrap` 훅을 `bootstrap_queue`(stale·만료 정리) 뒤에 부른다(옛과 같은 정리 → enqueue 순, Ruling F2).
 - `ml_config`/`load_ml` 은 호출마다 레지스트리를 다시 만든다(성능 이슈 없음, 미최적화).

@@ -80,7 +80,7 @@ CLI·명령
 
 세션·컨텍스트
 - 주문 알림 제목 꼬리 표 `_STAGE_KIND`(커널 `execution.core`)는 `order_stage` 를 `_r` 로 잘라 찾는 옛 동작을 그대로 둔다. 그래서 `_r` 로 시작하는 꼬리가 있는 `52_order_reprice`·`53_order_rebalance` 는 꼬리가 비고, 실제로 꼬리가 붙는 것은 `51_order`(재평가)·`55_order_sl`(손절) 등 `_r` 가 없는 단계다(M4 의 spot 이 쓰는 것은 51·55).
-- `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view·quant 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None; `quant` 는 M7 부터 `05_quant` 리포트 요약). memory(M8)·calibration(M8)·theme 컨텍스트는 주입하지 않는다. 트레이더 bundle 이 `trader_context["quant"]` 를 실제로 소비하는지는 미검증이다(옛 테스트는 `checkpoint_bundle(kind="trader")` 까지 확인).
+- `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view·quant 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None; `quant` 는 M7 부터 `05_quant` 리포트 요약). memory(M8)·calibration(M8)·theme 컨텍스트는 주입하지 않는다.
 - `AnalystRole` 은 4종을 유지한다(`ANALYST_ROLES` 와 일치). `05_quant` 는 `QuantReport.role="quant"` 로 별도 스키마다(Ruling M7-K1).
 - `ask_json`·`probe_usage`(`quick.py`)는 이식하지 않았다(M8). `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
 - `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
@@ -118,7 +118,7 @@ M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·�
 - reprice: `run_once` 반환은 `{repriced, skipped}`(Ruling 17). "개장" 기준은 `monitor.start`(옛 동일). US 거래소 코드는 `ledger.ticker_exchanges` 에서 읽는다. 이미 재호가로 다시 낸 주문(origin `reprice`)은 후보가 아니다 — 틱 중간 예외로 완료 플래그가 안 서도 재제출분을 다시 쫓지 않는다.
 
 M7 scan_analyze (`scan_analyze.py`, `05_quant`)
-- `{market}_scan_analyze` 잡(cron `schedule.yaml scan_analyze.{kr,us}` 기본 07:30 KST / 08:30 뉴욕, 게이트 market)·큐 kind `scan_analyze`·`analyze_ticker`(종목 락 `locks.lock_for` 를 재평가와 공유). 스캔은 `scan.api.run_scan`, 분석 세션은 spot 이 돈다. 훅 자리 `scan_analyze.pre`·`scan_analyze.post`(후자는 섀도 기록용으로 비어 있음).
+- `{market}_scan_analyze` 잡(cron `schedule.yaml scan_analyze.{kr,us}` 기본 07:30 KST / 08:30 뉴욕, 게이트 market)·큐 kind `scan_analyze`·`analyze_ticker`(종목 락 `locks.lock_for` 를 재평가와 공유). 스캔은 `ports["scan"].run_scan`, 분석 세션은 spot 이 돈다. 훅 자리 `scan_analyze.pre`·`scan_analyze.post`(후자는 섀도 기록용으로 비어 있음).
 - `scan_analyze` 는 regime 단계(국면 갱신·시장 세션·재판정)를 품지 않는다. 그것은 M6 `{market}_regime` 잡(07:25 / 08:25 ET, 5분 앞, Ruling M7-S1)이 먼저 돈다. 옛 `_scan_analyze_body` 의 regime/market_view 호출이 사라진 이유다.
 - 섀도 포트폴리오 기록·`ensure_calibration`·reflect 스냅샷 `snapshot_fn` 은 M8 이다(옛 `test_scan_analyze_body_records_shadow_portfolios` 2건 미이식).
 - `ScanAnalyzeSchedule` 은 `AtTime` 대신 spot `ReconcileAt` 을 쓴다(레인이 다른 기능의 타입을 import 못 함; 필드 동일).
