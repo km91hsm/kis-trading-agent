@@ -145,10 +145,16 @@ def _ensure_quant(deps, ticker: str, market: str, today: date) -> None:
             dry_run=bool(deps.dry_run),
             now=deps.now,
         )
-        tools.ensure_quant(ctx, ticker=ticker, market=market, date=today)
-        tools.ensure_calibration(ctx, ticker=ticker, market=market, date=today)
-    except Exception as e:  # noqa: BLE001 - 05_quant·35_calibration 은 선택 입력
-        logger.warning("05_quant 생성 실패 %s %s: %s", market, ticker, e)
+        try:
+            tools.ensure_quant(ctx, ticker=ticker, market=market, date=today)
+        except Exception as e:  # noqa: BLE001 - 05_quant 는 선택 입력
+            logger.warning("05_quant 생성 실패 %s %s: %s", market, ticker, e)
+        try:
+            tools.ensure_calibration(ctx, ticker=ticker, market=market, date=today)
+        except Exception as e:  # noqa: BLE001 - 35_calibration 은 선택 입력
+            logger.warning("35_calibration 생성 실패 %s %s: %s", market, ticker, e)
+    except Exception as e:  # noqa: BLE001 - 도구 컨텍스트 조립 실패도 세션을 막지 않는다
+        logger.warning("05_quant·35_calibration 준비 실패 %s %s: %s", market, ticker, e)
     finally:
         conn.close()
 

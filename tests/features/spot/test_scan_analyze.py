@@ -428,3 +428,22 @@ def test_analyze_targets_skips_when_throttled_without_collecting(project, settin
     r = scan_analyze.analyze_targets(deps, "KR", [{"ticker": "A"}], today=TODAY)
     assert "사용량 감속" in r["skipped"] and inputs.calls == []
     assert len(deps.notifier.msgs) == 1
+
+
+def test_ensure_quant_failure_still_runs_calibration(project, settings, monkeypatch, caplog):
+    """05_quant 실패가 35_calibration 을 건너뛰지 않고, 로그는 단계마다 따로 남는다."""
+    seen = []
+
+    def bad_quant(ctx, **kw):
+        raise RuntimeError("퀀트 장애")
+
+    def bad_cal(ctx, **kw):
+        seen.append(kw["ticker"])
+        raise RuntimeError("보정 장애")
+
+    monkeypatch.setattr(scan_analyze.tools, "ensure_quant", bad_quant)
+    monkeypatch.setattr(scan_analyze.tools, "ensure_calibration", bad_cal)
+    with caplog.at_level(logging.WARNING, logger="trader.spot"):
+        scan_analyze._ensure_quant(_deps(project, settings), "005930", "KR", TODAY)
+    assert seen == ["005930"]
+    assert "05_quant 생성 실패" in caplog.text and "35_calibration 생성 실패" in caplog.text

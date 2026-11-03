@@ -14,7 +14,7 @@ from trader.kernel.config import KST
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.session.runner import SessionResult, SessionSpec, run_session
 
-logger = logging.getLogger("trader.memory")
+logger = logging.getLogger("trader.evaluation")
 
 
 def pending(conn: sqlite3.Connection, *, market: str | None = None, limit: int = 20) -> list[dict]:

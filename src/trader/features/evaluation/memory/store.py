@@ -52,8 +52,9 @@ def held_at(
     if last is None:
         return None
     row = conn.execute(
-        "SELECT qty FROM positions_snapshot WHERE account_id=? AND date=? AND ticker=?",
-        (account_id, last, ticker),
+        "SELECT qty FROM positions_snapshot WHERE account_id=? AND market=? AND date=? "
+        "AND ticker=?",
+        (account_id, market, last, ticker),
     ).fetchone()
     return bool(row and int(row["qty"] or 0) > 0)
 

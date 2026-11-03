@@ -28,24 +28,30 @@ def backup(*, state: Path | None = None, now: datetime | None = None) -> Path:
     """원장 전체를 백업 API 로 복사한다(쓰는 중이어도 일관된 시점). 임시 파일에 쓰고 무결성
     확인 뒤 이름을 바꾼다 — 실패한 사본이 정상 백업처럼 남지 않게."""
     base = state or paths.state_dir()
+    db = base / DB_NAME
+    if not db.is_file():  # connect 가 빈 원장을 만들어 설정 오류를 '성공' 백업으로 가리지 않게
+        raise FileNotFoundError(f"원장 파일이 없습니다: {db}")
     out_dir = backup_dir(base)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y%m%d_%H%M%S")
     final = out_dir / f"{_PREFIX}{stamp}.db"
     tmp = final.with_suffix(".db.tmp")
-    src = sqlite3.connect(base / DB_NAME, timeout=30)
     try:
-        dst = sqlite3.connect(tmp)
+        src = sqlite3.connect(db, timeout=30)
         try:
-            src.backup(dst)
-            ok = dst.execute("PRAGMA quick_check").fetchone()[0]
+            dst = sqlite3.connect(tmp)
+            try:
+                src.backup(dst)
+                ok = dst.execute("PRAGMA quick_check").fetchone()[0]
+            finally:
+                dst.close()
         finally:
-            dst.close()
-    finally:
-        src.close()
-    if ok != "ok":
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"백업 무결성 확인 실패: {ok}")
+            src.close()
+        if ok != "ok":
+            raise RuntimeError(f"백업 무결성 확인 실패: {ok}")
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # prune glob(trader-*.db) 이 못 잡는 임시 파일을 남기지 않는다
+        raise
     tmp.replace(final)
     logger.info("원장 백업 %s", final.name)
     return final

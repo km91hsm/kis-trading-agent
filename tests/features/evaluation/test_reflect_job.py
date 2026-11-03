@@ -15,6 +15,7 @@ from trader.features.evaluation.feature import FEATURE
 from trader.features.evaluation.jobs import REFLECT_JOB
 from trader.features.evaluation.memory import store
 from trader.features.regime import market_view
+from trader.features.scan import api as scan_api
 from trader.kernel.broker.fake import FakeMarket
 from trader.kernel.broker.models import Candle
 from trader.kernel.cli.boot import build_registry
@@ -182,6 +183,27 @@ def test_reflect_fires_mature_hook(project, settings):
     jobs.reflect_body(deps)
     (kw,) = seen
     assert kw["matured"] == [] and kw["deps"] is deps and kw["today"] == date(2026, 11, 2)
+
+
+@pytest.mark.parametrize("target", ["theme", "shadow"])
+def test_reflect_mature_failure_leaves_no_open_write_transaction(
+    project, settings, monkeypatch, target
+):
+    """테마·섀도 채점이 쓰기 뒤 커밋 전에 실패해도 열린 쓰기 트랜잭션을 남기지 않는다(잠금 방지)."""
+
+    def boom(conn, *a, **kw):
+        conn.execute("UPDATE memory_entries SET round=round")  # 암묵 BEGIN
+        raise RuntimeError("채점 장애")
+
+    if target == "theme":
+        monkeypatch.setattr(scan_api, "theme_mature", boom)
+    else:
+        monkeypatch.setattr(jobs.shadow, "mature", boom)
+    seen = []
+    hook = Hook("reflect.mature", lambda *, conn, **kw: seen.append(conn.in_transaction))
+    deps = _deps(project, settings, hooks={"reflect.mature": (hook,)})
+    jobs.reflect_body(deps)
+    assert seen == [False]
 
 
 def test_reflect_catch_up_enqueues_queue_kind(project, settings):

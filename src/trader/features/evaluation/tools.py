@@ -19,7 +19,7 @@ from trader.kernel.session import tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import market_dir, read_checkpoint, write_checkpoint
 
-logger = logging.getLogger("trader.memory")
+logger = logging.getLogger("trader.evaluation")
 
 
 def tool_ctx(b: Any) -> LaneContext:

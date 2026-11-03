@@ -182,6 +182,8 @@ def reflect_body(deps, job=None, *, market: str | None = None) -> dict:
                 )
             except Exception as e:  # noqa: BLE001 - 채점 실패가 복기를 막지 않는다
                 logger.warning("시장 제안 채점 실패 %s: %s", m, e)
+        # 앞 단계 쓰기를 확정한다 — 아래 채점 실패의 rollback 이 그것까지 되돌리지 않게
+        conn.commit()
         for m in markets:  # 테마 열기 판정 사후 검증 — 실패는 경고만
             try:
                 scan_api.theme_mature(
@@ -193,12 +195,15 @@ def reflect_body(deps, job=None, *, market: str | None = None) -> dict:
                     ),
                 )
             except Exception as e:  # noqa: BLE001
+                # 커밋 전 실패가 쓰기 트랜잭션을 연 채 두면 세션 하위 프로세스가 잠금에 걸린다
+                conn.rollback()
                 logger.warning("테마 판정 채점 실패 %s: %s", m, e)
         try:
             shadow_matured = shadow.mature(
                 conn, state=deps.state, today=today, index_tables=index_tables
             )
         except Exception as e:  # noqa: BLE001 - 섀도 만기 실패가 반성을 막지 않는다
+            conn.rollback()  # 열린 쓰기 트랜잭션을 남기지 않는다
             logger.warning("섀도 포트폴리오 만기 실패: %s", e)
             shadow_matured = None
         hooks_mod.run(

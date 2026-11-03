@@ -179,3 +179,18 @@ def test_held_at_sees_empty_account_nav_snapshot(conn):
         positions=[], market="KR",
     )  # fmt: skip
     assert store.held_at(conn, account_id="p", market="KR", ticker="A", d="2026-09-01") is False
+
+
+def test_held_at_ignores_same_ticker_in_other_market(conn):
+    """두 번째 조회도 시장을 건다 — 같은 날 다른 시장 스냅샷의 같은 티커를 보유로 보지 않는다."""
+    pos = {"ticker": "A", "qty": 3, "avg_price": 1, "current_price": 1, "eval_amount": 3}
+    kledger.snapshot_positions(
+        conn, account_id="p", d=date(2026, 9, 1), nav=Decimal(100), cash=Decimal(97),
+        positions=[pos], market="US",
+    )  # fmt: skip
+    kledger.snapshot_positions(
+        conn, account_id="p", d=date(2026, 9, 1), nav=Decimal(100), cash=Decimal(100),
+        positions=[], market="KR",
+    )  # fmt: skip
+    assert store.held_at(conn, account_id="p", market="US", ticker="A", d="2026-09-01") is True
+    assert store.held_at(conn, account_id="p", market="KR", ticker="A", d="2026-09-01") is False

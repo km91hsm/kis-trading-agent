@@ -789,14 +789,16 @@ def execute(
     results: list[dict] = []
     bookkeeping_error: OrderBookkeepingError | None = None
     ev = ctx.ports.get("evaluation")
-    sizer = ev.rl_sizer(ctx.state) if ev is not None else None
     rl_eligible = (
-        sizer is not None
+        ev is not None
         and decision_id is not None
         and origin.origin not in ("stop", "hedge", "park", "scalp")
         and not dry_run  # dry-run·FAKE 세션의 제안은 실험 집계를 오염시킨다
         and decision.action in ("BUY", "ADD")
     )
+    # 사이저(ml.yaml 읽기·승격 시 피클 로드)는 자격이 있을 때만 1회 로드한다
+    sizer = ev.rl_sizer(ctx.state) if rl_eligible else None
+    rl_eligible = rl_eligible and sizer is not None
     rl_base = _RlBase()
     for account in ctx.accounts:
         if market not in account.markets or account.id in skip:

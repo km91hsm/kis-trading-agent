@@ -151,3 +151,46 @@ def test_build_portfolio_updates_breaker_only_for_paper_and_record(rl, ports, mo
     calls.clear()
     _run(ctx, dry_run=True)  # execute 경로: 모의 계좌만 갱신
     assert calls == [("KR", ["10000000"])]
+
+
+def _counting(rl, sizer, monkeypatch):
+    """사이저 로드 횟수를 센다(ml.yaml 읽기·피클 로드는 RL 자격이 있을 때만)."""
+    ctx, _ = rl
+    calls: list = []
+
+    def load(state):
+        calls.append(state)
+        return sizer
+
+    monkeypatch.setattr(ctx.ports["evaluation"], "rl_sizer", load)
+    return calls
+
+
+def test_rl_sizer_loaded_only_when_eligible(rl, monkeypatch):
+    ctx, _ = rl
+    calls = _counting(rl, _sizer("shadow"), monkeypatch)
+    _run(ctx, dry_run=True)
+    _run(ctx, ok_decision(action="HOLD"))
+    assert calls == []
+    _run(ctx)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"is_stop_loss": True}, {"is_hedge": True}, {"is_park": True}, {"scalp_leg": "entry"}],
+    ids=["stop", "hedge", "park", "scalp"],
+)
+def test_rl_skipped_for_stop_hedge_park_scalp_origins(rl, kw, monkeypatch):
+    ctx, _ = rl
+    calls = _counting(rl, _sizer("apply"), monkeypatch)
+    dec = Decision(**ok_decision())
+    spot_ledger.ingest_checkpoint(
+        ctx.conn, D, "KR", dec.ticker, "30_decision", {"data": dec.model_dump()}
+    )
+    did = spot_ledger.decision_id(ctx.conn, D, "KR", dec.ticker)
+    assert did is not None
+    executor.execute(
+        ctx, dec, date=D, market="KR", price=PRICE, dry_run=False, decision_id=did, **kw
+    )
+    assert calls == [] and _shadow_rows(ctx) == []

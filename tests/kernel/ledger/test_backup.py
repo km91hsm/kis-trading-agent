@@ -3,6 +3,8 @@
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
+
 from trader.kernel.ledger import backup
 
 
@@ -31,3 +33,38 @@ def test_prune_keeps_recent_daily_and_monday_weekly(tmp_path):
     mondays = {d for d in days if d.weekday() == 0 and d not in recent}
     assert recent <= days and len(mondays) == 8 and days == recent | mondays
     assert removed == 80 - len(kept) and (tmp_path / "unrelated.txt").exists()
+
+
+def test_backup_missing_ledger_raises_without_creating_db(tmp_path):
+    """trader.db 가 없으면 빈 원장을 만들어 '성공' 백업을 남기지 않는다(설정 오류를 가리지 않게)."""
+    state = tmp_path / "state"
+    state.mkdir()
+    with pytest.raises(FileNotFoundError):
+        backup.backup(state=state, now=datetime(2026, 10, 27, tzinfo=UTC))
+    assert not (state / backup.DB_NAME).exists()
+    assert not list(backup.backup_dir(state).glob("trader-*"))
+
+
+def test_backup_failure_removes_tmp(conn, project, monkeypatch):
+    """백업 API 가 실패하면 prune glob 이 못 잡는 `.db.tmp` 를 남기지 않는다."""
+    real = sqlite3.connect
+
+    class Src:
+        def __init__(self, c):
+            self.c = c
+
+        def backup(self, dst):
+            raise sqlite3.OperationalError("디스크 오류")
+
+        def close(self):
+            self.c.close()
+
+    def connect(path, *a, **kw):
+        c = real(path, *a, **kw)
+        return Src(c) if str(path).endswith(backup.DB_NAME) else c
+
+    monkeypatch.setattr(backup.sqlite3, "connect", connect)
+    state = project / "state"
+    with pytest.raises(sqlite3.OperationalError):
+        backup.backup(state=state, now=datetime(2026, 10, 27, tzinfo=UTC))
+    assert not list(backup.backup_dir(state).glob("*.tmp"))

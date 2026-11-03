@@ -141,7 +141,8 @@ def ask_json(
         conn, None, agent=call_agent, model=model, ticker=str(payload.get("ticker") or ""),
         market=None, session_id=session_id, now=started,
     )  # fmt: skip
-    assert call_id is not None  # cap 없이 시작하면 항상 행이 생긴다
+    if call_id is None:  # cap 없이 시작하면 항상 행이 생긴다(-O 에서도 검사)
+        raise RuntimeError("agent_calls 행을 만들지 못했습니다")
     t0 = time.monotonic()
 
     def finish(status: str, *, cost=None, error=None, sid=None) -> None:
@@ -210,7 +211,8 @@ def probe_usage(
         conn, None, agent=PROBE_AGENT, model=PROBE_MODEL, ticker=None, market=None,
         session_id=session_id, now=started,
     )  # fmt: skip
-    assert call_id is not None
+    if call_id is None:  # -O 에서도 검사
+        raise RuntimeError("agent_calls 행을 만들지 못했습니다")
     t0 = time.monotonic()
 
     def finish(status: str, *, cost=None, error=None) -> None:
