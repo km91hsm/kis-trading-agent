@@ -24,7 +24,7 @@
 | `uv run trader spot reconcile --market KR\|US` | 브로커 보유 vs 스냅샷 대사(스냅샷만 보정, 주문 유지) |
 | `uv run trader regime show\|backtest --market KR\|US --days N\|killswitch on [--reason]\|off --note …\|show` | 국면·킬스위치 조회·백테스트·수동 발동/해제 (`killswitch on`·`off` 는 사용자 전용) |
 | `uv run trader scan theme show [--market KR\|US --live]\|events show [--market KR\|US]` | 테마 열기·사건 감지 결과 조회 (조회만) |
-| `uv run trader scan run [--market …]\|backtest\|universe check\|universe sectors` | 정량 필터→screener 세션 스캔(`FAKE_CLAUDE=1` 없이 금지)·후보 백테스트(조회만)·유니버스 시세 점검·섹터 제안 |
+| `uv run trader scan run [--market KR\|US --asof … --dry-run]\|backtest\|universe check\|universe sectors` | 정량 필터→screener 세션 스캔(`FAKE_CLAUDE=1` 없이 금지)·후보 백테스트(조회만)·유니버스 시세 점검·섹터 제안 |
 | `uv run trader ml train\|tune\|models\|promote\|demote` | 퀀트 모델 학습·튜닝 리포트·레지스트리 조회·수동 승격/해제 (`promote`·`demote` 는 사용자 전용) |
 | `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |

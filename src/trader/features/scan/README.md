@@ -13,7 +13,7 @@
 - 설정 파일 `events`(`templates/config/events.yaml`, 사건 31개): `enabled`·`lookback_hours`·`max_picks_per_event`·`max_event_picks`·`events`(`EventDef`, id 중복 거부). `load_events()`.
 - 잡(`jobs.py`): `{market}_theme`(`THEME`, interval=`schedule.theme.interval_s`, 게이트 `monitor`, `theme.enabled` 일 때만) — `theme_body` 가 `compute`→`record`→상위가 바뀔 때만 알림.
 - 포트(`ports.py`): `ports["scan"]` = `ScanPortImpl.theme_of(conn, market, today)` → 종목 → 오늘 상위 테마·shock 사건 라벨(없으면 None). spot 게이트가 쓴다.
-- CLI(`cli.py`, `uv run trader scan --help`): `trader scan theme show [--market KR] [--live]`, `trader scan events show [--market KR]`(읽기 전용 JSON), `trader scan run`·`backtest`·`universe check|sectors`(아래 M7 절).
+- CLI(`cli.py`, `uv run trader scan --help`): `trader scan theme show [--market KR] [--live]`, `trader scan events show [--market KR]`(읽기 전용 JSON), `trader scan run [--market --asof --dry-run]`(`--dry-run` 은 screener 세션 없이 정량 상위만)·`backtest`·`universe check|sectors`(아래 M7 절).
 - 문구(`messages.py`): `theme_heat`·`theme_name`·`event_detected`.
 - 다른 기능의 표를 읽는 데이터 접근: `ingest` 의 `news_items`, `spot` 의 `ticker_names`(`SELECT ticker, name FROM ticker_names WHERE market=?`).
 

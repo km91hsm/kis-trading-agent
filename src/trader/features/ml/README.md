@@ -17,13 +17,13 @@
 - 룩어헤드 방지(PIT): 재무비율은 Y 값을 Y+1 년 4월 1일부터 쓰고, 과거 asof 스냅샷은 `MAX_PAST` 를 넘으면 거부한다. 학습 라벨 엠바고(워크포워드가 마지막 학습일을 test 시작 `horizon_days + embargo_days + 1` 거래일 앞으로 당긴다)를 두며, 유니버스는 그날 구성원 이력(`universe_members`)으로 거른다(`ml.train.pit.strict` 면 기록 전 과거 행을 아예 뺀다, `liquidity_top_n` 으로 유동성 상위만).
 - 승격 기준(`promotion_decision`): 공통 — 평가 폴드가 있고 모든 폴드의 up 예측 ≥ `min_up_predictions`("전부 중립" 모델 차단). `promote_metric=accuracy` 면 합산 정확도 > 기준선(최빈 라벨)·≥ `promote_min_accuracy`·알파 > `min_alpha`, `alpha`(scan 랭커용) 면 상위 N 평균 알파 ≥ `min_alpha`·알파 양인 폴드 비율 ≥ `promote_min_positive_folds`. `min_alpha` 는 시장별(`promote_min_alpha_by_market`) 값이 우선. 기준을 통과한 학습만 자동 승격하고, 아니면 저장만 한다.
 - `ml tune` 은 리포트만 낸다: dev 폴드(마지막 폴드 제외)로 하이퍼파라미터를 고르고 홀드아웃을 보고한다. 설정·레지스트리를 바꾸지 않는다(적용은 사람이 `ml.yaml` 수정).
-- 레지스트리 레이아웃: `state/models/<name>/<버전 YYYYMMDD_HHMMSS>/{model.joblib, meta.json}`(`name` = `quant`). `meta.json` 에 `promoted`·`promote_reason`·지표·학습 시장 등. `latest(promoted_only=True, market=)` 은 시장 전용 모델을 우선하고 없으면 전시장 모델을 쓴다. `list_models` 는 깨진 pickle·클래스 변경으로 못 읽는 버전을 경고 후 건너뛴다(파이프라인 보호).
+- 레지스트리 레이아웃: `state/models/<name>/<버전 YYYYMMDD_HHMMSS>/{model.joblib, meta.json}`(`name` = `quant`). `meta.json` 에 `promoted`·`promote_reason`·지표·학습 시장 등. `latest(promoted_only=True, market=)` 은 시장 전용 모델을 우선하고 없으면 전시장 모델을 쓴다. `latest` 는 깨진 pickle·클래스 변경으로 못 읽는 버전을 경고 후 건너뛴다(파이프라인 보호). `list_models` 는 `meta.json` 만 읽는다(못 읽는 메타는 조용히 건너뛴다).
 - lightgbm 은 선택 의존(`extras`)이다. 이 맥처럼 libomp 가 없으면 `import lightgbm` 이 ImportError 가 아니라 OSError 라 `models/quant.py` 의 가용성 검사가 `except Exception` 으로 감싸고 기본 백엔드는 sklearn 이다(Ruling L1). lightgbm 으로 학습한 모델을 lightgbm 없는 환경에서 못 읽으면 경고(`ml demote` 안내) 후 건너뛴다.
 - 코드는 `kernel/` 과 다른 기능의 `api.py`(`ingest.api`) 만 import 한다(3층 규칙). 로거 `trader.ml`.
 
 ## 알려진 차이 (옛 저장소 대비)
 
-- `QuantModel` 의 pickle 모듈 경로가 바뀌었다(`trader.features.ml.models.quant`). 옛 `state/models/quant/*` 는 로드할 수 없다 — `list_models`/`latest` 가 경고 후 건너뛰므로 크래시는 없고, 새로 `trader ml train` 으로 재학습해야 `05_quant`·ML 랭킹이 살아난다.
+- `QuantModel` 의 pickle 모듈 경로가 바뀌었다(`trader.features.ml.models.quant`). 옛 `state/models/quant/*` 는 로드할 수 없다 — `latest` 가 경고 후 건너뛰므로 크래시는 없고, 새로 `trader ml train` 으로 재학습해야 `05_quant`·ML 랭킹이 살아난다.
 - `_features_dir` 는 읽기 경로에서도 `state/features` 디렉터리를 만든다(옛 결함 보존, Ruling P2).
 - `promote` 는 다른 버전을 내리지 않는다(옛 동작). 승격 버전이 여럿이면 `latest` 가 가장 최근 것을 쓴다. 정리는 `trader ml demote <version>` 으로 사람이 한다.
 - `ml.yaml` 의 `rl_sizer`·`calibration` 절은 설정만 있고 소비자가 없다(M8). RL 사이저(`ml/rl/*`·`rl_shadow`·`rl_train` kind·`trader rl`)도 M8.
