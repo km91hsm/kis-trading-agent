@@ -165,12 +165,18 @@ def lane_kinds(kinds: jobq.Kinds, lanes: frozenset[str]) -> frozenset[str]:
     return frozenset(k for k, q in kinds.items() if q.lane in lanes)
 
 
+def is_auto_source(source: str | None) -> bool:
+    """자동 출처인가. `notice:{env}` 처럼 ':' 뒤에 붙은 꼬리는 떼고 앞부분만 `AUTO_SOURCES` 와
+    맞춘다(':' 가 없으면 그대로 정확히 맞춘다)."""
+    return bool(source) and str(source).split(":", 1)[0] in AUTO_SOURCES
+
+
 def auto_gate(deps: Any, req: dict) -> str | None:
     """자동 요청(데몬 따라잡기·뉴스·체결통보·재기동 재등록)의 trading kind 는 넣은 뒤 꺼내기
     전에 장이 끝나거나 일시정지·휴장일일 수 있다 — 꺼내는 시점에 시장 게이트와 장 마감을 다시
     본다. 사람이 누른 요청(web·telegram·cli)과 trading 이 아닌 kind 는 그대로 돈다."""
     spec = deps.queue.kinds.get(req["kind"])
-    if spec is None or not spec.trading or req.get("source") not in AUTO_SOURCES:
+    if spec is None or not spec.trading or not is_auto_source(req.get("source")):
         return None
     market = (req.get("params") or {}).get("market")
     gate = (deps.gates or {}).get("market")
@@ -268,12 +274,14 @@ def _tick_locked(deps: Any, lanes: frozenset[str]) -> dict:
     done = {"v": False}
 
     def _finish(status: str, result: dict | None = None, error: str | None = None) -> None:
-        done["v"] = True
+        # done 은 기록이 성공한 뒤에만 — 실패하면 아래 finally 의 `_close_unrun` 이 다시 닫는다
+        # (running 으로 남으면 EmptyParams kind 는 재기동 전까지 전부 DuplicateRequest)
         c = deps.conn_factory()
         try:
             jobq.finish(c, req_id, status, result=result, error=error, now=deps.now())  # type: ignore[arg-type]
         finally:
             c.close()
+        done["v"] = True
 
     def wrapped(ctx: Any, job: ScheduledJob) -> Any:
         try:

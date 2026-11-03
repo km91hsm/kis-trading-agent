@@ -695,3 +695,35 @@ def test_tick_conn_factory_failure_does_not_leave_request_running(env, conn):
     row = next(r for r in jobq.list_recent(conn) if r["id"] == rid)
     assert row["status"] == "error" and "연결 실패" in row["error"]
     assert hb._data["jobs"]["train"]["last_status"] == "error"
+
+
+def test_finish_write_failure_does_not_leave_request_running(env, conn, monkeypatch):
+    """S1: 본체 뒤 finish 기록이 한 번 실패해도 요청은 running 으로 남지 않는다 — EmptyParams
+    kind(sync)는 남으면 재기동 전까지 같은 요청이 전부 DuplicateRequest 가 된다."""
+    rid = enqueue(env, conn, "sync", {})
+    real = jobq.finish
+    calls = {"n": 0}
+
+    def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("database is locked")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(jobq, "finish", flaky)
+    assert env.tick("fast") == {"request": rid, "kind": "sync"}
+    row = next(r for r in jobq.list_recent(conn) if r["id"] == rid)
+    assert row["status"] != "running" and calls["n"] == 2
+    assert enqueue(env, conn, "sync", {}) != rid  # DuplicateRequest 가 아니다
+
+
+def test_auto_gate_matches_source_prefix(project):
+    """S3: 'notice:{env}' 같은 접두 출처도 자동 출처('notice')로 본다. ':' 없는 출처는 정확히."""
+    after = datetime(2026, 10, 27, 7, 0, tzinfo=UTC)  # 16:00 KST, 장 마감 뒤
+    env = make_env(project, after)
+    req = {"kind": "reeval", "params": {"market": "KR"}, "source": "notice:paper"}
+    assert qj.auto_gate(env.deps, req) == "장 마감"
+    assert qj.auto_gate(env.deps, {**req, "source": "news:live"}) == "장 마감"
+    assert qj.auto_gate(env.deps, {**req, "source": "web:paper"}) is None
+    assert qj.auto_gate(env.deps, {**req, "source": "noticeboard"}) is None
+    assert qj.auto_gate(env.deps, {**req, "source": "notice"}) == "장 마감"
