@@ -42,6 +42,9 @@ class Port:
     def market_client(self):
         return None
 
+    def paused(self, conn):
+        return bool(control.get_flag(conn, "paused"))
+
 
 def trigger_deps(
     project, conn, *, now=None, dry_run=False, notifier=None, brokers=(), settings=None,
@@ -213,6 +216,20 @@ def test_news_trigger_updates_flag_and_novel_even_when_skipped(conn, project):
     assert out["novel"] == 1 and out["skipped"] == "discovery.intraday.enabled=false"
     assert control.get_flag(conn, "news_trigger_at:KR") == NOW.isoformat()
     deps.settings.discovery.intraday.enabled = True
+
+
+def test_news_trigger_discover_throttled_still_marks_novel(conn, project, monkeypatch):
+    """Review Focus 2: 감속이어도 `news_trigger_at`·novel 은 갱신, discover 는 큐에 안 넣는다."""
+    from trader.kernel.session import usage
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    monkeypatch.setattr(usage, "session_allowance", lambda *a, **k: (False, "사용량 감속 테스트"))
+    deps = trigger_deps(project, conn)
+    _news(conn, [("금리 동결", [])])
+    out = _news_trigger(deps, conn)
+    assert out["novel"] == 1 and out["discover"].startswith("사용량 감속")
+    assert control.get_flag(conn, "news_trigger_at:KR") == NOW.isoformat()
+    assert "discover" not in [k for k, _, _ in _queued(conn)]
 
 
 def test_discover_cap_only_consumed_by_successful_enqueue(conn, project):

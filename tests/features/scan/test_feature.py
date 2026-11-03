@@ -49,3 +49,14 @@ def test_feature_declares_screen_discover_session_kinds():
     assert FEATURE.agents == AGENTS
     assert (SCREEN.kind, SCREEN.runs_kind, SCREEN.throttle) == ("screen", "scan", "hard")
     assert (DISCOVER.kind, DISCOVER.agents) == ("discover", ("scout",))
+
+
+def test_scan_does_not_import_accounts_feature():
+    """scan 허용 목록은 커널 + ingest·saveticker·regime·ml 의 api 뿐 — accounts 는 포트로만."""
+    root = Path(__file__).resolve().parents[3] / "src" / "trader" / "features" / "scan"
+    offenders = [
+        str(p)
+        for p in root.rglob("*.py")
+        if "trader.features.accounts" in p.read_text(encoding="utf-8")
+    ]
+    assert offenders == []

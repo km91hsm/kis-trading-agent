@@ -94,6 +94,24 @@ def test_run_screen_session_failure_falls_back_to_top3_and_keeps_held_watch(
     assert r["session"] == {"ok": False, "fake": False, "cost_usd": None}
 
 
+def test_run_screen_ok_without_screen_checkpoint_falls_back_to_top3(
+    project, conn, settings, monkeypatch
+):
+    """Review Focus 4: 세션은 ok=True 인데 `_screen` 체크포인트가 없으면(빈 picks) 정량 상위 3개로,
+    watch 는 그대로."""
+    monkeypatch.setattr(
+        screener, "run_session", lambda spec, kind, ctx, **kw: SessionResult(ok=True)
+    )
+    lc = lane(conn, settings)
+    r = screener.run_screen(
+        lc, market="KR", date=D, candidates=CANDS, cap_hit=False, watch=["KR:005930"]
+    )
+    assert r["picks"] == [
+        {"ticker": t, "reason": "screener 실패: 정량 상위"} for t in ("000000", "000001", "000002")
+    ]
+    assert ("005930", "watch") in [(t["ticker"], t["source"]) for t in r["analyze_targets"]]
+
+
 def _capture_screen(monkeypatch):
     got = {}
 

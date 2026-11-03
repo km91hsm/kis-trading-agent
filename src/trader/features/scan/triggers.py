@@ -13,7 +13,6 @@ from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from trader.features.accounts import api as accounts_api
 from trader.features.ingest import api as ingest_api
 from trader.features.regime import api as regime_api
 from trader.features.scan import discovery, messages
@@ -47,6 +46,12 @@ def session_allowed(deps: Any, conn: sqlite3.Connection, kind: str) -> tuple[boo
     if is_fake():
         return True, None
     return usage.session_allowance(conn, deps.settings, kind=kind, now=deps.now())
+
+
+def is_paused(deps: Any, conn: sqlite3.Connection) -> bool:
+    """일시정지 여부: accounts 포트의 `paused`. 포트가 없으면 정지 아님."""
+    port = (deps.ports or {}).get("accounts")
+    return bool(port.paused(conn)) if port is not None else False
 
 
 def in_market_window(deps: Any, market: str) -> bool:
@@ -171,7 +176,7 @@ def disclosure_trigger(
     ]
     if not fresh:
         return res
-    can_run = not accounts_api.is_paused(conn) and in_market_window(deps, market)
+    can_run = not is_paused(deps, conn) and in_market_window(deps, market)
     today = run_date_for(market, deps.now())
     cache = _cache_dir(deps)
     hedge = regime_api.excluded_tickers(deps.settings, market)
@@ -229,7 +234,7 @@ def news_trigger(deps: Any, conn: sqlite3.Connection, market: str, universe: Any
         return out
     if not cfg.enabled:
         return out | {"skipped": "discovery.intraday.enabled=false"}
-    if accounts_api.is_paused(conn):
+    if is_paused(deps, conn):
         return out | {"skipped": "일시정지"}
     if not in_market_window(deps, market):
         return out | {"skipped": "장중 창 밖 (아침 scan 이 48시간 뉴스를 본다)"}
