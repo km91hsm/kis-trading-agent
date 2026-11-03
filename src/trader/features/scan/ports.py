@@ -9,8 +9,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from trader.features.scan import membership
+from trader.features.ingest.api import load_sectors
+from trader.features.scan import membership, sector_suggest
 from trader.features.scan.settings import load_events
+from trader.kernel.platform import paths
 from trader.kernel.registry.types import Port
 
 logger = logging.getLogger("trader.scan")
@@ -44,6 +46,11 @@ class ScanPortImpl:
         )
         m = result["map"]
         return lambda ticker: list(m[ticker]) if m.get(ticker) else None
+
+    def sector_of(self, market: str) -> Callable[[str], str | None]:
+        """종목 → 섹터: sectors.yaml 우선, 없으면 자동 분류 캐시(`state/cache/sector_auto.json`),
+        그래도 없으면 None."""
+        return sector_suggest.resolver(load_sectors(), market, state=paths.state_dir())
 
 
 def build_port(boot: Any) -> ScanPortImpl:

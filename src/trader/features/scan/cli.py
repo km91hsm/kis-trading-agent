@@ -1,29 +1,35 @@
 """`trader scan` — 테마 열기 조회(`theme show`)·사건 감지 조회(`events show`)·정량 스크린 과거 검증
-(`backtest`). 모두 읽기 전용이고 출력은 JSON 한 덩어리다.
+(`backtest`)·유니버스 점검(`universe check|sectors`). 모두 읽기 전용이고 출력은 JSON 한 덩어리다.
 옛 `events check`(수혜 표 시세 확인)는 이식하지 않았다(README)."""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import typer
 
+from trader.features.ingest import api as ingest_api
 from trader.features.ml import api as ml_api
 from trader.features.saveticker import api as saveticker_api
-from trader.features.scan import backtest, events, theme
+from trader.features.scan import backtest, events, sector_suggest, theme, universe_check
 from trader.features.scan.settings import load_events
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import ConfigError
 from trader.kernel.ledger import control
-from trader.kernel.platform import paths
+from trader.kernel.platform import bundle, paths
 from trader.kernel.session.run_store import run_date_for
 
 scan_app = typer.Typer(help="테마 열기·사건 수혜 조회", no_args_is_help=True)
 theme_app = typer.Typer(help="테마 열기 감지: 조회", no_args_is_help=True)
 events_app = typer.Typer(help="사건 수혜: 뉴스 감지 결과 보기", no_args_is_help=True)
+universe_app = typer.Typer(help="유니버스 점검", no_args_is_help=True)
 scan_app.add_typer(theme_app, name="theme")
 scan_app.add_typer(events_app, name="events")
+scan_app.add_typer(universe_app, name="universe")
 
 
 def _market(market: str) -> str:
@@ -130,3 +136,76 @@ def scan_backtest(
         "생존 편향이 남는다(편출·상장폐지 종목 없음)"
     )
     typer.echo(json.dumps(out, ensure_ascii=False, default=str))
+
+
+def _market_client(boot_fn: Callable[..., Any]) -> Any:
+    """KIS 시세 클라이언트(`ports["accounts"].market_client()`). 테스트가 갈아끼우는 지점."""
+    return boot_fn(ports=True).ports["accounts"].market_client()
+
+
+@universe_app.command("check")
+@config_errors
+def universe_check_cmd(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    show_all: bool = typer.Option(False, "--all", help="문제 없는 종목도 출력"),
+) -> None:
+    """유니버스 종목이 KIS 시세를 실제로 주는지 점검한다 (US 는 거래소 코드 제안). 문제면 exit 1."""
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    universe = ingest_api.load_universe()
+    rows = universe_check.check(universe, _market_client(boot), market=market)
+    bad = [r for r in rows if not r["ok"]]
+    for r in rows if show_all else bad:
+        mark = "OK " if r["ok"] else "NG "
+        ex = f" {r['exchange']}" if r["exchange"] else ""
+        hint = f" → {r['suggested_exchange']}" if r["suggested_exchange"] else ""
+        typer.echo(f"{mark}{r['ticker']}{ex}{hint} {r['note']}".rstrip())
+    typer.echo(f"점검 {len(rows)}종목, 문제 {len(bad)}건")
+    if bad:
+        raise typer.Exit(code=1)
+
+
+def _templates_config_dir() -> Path:
+    """config/*.yaml 의 사본이 있는 templates/config (개발 체크아웃).
+
+    번들(_internal)에는 쓰지 않는다."""
+    return paths.project_root() / "templates" / "config"
+
+
+@universe_app.command("sectors")
+@config_errors
+def universe_sectors_cmd(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    show_all: bool = typer.Option(False, "--all", help="이미 섹터가 있는 종목도 출력"),
+    write: bool = typer.Option(
+        False, "--write", help="제안을 config/sectors.yaml(+템플릿)에 덧붙인다"
+    ),
+) -> None:
+    """KIS 업종으로 sectors.yaml 에 빠진 종목의 섹터를 제안한다. 표에 없는 업종이 있으면 exit 1."""
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    universe = ingest_api.load_universe()
+    sectors = ingest_api.load_sectors()
+    rows = sector_suggest.suggest(
+        universe, sectors, _market_client(boot), market=market, only_missing=not show_all
+    )
+    for r in rows:
+        ex = f" {r['exchange']}" if r["exchange"] else ""
+        typer.echo(
+            f"{r['ticker']}{ex}  업종={r['industry'] or '-'}  현재={r['current'] or '-'}  "
+            f"제안={r['suggested'] or '-'}  {r['note']}".rstrip()
+        )
+    unresolved = [r for r in rows if r["current"] is None and not r["suggested"]]
+    if write:
+        today = date.today()
+        n = sector_suggest.apply(paths.config_dir() / "sectors.yaml", market, rows, today=today)
+        tmpl = _templates_config_dir() / "sectors.yaml"
+        wrote_tmpl = False
+        if not bundle.is_frozen() and tmpl.is_file():
+            # 템플릿은 KIS 제안이 아니라 config 값으로 맞춘다 (config 에만 있던 수동 항목도 함께)
+            sector_suggest.sync(paths.config_dir() / "sectors.yaml", tmpl, market, today=today)
+            wrote_tmpl = True
+        typer.echo(f"기록: {n}종목 (config/sectors.yaml{'·templates' if wrote_tmpl else ''})")
+    typer.echo(f"점검 {len(rows)}종목, 제안 없음 {len(unresolved)}건")
+    if unresolved:
+        raise typer.Exit(code=1)
