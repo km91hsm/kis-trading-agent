@@ -33,8 +33,8 @@ def _item(key: str, ok: bool, value, threshold, note: str = "") -> dict:
 
 
 def interval_kinds_of(features: Iterable[Any]) -> frozenset[str]:
-    """interval 잡 id(`{market}` 은 kr/us 로 전개). kind 는 넣지 않는다 — 데몬이 `runs.kind=job.kind`
-    로 쓰므로 kind(예: monitor)를 넣으면 재평가 세션까지 빠진다.
+    """interval 잡 id(`{market}` 은 kr/us 로 전개). kind 는 넣지 않는다 — 데몬은 runs.kind=job.kind
+    로 쓰므로 kind(monitor 등)를 넣으면 재평가 세션까지 빠진다.
 
     interval 잡은 오류일 때만 runs 에 남아 오류율 분모를 왜곡하므로 점검에서 제외한다."""
     out: set[str] = set()
