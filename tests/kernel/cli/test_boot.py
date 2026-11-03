@@ -40,3 +40,21 @@ def test_boot_port_failure_is_config_error(project, monkeypatch):
     monkeypatch.setattr(boot_mod, "check", lambda fs: [])
     with pytest.raises(ConfigError, match="포트 pa 조립 실패: ValueError: 키 없음"):
         boot_mod.boot(ports=True)
+
+
+def test_boot_ports_share_one_dict_for_lazy_resolution(project, monkeypatch):
+    seen = {}
+
+    def build_a(b):
+        seen["ports"] = b.ports
+        return "A"
+
+    feats = [_feat("a", Port("a", build_a)), _feat("b", Port("b", lambda b: "B"))]
+    monkeypatch.setattr(boot_mod, "discover", lambda: feats)
+    monkeypatch.setattr(boot_mod, "check", lambda fs: [])
+    b = boot_mod.boot(ports=True)
+    try:
+        assert seen["ports"] is b.ports
+        assert seen["ports"]["b"] == "B"
+    finally:
+        b.conn.close()

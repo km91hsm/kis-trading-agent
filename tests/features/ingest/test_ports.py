@@ -81,3 +81,20 @@ def test_collect_injects_peer_fn_from_ml_port(project):
     assert set(calls[0]) == {"market", "ticker", "asof_date", "sectors"}
     assert calls[0]["ticker"] == "000660" and calls[0]["market"] == "KR"
     assert out["fundamental"]["peer"]["data"] == {"per": 12.5}
+
+
+def test_build_port_resolves_ml_lazily_from_boot_ports(project):
+    from types import SimpleNamespace
+
+    from trader.features.ingest import ports as ingest_ports
+
+    cfg = SourcesConfig.model_validate({"news": {"enabled": False}})
+    boot_ports: dict = {}
+    boot = SimpleNamespace(secrets=Secrets(), registry=None, ports=boot_ports)
+    orig = ingest_ports.load_sources
+    ingest_ports.load_sources = lambda registry=None: cfg
+    try:
+        port = ingest_ports.build_port(boot)
+    finally:
+        ingest_ports.load_sources = orig
+    assert port._ports is boot_ports

@@ -78,7 +78,9 @@ def boot(
     boot_ = Boot(settings_obj, connection, features, schedule_obj, registry, secrets_obj)
     if not ports:
         return boot_
+    # 모든 포트가 같은 ports dict 를 받는다 — 먼저 조립된 포트가 나중 포트를 지연 해석할 수 있다
     built: dict[str, Any] = {}
+    boot_ = replace(boot_, ports=built)
     for f in features:
         for port in f.ports:
             try:
@@ -89,7 +91,7 @@ def boot(
                 raise ConfigError(
                     f"포트 {port.name} 조립 실패: {type(e).__name__}: {e}"
                 ) from e
-    return replace(boot_, ports=built)
+    return boot_
 
 
 def config_errors(fn):
