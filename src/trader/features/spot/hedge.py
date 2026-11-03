@@ -421,6 +421,8 @@ def hedge_tick(deps: Any, market: str) -> dict:
     today = run_date_for(market, deps.now())
     conn = deps.conn_factory()
     try:
+        if control.get_flag(conn, done_key(market, today)):
+            return {"skipped": "오늘 이미 실행"}
         ectx = executor.exec_ctx_from(
             deps.settings, conn, accounts_port, deps.notifier or NullNotifier(), deps.now,
             deps.state, ports=deps.ports,
@@ -428,8 +430,6 @@ def hedge_tick(deps: Any, market: str) -> dict:
         mc = ectx.market_client
         if mc is None:
             return {"skipped": "비활성"}
-        if control.get_flag(conn, done_key(market, today)):
-            return {"skipped": "오늘 이미 실행"}
         if ectx.paused(conn):
             flag = f"hedge_paused_notice:{market}:{today.isoformat()}"
             if not control.get_flag(conn, flag):

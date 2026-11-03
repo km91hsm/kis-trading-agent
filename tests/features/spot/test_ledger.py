@@ -120,7 +120,8 @@ def test_round0_stays_in_sync_with_decision_row(conn):
         return tuple(d), tuple(r)
 
     d, r = both()
-    assert d == r[:2] == ("hedge", 1) and r[2] == "ADD"
+    # Ruling P8: 재적재는 source 를 마지막 쓴 쪽('llm')으로 되돌리고 round 0 이 그대로 따른다
+    assert d == r[:2] == ("llm", 1) and r[2] == "ADD"
     ledger.set_skipped_debate(conn, did, False)
     d, r = both()
     assert d[1] == r[1] == 0
@@ -179,3 +180,22 @@ def test_stop_floor_ignores_later_rounds_on_reingest(conn):
     got = [(r["round"], r["action"], r["stop_loss"]) for r in rows]
     assert got == [(0, "BUY", "65000.0"), (1, "HOLD", "65000.0"), (2, "ADD", "68000.0"),
                    (3, "SELL", None)]  # fmt: skip
+
+
+def test_decision_source_follows_last_writer(conn):
+    """Ruling P8: 결정 행 upsert 는 한 곳(`_upsert_decision`)이고 `source` 는 마지막 쓴 쪽을
+    따른다 — 같은 (날짜, 시장, 종목)에 헤지 행 뒤 LLM 결정이 오면 'llm', 반대면 'hedge'."""
+    hedge_data = ok_decision(ticker="114800", stop_loss=None, take_profit=None)
+
+    def source(ticker):
+        q = "SELECT source FROM decisions WHERE ticker=?"
+        return conn.execute(q, (ticker,)).fetchone()["source"]
+
+    did = ledger.insert_hedge_decision(conn, D, "KR", "114800", hedge_data)
+    assert source("114800") == "hedge"
+    ledger.ingest_checkpoint(conn, D, "KR", "114800", "30_decision", cp(hedge_data))
+    assert source("114800") == "llm" and ledger.decision_id(conn, D, "KR", "114800") == did
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "30_decision", cp(ok_decision()))
+    ledger.insert_hedge_decision(conn, D, "KR", "005930", ok_decision())
+    assert source("005930") == "hedge"
+    assert conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 2

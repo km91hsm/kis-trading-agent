@@ -143,7 +143,7 @@ def test_hedge_tick_skips_quietly_without_regime_port(project, settings, conn, m
     regime_jobs.regime_update(deps, "KR")
     n = len(deps.notifier.msgs)
     no_port = replace(deps, ports={"accounts": deps.ports["accounts"]})
-    assert isinstance(hedge.hedge_tick(no_port, "KR")["skipped"], str)
+    assert hedge.hedge_tick(no_port, "KR") == {"skipped": "비활성"}
     monkeypatch.setattr(monitor_mod, "monitor_once", lambda ctx, **kw: {"checked": 1})
     out = spot_jobs.monitor_body(no_port, JOB)
     assert out["checked"] == 1 and "hedge" not in out and _broker(no_port).orders == []
@@ -151,7 +151,7 @@ def test_hedge_tick_skips_quietly_without_regime_port(project, settings, conn, m
     s_off = deps.settings.model_copy(update={"hedge": off})
     off_port = regime_ports.build_port(SimpleNamespace(settings=s_off))
     disabled = replace(deps, settings=s_off, ports={**deps.ports, "regime": off_port})
-    assert isinstance(hedge.hedge_tick(disabled, "KR")["skipped"], str)
+    assert hedge.hedge_tick(disabled, "KR") == {"skipped": "비활성"}
     assert _broker(deps).orders == [] and len(deps.notifier.msgs) == n
 
 

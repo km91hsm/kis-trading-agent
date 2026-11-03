@@ -90,33 +90,7 @@ def ingest_checkpoint(
     elif _DECISION_RE.match(stage) or (m_round := _ROUND_RE.match(stage)) is not None:
         # 30_decision 과 재평가 31_decision_r<n> 모두 (date, market, ticker) 결정 행을 덮어쓴다
         # (옛 동작: 최신 결정이 행이 된다). 손절 바닥은 아래 라운드 행(stop_loss)에서 유지한다
-        conn.execute(
-            "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
-            "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
-            "data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(date, market, ticker) DO UPDATE SET action=excluded.action, "
-            "target_weight=excluded.target_weight, order_type=excluded.order_type, "
-            "limit_price=excluded.limit_price, stop_loss=excluded.stop_loss, "
-            "take_profit=excluded.take_profit, horizon_days=excluded.horizon_days, "
-            "confidence=excluded.confidence, rationale=excluded.rationale, "
-            "data_json=excluded.data_json",
-            (
-                day,
-                market,
-                ticker,
-                data.get("action"),
-                _txt(data.get("target_weight")),
-                data.get("order_type"),
-                _txt(data.get("limit_price")),
-                _txt(data.get("stop_loss")),
-                _txt(data.get("take_profit")),
-                data.get("horizon_days"),
-                data.get("confidence"),
-                data.get("rationale"),
-                js,
-                now,
-            ),
-        )
+        _upsert_decision(conn, day, market, ticker, data, js, now, source="llm")
         did = decision_id(conn, d, market, ticker)
         if did is not None and m_round is None:
             _upsert_round(conn, did, 0, data, js, now)
@@ -127,23 +101,31 @@ def ingest_checkpoint(
     conn.commit()
 
 
-def insert_hedge_decision(
-    conn: sqlite3.Connection, d: date, market: str, ticker: str, data: dict
-) -> int:
-    """파이썬이 만든 헤지 결정 행(`source='hedge'`). 같은 날·종목이면 갱신하고 행 id 를 돌려준다.
-    라운드 행은 만들지 않는다 — 손절 바닥·분포(llm 결정)에서 빠진다."""
+def _upsert_decision(
+    conn: sqlite3.Connection,
+    day: str,
+    market: str,
+    ticker: str,
+    data: dict,
+    js: str,
+    now: str,
+    *,
+    source: str,
+) -> None:
+    """결정 행 (날짜, 시장, 종목) upsert 의 유일한 SQL. `source` 는 마지막 쓴 쪽을 따른다
+    (Ruling P8 — 같은 날 헤지 행 뒤 LLM 결정이 오면 'llm'). commit 은 호출자."""
     conn.execute(
         "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
         "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
-        "data_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hedge', ?) "
+        "data_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(date, market, ticker) DO UPDATE SET action=excluded.action, "
         "target_weight=excluded.target_weight, order_type=excluded.order_type, "
         "limit_price=excluded.limit_price, stop_loss=excluded.stop_loss, "
         "take_profit=excluded.take_profit, horizon_days=excluded.horizon_days, "
         "confidence=excluded.confidence, rationale=excluded.rationale, "
-        "data_json=excluded.data_json, source='hedge'",
+        "data_json=excluded.data_json, source=excluded.source",
         (
-            d.isoformat(),
+            day,
             market,
             ticker,
             data.get("action"),
@@ -155,10 +137,20 @@ def insert_hedge_decision(
             data.get("horizon_days"),
             data.get("confidence"),
             data.get("rationale"),
-            _js(data),
-            now_iso(),
+            js,
+            source,
+            now,
         ),
     )
+
+
+def insert_hedge_decision(
+    conn: sqlite3.Connection, d: date, market: str, ticker: str, data: dict
+) -> int:
+    """파이썬이 만든 헤지 결정 행(`source='hedge'`). 같은 날·종목이면 갱신하고 행 id 를 돌려준다.
+    라운드 행은 만들지 않는다 — 손절 바닥·분포(llm 결정)에서 빠진다."""
+    day, js = d.isoformat(), _js(data)
+    _upsert_decision(conn, day, market, ticker, data, js, now_iso(), source="hedge")
     conn.commit()
     did = decision_id(conn, d, market, ticker)
     if did is None:  # 방금 쓴 행이 없을 수 없다 — 원장 이상
