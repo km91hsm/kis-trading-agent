@@ -36,6 +36,7 @@
   - `init_schema` 는 이미 최신이면 쓰기 잠금 없이 반환한다.
   - 저장 시각은 `now_iso()` 의 UTC ISO8601.
   - 커널은 `control`·`runs` 외의 도메인 테이블을 모른다. 기능이 자기 마이그레이션으로 만든다.
+  - M7 에서 종목 표기 `ledger/names.py`(`ticker_names` → 캐시 JSON, 네트워크 없음)가 기능에서 커널로 승격됐다.
 - 테스트: `tests/kernel/ledger/`
 
 ## session
@@ -77,6 +78,7 @@
   - 보낸 뒤(`sent_at`) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이다(같은 결정·계좌·방향 주문이 다시 안 나간다). 사람이 KIS 주문 유무를 확인한 뒤 `ExecKeyStore` 로 푼다.
   - `take_pending` 이 pending 이 아닌 승인은 실제 상태를 돌려주고 DB 를 바꾸지 않는다(approved 행을 expired 로 덮지 않는다). 승인 지문은 항상 비교한다.
   - 마이그레이션 `EXECUTION` 은 `session` 과 같은 방식(`contracts.KERNEL_MODULES`)으로 합쳐진다.
+  - M7 에서 보유기간 프로필 `execution/horizon.py`(결정 `horizon_days` → short|mid|long 의 점검 주기·임계, 순수 함수·덕 타이핑)가 spot 에서 커널로 승격됐다(scan 트리거와 spot 이 함께 쓴다).
 - 테스트: `tests/kernel/execution/`
 
 ## lane
@@ -197,4 +199,4 @@
 
 ## features 층
 
-`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). `regime`(M6, 서비스: 국면·킬스위치·권리 일정 블랙아웃·시장 세션·`{market}_regime`/`ksd_events` 잡·`ports["regime"]`·`trader regime`·텔레그램 `/kill`, `features/regime/README.md`), `scan`(M6, 서비스: 테마 열기·사건 감지·`news.post_ingest` 훅·`ports["scan"]`·`trader scan`, `features/scan/README.md`). 레인(spot)은 두 기능을 `LaneContext.ports["regime"]`·`ports["scan"]` 로만 받고 import 하지 않는다. spot 에는 헤지·현금 운용·주간 리밸런스(M6)도 있다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). `regime`(M6, 서비스: 국면·킬스위치·권리 일정 블랙아웃·시장 세션·`{market}_regime`/`ksd_events` 잡·`ports["regime"]`·`trader regime`·텔레그램 `/kill`, `features/regime/README.md`), `scan`(M6, 서비스: 테마 열기·사건 감지·`news.post_ingest` 훅·`ports["scan"]`·`trader scan`, `features/scan/README.md`). 레인(spot)은 두 기능을 `LaneContext.ports["regime"]`·`ports["scan"]` 로만 받고 import 하지 않는다. spot 에는 헤지·현금 운용·주간 리밸런스(M6)도 있다. `ml`(M7, 서비스: 피처 스토어·퀀트 학습·튠·레지스트리·시점 유니버스·`05_quant` 리포트·`ml_train`/`universe_members` 잡·큐 kind `features_*`/`ml_train`·`ports["ml"]`·`trader ml`, `features/ml/README.md`). `scan` 은 M7 에서 정량 필터·ML 랭커·발굴·스크리너·뉴스/공시 트리거·관심종목(`/watch`)·유니버스 점검·`trader scan run|backtest|universe`로 확장됐다(ML 랭커는 ml→scan 순환을 피해 scan 소유). spot 에는 `{market}_scan_analyze` 잡·큐 kind `scan_analyze`/`analyze_ticker`(M7)가 들어왔다. 옛 `features/jobs` 는 별도 기능이 되지 않고 커널 작업 큐로 흡수됐다(`QueueKind` 선언만 각 기능이 더하고 `/run` 은 커널 내장). 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.

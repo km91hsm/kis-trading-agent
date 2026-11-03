@@ -75,7 +75,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - 이연(M3):
   - M4: `InputDeps.market` 주입, native-host argv 우회(번들) — `test_native_origin_routes_before_cli`, `trader collect` 별칭 여부
   - M6: `_vix`
-  - M7(회수): `_news_trigger`·`_discover_body`·`_disclosure_trigger`·`_events_check`·`ticker_names` 캐시·`peer_fn`·`universe check|sectors`, 옛 `test_daemon_news` 7건·`test_daemon_disclosure` 3건
+  - (M7 회수 완료): `_news_trigger`·`_discover_body`·`_disclosure_trigger`·`_events_check`·`ticker_names` 캐시·`peer_fn`·`universe check|sectors`, 옛 `test_daemon_news` 7건·`test_daemon_disclosure` 3건
   - M11: `/api/news`·`/api/control/manual-inputs`·`/api/system/saveticker`·restart
   - M12: health `disclosure`·`saveticker`, selfcheck playwright 점검, `test_health_disclosure_area_critical_for_held`, 패키징(`extensions/saveticker` data·playwright 드라이버)
 
@@ -108,7 +108,7 @@ SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경�
 - 이연(M4):
   - M5: `resume` 세션·`31_decision_r<n>` 재평가(옛 `stop_floor` 규칙 포함)·trigger 가격·stop·monitor·`telegram_poll`/outbox flush 잡·`holiday_fn`·기동 시 stale `running` 행 정리·게이트 공급 경로(`Feature.gates`)·시그널 `wait=True` 테스트·`accounts_io.blockers` 실제 스키마
   - M6: killswitch·blackout·hedge·park·regime 컨텍스트·승인 재판정의 bear/killswitch 재검사·`test_rules` 의 regime 호출자
-  - M7(회수; RL 은 M8, `AnalystRole` quant 복원은 Ruling M7-K1 로 하지 않음): quant·theme
+  - (M7 회수 완료; RL 은 M8, `AnalystRole` quant 복원은 Ruling M7-K1 로 하지 않음): quant·theme
   - M8: memory·calibration·`quick.py`(`ask_json`·`probe_usage`)·`test_quick` 9건·결과 dict `memory_entry_id`·`memory_entries` 단언
   - M10: fo 세션·`test_session_fo`·`test_schemas_fo`·`test_ticks_fo`·`test_usage_fo`
   - M11: `decision_trace`
@@ -137,7 +137,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - 이연(M2, M5 가 한 것): 체결통보 리스너(`_notice_listeners`)
 - 이연(M5):
   - M6: killswitch·hedge·`cash_park`·`excluded_tickers`(monitor 의 헤지/현금 운용 건너뛰기·`cancel_buys`)
-  - M7(회수): 공시/뉴스 트리거 생산(`news.post_ingest` 훅)·`analyze_ticker` kind(종목 락 `locks.lock_for` 공유)·discover·`reevaluate` 의 dry_run 담긴 요청 실행 단언·US 거래소 보강 단언
+  - (M7 회수 완료): 공시/뉴스 트리거 생산(`news.post_ingest` 훅)·`analyze_ticker` kind(종목 락 `locks.lock_for` 공유)·discover·`reevaluate` 의 dry_run 담긴 요청 실행 단언·US 거래소 보강 단언
   - M8: memory(메모리 브레이커 인자·`test_resume` memory 1건)·`close` 무효화 종가표(`close_table` 콜러블 주입, Ruling 14)
   - M9: `ops_check` 잡·health
   - M10: fo 분기·`test_balance_dispatch` 3건·`test_fills_fo`
@@ -162,7 +162,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 13 문서·템플릿·체크리스트·골든 재검증
 - [x] PR·CI(ubuntu+windows)·머지 (#7, main 10c3cbd)
 - 이연(M6):
-  - M7(회수; `events check` CLI 는 훅으로 대체): discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
+  - (M7 회수 완료; `events check` CLI 는 훅으로 대체): discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
   - M8: `theme.mature` 데몬 호출(종가표 주입, 피처 스토어)·`metrics.decision_distribution`(헤지 결정 제외 단언은 `source` 로 대체)·`ml_trained` 메시지·`_default_sector_of` 예외 로그·`mature(close_table=None)` 테스트
   - M9: `_scalp_open`(리밸런스 단타 보유 제외; 지금은 빈 집합)·`hedge_tick` pending 플래그 시 데몬 재시도 없음(옛 결함 보존, `MAX_RETRIES` 죽은 코드)·리밸런스 잔고·시세 전부 실패에도 done 플래그 기록(옛 동일)·커널 `status_message` 절별 실패 격리·`market_view` QueueKind `trading=False`(옛 `TRADING_KINDS` 포함) 확인·stale 예탁원 알림 매 실행(옛 동일)·`test_cli_regime` scalp 1건
   - M9: 큐 kind `rebalance` 의 `market` 을 `Literal["KR","US"]` 로 검증(현재 `ReconcileParams` 재사용)
@@ -176,27 +176,30 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 ## M7 — features/ml + scan 확장 + spot scan_analyze
 피처 스토어·학습·레지스트리·퀀트 리포트·유니버스 PIT(`features/ml`), 정량 필터·ML 랭커·스크리너·발굴·뉴스/공시 트리거·관심종목(`features/scan` 확장), `{market}_scan_analyze` 잡·`05_quant`(`features/spot`). 작업 큐는 M5 커널 그대로(`features/jobs` 패키지 없음). 플랜 `docs/superpowers/plans/2026-11-03-m7-scan-ml.md`. 완료 기준: 옛 테스트 이식 통과.
 - [x] 착수(브랜치 `feat/m7-scan-ml`, 플랜 작성)
-- [ ] Task 1 의존성(sklearn·joblib·pyarrow·numpy) + 커널 전제 — `MlPort`·`ScanPort` 확장·`QuantReport`·원장 헬퍼/`horizon`/`names` 승격
-- [ ] Task 2 커널 소수정 — 큐 우선순위·내장 `/run`·ingest 훅 `deps`·`peer_fn` 포트 해석·`regime.api.excluded_tickers`
-- [ ] Task 3 ml 뼈대 — `ml.yaml` 섹션·원장 v12 `universe_members`·피처 스토어·데이터셋
-- [ ] Task 4 ml 모델 — `walkforward`·`QuantModel`·레지스트리
-- [ ] Task 5 ml 학습·튠·시점 유니버스·`05_quant` 리포트·`trader ml` CLI
-- [ ] Task 6 ml 잡(`ml_train`·`universe_members`)·큐 kind `features_*`/`ml_train`·`daemon.bootstrap` 훅·`ports["ml"]`
-- [ ] Task 7 scan 정량 필터·ML 랭커·스크린 백테스트·관심종목·`discovery` 설정·테마 `vol_z`
-- [ ] Task 8 scan 유니버스 점검·섹터 제안·`ports["scan"].sector_of`·`trader scan universe`
-- [ ] Task 9 scan 발굴 — 스키마·`discovery`·`tool scan` 도구 3종·scout/screener/scan-orchestrator 에이전트
-- [ ] Task 10 scan 스크리너·세션 kind `screen`/`discover`·FAKE·`run_scan`·`trader scan run`
-- [ ] Task 11 scan 트리거(뉴스/공시 재분석)·큐 kind `discover`·텔레그램 `/watch`
-- [ ] Task 12 spot `{market}_scan_analyze`·큐 kind `scan_analyze`/`analyze_ticker`·`05_quant`·`sector_of`·스케줄
-- [ ] Task 13 문서·템플릿·체크리스트·전체 재검증
+- [x] Task 1 의존성(sklearn·joblib·pyarrow·numpy) + 커널 전제 — `MlPort`·`ScanPort` 확장·`QuantReport`·원장 헬퍼/`horizon`/`names` 승격
+- [x] Task 2 커널 소수정 — 큐 우선순위·내장 `/run`·ingest 훅 `deps`·`peer_fn` 포트 해석·`regime.api.excluded_tickers`
+- [x] Task 3 ml 뼈대 — `ml.yaml` 섹션·원장 v12 `universe_members`·피처 스토어·데이터셋
+- [x] Task 4 ml 모델 — `walkforward`·`QuantModel`·레지스트리
+- [x] Task 5 ml 학습·튠·시점 유니버스·`05_quant` 리포트·`trader ml` CLI
+- [x] Task 6 ml 잡(`ml_train`·`universe_members`)·큐 kind `features_*`/`ml_train`·`daemon.bootstrap` 훅·`ports["ml"]`
+- [x] Task 7 scan 정량 필터·ML 랭커·스크린 백테스트·관심종목·`discovery` 설정·테마 `vol_z`
+- [x] Task 8 scan 유니버스 점검·섹터 제안·`ports["scan"].sector_of`·`trader scan universe`
+- [x] Task 9 scan 발굴 — 스키마·`discovery`·`tool scan` 도구 3종·scout/screener/scan-orchestrator 에이전트
+- [x] Task 10 scan 스크리너·세션 kind `screen`/`discover`·FAKE·`run_scan`·`trader scan run`
+- [x] Task 11 scan 트리거(뉴스/공시 재분석)·큐 kind `discover`·텔레그램 `/watch`
+- [x] Task 12 spot `{market}_scan_analyze`·큐 kind `scan_analyze`/`analyze_ticker`·`05_quant`·`sector_of`·스케줄
+- [x] Task 13 문서·템플릿·체크리스트·전체 재검증
 - [ ] PR·CI(ubuntu+windows)·머지
 - Ruling(M7): A1 랭커는 scan 소유(ml→scan 순환 방지, `ml.api` 소비) · K1 `AnalystRole` 은 4종 유지, `QuantReport.role="quant"` 별도 · S1 `regime` 스케줄을 `07:25`/`08:25 ET` 로 앞당겨 scan 앞에 둠 · `features/jobs` 는 커널 큐로 흡수(QueueKind 만 추가, `/run` 은 커널 내장) · `universe_pit` 는 ml 소유
+- Ruling(M7, 실행 중 추가): L1 lightgbm 은 선택 의존이고 `import` 가 OSError(libomp 없음)여도 sklearn 으로 대체 · P1 `ROUND_TRIP_BP` 는 scan 백테스트에 복제(레인 `costs` 를 못 씀) · P2 플랜이 강제한 옛 결함(mkdir-on-read·promote 미강등·`max_event` 8/0·`schema_version` 1·`news_trigger_at` 선갱신)은 동작 보존 · T6-1 `peer_medians` 는 옛 `_peer_section` 모양 유지 · T9-1 발굴 세이브티커 폴더는 `saveticker_api.load_cfg().dir` · T10-1 옛 `scan_line` TypeError 는 고침 · T10-2 `run_scan` http 는 `ingest_api.owned_client(ctx.ext.get("http"), timeout=15)`
 - 이연(M2, M7 가 한 것): watchlist·`/watch`(옛 `test_control` watchlist 2건)
 - 이연(M7):
   - M8: RL 사이저 전부(`ml/rl/*`·`rl_shadow`·executor RL 훅·`trader rl`·`rl_train` kind·옛 테스트 8건·`test_ml_train_job_trains_sizer_even_when_not_enabled`; `ml.yaml` 의 `rl_sizer`·`calibration` 절은 설정만 둠)
   - M8: 섀도 포트폴리오 기록(`scan_analyze.post` 훅 자리, 옛 `test_scan_analyze_body_records_shadow_portfolios` 2건)·reflect 스냅샷 `snapshot_fn`
   - M11: 웹 `/api/features`·`/api/ml`·`RunJobButton`
   - M12: `trader status` ML 절·ops.health `disclosure` 영역(`test_health_disclosure_area_critical_for_held`)
+  - M12: 커널 runner 가 `daemon.bootstrap` 훅을 `bootstrap_queue` 앞에 부름(만료 직전 queued 백필은 다음 기동에 회복) — 순서 교정 후보
+  - M8·M11 이후: `scan_analyze._close_stale`·spot `_close_stale_sessions` 를 커널 공개 헬퍼로 통합
   - 알려진 차이(README 에 기록): `QuantModel` pickle 모듈 경로 변경으로 옛 `state/models/quant/*` 재학습 필요; `ROUND_TRIP_BP` 상수가 scan 백테스트에 중복(spot `costs` 는 레인 모듈)
 
 ## M8 — features/evaluation + briefing
