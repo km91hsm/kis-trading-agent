@@ -14,7 +14,7 @@ import pandas as pd
 
 from trader.features.ml import dataset, walkforward
 
-logger = logging.getLogger("trader.features.ml")
+logger = logging.getLogger("trader.ml")
 
 N_CLASSES = 3
 

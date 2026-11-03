@@ -16,7 +16,7 @@ import joblib
 
 from trader.kernel.platform import paths
 
-logger = logging.getLogger("trader.features.ml")
+logger = logging.getLogger("trader.ml")
 META = "meta.json"
 MODEL = "model.joblib"
 
