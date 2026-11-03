@@ -97,7 +97,11 @@ def test_build_daemon_deps(project):
         assert deps.now().tzinfo is not None
         assert isinstance(deps.notifier, NullNotifier)  # 시크릿 없음
         assert deps.registry is b.registry
-        assert set(deps.hooks) == {"news.post_ingest", "daemon.bootstrap"}  # scan 사건 감지·ml 백필
+        assert set(deps.hooks) == {
+        "news.post_ingest",
+        "daemon.bootstrap",
+        "scan_analyze.post",
+    }  # scan 사건 감지·ml 백필·evaluation 섀도 기록
         assert deps.secrets is not None
     finally:
         b.conn.close()

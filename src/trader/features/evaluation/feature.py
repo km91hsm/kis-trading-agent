@@ -1,5 +1,6 @@
 """evaluation 기능 선언 (서비스): 설정 절·원장 v13·제어 네임스페이스. 잡·CLI 는 뒤 Task."""
 
+from trader.features.evaluation.cli import evaluation_app
 from trader.features.evaluation.jobs import DAILY_REPORT, PAPER_REVIEW, shadow_record_hook
 from trader.features.evaluation.migrations import MIGRATIONS
 from trader.features.evaluation.ports import PORT
@@ -13,6 +14,7 @@ FEATURE = Feature(
     tier="service",
     sections=(*SECTIONS, *SCHEDULE_SECTIONS),
     migrations=MIGRATIONS,
+    cli=evaluation_app,
     control_namespaces=("memory_breaker", "vix_last"),
     ports=(PORT,),
     jobs=(DAILY_REPORT, PAPER_REVIEW),

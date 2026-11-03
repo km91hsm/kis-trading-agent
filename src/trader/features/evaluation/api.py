@@ -6,6 +6,7 @@ from trader.features.evaluation import (
     open_window,
     paper_review,
     performance,
+    readiness,
     shadow,
 )
 from trader.features.evaluation.memory.outcomes import SIGN, close_table, window_return
@@ -20,6 +21,7 @@ from trader.features.evaluation.memory.store import (
 from trader.features.evaluation.memory.vector import DIMS, cosine, situation_vector
 from trader.features.evaluation.metrics import convergence_rate, decision_distribution
 from trader.features.evaluation.performance import benchmarks, metrics_of, nav_series
+from trader.features.evaluation.readiness import MIN_SHADOW_PAIRS, interval_kinds_of
 from trader.features.evaluation.settings import MemorySettings
 
 lots_report = lots.report
@@ -30,8 +32,10 @@ paired_stats = shadow.paired_stats
 cash_effect = shadow.cash_effect
 open_window_targets = open_window.targets
 performance_report = performance.report
+readiness_check = readiness.check
 
 __all__ = [
+    "MIN_SHADOW_PAIRS",
     "DIMS",
     "MemorySettings",
     "SIGN",
@@ -45,6 +49,7 @@ __all__ = [
     "fill_outcome",
     "get_entry",
     "index_table",
+    "interval_kinds_of",
     "lots_report",
     "mature_memory",
     "open_window_targets",
@@ -55,6 +60,7 @@ __all__ = [
     "metrics_of",
     "nav_series",
     "record_decision",
+    "readiness_check",
     "retrieve",
     "shadow_mature",
     "shadow_rows",
