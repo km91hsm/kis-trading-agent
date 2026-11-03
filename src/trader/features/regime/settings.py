@@ -1,4 +1,5 @@
-"""regime 설정 섹션: settings.yaml 의 `hedge`·`event_blackout`.
+"""regime 설정 섹션: settings.yaml 의 `hedge`·`event_blackout`,
+schedule.yaml 의 `regime`·`ksd_events`.
 
 yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
@@ -126,3 +127,29 @@ SECTIONS = (
     Section("settings", "hedge", HedgeCfg, HedgeCfg),
     Section("settings", "event_blackout", BlackoutCfg, BlackoutCfg),
 )
+
+
+_HM = r"^([01]\d|2[0-3]):([0-5]\d)$"
+
+
+class AtTime(BaseModel):
+    """잡 시각: "HH:MM" 과 시간대(기본 KST)·요일(APScheduler 표기, 없으면 잡 기본 mon-fri)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    time: str = Field(pattern=_HM)
+    tz: str | None = None
+    days: str | None = None
+
+
+class RegimeSchedule(BaseModel):
+    """schedule.yaml `regime`: 시장별 국면 판정 시각(scan 앞, US 는 뉴욕 시각)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: str | AtTime = "08:25"  # 문자열이면 KST
+    us: str | AtTime = Field(default_factory=lambda: AtTime(time="09:20", tz="America/New_York"))
+
+
+REGIME_SCHEDULE = Section("schedule", "regime", RegimeSchedule, RegimeSchedule)
+KSD_SCHEDULE = Section("schedule", "ksd_events", str, lambda: "07:05")

@@ -278,3 +278,22 @@ def test_build_inputs_includes_saveticker_snapshot_when_folder_exists(project, c
     assert "trends" not in inp["saveticker"] and inp["saveticker"]["movers"]["gain"]
     assert inp["saveticker"]["report"]["report_date"] == "2026-10-23"
     assert "saveticker" not in inp["errors"]
+
+
+def test_run_market_view_passes_cancel_to_session(lctx, conn):
+    """데몬 종료 이벤트(cancel)가 세션 러너까지 간다."""
+    import threading
+
+    from trader.kernel.session.runner import SessionResult
+
+    seen = {}
+
+    def runner(spec, kind, ctx, **kw):
+        seen.update(kw)
+        return SessionResult(ok=True, session_id="s", fake=True)
+
+    ev = threading.Event()
+    market_view.run_market_view(
+        lctx, market="KR", date=D, inputs={}, cap_hit=False, session_runner=runner, cancel=ev
+    )
+    assert seen["cancel"] is ev

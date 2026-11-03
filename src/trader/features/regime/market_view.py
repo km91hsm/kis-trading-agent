@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -267,9 +268,10 @@ def run_market_view(
     inputs: dict,
     cap_hit: bool,
     session_runner: Callable[..., Any] | None = None,
+    cancel: threading.Event | None = None,
 ) -> dict:
     """입력 저장 → 세션 1회 → `_market_view` 읽기. {view, session} 또는 {skipped}/{error}.
-    ctx 는 `LaneContext`."""
+    ctx 는 `LaneContext`. cancel 이 세워지면(데몬 종료) 세션을 멈춘다."""
     save_inputs(inputs, market=market, today=date, state=ctx.state)
     hedge = ctx.settings.hedge
     if not hedge.enabled or not hedge.market_session:
@@ -281,7 +283,7 @@ def run_market_view(
         market=market, date=date, tickers=[], dry_run=True, asof=ctx.now(), kind="market"
     )
     try:
-        res = runner(spec, MARKET, ctx, agents=agents_for_runner())
+        res = runner(spec, MARKET, ctx, agents=agents_for_runner(), cancel=cancel)
     except PipelineError as e:
         logger.warning("시장 세션 생략 %s: %s", market, e)
         return {"skipped": str(e), "view": None}

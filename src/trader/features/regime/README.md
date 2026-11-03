@@ -15,6 +15,12 @@
 - 스키마(`schemas.py`): `HedgeProposal`(stance·hedge_weight ≤0.25·leveraged·scalp_ok·confidence·horizon_days·rationale ≤500·invalidation_conditions). 리포트·턴은 커널 공용.
 - 에이전트(`agents/`): `analyst-market`·`market-researcher-bull`·`market-researcher-bear`·`strategist`·`market-orchestrator`(market 모드 절만).
 - FAKE(`fake.py`): `FAKE_CLAUDE=1` 이면 `run_fake_market(ctx, spec)` → `write_fake_market` 가 같은 도구로 NEUTRAL 리포트·토론 r0(+r1)·요약·제안(bear → RISK_OFF 0.10, 그 외 RISK_ON 0.0)을 쓴다.
+- 입력(`inputs.py`): `proxy_candles`(지수 proxy 완성 일봉, `market_hours.completed_candles`)·`vix`(US, `FRED_API_KEY`)·`flow_weak_signal`(KR 외인 수급, `hedge.flow_signal`).
+- 잡(`jobs.py`): `{market}_regime`(cron `schedule.yaml regime.<m>`, 평일, 게이트 market, `hedge.enabled` 일 때) = `regime_update` → `market_view_body`(`hedge.market_session`) → `apply_view` → `mature_views`, 시장 세션·재판정 예외는 격리. `ksd_events`(cron `ksd_events`, 평일 07:05 KST, `event_blackout.enabled` 일 때) = `ksd_body`. 시세·계좌·브로커는 `deps.ports["accounts"]`, 시장 세션 `LaneContext` 는 `state=deps.state`·`ext["secrets"]`·`cancel=deps.stop_event`.
+- 큐 kind(`jobs.QUEUE_KINDS`): `market_view`(`{market: KR|US}`, slow 레인, 라벨 "시장 세션") = `market_view_body`.
+- CLI(`cli.py`): `trader regime show`(헤지 설정 + `summary` JSON)·`backtest --market KR|US --days 260~1000`·`killswitch on [--reason]|off --note <MIN_NOTE 자 이상>|show`.
+- 텔레그램(`telegram.py`): `/kill`(켜기만, 신뢰 발신자만) → `killswitch.engage(source="telegram")` + `killswitch_on` 문구. `/status` 절 「국면」 = `regime.line`.
+- 설정(schedule): `regime`(`RegimeSchedule`: kr "08:25" KST, us 09:20 America/New_York, 값은 "HH:MM" 또는 `AtTime{time, tz, days}`)·`ksd_events`("HH:MM", KST).
 - 문구(`messages.py`): `regime_change`·`market_view`·`killswitch_on`·`ksd_stale`. 코드값은 커널 `REGIME`·`STANCE` 표로 한글.
 
 ## 규칙
@@ -28,7 +34,7 @@
 
 ## 테스트
 
-`tests/features/regime/`(시장 세션은 `test_market_view.py`·`test_market_tools.py`, 포트는 `test_ports.py`, 현물 게이트 배선은 `tests/features/spot/test_executor_regime.py`), KIS 권리 일정 TR 파싱은 `tests/kernel/broker/test_market_ksd.py`.
+`tests/features/regime/`(잡·큐는 `test_jobs.py`, CLI `test_cli.py`, `/kill`·상태 절 `test_telegram.py`, 시장 세션은 `test_market_view.py`·`test_market_tools.py`, 포트는 `test_ports.py`, 현물 게이트 배선은 `tests/features/spot/test_executor_regime.py`), KIS 권리 일정 TR 파싱은 `tests/kernel/broker/test_market_ksd.py`.
 
 ## 알려진 차이 (옛 저장소 대비)
 
@@ -38,6 +44,10 @@
 4. `messages.ksd_stale` 는 `(라벨, 일수)` 목록 대신 `stale_kinds` 결과 dict 를 받아 종류를 `LABEL` 로 바꾼다. 해제 안내 명령은 `trader control killswitch off` → `trader regime killswitch off`.
 5. 블랙아웃 로거는 `trader.risk` → `trader.regime`.
 6. 시장 세션 에이전트 이름: 옛 공용 `researcher-bull`·`researcher-bear`·`orchestrator` 대신 `market-researcher-bull`·`market-researcher-bear`·`market-orchestrator`(에이전트 이름 전역 유일). 모델 키도 `models.market_researcher_bull|bear` 로 바뀌어 옛 `researcher_bull|bear` 설정을 따르지 않는다(없으면 md 기본 sonnet). 커널 프롬프트 조립용으로 러너 매핑에만 별칭 `orchestrator` 를 둔다.
-7. 시장 세션 도구 컨텍스트는 `tools.MarketToolContext(settings, conn, state, now)` 다(옛 공용 `ToolContext` 의 계좌·브로커 없음). `build_inputs`·`run_market_view` 는 `LaneContext` 를 받고, 거시 키는 `ctx.ext["secrets"]`(없으면 키 없음)에서 읽는다. 세션 취소(`cancel`) 인자는 없다.
+7. 시장 세션 도구 컨텍스트는 `tools.MarketToolContext(settings, conn, state, now)` 다(옛 공용 `ToolContext` 의 계좌·브로커 없음). `build_inputs`·`run_market_view` 는 `LaneContext` 를 받고, 거시 키는 `ctx.ext["secrets"]`(없으면 키 없음)에서 읽는다. 세션 취소는 `run_market_view(cancel=)` → `run_session(cancel=)`.
 8. 세이브티커 폴더는 `sources.yaml` 의 `news.saveticker_dir` 대신 `saveticker.dir`(`saveticker.api.load_cfg`) 를 본다.
 9. 섹터 비중(`_sector_weights`)은 옛 `ledger/views.sector_weights` 를 이 모듈 private 로 옮겼다. 포지션은 `kernel.execution.ledger.latest_positions`.
+10. 옛 데몬은 국면 갱신·시장 세션·재판정을 `<시장>_scan_analyze` 앞에서, 제안 채점을 reflect 잡에서 돌렸다. 이제 `{market}_regime` 한 잡이 순서대로 돌고(scan 은 M7), 채점(`mature_views`)도 이 잡 끝에서 모든 시장을 본다.
+11. 킬스위치 CLI 는 `trader control killswitch on|off|show [--note]` → `trader regime killswitch on [--reason]|off --note|show`. 켜는 사유는 `--reason`(옛 `--note` 겸용 아님), off 의 짧은 메모는 원장을 열기 전에 거부한다.
+12. `regime backtest` 의 시세 클라이언트는 `cli._build_market(secrets)` 대신 계좌 포트(`_market_client(boot)` → `ports["accounts"].market_client()`)이고, 시장 검사를 설정 로드 앞에서 한다.
+13. `/kill` 해제 안내는 `trader regime killswitch off`(옛 `control killswitch off`).

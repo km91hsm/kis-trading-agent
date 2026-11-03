@@ -10,12 +10,14 @@ from trader.kernel.platform.bundle import templates_dir
 
 def test_feature_declares_sections_and_migration_v10():
     from trader.features.regime.feature import FEATURE
-    from trader.features.regime.settings import BlackoutCfg, HedgeCfg
+    from trader.features.regime.settings import BlackoutCfg, HedgeCfg, RegimeSchedule
 
     assert FEATURE.id == "regime" and FEATURE.tier == "service"
     assert {(s.file, s.key, s.model) for s in FEATURE.sections} == {
         ("settings", "hedge", HedgeCfg),
         ("settings", "event_blackout", BlackoutCfg),
+        ("schedule", "regime", RegimeSchedule),
+        ("schedule", "ksd_events", str),
     }
     assert [(m.version, m.name, m.owner) for m in FEATURE.migrations] == [
         (10, "regime_market_views", "regime")

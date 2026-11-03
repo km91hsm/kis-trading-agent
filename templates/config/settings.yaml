@@ -76,6 +76,8 @@ models:
   analyst: sonnet
   researcher_bull: sonnet
   researcher_bear: sonnet  # 강세와 같은 모델(전체 검토 L11 — 비대칭이면 정당한 수렴도 '아첨' 으로 판정)
+  market_researcher_bull: sonnet  # 시장 세션 리서처(regime)
+  market_researcher_bear: sonnet  # 강세와 같은 모델(같은 대칭 이유)
   trader: opus
   reflector: sonnet
   strategist: sonnet  # 시장 세션 전략가(헤지 비중 제안). md 기본은 opus

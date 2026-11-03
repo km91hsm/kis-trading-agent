@@ -22,3 +22,7 @@ reconcile:
   us: {time: "16:15", tz: America/New_York}       # US 마감(16:00 ET) 뒤
 balance_refresh:
   interval_s: 300   # 잔고 스냅샷 갱신 주기(초): 장중 매 틱, 장 밖은 30분 넘은 스냅샷만
+regime:
+  kr: "08:25"                                     # 국면 판정 → 시장 세션 → 재판정(평일, KR 개장 전)
+  us: {time: "09:20", tz: America/New_York}       # US 개장(09:30 ET) 전
+ksd_events: "07:05"   # 예탁원 권리 일정 수집(KST, 평일) — event_blackout.enabled 일 때만
