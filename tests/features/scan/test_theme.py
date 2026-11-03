@@ -88,6 +88,48 @@ def test_compute_without_rank_api_still_scores(project, conn, settings):
     assert heat["themes"] and heat["themes"][0]["catalyst_ok"] is True
 
 
+def test_compute_vol_z_from_feature_store(project, conn, settings, monkeypatch):
+    """뉴스에 나온 종목의 피처 스토어 `vol_z_20` 이 `vol_z` 로 들어간다(스토어 밖 종목은 빠짐)."""
+    from tests.features.ml.helpers import synthetic_features
+    from trader.features.ml import api as ml_api
+
+    df = synthetic_features(1, 1, signal=False).iloc[:1].copy()
+    df["date"] = date(2026, 10, 26)
+    df["ticker"] = "005930"
+    df["vol_z_20"] = 2.5
+    ml_api.write_rows(df, derive=False)
+    conn.execute(
+        "INSERT INTO news_items(market, source, title, url, url_hash, published_at, received_at,"
+        " tickers_json, novel) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("KR", "naver", "HBM", "u", "h1", "2026-10-26T01:00:00+00:00",
+         "2026-10-26T01:00:00+00:00", '["005930", "000660"]', 1),
+    )  # fmt: skip
+    conn.commit()
+    seen = []
+    real = theme.score_themes
+
+    def spy(inp, *a, **k):
+        seen.append(inp)
+        return real(inp, *a, **k)
+
+    monkeypatch.setattr(theme, "score_themes", spy)
+    heat = theme.compute(
+        conn,
+        settings,
+        market="KR",
+        today=date(2026, 10, 26),
+        now=datetime(2026, 10, 26, 2, tzinfo=UTC),
+        sector_of=lambda t: None,
+    )
+    assert seen[-1].vol_z == {"005930": 2.5} and heat["signals"]["vol_z"] == 1
+    # 빈 스토어는 {} (다른 날짜로 조회)
+    heat = theme.compute(
+        conn, settings, market="KR", today=date(2026, 10, 1),
+        now=datetime(2026, 10, 1, 2, tzinfo=UTC), sector_of=lambda t: None,
+    )  # fmt: skip
+    assert seen[-1].vol_z == {} and heat["signals"]["vol_z"] == 0
+
+
 def test_rank_and_flow_components():
     inp = _inp(
         ranks={

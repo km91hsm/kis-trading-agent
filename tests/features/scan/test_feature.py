@@ -9,11 +9,12 @@ from trader.kernel.platform.bundle import templates_dir
 
 def test_feature_declares_theme_sections_and_v11():
     from trader.features.scan.feature import FEATURE
-    from trader.features.scan.settings import ThemeCfg, ThemeSchedule
+    from trader.features.scan.settings import DiscoveryCfg, ThemeCfg, ThemeSchedule
 
     assert FEATURE.id == "scan" and FEATURE.tier == "service"
     assert {(s.file, s.key, s.model) for s in FEATURE.sections if s.file != "events"} == {
         ("settings", "theme", ThemeCfg),
+        ("settings", "discovery", DiscoveryCfg),
         ("schedule", "theme", ThemeSchedule),
     }
     assert {s.key for s in FEATURE.sections if s.file == "events"} == {

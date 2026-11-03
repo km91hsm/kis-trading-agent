@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from trader.features.ingest.api import load_sectors
+from trader.features.ml import api as ml_api
 from trader.features.scan import messages
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger import control
@@ -302,7 +303,9 @@ def compute(
     saveticker_root: Path | None = None,
     sector_of: Callable[[str], str | None] | None = None,
 ) -> dict:
-    """오늘 테마 열기 결과 `{market, date, observed_at, themes:[…]}`. `vol_z` 는 M8 전까지 `{}`."""
+    """오늘 테마 열기 결과 `{market, date, observed_at, themes:[…]}`.
+    `vol_z` 는 피처 스토어 `vol_z_20`
+    (뉴스·순위에 나온 종목 중 스토어에 있는 것만; 스토어가 비면 `{}`)."""
     cfg = settings.theme
     if sector_of is None:
         sector_of = _default_sector_of(market)
@@ -316,7 +319,31 @@ def compute(
         for r in rows:
             if r.name and r.ticker not in names:
                 names[r.ticker] = r.name
+    cand = set()
+    for n in news_today:
+        cand.update(n.get("tickers") or [])
+    for rows in ranks.values():
+        cand.update(r.ticker for r in rows)
     vol_z: dict[str, float] = {}
+    if cand:
+        try:
+            # 스토어에 없는 종목(뉴스 태그·유니버스 밖)이 섞이면 latest_rows 가 60개 파일을 다
+            # 읽는다 → 최근 파일에 있는 종목만, vol_z_20 열만 읽는다(전체 검토 3차)
+            present = sorted(cand & ml_api.known_tickers(None, market, asof=today))
+            df = (
+                ml_api.latest_rows(None, market, tickers=present, asof=today, columns=["vol_z_20"])
+                if present
+                else None
+            )
+            if "vol_z_20" in getattr(df, "columns", []):
+                for t, v in zip(df["ticker"], df["vol_z_20"], strict=False):
+                    try:
+                        if v == v and v is not None:  # NaN 제외
+                            vol_z[str(t)] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:  # noqa: BLE001 - 피처가 없으면 vol 성분 0
+            logger.debug("vol_z 읽기 실패: %s", e)
     inp = ThemeInputs(
         market=market,
         news_today=news_today,

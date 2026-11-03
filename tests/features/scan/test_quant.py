@@ -1,0 +1,164 @@
+from datetime import date
+
+import pandas as pd
+
+from trader.features.ingest.api import Universe
+from trader.features.ml import api as ml_api
+from trader.features.scan import quant
+
+
+def _df():
+    rows = []
+    for i in range(10):
+        rows.append(
+            {
+                "date": date(2026, 10, 8),
+                "ticker": f"T{i:02d}",
+                "market": "KR",
+                "close": 1000.0 + i,
+                "volume": (i + 1) * 100_000,  # T00 거래대금 최저
+                "atr_14": 10.0 if i != 9 else 400.0,  # T09 변동성 극단
+                "roc_10": float(i),  # 모멘텀은 번호 순
+                "high_52w_pos": 0.1 * i,
+                "vol_z_20": 0.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_quant_filters_and_scores():
+    out = quant.score(_df(), top=30)
+    tickers = list(out["ticker"])
+    assert "T09" not in tickers  # 변동성 상위 10% 제외
+    assert (
+        "T00" not in tickers and "T01" not in tickers and "T02" not in tickers
+    )  # 거래대금 하위 30%
+    assert tickers[0] == "T08" and out["score"].is_monotonic_decreasing
+    assert all(isinstance(r, list) for r in out["reasons"])
+    assert len(quant.score(_df(), top=2)) == 2
+
+
+def test_quant_handles_missing_indicator_columns():
+    df = _df().drop(columns=["atr_14", "high_52w_pos"])
+    out = quant.score(df, top=30)
+    assert len(out) >= 1 and out["score"].notna().all()
+
+
+def test_candidates_merges_universe_watch_and_exclude(project):
+    df = _df()
+    df["ticker"] = [f"0000{i:02d}" for i in range(10)]
+    ml_api.write_rows(_full(df))
+    uni = Universe(
+        kr=[f"0000{i:02d}" for i in range(10)] + ["999999"], watch=["000001"], exclude=["000008"]
+    )
+    cands = quant.candidates(uni, "KR")
+    ids = [c["ticker"] for c in cands]
+    assert "000008" not in ids and "000001" in ids  # exclude 제거, watch 포함(점수와 무관)
+    assert ids[0] == "000007"  # 000008 제외 후 최고 점수
+    assert "999999" in ids and cands[-1]["score"] is None  # 피처 없는 종목은 끝에
+    assert all(c["exchange"] is None for c in cands)
+
+
+def test_candidates_us_carries_exchange(project):
+    uni = Universe(us=[{"symbol": "AAPL", "exchange": "NAS"}])
+    cands = quant.candidates(uni, "US")
+    assert cands == [{"ticker": "AAPL", "exchange": "NAS", "score": None, "reasons": ["피처 없음"]}]
+
+
+def _full(df):
+    """피처 스토어가 요구하는 전체 열을 채운다 (없는 열은 NaN)."""
+    import numpy as np
+
+    for c in ml_api.FEATURE_COLUMNS:
+        if c not in df.columns:
+            df[c] = np.nan
+    return df
+
+
+def test_scan_includes_runtime_watchlist(project):
+    """control 관심종목(/watch)은 universe.watch 와 같이 후보에 들어간다 (점수와 무관)."""
+    df = _df()
+    df["ticker"] = [f"0000{i:02d}" for i in range(10)]
+    ml_api.write_rows(_full(df))
+    uni = Universe(kr=[f"0000{i:02d}" for i in range(5)], exclude=["000003"])
+    cands = quant.candidates(uni, "KR", watch_extra=["000007", "000003", "777777"])
+    ids = [c["ticker"] for c in cands]
+    assert "000007" in ids and "777777" in ids and "000003" not in ids
+    assert [c for c in cands if c["ticker"] == "000007"][0]["score"] is not None
+
+
+def test_score_drops_rows_with_nan_signal():
+    df = _df()
+    df.loc[df["ticker"] == "T05", "roc_10"] = float("nan")
+    out = quant.score(df)
+    assert "T05" not in set(out["ticker"]) and out["score"].notna().all()
+
+
+def test_candidates_scope_watch_to_market(project):
+    """universe.watch 는 접두사·코드 형식으로 시장을 가려 다른 시장 후보에 섞이지 않는다."""
+    uni = Universe(kr=["005930"], us=[], watch=["000660", "AAPL", "US:MSFT", "KR:000270"])
+    kr = [c["ticker"] for c in quant.candidates(uni, "KR")]
+    us = [c["ticker"] for c in quant.candidates(uni, "US")]
+    assert kr == ["005930", "000660", "000270"]
+    assert us == ["AAPL", "MSFT"]
+
+
+def test_candidates_reads_only_universe_tickers(project, monkeypatch):
+    """latest_rows 에 종목을 넘기지 않으면 파일 60개를 전부 읽는다(1초). 유니버스를 넘긴다."""
+    seen = {}
+
+    def fake_latest_rows(state, market, *, tickers=None, asof=None, max_files=60):
+        seen["tickers"] = tickers
+        return pd.DataFrame(columns=ml_api.FEATURE_COLUMNS)
+
+    monkeypatch.setattr(quant.ml_api, "latest_rows", fake_latest_rows)
+    universe = Universe(kr=["005930", "000660"], watch=["KR:035420"])
+    quant.candidates(universe, "KR")
+    assert set(seen["tickers"]) == {"005930", "000660", "035420"}
+
+
+def test_candidates_pass_asof_to_feature_store(project, monkeypatch):
+    """`scan --asof` 의 운영일이 피처 조회에 전달돼야 과거 시점 스캔이 최신 파일을 보지 않는다."""
+    from datetime import date
+
+    seen = {}
+
+    def fake_latest_rows(state, market, *, tickers=None, asof=None, max_files=60):
+        seen["asof"] = asof
+        return pd.DataFrame(columns=ml_api.FEATURE_COLUMNS)
+
+    monkeypatch.setattr(quant.ml_api, "latest_rows", fake_latest_rows)
+    quant.candidates(Universe(kr=["005930"]), "KR", asof=date(2026, 10, 1))
+    assert seen["asof"] == date(2026, 10, 1)
+
+
+def test_candidates_labels_signal_missing_distinct_from_no_features(project, monkeypatch):
+    """피처 행은 있지만 신호 결측·필터로 빠진 종목은 '피처 없음' 이 아니라 그렇게 표시한다."""
+    df = _df()
+    df.loc[df["ticker"] == "T05", "roc_10"] = float("nan")
+
+    def fake_latest_rows(state, market, *, tickers=None, asof=None, max_files=60):
+        return df
+
+    monkeypatch.setattr(quant.ml_api, "latest_rows", fake_latest_rows)
+    out = {c["ticker"]: c for c in quant.candidates(Universe(kr=[*df["ticker"], "999999"]), "KR")}
+    assert out["T05"]["score"] is None and "피처 없음" not in out["T05"]["reasons"]
+    assert out["999999"]["reasons"] == ["피처 없음"]
+
+
+def test_candidates_distinguish_filter_drop_from_missing_signal(project, monkeypatch):
+    """제외 사유를 셋으로 가른다: 정량 필터 탈락(거래대금 하위 30%·변동성 상위 10%), 신호 결측,
+    피처 없음. 운영자가 '왜 빠졌나' 를 한눈에 봐야 한다."""
+    df = _df()
+    df.loc[df["ticker"] == "T05", "roc_10"] = float("nan")
+
+    def fake_latest_rows(state, market, *, tickers=None, asof=None, max_files=60):
+        return df
+
+    monkeypatch.setattr(quant.ml_api, "latest_rows", fake_latest_rows)
+    out = {c["ticker"]: c for c in quant.candidates(Universe(kr=[*df["ticker"], "999999"]), "KR")}
+    assert out["T00"]["reasons"] == ["정량 필터 탈락: 거래대금 하위 30%"]
+    assert out["T09"]["reasons"] == ["정량 필터 탈락: 변동성 상위 10%"]
+    assert out["T05"]["reasons"] == ["신호 결측: roc_10"]
+    assert out["999999"]["reasons"] == ["피처 없음"]
+    assert out["T08"]["score"] is not None

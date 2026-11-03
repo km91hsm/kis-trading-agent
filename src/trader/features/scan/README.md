@@ -25,8 +25,9 @@
 
 1. `ThemeCfg.interval_s` 는 없다. 주기는 `schedule.yaml theme.interval_s`.
 2. `mature` 는 `state` 대신 `close_table(market, since, until)` 콜러블을 주입받는다(피처 스토어 종가는 M8). None 이면 경고하고 0 을 돌려준다. 수익 창 계산은 `memory.outcomes.window_return` 대신 이 모듈의 private 구현(pandas import 없음).
-3. `compute` 의 `vol_z` 는 `{}`(피처 스토어 `vol_z_20` 은 M8 이후), `state` 인자는 없다. 섹터 맵은 `sector_of` 로 주입하고, 없으면 `ingest.api.load_sectors()` 를 시도하다 실패하면 키워드 테마만 쓴다.
+3. `compute` 의 `vol_z` 는 피처 스토어 `vol_z_20`(M7, `ml.api`)에서 채운다. `state` 인자는 없고 기본 상태 폴더를 쓴다. 섹터 맵은 `sector_of` 로 주입하고, 없으면 `ingest.api.load_sectors()` 를 시도하다 실패하면 키워드 테마만 쓴다.
 4. `events check`(수혜 표 시세 확인 CLI)는 이식하지 않았다. 세이브티커 폴더는 `saveticker.api.load_cfg().dir`(옛 `sources.news.saveticker_dir`)이다.
 5. discovery(scout 후보 검증·병합·`event_watch` 입력)는 M7 로 이연 — 옛 test_events 의 discovery 관련 단언은 이식하지 않았다. 옛 게이트 테스트(shock 종목 테마 안전장치)는 `tests/features/spot/test_executor_theme.py` 로 이식했다(`ports["scan"]`). 사건 감지는 데몬 직접 호출 대신 `news.post_ingest` 훅으로 돈다.
 6. 알림 순서는 옛 코드 그대로 "알림 완료 표시(`new_for_alert`) 후 전송"이다. 전송이 실패해도(로그 debug) 그 사건은 그날 다시 알리지 않는다. `notifier=None` 이면 전송만 건너뛰고 `alerted` 는 채워진다.
 7. `compute` 의 섹터 맵 폴백 `_default_sector_of` 의 예외는 로그 없이 키워드 테마로 넘어간다. `mature(close_table=None)` 경로는 테스트가 없다(M8 에서 종가표 주입과 함께 정리).
+8. (M7) `scan backtest` 의 왕복비용은 `backtest.ROUND_TRIP_BP = {"KR": 30, "US": 50}` — spot 의 `costs` 는 레인 모듈이라 scan 이 못 쓰고 값만 복제했다(변경 시 두 곳을 같이). ML 랭커(`ranker.py`)는 import 순환을 피해 ml 이 아니라 scan 에 둔다. 옛 `screen backtest` 는 `scan backtest`.

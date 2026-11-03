@@ -1,19 +1,22 @@
-"""`trader scan` — 테마 열기 조회(`theme show`)·사건 감지 조회(`events show`). 둘 다 읽기 전용이고
-출력은 JSON 한 덩어리다. 옛 `events check`(수혜 표 시세 확인)는 이식하지 않았다(README)."""
+"""`trader scan` — 테마 열기 조회(`theme show`)·사건 감지 조회(`events show`)·정량 스크린 과거 검증
+(`backtest`). 모두 읽기 전용이고 출력은 JSON 한 덩어리다.
+옛 `events check`(수혜 표 시세 확인)는 이식하지 않았다(README)."""
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import typer
 
+from trader.features.ml import api as ml_api
 from trader.features.saveticker import api as saveticker_api
-from trader.features.scan import events, theme
+from trader.features.scan import backtest, events, theme
 from trader.features.scan.settings import load_events
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import ConfigError
 from trader.kernel.ledger import control
+from trader.kernel.platform import paths
 from trader.kernel.session.run_store import run_date_for
 
 scan_app = typer.Typer(help="테마 열기·사건 수혜 조회", no_args_is_help=True)
@@ -86,3 +89,44 @@ def events_show(market: str = typer.Option("KR", "--market", help="KR|US")) -> N
             ensure_ascii=False,
         )
     )
+
+
+@scan_app.command("backtest")
+@config_errors
+def scan_backtest(
+    market: str = typer.Option("KR", "--market", help="KR|US"),
+    days: int = typer.Option(1100, "--days", min=30, help="최근 N일 피처 파일"),
+    top: int = typer.Option(5, "--top", min=1, max=30, help="바구니 종목 수"),
+    horizon: int = typer.Option(5, "--horizon", min=1, max=60, help="보유 거래일"),
+) -> None:
+    """`roc_10` 상위 N·실제 scan 점수 상위 N·필터 통과 1/N 을 다음 거래일 진입, horizon 거래일
+    보유, 같은 왕복비용으로 비교한다(겹치지 않는 창). 읽기 전용 — 설정·주문 불변."""
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US: {market}")
+    b = boot(conn=True)
+    try:
+        since = date.today() - timedelta(days=days)
+        df = ml_api.load_all(
+            paths.state_dir(),
+            market=market,
+            since=since,
+            columns=["close", "volume", "roc_10", "high_52w_pos", "atr_14"],
+        )
+        # 시점 유니버스는 신호일 선택에만 — 가격표는 걸러지지 않은 df(PR #62 Codex)
+        eligible, pit = ml_api.pit_apply(df, b.conn, ml_api.load_ml(b.registry).train.pit)
+    finally:
+        b.conn.close()
+    out = backtest.run(
+        df,
+        market=market,
+        top_n=top,
+        horizon=horizon,
+        cost_bp=backtest.ROUND_TRIP_BP[market],
+        select=eligible,
+    )
+    out["pit"] = pit
+    out["note"] = (
+        "survivorship: 피처 스토어는 오늘 유니버스로 백필 — pit.recorded_since 이전 구간은 "
+        "생존 편향이 남는다(편출·상장폐지 종목 없음)"
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False, default=str))
