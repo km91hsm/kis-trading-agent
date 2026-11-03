@@ -8,10 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from tests.features.evaluation.helpers import seed_matured
+from tests.features.evaluation.test_outcomes import DAYS, _decision, _store
 from tests.kernel.daemon.test_runner import make_deps
 from trader.features.evaluation import jobs, reflect
 from trader.features.evaluation.feature import FEATURE
 from trader.features.evaluation.jobs import REFLECT_JOB
+from trader.features.evaluation.memory import store
 from trader.features.regime import market_view
 from trader.kernel.broker.fake import FakeMarket
 from trader.kernel.broker.models import Candle
@@ -160,11 +162,17 @@ def test_reflect_body_without_market_client_skips_snapshot_and_still_matures(pro
     deps = _deps(project, settings, mc=None, ml=ml)
     conn = deps.conn_factory()
     seed_matured(conn, 1, start=date(2026, 10, 9), now=NOW)
+    # 미만기 엔트리 1건 + 피처 스토어 종가: 시세 클라이언트가 없어도 만기 채점은 돈다
+    _store({"A": [100] * 5 + [104] * 25})
+    eid = _decision(conn, 1, "A", "BUY", DAYS[0])
     conn.commit()
     conn.close()
     out = jobs.reflect_body(deps)
     assert ml.calls == [] and out["features"] is None and deps.notifier.msgs == []
-    assert out["sessions"] == 1 and out["errors"] == [] and out["matured"] == 0
+    assert out["sessions"] == 1 and out["errors"] == [] and out["matured"] == 1
+    conn = deps.conn_factory()
+    assert store.get_entry(conn, eid)["outcome_at"] is not None
+    conn.close()
 
 
 def test_reflect_fires_mature_hook(project, settings):
