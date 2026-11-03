@@ -69,7 +69,7 @@ def test_latest_warns_with_backend_hint_when_lightgbm_model_fails_to_load(projec
         '{"name": "quant", "version": "20260101_000000", "promoted": true, "backend": "lightgbm"}',
         encoding="utf-8",
     )
-    with caplog.at_level(logging.WARNING, logger="trader.features.ml"):
+    with caplog.at_level(logging.WARNING, logger="trader.ml"):
         assert registry.latest("quant") is None
     msg = " ".join(r.getMessage() for r in caplog.records)
     assert "lightgbm" in msg and ("sklearn" in msg or "demote" in msg)
