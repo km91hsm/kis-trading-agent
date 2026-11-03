@@ -8,7 +8,7 @@ import pytest
 from trader.kernel.broker.models import OrderResult
 from trader.kernel.execution import core
 from trader.kernel.execution.idem import ExecKeyStore
-from trader.kernel.execution.ledger import insert_order
+from trader.kernel.execution.ledger import insert_fill, insert_order
 
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
@@ -41,7 +41,7 @@ def _deps(conn):
     )
 
 
-def _order(conn):
+def _order(conn, qty=2):
     return insert_order(
         conn,
         decision_id=None,
@@ -49,7 +49,7 @@ def _order(conn):
         ticker="005930",
         market="KR",
         side="BUY",
-        qty=2,
+        qty=qty,
         order_type="LIMIT",
         price=Decimal("100"),
         status="accepted",
@@ -128,3 +128,52 @@ def test_cancel_dead_order_skips_broker(conn, dead):
     assert out["ok"] is False and out["status"] == dead and out["message"]
     assert broker.calls == []
     assert _status(conn, oid) == dead
+
+
+# --- 잔량 기준 취소 (M9 Task 6 리뷰 T6-R1) -------------------------------------------------
+
+
+def _fill(conn, oid, qty, minute):
+    insert_fill(
+        conn, order_id=oid, account_id="paper-main", market="KR", ticker="005930", side="BUY",
+        qty=qty, price=Decimal("100"), filled_at=T0.replace(minute=minute).isoformat(),
+        order_no="0001",
+    )  # fmt: skip
+
+
+def test_cancel_partial_fill_sends_remaining_qty(conn):
+    """주문 10주 중 4주 체결 → 브로커 취소 수량은 잔량 6(US ORD_QTY 가 그대로 쓴다)."""
+    oid, broker = _order(conn, qty=10), _Broker()
+    _fill(conn, oid, 4, 1)
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="US", broker=broker,
+        dry_run=False, reason="재호가", exchange="NAS",
+    )  # fmt: skip
+    assert out["ok"] is True and broker.calls[-1][1]["qty"] == 6
+    assert _status(conn, oid) == "cancelled"
+
+
+def test_cancel_fully_filled_skips_broker(conn):
+    """체결 합계가 주문 수량과 같으면(상태는 아직 accepted) 브로커를 부르지 않고 ok=False."""
+    oid, broker = _order(conn, qty=10), _Broker()
+    _fill(conn, oid, 6, 1)
+    _fill(conn, oid, 4, 2)
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="US", broker=broker,
+        dry_run=False, reason="재호가",
+    )  # fmt: skip
+    assert out == {
+        "ok": False, "order_id": oid, "status": "accepted",
+        "message": "남은 수량 없음(전량 체결)",
+    }  # fmt: skip
+    assert broker.calls == []
+    assert _status(conn, oid) == "accepted"
+
+
+def test_cancel_without_fills_sends_full_qty(conn):
+    oid, broker = _order(conn, qty=10), _Broker()
+    core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="US", broker=broker,
+        dry_run=False, reason="재호가",
+    )  # fmt: skip
+    assert broker.calls[-1][1]["qty"] == 10

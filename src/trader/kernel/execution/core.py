@@ -137,7 +137,8 @@ def cancel(
     """미체결 주문 1건을 취소한다. 브로커 취소 1회, 접수(accepted)되면 cancelled 로 바꾼다.
 
     US 취소에는 org_no·ticker·qty 가 필요해 주문 행에서 읽어 넘긴다(exchange 는 호출자가 준다).
-    이미 끝난 주문(`DEAD_STATUSES`)은 브로커를 부르지 않고 `ok=False`.
+    qty 는 잔량 기준(주문 수량 − 원장 `fills` 합계)이다 — 잔량이 0 이면(전량 체결) 브로커를 부르지
+    않고 `ok=False`. 이미 끝난 주문(`DEAD_STATUSES`)도 브로커를 부르지 않고 `ok=False`.
     dry_run 은 브로커도 상태도 건드리지 않고 현재 상태만 돌려준다. 브로커가 거부하면 상태를
     두고 `ok=False`, 예외는 상태를 그대로 두고 다시 올린다(취소 여부를 모르는 채 적지 않는다)."""
     row = deps.conn.execute(
@@ -153,6 +154,18 @@ def cancel(
             "status": row["status"],
             "message": f"이미 끝난 주문({row['status']})",
         }
+    filled = deps.conn.execute(
+        "SELECT COALESCE(SUM(qty), 0) AS q FROM fills WHERE order_id=?", (order_id,)
+    ).fetchone()["q"]
+    remaining = max(int(row["qty"]) - int(filled), 0)
+    if remaining == 0:  # 전량 체결: 취소할 잔량이 없다
+        logger.info("주문 #%d 잔량 없음 — 취소 생략: %s", order_id, reason)
+        return {
+            "ok": False,
+            "order_id": order_id,
+            "status": row["status"],
+            "message": "남은 수량 없음(전량 체결)",
+        }
     if dry_run:
         logger.info("취소 건너뜀(dry_run) 주문 #%d: %s", order_id, reason)
         return {"ok": True, "dry_run": True, "order_id": order_id, "status": row["status"]}
@@ -163,7 +176,7 @@ def cancel(
             org_no=row["org_no"],
             ticker=row["ticker"],
             exchange=exchange,
-            qty=int(row["qty"]),
+            qty=remaining,
         )
     except Exception:
         logger.warning("주문 #%d 취소 실패(상태 유지): %s", order_id, reason)
