@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import date
 from decimal import Decimal
@@ -265,3 +266,53 @@ def test_day_bounds_and_marks(conn):
     assert (m0["order_id"], m0["approval_id"]) == (0, 0) and m0["at"]
     oid = _order(conn)
     assert ledger.ledger_marks(conn)["order_id"] == oid
+
+
+def _decision_row(conn, d, ticker="005930", market="KR", **data):
+    conn.execute(
+        "INSERT INTO decisions(date, market, ticker, action, data_json, created_at) "
+        "VALUES (?, ?, ?, 'BUY', ?, '2026-10-09T00:00:00+00:00')",
+        (d.isoformat(), market, ticker, json.dumps(data)),
+    )
+    conn.commit()
+
+
+def test_insert_and_get_trigger_roundtrip(conn):
+    tid = ledger.insert_trigger(
+        conn,
+        market="KR",
+        ticker="005930",
+        kind="price",
+        detail={"pct": 3.5},
+        price=Decimal("71500"),
+        decision_id=None,
+        account_id=None,
+        created_at="2026-10-09T01:00:00+00:00",
+    )
+    assert tid > 0
+    row = conn.execute("SELECT * FROM triggers WHERE id=?", (tid,)).fetchone()
+    assert row["kind"] == "price" and json.loads(row["detail"]) == {"pct": 3.5}
+    assert row["price"] == "71500" and row["handled_at"] is None
+
+
+def test_decision_id_and_latest_decision_hydrate(conn):
+    d1, d2 = date(2026, 10, 8), date(2026, 10, 9)
+    _decision_row(conn, d1, w=1)
+    _decision_row(conn, d2, w=2)
+    did = ledger.decision_id(conn, d2, "KR", "005930")
+    assert did is not None and ledger.decision_id(conn, d2, "KR", "000660") is None
+    assert ledger.get_decision(conn, did)["date"] == "2026-10-09"
+    assert ledger.get_decision(conn, did, hydrate=True)["data"] == {"w": 2}
+    assert ledger.latest_decision(conn, "KR", "005930")["data"] == {"w": 2}
+    assert ledger.latest_decision(conn, "KR", "005930", before=d2)["data"] == {"w": 1}
+    assert ledger.latest_decision(conn, "KR", "005930", before=d1) is None
+
+
+def test_exchange_of_reads_ticker_exchanges(conn):
+    conn.execute(
+        "INSERT INTO ticker_exchanges(market, ticker, exchange, updated_at) "
+        "VALUES ('US', 'AAPL', 'NAS', '2026-10-09T00:00:00+00:00')"
+    )
+    conn.commit()
+    assert ledger.exchange_of(conn, "US", "AAPL") == "NAS"
+    assert ledger.exchange_of(conn, "US", "MSFT") is None

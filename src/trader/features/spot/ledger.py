@@ -12,8 +12,16 @@ from decimal import Decimal
 from typing import Any
 
 from trader.kernel.execution import ledger as xledger
-from trader.kernel.execution.ledger import day_bounds
-from trader.kernel.execution.ledger import latest_positions as latest_positions  # 재export
+from trader.kernel.execution.ledger import (  # noqa: F401 — 재export
+    _hydrate,
+    day_bounds,
+    decision_id,
+    exchange_of,
+    get_decision,
+    insert_trigger,
+    latest_decision,
+    latest_positions,
+)
 from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.ledger.db import now_iso
 
@@ -193,43 +201,6 @@ def _upsert_round(
     )
 
 
-def decision_id(conn: sqlite3.Connection, d: date, market: str, ticker: str) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM decisions WHERE date=? AND market=? AND ticker=?",
-        (d.isoformat(), market, ticker),
-    ).fetchone()
-    return int(row["id"]) if row else None
-
-
-def _hydrate(row: sqlite3.Row) -> dict:
-    out = dict(row)
-    out["data"] = json.loads(out["data_json"])
-    return out
-
-
-def get_decision(
-    conn: sqlite3.Connection, decision_id: int, *, hydrate: bool = False
-) -> dict | None:
-    """결정 행. hydrate 면 `data_json` 을 파싱한 `data` 키를 더한다."""
-    row = conn.execute("SELECT * FROM decisions WHERE id=?", (decision_id,)).fetchone()
-    if row is None:
-        return None
-    return _hydrate(row) if hydrate else dict(row)
-
-
-def latest_decision(
-    conn: sqlite3.Connection, market: str, ticker: str, *, before: date | None = None
-) -> dict | None:
-    """종목의 가장 최근 결정 행(`data` 복원). before 가 있으면 그 날짜 **미만**만."""
-    sql = "SELECT * FROM decisions WHERE market=? AND ticker=? "
-    args: list[Any] = [market, ticker]
-    if before is not None:
-        sql += "AND date < ? "
-        args.append(before.isoformat())
-    row = conn.execute(sql + "ORDER BY date DESC, id DESC LIMIT 1", args).fetchone()
-    return _hydrate(row) if row is not None else None
-
-
 def set_skipped_debate(conn: sqlite3.Connection, decision_id: int, flag: bool) -> None:
     """결정 행에 토론 생략 여부(합의 시 생략)를 남긴다."""
     conn.execute("UPDATE decisions SET skipped_debate=? WHERE id=?", (int(bool(flag)), decision_id))
@@ -285,13 +256,6 @@ def upsert_ticker_exchange(
     conn.commit()
 
 
-def exchange_of(conn: sqlite3.Connection, market: str, ticker: str) -> str | None:
-    row = conn.execute(
-        "SELECT exchange FROM ticker_exchanges WHERE market=? AND ticker=?", (market, ticker)
-    ).fetchone()
-    return str(row["exchange"]) if row else None
-
-
 def ticker_exchanges(conn: sqlite3.Connection, market: str) -> dict[str, str]:
     """시장의 관측 거래소 표(종목 → NAS|NYS|AMS). 잔고가 거래소를 주지 않은 US 보유의 폴백."""
     rows = conn.execute(
@@ -342,36 +306,6 @@ def has_pending_approval(
 
 
 # --- 트리거 (monitor) -----------------------------------------------------------------
-
-
-def insert_trigger(
-    conn: sqlite3.Connection,
-    *,
-    market: str,
-    ticker: str,
-    kind: str,
-    detail: dict,
-    price: Decimal | None,
-    decision_id: int | None,
-    account_id: str | None,
-    created_at: str,
-) -> int:
-    cur = conn.execute(
-        "INSERT INTO triggers(account_id, market, ticker, kind, detail, price, decision_id, "
-        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            account_id,
-            market,
-            ticker,
-            kind,
-            _js(detail),
-            None if price is None else str(price),
-            decision_id,
-            created_at,
-        ),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
 
 
 def mark_trigger_handled(

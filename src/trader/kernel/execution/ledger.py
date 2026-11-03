@@ -780,3 +780,84 @@ def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> 
         "cash": nav["cash"] if nav else None,
         "positions": positions,
     }
+
+
+# --- 결정·트리거·거래소 조회 (spot 에서 승격) ------------------------------------------
+
+
+def _js(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+
+def decision_id(conn: sqlite3.Connection, d: date, market: str, ticker: str) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM decisions WHERE date=? AND market=? AND ticker=?",
+        (d.isoformat(), market, ticker),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _hydrate(row: sqlite3.Row) -> dict:
+    out = dict(row)
+    out["data"] = json.loads(out["data_json"])
+    return out
+
+
+def get_decision(
+    conn: sqlite3.Connection, decision_id: int, *, hydrate: bool = False
+) -> dict | None:
+    """결정 행. hydrate 면 `data_json` 을 파싱한 `data` 키를 더한다."""
+    row = conn.execute("SELECT * FROM decisions WHERE id=?", (decision_id,)).fetchone()
+    if row is None:
+        return None
+    return _hydrate(row) if hydrate else dict(row)
+
+
+def latest_decision(
+    conn: sqlite3.Connection, market: str, ticker: str, *, before: date | None = None
+) -> dict | None:
+    """종목의 가장 최근 결정 행(`data` 복원). before 가 있으면 그 날짜 **미만**만."""
+    sql = "SELECT * FROM decisions WHERE market=? AND ticker=? "
+    args: list[Any] = [market, ticker]
+    if before is not None:
+        sql += "AND date < ? "
+        args.append(before.isoformat())
+    row = conn.execute(sql + "ORDER BY date DESC, id DESC LIMIT 1", args).fetchone()
+    return _hydrate(row) if row is not None else None
+
+
+def exchange_of(conn: sqlite3.Connection, market: str, ticker: str) -> str | None:
+    row = conn.execute(
+        "SELECT exchange FROM ticker_exchanges WHERE market=? AND ticker=?", (market, ticker)
+    ).fetchone()
+    return str(row["exchange"]) if row else None
+
+
+def insert_trigger(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    ticker: str,
+    kind: str,
+    detail: dict,
+    price: Decimal | None,
+    decision_id: int | None,
+    account_id: str | None,
+    created_at: str,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO triggers(account_id, market, ticker, kind, detail, price, decision_id, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            account_id,
+            market,
+            ticker,
+            kind,
+            _js(detail),
+            None if price is None else str(price),
+            decision_id,
+            created_at,
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)

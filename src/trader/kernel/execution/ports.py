@@ -104,10 +104,50 @@ class RegimePort(Protocol):
 
 
 class ScanPort(Protocol):
-    """종목 테마 조회."""
+    """종목 테마·섹터 조회와 스캔 실행."""
 
     def theme_of(
         self, conn: sqlite3.Connection, market: str, today: date
     ) -> Callable[[str], list[str] | None]:
         """종목 → 테마 목록(모르면 None) 함수."""
+        ...
+
+    def run_scan(
+        self, ctx: Any, *, market: str, cancel: Any | None = None, dry_run: bool = False
+    ) -> dict:
+        """시장 스캔을 실행하고 결과 요약을 돌려준다."""
+        ...
+
+    def sector_of(self, market: str) -> Callable[[str], str | None]:
+        """종목 → 섹터(모르면 None) 함수."""
+        ...
+
+
+class MlPort(Protocol):
+    """정량(ML) 모델 조회·보고·스냅샷 — 구현은 ml 기능이 맡는다."""
+
+    def quant_enabled(self) -> bool: ...
+
+    def latest_model(self, market: str | None) -> tuple[Any, dict] | None:
+        """(모델, 메타) 최신본. 없으면 None."""
+        ...
+
+    def latest_row(self, ticker: str, market: str, *, asof: date | None) -> dict | None:
+        """종목의 피처 행(asof 이하 최신). 없으면 None."""
+        ...
+
+    def build_report(self, model: Any, meta: dict, row: dict, *, ticker: str, asof: str) -> dict:
+        """`QuantReport` 모양의 dict."""
+        ...
+
+    def peer_medians(
+        self, *, market: str, ticker: str, asof_date: date, sectors: Any
+    ) -> dict | None:
+        """동종 섹터 피처 중앙값. 없으면 None."""
+        ...
+
+    def snapshot(
+        self, markets: list[str], *, tickers: list[tuple[str, str | None]] | None = None
+    ) -> int:
+        """피처 스냅샷을 적재하고 행 수를 돌려준다."""
         ...
