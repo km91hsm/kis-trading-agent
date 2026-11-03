@@ -4,7 +4,8 @@
 from datetime import UTC, date, datetime, timedelta
 
 from trader.features.ingest import api as ingest_api
-from trader.features.scan import events
+from trader.features.ingest.api import Universe
+from trader.features.scan import discovery, events
 from trader.features.scan.settings import EventDef, load_events
 from trader.kernel.cli.boot import build_registry
 from trader.kernel.config.loader import load
@@ -302,3 +303,103 @@ def test_events_check_without_notifier_and_failed_send_still_marks_alerted(conn,
             raise RuntimeError("x")
 
     assert events_check(conn, "KR", cfg=cfg, now=now, notifier=Boom())["alerted"] == []
+
+
+def test_resolve_event_tier_only_from_table_with_caps():
+    watch = [
+        {"id": "war_geopolitics", "label": "전쟁", "kind": "shock", "hits": 3, "news": [],
+         "tickers": [{"ticker": "012450", "name": "한화에어로스페이스", "role": "방산"},
+                     {"ticker": "132030", "name": "KODEX 골드선물(H)", "role": "금"},
+                     {"ticker": "064350", "name": "현대로템", "role": "방산"}]},
+    ]  # fmt: skip
+    disc = {
+        "candidates": [
+            {"name": "한화에어로스페이스", "ticker": "012450", "market": "KR", "tier": "event",
+             "catalyst": "공습 확대", "confidence": 0.7, "source_ids": ["event:war_geopolitics"]},
+            {"name": "KODEX 골드선물(H)", "ticker": "132030", "market": "KR", "tier": "event",
+             "catalyst": "안전자산", "confidence": 0.6, "source_ids": []},
+            {"name": "현대로템", "ticker": "064350", "market": "KR", "tier": "event",
+             "catalyst": "x", "confidence": 0.5, "source_ids": []},  # 사건당 상한 2 초과
+            {"name": "지어낸 종목", "ticker": "999999", "market": "KR", "tier": "event",
+             "catalyst": "x", "confidence": 0.9, "source_ids": []},  # 표에 없음
+        ]
+    }  # fmt: skip
+    r = discovery.resolve(
+        disc,
+        market="KR",
+        universe=Universe(kr=["005930"]),
+        cache_names={},
+        event_watch=watch,
+        max_event=4,
+        max_per_event=2,
+    )
+    assert [c["ticker"] for c in r["candidates"]] == ["012450", "132030"]
+    assert all(c["tier"] == "event" and c["event_id"] == "war_geopolitics" for c in r["candidates"])
+    reasons = {u["ticker"]: u["reason"] for u in r["unresolved"]}
+    assert "사건당 상한" in reasons["064350"] and "표" in reasons["999999"]
+    merged = discovery.merge([], r, max_event=1)
+    assert [m["ticker"] for m in merged] == ["012450"]  # 확신순 + 사건 후보 상한
+    assert merged[0]["discovery"]["event_id"] == "war_geopolitics"
+
+
+def test_event_watch_in_discovery_inputs(conn, project, settings):
+    (project / "config" / "events.yaml").write_text(
+        "enabled: true\nevents:\n"
+        "  - {id: war_geopolitics, label: 전쟁, kind: shock, min_news: 1, keywords: [공습],\n"
+        "     beneficiaries: {KR: [{ticker: '012450', name: 한화에어로스페이스, role: 방산}]}}\n",
+        encoding="utf-8",
+    )
+    _news(conn, ["공습 개시"])
+    data = discovery.build_inputs(
+        conn,
+        settings,
+        Universe(kr=["005930"]),
+        market="KR",
+        today=TODAY,
+        asof=datetime.now(UTC) + timedelta(seconds=5),
+        quant_candidates=[],
+        state=project / "state",
+    )
+    assert data["event_watch"][0]["id"] == "war_geopolitics" and data["max_event_picks"] == 4
+    assert events.today_events(conn, "KR", TODAY)[0]["id"] == "war_geopolitics"
+
+
+def test_event_cap_counts_universe_members_too():
+    watch = [
+        {"id": "a", "label": "a", "kind": "shock", "hits": 3, "news": [],
+         "tickers": [{"ticker": "005930", "name": "삼성전자", "role": "x"}]},
+        {"id": "b", "label": "b", "kind": "shock", "hits": 3, "news": [],
+         "tickers": [{"ticker": "000660", "name": "SK하이닉스", "role": "x"}]},
+    ]  # fmt: skip
+    disc = {
+        "candidates": [
+            {"name": "삼성전자", "ticker": "005930", "market": "KR", "tier": "event",
+             "catalyst": "x", "confidence": 0.5, "source_ids": []},
+            {"name": "SK하이닉스", "ticker": "000660", "market": "KR", "tier": "event",
+             "catalyst": "x", "confidence": 0.5, "source_ids": []},
+        ]
+    }  # fmt: skip
+    r = discovery.resolve(
+        disc,
+        market="KR",
+        universe=Universe(kr=["005930", "000660"]),
+        cache_names={},
+        event_watch=watch,
+        max_event=1,
+    )
+    assert [c["ticker"] for c in r["candidates"]] == ["005930"]
+
+
+def test_resolve_event_ticker_is_case_insensitive():
+    """2-L22: scout 가 US 심볼을 소문자로 내도 `watch_index`(대문자 키)에서 찾는다."""
+    watch = [
+        {"id": "oil_shock", "label": "유가", "kind": "shock", "hits": 2, "news": [],
+         "tickers": [{"ticker": "XOM", "name": "Exxon", "role": "정유", "exchange": "NYS"}]},
+    ]  # fmt: skip
+    disc = {"candidates": [{"name": "Exxon", "ticker": "xom", "market": "US", "tier": "event",
+                            "catalyst": "x", "confidence": 0.6, "source_ids": []}]}  # fmt: skip
+    r = discovery.resolve(
+        disc, market="US", universe=Universe(kr=["005930"]), cache_names={},
+        event_watch=watch, max_event=4, max_per_event=2,
+    )  # fmt: skip
+    assert [c["ticker"] for c in r["candidates"]] == ["XOM"] and r["unresolved"] == []
