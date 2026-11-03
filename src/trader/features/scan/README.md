@@ -30,7 +30,7 @@
 5. discovery(scout 후보 검증·병합·`event_watch` 입력)는 M7 로 이연 — 옛 test_events 의 discovery 관련 단언은 이식하지 않았다. 옛 게이트 테스트(shock 종목 테마 안전장치)는 `tests/features/spot/test_executor_theme.py` 로 이식했다(`ports["scan"]`). 사건 감지는 데몬 직접 호출 대신 `news.post_ingest` 훅으로 돈다.
 6. 알림 순서는 옛 코드 그대로 "알림 완료 표시(`new_for_alert`) 후 전송"이다. 전송이 실패해도(로그 debug) 그 사건은 그날 다시 알리지 않는다. `notifier=None` 이면 전송만 건너뛰고 `alerted` 는 채워진다.
 7. `compute` 의 섹터 맵 폴백 `_default_sector_of` 의 예외는 로그 없이 키워드 테마로 넘어간다. `mature(close_table=None)` 경로는 테스트가 없다(M8 에서 종가표 주입과 함께 정리).
-8. (M7) `scan backtest` 의 왕복비용은 `backtest.ROUND_TRIP_BP = {"KR": 30, "US": 50}` — spot 의 `costs` 는 레인 모듈이라 scan 이 못 쓰고 값만 복제했다(변경 시 두 곳을 같이). ML 랭커(`ranker.py`)는 import 순환을 피해 ml 이 아니라 scan 에 둔다. 옛 `screen backtest` 는 `scan backtest`.
+8. (M7) `scan backtest` 의 왕복비용은 `backtest.ROUND_TRIP_BP` — 커널 `execution/costs.ROUND_TRIP_BP`(KR 30bp·US 50bp)를 다시 내보낸다(M8 A5, 정본은 커널 한 곳). ML 랭커(`ranker.py`)는 import 순환을 피해 ml 이 아니라 scan 에 둔다. 옛 `screen backtest` 는 `scan backtest`.
 
 ## M7 확장 (정량 필터·랭커·발굴·스크리너·트리거)
 
@@ -48,7 +48,7 @@
 ## 알려진 차이 (M7, 옛 저장소 대비)
 
 - ML 랭커는 ml 이 아니라 scan 이 소유한다(Ruling A1 — ml → scan import 순환 방지, scan 이 `ml.api` 를 소비).
-- `backtest.ROUND_TRIP_BP = {"KR": 30, "US": 50}` 는 spot `costs` 의 값을 복제한 상수다(spot 은 레인이라 scan 이 import 못 한다; 커널 승격은 금액 규칙이 레인 소유라 보류 — Ruling P1). 값을 바꾸면 두 곳을 같이 고친다.
+- `backtest.ROUND_TRIP_BP` 는 커널 `execution/costs.ROUND_TRIP_BP` 의 재노출이다(M8 A5 로 커널 승격 — M7 Ruling P1 의 복제 해소). 값은 커널에서만 고친다.
 - 옛 결함 보존(Ruling P2): `discovery.merge` 와 `resolve` 의 `max_event` 기본값이 서로 다르다(8 / 0); `_discovery_inputs` 의 `schema_version` 은 1 로 고정; `news_trigger_at` 갱신·novel 집계가 enabled/일시정지/창 밖 건너뛰기보다 먼저 일어난다(감속 시 `analyze` 는 None = 큐 미등록); 공시 seen 목록은 300건 상한.
 - 옛 결함 수정(Ruling T10-1): 옛 `scan_line` 이 요약된 discovery(미해결 = 개수 int)를 다시 요약하다 TypeError 로 알림이 조용히 사라졌다 — `discovery.summary` 가 int 를 받도록 고쳤다.
 - 트리거 본문은 데몬 안이 아니라 `news.post_ingest` 훅(`triggers.post_ingest`)에서 돈다. 훅은 시장별로 오류를 격리한다. 훅마다 Dart/Edgar 클라이언트를 만들고 닫지 않는다(브리프 지정).

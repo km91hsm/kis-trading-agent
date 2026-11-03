@@ -31,8 +31,8 @@
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
 | `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
-| `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl train\|models\|report\|promote\|demote` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL·성과 (`reflect`·`rl train` 은 `FAKE_CLAUDE=1` 없이 사용자만, `rl promote\|demote` 사용자만) |
-| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>`·`/daily` 큐 요청·`/watch add\|remove\|list` 관심종목 포함) |
+| `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl {train\|models\|report\|promote\|demote}` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL 사이저 (`reflect` 는 `FAKE_CLAUDE=1` 없이 금지, `rl promote\|demote` 는 사용자 전용) |
+| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/daily` 일일 리포트·`/watch add\|remove\|list` 관심종목 포함) |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
 

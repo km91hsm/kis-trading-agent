@@ -1,7 +1,5 @@
 # evaluation
 
-초안 — Task 14 에서 마무리한다.
-
 ## 책임
 
 - 원장 v13: `memory_entries`(결정별 메모리·결과·반성)·`calibration_runs`·`shadow_portfolios`·`rl_shadow`.
@@ -25,6 +23,7 @@
 - `quick.ask_json` 은 `agents.with_schema` 를 재사용한다(T2-R1; md 가 스키마를 이미 품으면 덧붙이지 않는다). `readiness.interval_kinds_of` 는 interval 잡의 `kind` 를 모은다(T9-R2, T9-R1 을 뒤집음; 데몬은 `runs.kind=job.kind` 로 쓰고 `runs_kind="monitor"` 세션은 없다). 대상은 discover 된 기능 + 커널 `QUEUE_FEATURE`·`BUILTIN_FEATURE`.
 - `store.held_at` 은 `account_nav` 만 있는 날을 "보유 없음"으로 본다. 집행 브레이커는 계좌 자신의 30일 NAV 를 쓴다(옛 paper 합산 아님; paper 계좌가 둘 이상이면 마지막 것이 이긴다).
 - `convergence_rate` 는 `debate_turns.decision_date`, `signal_hits`/`pending` 은 `analyst_reports.decision_date` 와 조인한다. `open_window._exchanges` 는 spot 소유 `ticker_exchanges` 테이블을 SQL 로 읽는다.
+- `ports._decided_at` 은 US 백필(운영일이 지금이 아닐 때)에도 `MARKET_CLOSE["KR"]`(15:30 KST)를 쓴다 — 플랜 Task 5 결정(Ruling F2).
 - 미국 일일 리포트(16:20 ET)는 07:10 KST `fills_sync` 보다 먼저 돌아 `realized_5d` 가 하루 늦을 수 있다.
 - 이연: M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market`; M12 status/health 보정 재점검.
 - `theme.mature`/`mature_views` 는 reflect 가 부른다(M6 이연 회수).
@@ -32,10 +31,11 @@
 ### 보존한 옛 결함 (고치지 않음)
 
 - `fill_outcome` 를 이미 채점된 항목에 다시 부르면 재승격(재채점)된다 — 옛 동작 그대로. 같은 항목에 반복 호출하지 않는다.
-- `cash_effect` 는 `x.partial` 을 보지 않는다(부분 체결도 전량으로 계산) — 옛 동작. 부분 체결 비중이 큰 계좌는 성과 현금 흐름을 눈으로 확인한다.
+- `cash_effect` 는 `x.partial` 을 보지 않는다(`y.partial = 0` 만 거른다) — 옛 동작. `partial` 은 유예(14일) 뒤에도 종가가 없어 남은 비중으로 재정규화한 행 표시로 체결과는 관계없고, x 는 `weights_json='{}'`(현금일)이라 `x.partial` 은 항상 0이므로 실질 효과는 없다.
 - `calibration_runs` 는 기록만 하고 읽는 곳이 없다(write-only) — 이력 확인은 DB 를 직접 조회한다.
 - `_paper_days` 는 창이 무제한이다(전 기간 페이퍼 일수) — 오래된 계정은 readiness 일수 기준이 쉽게 충족된다.
-- `build_calibration` 의 날짜 중복 검사는 마지막 1행만 본다 — 같은 날짜가 떨어져 중복되면 걸러지지 않으니 입력 CSV 를 직접 정리한다.
+- `build_calibration` 의 `calibration_runs` KST 하루 1행 upsert 는 마지막 행(`ORDER BY id DESC LIMIT 1`)만 비교한다 — 시계가 거꾸로 가거나 행이 수동으로 끼어들면 같은 날 2행이 생긴다(CSV 입력은 없다).
+- `store.matured_count` 는 시장 구분 없이 센다 — US 워밍업이 KR 만기 엔트리로 채워질 수 있다(옛 동작, Ruling F1).
 
 ### 이 플랜이 고치거나 바꾼 것
 

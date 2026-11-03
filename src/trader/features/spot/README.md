@@ -82,7 +82,7 @@ CLI·명령
 - 주문 알림 제목 꼬리 표 `_STAGE_KIND`(커널 `execution.core`)는 `order_stage` 를 `_r` 로 잘라 찾는 옛 동작을 그대로 둔다. 그래서 `_r` 로 시작하는 꼬리가 있는 `52_order_reprice`·`53_order_rebalance` 는 꼬리가 비고, 실제로 꼬리가 붙는 것은 `51_order`(재평가)·`55_order_sl`(손절) 등 `_r` 가 없는 단계다(M4 의 spot 이 쓰는 것은 51·55).
 - `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view·quant 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None; `quant` 는 M7 부터 `05_quant` 리포트 요약). M8 부터 `memory`·`memory_status`(`ports["evaluation"].memory_context` — 포트·원장이 없으면 `[]`·`{warmup: true, breaker: null}`)와 `calibration`(`35_calibration` 체크포인트, `ml.yaml calibration.enabled ∧ inject` 일 때만, 아니면 None)도 싣는다. theme 컨텍스트는 주입하지 않는다. `35_calibration` 은 `ensure_calibration` 이 `ensure_quant` 와 같은 세 지점(`scan_analyze`·`tool collect`(결과 `calibration`)·`spot analyze`)에서 쓴다.
 - `AnalystRole` 은 4종을 유지한다(`ANALYST_ROLES` 와 일치). `05_quant` 는 `QuantReport.role="quant"` 로 별도 스키마다(Ruling M7-K1).
-- `ask_json`·`probe_usage`(`quick.py`)는 이식하지 않았다(M8). `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
+- `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
 - `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
 - `common_rules`(커널 `session.agents`) 는 옛 정규화(끝 마침표 제거)를 복원했다 — 옛 md 간 마침표 위치 차이를 계약 테스트가 허용하기 위함.
 

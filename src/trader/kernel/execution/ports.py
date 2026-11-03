@@ -211,7 +211,8 @@ class EvaluationPort(Protocol):
         accounts: list,
         skipped_debate: bool | None,
     ) -> int | None:
-        """판단을 기억·섀도 장부에 기록하고 판단 id 를 돌려준다."""
+        """판단을 메모리 엔트리로 기록하고 그 엔트리 id 를 돌려준다(기록하지 않으면 None).
+        섀도 장부는 건드리지 않는다."""
         ...
 
     def update_breaker(
