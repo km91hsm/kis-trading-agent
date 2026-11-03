@@ -14,6 +14,7 @@ from typing import Any
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.execution.ledger import latest_positions as latest_positions  # 재export
+from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.ledger.db import now_iso
 
 _ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
@@ -308,9 +309,16 @@ def has_open_order_today(
     *,
     market: str | None = None,
 ) -> bool:
-    """오늘 같은 계좌·종목·방향의 살아 있고 체결이 끝나지 않은 주문이 있으면 True(리밸런스 중복
-    발주 방지). `market` 을 주면 `d` 를 그 시장 현지 날짜로 본다."""
-    return bool(xledger.open_orders_today(conn, account_id, ticker, side, d, market=market))
+    """오늘 같은 계좌·종목·방향의 주문이 있으면 True — **체결 완료 주문도 센다**(옛 동작; 오전에
+    체결된 레그를 리밸런스가 다시 내지 않게). 취소·거부 등 죽은 상태만 뺀다. `market` 을 주면
+    `d` 를 그 시장 현지 날짜로 본다."""
+    lo, hi = day_bounds(d, market)
+    row = conn.execute(
+        "SELECT 1 FROM orders WHERE account_id=? AND ticker=? AND side=? "
+        f"AND status NOT IN ({dead_status_sql()}) AND created_at >= ? AND created_at < ? LIMIT 1",
+        (account_id, ticker, side, lo, hi),
+    ).fetchone()
+    return row is not None
 
 
 def has_pending_approval(

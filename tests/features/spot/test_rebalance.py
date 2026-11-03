@@ -208,6 +208,20 @@ def test_rebalance_skips_open_order_today(ctx, conn):
     assert [o.ticker for o in ctx.brokers["paper-main"].orders] == ["000660"]
 
 
+def test_rebalance_skips_filled_order_earlier_today(ctx, conn):
+    """Ruling P9: 오늘 이미 체결된 같은 방향 주문이 있는 레그도 다시 내지 않는다(옛 동작)."""
+    _seed(conn)
+    conn.execute(
+        "INSERT INTO orders(account_id, ticker, market, side, qty, order_type, status, mode, "
+        "created_at) VALUES ('paper-main','005930','KR','SELL',1,'LIMIT','filled','auto',?)",
+        ((NOW - timedelta(hours=1)).isoformat(),),
+    )
+    conn.commit()
+    out = _run(ctx)
+    assert any(leg.get("skipped") for leg in out["legs"] if leg["ticker"] == "005930")
+    assert [o.ticker for o in ctx.brokers["paper-main"].orders] == ["000660"]
+
+
 def test_rebalance_respects_gate_rejections(ctx, conn):
     _seed(conn)
     conn.execute(
