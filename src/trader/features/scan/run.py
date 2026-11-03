@@ -36,7 +36,7 @@ def run_scan(ctx: Any, *, market: str, cancel: Any | None = None, dry_run: bool 
     cap_hit = dry_run or (
         calls.sessions_today(ctx.conn, ctx.now()) >= ctx.settings.llm.daily_session_cap
     )
-    # 발굴 입력(네이버 블로그)용 http: 주입(`ext["http"]`)이면 그대로, 없으면 새로 만들어 끝에 닫는다
+    # 발굴 입력(네이버 블로그)용 http: 주입(`ext["http"]`)이면 그대로, 없으면 만들어 끝에 닫는다
     with ingest_api.owned_client((ctx.ext or {}).get("http"), timeout=15) as http:
         r = screener.run_screen(
             ctx,
