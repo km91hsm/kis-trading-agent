@@ -95,3 +95,16 @@ def test_scalp_report_live_us_exchange_lookup_order(project, conn, monkeypatch):
     assert r.exit_code == 0, r.output
     assert mc.asked == {"AAPL": "NYS", "MSFT": "AMS", "TSLA": "NAS"}
     assert json.loads(r.output)["judge"]["counts"]["no_go"] == 3
+
+
+def test_scalp_backtest_passes_run_date_to_report(project, monkeypatch):
+    """F2: backtest 의 report 도 `run_date_for` 날짜를 쓴다(UTC 날짜 아님)."""
+    from trader.features.scalp.state import save_state
+
+    d = date(2020, 1, 2)  # UTC 오늘과 확실히 다른 고정 날짜
+    save_state(None, d, "KR", {"open": [], "closed": [], "done": [], "halted": None})
+    monkeypatch.setattr(cli, "_market_client", lambda b: FakeMarket(minutes={"005930": []}))
+    monkeypatch.setattr(cli, "run_date_for", lambda m, n: d)
+    r = CliRunner().invoke(app, ["scalp", "backtest", "--ticker", "005930"])
+    assert r.exit_code == 0, r.output
+    assert [x["date"] for x in json.loads(r.output)["report"]["days"]] == ["2020-01-02"]

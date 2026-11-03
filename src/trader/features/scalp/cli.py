@@ -78,7 +78,12 @@ def backtest(
         "bars": len(bars),
         "today": signals.backtest_day(bars, cfg, open_hm=open_hm, close_hm=close_hm),
         "config": cfg.model_dump(),
-        "report": engine.report(paths.state_dir(), market=market, days=days),
+        "report": engine.report(
+            paths.state_dir(),
+            market=market,
+            days=days,
+            today=run_date_for(market, datetime.now(UTC)),
+        ),
     }
     typer.echo(json.dumps(out, ensure_ascii=False, default=str))
 

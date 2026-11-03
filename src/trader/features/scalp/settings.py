@@ -12,7 +12,7 @@ from trader.kernel.config.sections import Section
 class ScalpCfg(BaseModel):
     """분 단위 단타 층. **모의 계좌 전용·기본 끔.** 1분봉 신호는 파이썬 순수 함수이고 에이전트는
     후보(picks·뉴스·watch)와 허용 여부(strategist `scalp_ok`)만 정한다. 실전 계좌는 설정이 켜져
-    있어도 기록만 한다."""
+    있어도 주문·기록 없이 건너뛴다."""
 
     model_config = ConfigDict(extra="forbid")
 
