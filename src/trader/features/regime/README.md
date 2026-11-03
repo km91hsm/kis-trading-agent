@@ -55,3 +55,4 @@
 15. `regime.messages.ml_trained`(학습 완료 알림 문구)는 이식하지 않았다(M8).
 16. `{market}_regime` 은 `heavy=True` 다(Ruling P6 — 옛 시장 세션이 `scan_analyze` 의 heavy 락 안에서 돌던 것을 보존). `ksd_events` 는 `event_blackout.enabled` 가 아니라 `"KR" in settings.markets` 일 때 등록된다(Ruling P7 — 옛 데몬도 블랙아웃이 꺼져 있어도 미리 수집). `event_blackout.enabled` 는 `blackout.reason` 게이트와 stale 알림에만 쓴다.
 17. `/status` 의 「국면」 절은 커널 `status_message` 가 절별 실패를 격리하지 않으므로 `settings=None` 이면 빈 목록을 돌려준다(커널 격리는 M9 ops).
+18. 자동 킬스위치 알림: 옛 코드는 health 점검이 켜진 킬스위치를 나중에 알렸다. 이제 잔고 관측(`killswitch_observe`)이 **새로 켠 즉시 1회** 알린다(Ruling P11) — spot `build_portfolio` 가 포트의 `killswitch_message(conn, account_id)`(커널 Protocol 밖, 덕 타이핑; `messages.killswitch_on` 문구, 이 계좌가 막혀 있지 않으면 None)를 `notify_quietly` 로 보낸다. 이미 켜진 뒤 관측은 False 라 다시 알리지 않는다. 관측이 없는 경로(`record=False`·FAKE 세션)는 알리지 않는다.

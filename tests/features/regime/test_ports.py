@@ -22,3 +22,14 @@ def test_port_state_bull_when_hedge_disabled(conn, settings):
 def test_port_hedge_tickers_empty_when_disabled(settings):
     assert _port(settings).hedge_tickers("KR") == frozenset({"114800", "252670"})
     assert _port(settings, enabled=False).hedge_tickers("KR") == frozenset()
+
+
+def test_port_killswitch_message_only_when_engaged_for_account(conn, settings):
+    """`killswitch_message`: 꺼져 있거나 다른 계좌만 막혀 있으면 None, 켜진 계좌면 알림 문구."""
+    from trader.features.regime import killswitch, messages
+
+    port = _port(settings)
+    assert port.killswitch_message(conn, "paper-main") is None
+    killswitch.engage(conn, reason="합성 손실", source="auto", account_id="real-main")
+    assert port.killswitch_message(conn, "paper-main") is None  # 다른 계좌만 범위
+    assert port.killswitch_message(conn, "real-main") == messages.killswitch_on("합성 손실")

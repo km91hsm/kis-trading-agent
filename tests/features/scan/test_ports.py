@@ -27,3 +27,27 @@ def test_theme_of_returns_today_top_themes_and_none_for_unknown(conn, settings):
     cfg = settings.theme.model_copy(update={"enabled": False})
     off = ports.build_port(SimpleNamespace(settings=settings.model_copy(update={"theme": cfg})))
     assert off.theme_of(conn, "KR", D)("111111") is None
+
+
+def test_theme_of_keeps_themes_when_events_config_fails(conn, settings, project, caplog):
+    """사건 설정(events.yaml)이 깨져도 사건 쪽만 꺼지고 테마 소속은 그대로 답한다(옛 동작)."""
+    control.set_flag(
+        conn,
+        "theme_heat:KR",
+        {
+            "market": "KR",
+            "date": D.isoformat(),
+            "observed_at": "2026-10-26T02:00:00+00:00",
+            "themes": [{"theme": "섹터:반도체", "rank": 1, "score": 0.9, "members": ["111111"]}],
+        },
+    )
+
+    (project / "config").mkdir(exist_ok=True)
+    (project / "config" / "events.yaml").write_text(
+        "enabled: true\nunknown_key: 1\n", encoding="utf-8"
+    )  # extra=forbid 검증 실패
+    port = ports.build_port(SimpleNamespace(settings=settings))
+    with caplog.at_level("WARNING", logger="trader.scan"):
+        fn = port.theme_of(conn, "KR", D)
+    assert fn("111111") == ["섹터:반도체"] and fn("999999") is None
+    assert "사건 설정 읽기 실패" in caplog.text

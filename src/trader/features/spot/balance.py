@@ -7,7 +7,7 @@
 `regime`(RegimePort) 이 있으면 실제 NAV 로 누적 손실 킬스위치를 관측하고(`risk.
 killswitch_drawdown_pct`), `cancel_buys`·`cancel_fn` 이 있으면(데몬 잔고 갱신, dry-run 아님·장중)
 킬스위치가 켜진 계좌의 당일 미체결 BUY 를 거둔다 — `excluded_tickers`(헤지·현금 운용 ETF)는
-남긴다(옛 `on_killswitch`)."""
+남긴다(옛 `on_killswitch`). `notifier` 가 있으면 관측이 새로 켠 킬스위치를 한 번 알린다."""
 
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ def refresh(
     regime: Any | None = None,
     cancel_buys: bool = False,
     cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
+    notifier: Any | None = None,
 ) -> dict:
     """시장 하나의 계좌별 잔고를 다시 읽는다. {refreshed: [id], skipped: [id], errors: {id: 사유}}.
     계좌 하나의 실패는 그 계좌만 errors 로. 같은 시장 갱신이 이미 돌고 있으면 기다리지 않고
@@ -99,6 +100,7 @@ def refresh(
                     regime=regime,
                     cancel_buys=cancel_buys,
                     cancel_fn=cancel_fn,
+                    notifier=notifier,
                 )
                 out["refreshed"].append(a.id)
             except (KisApiError, ValueError) as e:

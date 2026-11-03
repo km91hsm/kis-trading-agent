@@ -415,6 +415,7 @@ def build_portfolio(
     killswitch_pct: float = 0.0,
     regime: Any | None = None,
     cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
+    notifier: Any | None = None,
 ) -> rules.Portfolio:
     """브로커 잔고·현금 + 원장 집계로 Portfolio 를 만들고(`record` 면) positions_snapshot 을 남긴다.
     now 가 있으면 만료된 승인 요청은 현금 예약에서 뺀다. 계좌 `capital_cap` 이 있으면 게이트가
@@ -424,7 +425,9 @@ def build_portfolio(
     본다(FAKE 세션은 관측하지 않는다). `cancel_buys`(주문을 낼 수 있는 호출만) 이고 킬스위치가 이
     계좌에 켜져 있으면(자동·수동 어느 경로든) `cancel_fn(account_id, market, today, keep=…)` 로
     당일 미체결 BUY 를 거둔다 — 게이트는 새 주문만 막는다. `hedge_tickers`(헤지·현금 운용 ETF)는
-    거두지 않고 종목 수·섹터 계산에서도 뺀다(옛 `on_killswitch`)."""
+    거두지 않고 종목 수·섹터 계산에서도 뺀다(옛 `on_killswitch`). 관측이 킬스위치를 **새로** 켜면
+    `notifier` 로 포트의 `killswitch_message` 문구를 한 번 보낸다(Ruling P11 — 문구는 포트가 만든다,
+    레인은 regime 을 import 하지 않는다)."""
     pos_list, cash = _balance(broker, market)
     positions = {p.ticker: p for p in pos_list}
     for p in positions.values():  # 잔고 응답의 종목명·US 거래소는 추가 호출 없이 얻는 관측값
@@ -434,7 +437,7 @@ def build_portfolio(
         spot_ledger.upsert_ticker_exchange(conn, p.market, p.ticker, getattr(p, "exchange", None))
     nav = spot_ledger.nav_of(pos_list, cash)
     if regime is not None and killswitch_pct > 0 and record:
-        regime.killswitch_observe(
+        engaged = regime.killswitch_observe(
             conn,
             account_id=account.id,
             market=market,
@@ -443,6 +446,11 @@ def build_portfolio(
             limit_pct=killswitch_pct,
             positions=[(p.ticker, p.qty, p.current_price) for p in pos_list],
         )
+        message = getattr(regime, "killswitch_message", None)
+        if engaged and notifier is not None and message is not None:
+            text = message(conn, account.id)
+            if text:
+                core.notify_quietly(notifier, text)
     if (
         regime is not None
         and cancel_buys
@@ -879,6 +887,7 @@ def _execute_account(
             killswitch_pct=ctx.settings.risk.killswitch_drawdown_pct,
             regime=port,
             cancel_fn=cancel,
+            notifier=ctx.notifier,
         )
         # 재판정(gate)은 쓰기 트랜잭션 안에서 돈다 — 휴장일 조회·킬스위치는 여기서 한 번만
         hol = _holidays_between(

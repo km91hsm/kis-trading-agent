@@ -99,7 +99,7 @@ class RegimePort(Protocol):
         ...
 
     def blackout_reason(self, conn: sqlite3.Connection, ticker: str, today: date) -> str | None:
-        """종목이 블랙아웃(실적 발표 등) 기간이면 사유, 아니면 None."""
+        """예탁원 권리 일정(유상·무상증자·액면교체·합병분할) 블랙아웃이면 사유, 아니면 None."""
         ...
 
 

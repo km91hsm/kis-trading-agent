@@ -165,6 +165,9 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - M7: discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·`events check` CLI·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
   - M8: `theme.mature` 데몬 호출(종가표 주입, 피처 스토어)·`metrics.decision_distribution`(헤지 결정 제외 단언은 `source` 로 대체)·`ml_trained` 메시지·`_default_sector_of` 예외 로그·`mature(close_table=None)` 테스트
   - M9: `_scalp_open`(리밸런스 단타 보유 제외; 지금은 빈 집합)·`hedge_tick` pending 플래그 시 데몬 재시도 없음(옛 결함 보존, `MAX_RETRIES` 죽은 코드)·리밸런스 잔고·시세 전부 실패에도 done 플래그 기록(옛 동일)·커널 `status_message` 절별 실패 격리·`market_view` QueueKind `trading=False`(옛 `TRADING_KINDS` 포함) 확인·stale 예탁원 알림 매 실행(옛 동일)·`test_cli_regime` scalp 1건
+  - M9: 큐 kind `rebalance` 의 `market` 을 `Literal["KR","US"]` 로 검증(현재 `ReconcileParams` 재사용)
+  - M9: 커널 `llm.timeout_by_kind` 기본값에 `market` 없음 — 기존 settings.yaml 사용자는 템플릿 재복사 필요(README/릴리스 노트 안내)
+  - M10: 커널 `latest_positions` 에 asset 필터 없음 — fo 행 생기면 시장 세션 입력에 파생 포지션 섞임; spot `_latest_positions` 와 통합
   - M9(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격
   - M11: 웹 `/api/system/theme`(옛 `test_daemon_theme::test_api_theme`)
   - M12: `trader status` 의 국면 절(옛 `test_status_regime_section`)

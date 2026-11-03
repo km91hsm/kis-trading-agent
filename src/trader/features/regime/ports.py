@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from trader.features.regime import blackout, killswitch, market_view, regime
+from trader.features.regime import blackout, killswitch, market_view, messages, regime
 from trader.features.regime.settings import HedgeCfg, HedgeInstrument
 from trader.kernel.registry.types import Port
 
@@ -74,6 +74,13 @@ class RegimePortImpl:
             limit_pct=limit_pct,
             positions=positions,
         )
+
+    def killswitch_message(self, conn: sqlite3.Connection, account_id: str) -> str | None:
+        """이 계좌에 킬스위치가 켜져 있으면 알림 문구(`messages.killswitch_on`), 아니면 None.
+        레인은 `killswitch_observe` 가 True(이번에 새로 켬)일 때만 한 번 보낸다(Ruling P11) — 레인이
+        regime 을 import 하지 않도록 문구를 포트가 만든다(커널 Protocol 밖, 덕 타이핑)."""
+        why = killswitch.reason(conn, account_id)
+        return messages.killswitch_on(why) if why else None
 
     def blackout_reason(self, conn: sqlite3.Connection, ticker: str, today: date) -> str | None:
         return blackout.reason(conn, ticker, today, self._settings.event_blackout)

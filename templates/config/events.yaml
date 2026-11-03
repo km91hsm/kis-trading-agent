@@ -1,7 +1,7 @@
-# 사건 → 수혜 묶음(사건 수혜, 2026-10-27). 뉴스에서 사건 키워드가 기준 이상 잡히면 scout 가 이 표의
+# 사건 → 수혜 묶음(사건 수혜, 2026-10-27). 뉴스에서 사건 키워드가 기준 이상 잡히면 scout(M7 예정)가 이 표의
 # 종목 중에서만 후보를 고른다(종목 코드는 LLM 이 아니라 이 표가 출처). 매수는 일반 분석·리스크
 # 게이트를 그대로 거치고, kind: shock 은 테마 안전장치(묶음 비중 상한·단기 보유·익절 필수)가 붙는다.
-# 종목은 2026-10-27 DART 고유번호·KIS 시세로 확인했다. 바꾸면 `trader events check` 로 시세를 확인한다.
+# 종목은 2026-10-27 DART 고유번호·KIS 시세로 확인했다. 바꾸면 종목 코드·시세를 직접 확인한다(`trader events check` 는 M7 예정).
 #
 # kind: shock(갑작스러운 사건 — 단기, 안전장치) | structural(몇 달 가는 흐름 — 일반 규칙)
 # keywords: 제목·요약에 하나라도 있으면 그 뉴스를 이 사건으로 센다(대소문자 무시). 같은 기사가 매체마다
@@ -10,7 +10,7 @@
 # min_news: 최근 lookback_hours 안에 이만큼 이상이면 '감지'
 enabled: true
 lookback_hours: 48
-max_picks_per_event: 2   # scout 가 한 사건에서 고를 수 있는 종목 수
+max_picks_per_event: 2   # scout(M7 예정)가 한 사건에서 고를 수 있는 종목 수
 max_event_picks: 4       # 하루 사건 후보 합계(시장별)
 
 events:
