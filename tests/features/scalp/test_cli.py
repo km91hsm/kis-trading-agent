@@ -54,3 +54,44 @@ def test_scalp_report_live_uses_market_client(project, monkeypatch):
     r = CliRunner().invoke(app, ["scalp", "report", "--market", "US", "--live"])
     assert r.exit_code == 0, r.output
     assert json.loads(r.output)["market"] == "US" and len(seen) == 1
+
+
+class _ExchangeMarket(FakeMarket):
+    """US 분봉 요청의 (종목, 거래소) 를 기록한다."""
+
+    def __init__(self):
+        super().__init__()
+        self.asked: dict[str, str] = {}
+
+    def get_minute_us(self, symbol, exchange, *, count=120):
+        self.asked[symbol] = exchange
+        return []
+
+
+def test_scalp_report_live_us_exchange_lookup_order(project, conn, monkeypatch):
+    """T8-R2: US 거래소 = 판정 사건의 값 → 원장 `ticker_exchanges` → `NAS`."""
+    from datetime import UTC, datetime
+
+    from trader.features.scalp.state import event, save_state
+
+    d = date(2026, 11, 4)
+    now = datetime(2026, 11, 4, 15, 0, tzinfo=UTC)
+    save_state(None, d, "US", {"open": [], "closed": [], "done": [], "halted": None})
+    base = {"go": False, "signal_price": "100", "signal_time": "100000"}
+    event(None, d, "US", "judge", now=now, ticker="AAPL", exchange="NYS", **base)
+    event(None, d, "US", "judge", now=now, ticker="MSFT", **base)
+    event(None, d, "US", "judge", now=now, ticker="TSLA", **base)
+    for t in ("AAPL", "MSFT"):  # AAPL 은 사건 값이 이겨야 한다
+        conn.execute(
+            "INSERT INTO ticker_exchanges(market, ticker, exchange, updated_at) "
+            "VALUES ('US', ?, 'AMS', ?)",
+            (t, now.isoformat()),
+        )
+    conn.commit()
+    mc = _ExchangeMarket()
+    monkeypatch.setattr(cli, "_market_client", lambda b: mc)
+    monkeypatch.setattr(cli, "run_date_for", lambda m, n: d)
+    r = CliRunner().invoke(app, ["scalp", "report", "--market", "US", "--live"])
+    assert r.exit_code == 0, r.output
+    assert mc.asked == {"AAPL": "NYS", "MSFT": "AMS", "TSLA": "NAS"}
+    assert json.loads(r.output)["judge"]["counts"]["no_go"] == 3
