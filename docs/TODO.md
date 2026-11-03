@@ -205,22 +205,24 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 ## M8 — features/evaluation + briefing
 메모리·보정·reflect·섀도·성과·readiness·backtest·paper_review·일일 리포트·RL 사이저(M7 이연), 아침 브리핑. 완료 기준: 옛 테스트 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m8-evaluation-briefing.md`(브랜치 `feat/m8-evaluation-briefing`).
 - [x] 플랜 작성(Task 1~14, Ruling A1~A15)
-- [ ] Task 1 커널 비용 상수 승격·`EvaluationPort`·`MlPort.close_table`/`extra_targets`·ml/scan/regime api 수출·MonitorContext 종가표 주입
-- [ ] Task 2 커널 `session/quick.py`(ask_json·probe_usage)·내장 잡 `usage_probe`·`ledger_backup`
-- [ ] Task 3 evaluation 뼈대·설정 절·원장 v13·스키마·메모리 store/vector
-- [ ] Task 4 메모리 만기 채점 outcomes·FIFO 로트 lots
-- [ ] Task 5 보정 calibration·backtest·evaluation 포트(메모리·보정·브레이커)
-- [ ] Task 6 섀도 포트폴리오·open_window·`scan_analyze.post` 훅
-- [ ] Task 7 성과 performance·metrics
-- [ ] Task 8 일일 리포트·paper_review·`/daily`·status 「성과」·잡
-- [ ] Task 9 readiness·CLI `trader evaluation readiness|backtest|paper-review|calibration build`
-- [ ] Task 10 복기 세션 kind `reflect`·에이전트·FAKE·`submit-reflection`·`reflect` 잡/큐·CLI·`reflect.mature` 훅 발화
-- [ ] Task 11 RL 사이저 `rl/`·`rl_train` 잡/큐·CLI `rl …`·포트 RL 메서드
-- [ ] Task 12 spot 통합(메모리/보정 컨텍스트·`35_calibration`·`memory_entry_id`·브레이커·RL)
-- [ ] Task 13 features/briefing(아침 브리핑, haiku 단발)
-- [ ] Task 14 문서·템플릿·TODO·전체 재검증
+- [x] Task 1 커널 비용 상수 승격·`EvaluationPort`·`MlPort.close_table`/`extra_targets`·ml/scan/regime api 수출·MonitorContext 종가표 주입
+- [x] Task 2 커널 `session/quick.py`(ask_json·probe_usage)·내장 잡 `usage_probe`·`ledger_backup`
+- [x] Task 3 evaluation 뼈대·설정 절·원장 v13·스키마·메모리 store/vector
+- [x] Task 4 메모리 만기 채점 outcomes·FIFO 로트 lots
+- [x] Task 5 보정 calibration·backtest·evaluation 포트(메모리·보정·브레이커)
+- [x] Task 6 섀도 포트폴리오·open_window·`scan_analyze.post` 훅
+- [x] Task 7 성과 performance·metrics
+- [x] Task 8 일일 리포트·paper_review·`/daily`·status 「성과」·잡
+- [x] Task 9 readiness·CLI `trader evaluation readiness|backtest|paper-review|calibration build`
+- [x] Task 10 복기 세션 kind `reflect`·에이전트·FAKE·`submit-reflection`·`reflect` 잡/큐·CLI·`reflect.mature` 훅 발화
+- [x] Task 11 RL 사이저 `rl/`·`rl_train` 잡/큐·CLI `rl …`·포트 RL 메서드
+- [x] Task 12 spot 통합(메모리/보정 컨텍스트·`35_calibration`·`memory_entry_id`·브레이커·RL)
+- [x] Task 13 features/briefing(아침 브리핑, haiku 단발)
+- [x] Task 14 문서·템플릿·TODO·전체 재검증
 - [ ] PR·CI(ubuntu+windows)·머지(머지는 사용자)
 - Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
+- Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R1 `readiness.interval_kinds_of` 는 확장된 잡 id 만 수집 · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
+- 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영
 
 ## M9 — features/scalp
 단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과.

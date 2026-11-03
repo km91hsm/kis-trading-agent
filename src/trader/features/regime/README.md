@@ -57,3 +57,5 @@
 17. `/status` 의 「국면」 절은 커널 `status_message` 가 절별 실패를 격리하지 않으므로 `settings=None` 이면 빈 목록을 돌려준다(커널 격리는 M9 ops).
 18. 자동 킬스위치 알림: 옛 코드는 health 점검이 켜진 킬스위치를 나중에 알렸다. 이제 잔고 관측(`killswitch_observe`)이 **새로 켠 즉시 1회** 알린다(Ruling P11) — spot `build_portfolio` 가 포트의 `killswitch_message(conn, account_id)`(커널 Protocol 밖, 덕 타이핑; `messages.killswitch_on` 문구, 이 계좌가 막혀 있지 않으면 None)를 `notify_quietly` 로 보낸다. 이미 켜진 뒤 관측은 False 라 다시 알리지 않는다. 관측이 없는 경로(`record=False`·FAKE 세션)는 알리지 않는다.
 19. 스케줄 기본값 변경(M7, Ruling S1): `regime` 을 `07:25`(KR, KST) / `08:25`(US, 뉴욕)로 앞당겼다(템플릿 `schedule.yaml` 과 `RegimeSchedule` 기본값을 함께). 옛 데몬은 국면 갱신·시장 세션을 `<시장>_scan_analyze` 안에서 돌렸지만 이 저장소는 `{market}_regime` 이 별도 잡이라, scan→analyze(`scan_analyze` 07:30 / 08:30)가 항상 오늘 국면·시장 제안을 보게 하려고 그 5분 앞에 둔다. 기존 `config/schedule.yaml` 에 옛 값(`07:30` 등)이 있으면 같은 시각이 되어 순서가 보장되지 않으니 직접 고친다.
+
+- M8 이후: `MonitorContext.close_table` 주입이 살아 있다(M5 Ruling 14 회수). 일일 리포트·status 「성과」는 evaluation 이 더한다.

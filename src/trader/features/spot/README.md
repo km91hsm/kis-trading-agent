@@ -126,3 +126,5 @@ M7 scan_analyze (`scan_analyze.py`, `05_quant`)
 - `sector_of` 주입 회수: 리밸런스 레그와 executor 가 `ports["scan"].sector_of` 로 섹터 상한을 평가한다(M5 의 "섹터 상한 미평가"가 M7 에서 해소). 리밸런스는 계좌 루프마다 `executor.sector_of_for(ctx.ports, market)` 를 다시 부른다(시장 단위 값이라 낭비, 정확성 영향 없음).
 - `05_quant`(`tools.ensure_quant`)는 `ports["ml"]`(`quant_enabled`·`latest_model(market)`·`latest_row`)로 만든다; 포트·승격 모델·피처 행이 없거나 예외가 나면 None(경고 후 건너뜀, 분석을 막지 않는다).
 - `scan_analyze._close_stale` 이 `spot.jobs._close_stale_sessions`(private)를 지연 import 한다(M5 의 커널 중복과 같은 사유로 공용화 후보).
+
+- M8 이후: 메모리·보정(`35_calibration`)·`memory_entry_id`·메모리 브레이커·RL 사이저는 `ports["evaluation"]` 로만 쓴다. `_rl_record` 는 exec-key 선점 뒤에 불려 선점을 잃으면 `applied=0` 으로 남는다. 브레이커 NAV 는 계좌 자신의 30일 시계열이다.

@@ -45,3 +45,5 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.
 16. 옛 코드는 계좌를 지워도 control 플래그(모드·LIVE 확인)가 남았으나 새 코드는 `remove_account` 때 `account_modes` 행을 지운다(같은 id 로 다시 만든 계좌에 넘어가지 않게).
+
+- M8: 텔레그램 `/daily`(일일 성과 리포트)가 evaluation 에서 등록된다.

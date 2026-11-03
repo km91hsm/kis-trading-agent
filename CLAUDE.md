@@ -31,7 +31,8 @@
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
 | `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
-| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/watch add\|remove\|list` 관심종목 포함) |
+| `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl train\|models\|report\|promote\|demote` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL·성과 (`reflect`·`rl train` 은 `FAKE_CLAUDE=1` 없이 사용자만, `rl promote\|demote` 사용자만) |
+| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>`·`/daily` 큐 요청·`/watch add\|remove\|list` 관심종목 포함) |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
 
@@ -58,7 +59,7 @@
 - 실전 주문을 수동으로 실행하지 않는다. 자동 주문·로그온 등록 경로(`daemon` 의 실기 기동, `kis order *`, `approvals approve`, `install` 등)는 사용자만 실행한다. 실기 검증이 필요하면 사용자에게 요청한다.
 - `secrets/` 를 커밋하지 않는다. 읽지도 않는다(`cat` 같은 Bash 읽기 명령 포함, 다른 명령과 묶지 않는다). `config/accounts.yaml` 에는 실제 계좌번호가 있으므로 값을 출력·인용하지 않는다.
 - 계좌 모드(`control`/`account_modes`)를 임의로 변경하지 않는다. 모드 변경은 사용자가 한다.
-- `FAKE_CLAUDE=1` 없이 `uv run trader spot analyze` 를 돌리지 않는다(구독 호출 발생). 사용자 요청 없이 실제 세션을 띄우지 않는다.
+- `FAKE_CLAUDE=1` 없이 `uv run trader spot analyze`·`uv run trader evaluation reflect` 를 돌리지 않는다(구독 호출 발생). 사용자 요청 없이 실제 세션을 띄우지 않는다.
 - `trader saveticker run|service|install-browser` 는 사이트 로그인·Chromium 다운로드라 사용자 요청 없이 돌리지 않는다.
 - 셸 스크립트(`.sh`/`.bat`/`.ps1`)를 추가하지 않는다. 훅·설치·유틸·빌드는 전부 파이썬.
 - `state/` 파일을 직접 편집하지 않는다.

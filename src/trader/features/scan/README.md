@@ -58,3 +58,5 @@
 - 옛 `screen backtest` 는 `trader scan backtest`; 스캔 실행은 `trader scan run`, 유니버스 점검·섹터 제안은 `trader scan universe check|sectors`.
 - 섀도 포트폴리오 기록은 없다(M8, spot `scan_analyze.post` 훅 자리). `events check` CLI 는 이식하지 않았다(`news.post_ingest` 훅이 사건 감지를 대신한다).
 - `scan.api` 가 `triggers` 를 import 해 api import 때 accounts/regime/ingest api 가 로드된다. `jobs.discover_request` 는 순환을 피해 지연 import 로 `events_check` 를 부른다.
+
+- M8 이후: `theme.mature`/`mature_views` 를 evaluation reflect 가 호출한다(종가표 `ml.api.close_table` 주입). 섀도 포트폴리오 기록은 evaluation 이 `scan_analyze.post` 훅으로 소비한다.
