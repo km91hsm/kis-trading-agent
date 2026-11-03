@@ -14,6 +14,8 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from tests.kernel.daemon.test_runner import make_deps
 from trader.features.spot import scan_analyze
 from trader.features.spot.feature import FEATURE
@@ -51,6 +53,12 @@ class Inputs:
         if self.order is not None:
             self.order.append(f"collect:{kw['ticker']}")
         return {}
+
+
+@pytest.fixture(autouse=True)
+def _fake_claude(monkeypatch):
+    """외부 FAKE_CLAUDE 값과 무관하게 같은 결과가 나오도록 FAKE 모드를 고정한다."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
 
 
 def _deps(project, settings, *, ports=None, now=NOW, **kw):
@@ -410,6 +418,7 @@ def test_analyze_targets_run_without_ml_port_or_model(
 
 
 def test_analyze_targets_skips_when_throttled_without_collecting(project, settings, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)  # 감속 선검사는 FAKE 가 아닐 때만 돈다
     monkeypatch.setattr(
         scan_analyze.usage, "session_allowance", lambda *a, **k: (False, "7일 84%")
     )
