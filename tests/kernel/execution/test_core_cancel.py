@@ -114,3 +114,17 @@ def test_cancel_missing_order_raises(conn):
             _deps(conn), order_id=999, order_no="x", market="KR", broker=_Broker(),
             dry_run=False, reason="r",
         )  # fmt: skip
+
+
+@pytest.mark.parametrize("dead", ["rejected", "cancelled", "failed", "expired"])
+def test_cancel_dead_order_skips_broker(conn, dead):
+    """이미 끝난 주문(DEAD_STATUSES)은 브로커를 부르지 않고 ok=False."""
+    oid, broker = _order(conn), _Broker()
+    conn.execute("UPDATE orders SET status=? WHERE id=?", (dead, oid))
+    out = core.cancel(
+        _deps(conn), order_id=oid, order_no="0001", market="KR", broker=broker,
+        dry_run=False, reason="재호가",
+    )  # fmt: skip
+    assert out["ok"] is False and out["status"] == dead and out["message"]
+    assert broker.calls == []
+    assert _status(conn, oid) == dead

@@ -54,6 +54,7 @@ __all__ = [
     "approve",
     "build_portfolio",
     "cancel_open_buys",
+    "cancel_rows",
     "deps_of",
     "exec_ctx",
     "exec_ctx_from",
@@ -268,9 +269,52 @@ def _shown(ctx: ExecContext, market: str, ticker: str) -> str:
 # --- 미체결 매수 취소 ------------------------------------------------------------------
 
 
+def cancel_rows(
+    ctx: ExecContext,
+    account_id: str,
+    market: str,
+    rows: list,
+    *,
+    exchange_of: Callable[[str], str | None] = lambda _t: None,
+    reason: str,
+) -> tuple[int, list[str]]:
+    """주문 행들을 `core.cancel` 로 취소한다(브로커 취소의 유일한 경로). (취소 건수, 취소하지 못한
+    종목들). 브로커 없음·응답 없는(번호 없는) 주문·US 거래소를 모르는 주문·KIS 거부·이미 끝난
+    주문·예외(`KisApiError`·`ValueError`)는 '못 함'. 위험을 줄이는 취소라 실제로 보낸다 — dry-run
+    호출자는 여기 오기 전에 돌아간다."""
+    broker = ctx.brokers.get(account_id)
+    deps = deps_of(ctx)
+    done, left = 0, []
+    for r in rows:
+        t = str(r["ticker"])
+        ex = exchange_of(t) if market == "US" else None
+        if broker is None or not r["order_no"] or (market == "US" and not ex):
+            left.append(t)
+            continue
+        try:
+            res = core.cancel(
+                deps,
+                order_id=int(r["id"]),
+                order_no=str(r["order_no"]),
+                market=market,
+                broker=broker,
+                dry_run=False,
+                reason=reason,
+                exchange=ex,
+            )
+        except (KisApiError, ValueError) as e:
+            logger.warning("%s 실패 %s %s #%s: %s", reason, account_id, t, r["order_no"], e)
+            left.append(t)
+            continue
+        if res.get("ok"):
+            done += 1
+        else:
+            left.append(t)
+    return done, left
+
+
 def cancel_open_buys(
-    conn: sqlite3.Connection,
-    broker: Any,
+    ctx: ExecContext,
     account_id: str,
     market: str,
     day: date,
@@ -279,43 +323,23 @@ def cancel_open_buys(
     exchange_of: Callable[[str], str | None] = lambda _t: None,
     keep: frozenset[str] | None = None,
     side: str = "BUY",
+    reason: str | None = None,
 ) -> tuple[int, list[str]]:
-    """당일(시장 현지) 미체결 주문(기본 BUY)을 취소한다 — 결정이 매수에서 돌아섰을 때 등.
-    (취소 건수, 취소하지 못한 종목들). 응답 없는(번호 없는) 주문·US 거래소를 모르는 주문·KIS 거부는
-    '못 함' 으로 돌려 호출자가 알린다. 위험을 줄이는 취소라 새 주문이 아니다(코어를 지나지 않음)."""
-    if broker is None:
+    """당일(시장 현지) 미체결 주문(기본 BUY)을 `cancel_rows` 로 취소한다 — 결정이 매수에서
+    돌아섰을 때·손절 직전 등. (취소 건수, 취소하지 못한 종목들) — 호출자가 알린다. 브로커가 없으면
+    (0, [])."""
+    if ctx.brokers.get(account_id) is None:
         return 0, []
     keep = keep or frozenset()
-    done, left = 0, []
-    for r in xledger.open_orders_today(conn, account_id, ticker, side, day, market=market):
-        t = str(r["ticker"])
-        if t in keep:
-            continue
-        ex = exchange_of(t) if market == "US" else None
-        if not r["order_no"] or (market == "US" and not ex):
-            left.append(t)
-            continue
-        try:
-            res = broker.cancel_order(
-                str(r["order_no"]),
-                market=market,
-                org_no=r["org_no"],
-                ticker=t,
-                exchange=ex,
-                qty=int(r["qty"]),
-            )
-        except (KisApiError, ValueError) as e:
-            logger.warning(
-                "미체결 %s 취소 실패 %s %s #%s: %s", side, account_id, t, r["order_no"], e
-            )
-            left.append(t)
-            continue
-        if res.accepted:
-            xledger.set_order_status(conn, int(r["id"]), "cancelled")
-            done += 1
-        else:
-            left.append(t)
-    return done, left
+    rows = [
+        r
+        for r in xledger.open_orders_today(ctx.conn, account_id, ticker, side, day, market=market)
+        if str(r["ticker"]) not in keep
+    ]
+    return cancel_rows(
+        ctx, account_id, market, rows, exchange_of=exchange_of,
+        reason=reason or f"미체결 {side} 취소",
+    )  # fmt: skip
 
 
 # --- 포트폴리오 ------------------------------------------------------------------------
@@ -638,8 +662,7 @@ def execute(
             if market not in account.markets or account.id in skip:
                 continue
             n, left = cancel_open_buys(
-                ctx.conn,
-                ctx.brokers.get(account.id),
+                ctx,
                 account.id,
                 market,
                 date,

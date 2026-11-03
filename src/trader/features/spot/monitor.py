@@ -441,42 +441,16 @@ def _cancellable_resting_sell(row: Any, quote: Decimal) -> bool:
 def _cancel_rows(
     ctx: MonitorContext, account: Any, market: str, pos: Position, rows: list, reason: str
 ) -> tuple[int, int]:
-    """주문 행들을 `core.cancel` 로 취소한다. (취소한 건수, 취소하지 못한 건수). 응답 없는(번호
-    없는) 주문·US 거래소를 모르는 주문·KIS 거부·예외는 '못 함'."""
-    ex = ctx.exec
-    deps = executor.deps_of(ex)
-    broker = ex.brokers.get(account.id)
-    exchange = _exchange(ctx, pos) if market == "US" else None
-    done = left = 0
+    """주문 행들을 `executor.cancel_rows`(→ `core.cancel`)로 취소한다. (취소한 건수, 취소하지 못한
+    건수)."""
     # 호출자(`_sell_now`)는 실제 손절을 낼 수 있을 때(`live`: dry-run·off·일시정지 아님)만 여기에
     # 온다(`_cancel_open_sells` 도 dry_run 이면 먼저 돌아간다) — 그래서 취소는 실제로 보낸다
     assert not ctx.dry_run, "dry-run 에서는 손절 전 취소를 보내지 않는다"
-    for r in rows:
-        if not r["order_no"] or (market == "US" and not exchange):
-            left += 1
-            continue
-        try:
-            res = core.cancel(
-                deps,
-                order_id=int(r["id"]),
-                order_no=str(r["order_no"]),
-                market=market,
-                broker=broker,
-                dry_run=False,
-                reason=reason,
-                exchange=exchange,
-            )
-        except (KisApiError, ValueError) as e:
-            logger.warning(
-                "%s 실패 %s %s #%s: %s", reason, account.id, pos.ticker, r["order_no"], e
-            )
-            left += 1
-            continue
-        if res.get("ok"):
-            done += 1
-        else:
-            left += 1
-    return done, left
+    exchange = _exchange(ctx, pos) if market == "US" else None
+    done, left = executor.cancel_rows(
+        ctx.exec, account.id, market, rows, exchange_of=lambda _t: exchange, reason=reason
+    )
+    return done, len(left)
 
 
 def _cancel_open_sells(
@@ -508,12 +482,17 @@ def _cancel_open_buys(
 ) -> int:
     """손절할 종목의 당일 미체결 BUY(아침 ADD 지정가 등)를 취소한다 — 손절 뒤 체결돼 다시 보유하게
     되는 것을 막는다(전체 검토 O13). 실패는 경고만(손절은 그대로 진행). 취소한 건수."""
-    if ctx.exec.brokers.get(account.id) is None:
-        return 0
-    rows = xledger.open_orders_today(
-        ctx.exec.conn, account.id, pos.ticker, "BUY", local_day, market=market
+    assert not ctx.dry_run, "dry-run 에서는 손절 전 취소를 보내지 않는다"
+    exchange = _exchange(ctx, pos) if market == "US" else None
+    done, _left = executor.cancel_open_buys(
+        ctx.exec,
+        account.id,
+        market,
+        local_day,
+        ticker=pos.ticker,
+        exchange_of=lambda _t: exchange,
+        reason="손절 전 미체결 BUY 취소",
     )
-    done, _left = _cancel_rows(ctx, account, market, pos, rows, "손절 전 미체결 BUY 취소")
     return done
 
 
