@@ -469,3 +469,36 @@ def test_discovery_inputs_include_theme_heat(project, conn, settings):
     control.set_flag(conn, "theme_heat:KR", {"date": "2000-01-01", "themes": themes})
     data = discovery.build_inputs(conn, settings, UNI_KR, market="KR", today=D, asof=T0, **kw)
     assert data["theme_heat"] == []
+
+
+def test_fake_screen_with_discovery_merges_and_summarizes(project, conn, settings, monkeypatch):
+    import yaml
+
+    from tests.features.accounts.conftest import make_account
+    from tests.features.scan.conftest import lane
+    from trader.features.scan import screener
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    (project / "config" / "universe.yaml").write_text(
+        yaml.safe_dump({"kr": ["000003", "000000"], "us": [], "watch": [], "exclude": []}),
+        encoding="utf-8",
+    )
+    cands = [
+        {"ticker": f"0000{i:02d}", "exchange": None, "score": 10 - i, "reasons": ["r"]}
+        for i in range(8)
+    ]
+    r = screener.run_screen(
+        lane(conn, settings, accounts=[make_account("paper-main", "paper", "auto")], now=T0),
+        market="KR",
+        date=D,
+        candidates=cands,
+        cap_hit=False,
+        asof=T0,
+        universe=Universe(kr=["000003", "000000"]),
+        discovery=True,
+    )
+    assert read_checkpoint(market_dir(D, "KR"), "_discovery_inputs") is not None
+    # FAKE 는 정량 점수 순으로 첫 유니버스 종목(000000, score 10)을 발굴로 흉내 낸다
+    assert r["discovery"]["candidates"][0]["ticker"] == "000000" and r["discovery"]["universe"] == 1
+    assert r["picks"][0] == {"ticker": "000000", "reason": "FAKE: 뉴스 발굴"}
+    assert len(r["picks"]) == 5

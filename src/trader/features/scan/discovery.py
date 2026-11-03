@@ -523,6 +523,7 @@ def summary(discovery: dict | None) -> dict | None:
     if not discovery:
         return None
     cands = discovery.get("candidates") or []
+    unresolved = discovery.get("unresolved") or []
     return {
         "candidates": [
             {k: c.get(k) for k in ("ticker", "name", "tier", "exchange", "catalyst", "confidence")}
@@ -530,7 +531,8 @@ def summary(discovery: dict | None) -> dict | None:
         ],
         "universe": sum(1 for c in cands if c.get("tier") == "universe"),
         "listed": sum(1 for c in cands if c.get("tier") == "listed"),
-        "unresolved": len(discovery.get("unresolved") or []),
+        # 이미 요약된 dict(`_scan.discovery`, 미해결이 개수)를 다시 요약해도 깨지지 않게
+        "unresolved": unresolved if isinstance(unresolved, int) else len(unresolved),
     }
 
 

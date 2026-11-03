@@ -15,13 +15,15 @@ import typer
 from trader.features.ingest import api as ingest_api
 from trader.features.ml import api as ml_api
 from trader.features.saveticker import api as saveticker_api
-from trader.features.scan import backtest, events, sector_suggest, theme, universe_check
+from trader.features.scan import backtest, events, run, sector_suggest, theme, universe_check
 from trader.features.scan.settings import load_events
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import ConfigError
+from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.platform import bundle, paths
 from trader.kernel.session.run_store import run_date_for
+from trader.kernel.session.runner import PipelineError
 
 scan_app = typer.Typer(help="테마 열기·사건 수혜 조회", no_args_is_help=True)
 theme_app = typer.Typer(help="테마 열기 감지: 조회", no_args_is_help=True)
@@ -95,6 +97,40 @@ def events_show(market: str = typer.Option("KR", "--market", help="KR|US")) -> N
             ensure_ascii=False,
         )
     )
+
+
+@scan_app.command("run")
+@config_errors
+def scan_run(
+    market: str = typer.Option("KR", "--market", help="KR 또는 US"),
+    asof: str | None = typer.Option(None, "--asof", help="기준 시각 ISO8601 (기본: 현재 UTC)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="screener 세션 없이 정량 상위만"),
+) -> None:
+    """정량 필터 → screener 세션 → 오늘 분석 대상 목록 (_scan.json, stdout JSON)."""
+    if market not in ("KR", "US"):
+        raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
+    when = datetime.fromisoformat(asof) if asof else datetime.now(UTC)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    b = boot(ports=True)
+    try:
+        ctx = LaneContext(
+            b.settings,
+            b.conn,
+            state=paths.state_dir(),
+            now=lambda: when,
+            dry_run=dry_run,
+            notifier=None,
+            ports=b.ports,
+            ext={"registry": b.registry},
+        )
+        out = run.run_scan(ctx, market=market, dry_run=dry_run)
+    except (PipelineError, ValueError) as e:
+        typer.echo(f"오류: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    finally:
+        b.conn.close()
+    typer.echo(json.dumps(out, ensure_ascii=False, default=str))
 
 
 @scan_app.command("backtest")

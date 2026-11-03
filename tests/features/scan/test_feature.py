@@ -37,3 +37,13 @@ def test_theme_template_matches_model_fields(monkeypatch):
     assert ThemeCfg(**raw["theme"]) == ThemeCfg()
     sched = yaml.safe_load((cfg / "schedule.yaml").read_text(encoding="utf-8"))
     assert ThemeSchedule(**sched["theme"]) == ThemeSchedule(interval_s=1800)
+
+
+def test_feature_declares_screen_discover_session_kinds():
+    from trader.features.scan.feature import FEATURE
+    from trader.features.scan.session_kinds import AGENTS, DISCOVER, SCREEN
+
+    assert FEATURE.session_kinds == (SCREEN, DISCOVER)
+    assert FEATURE.agents == AGENTS
+    assert (SCREEN.kind, SCREEN.runs_kind, SCREEN.throttle) == ("screen", "scan", "hard")
+    assert (DISCOVER.kind, DISCOVER.agents) == ("discover", ("scout",))
