@@ -123,6 +123,73 @@ class ScanPort(Protocol):
         """종목 → 섹터(모르면 None) 함수."""
         ...
 
+    def watchlist(self, conn: sqlite3.Connection, market: str | None) -> list[str]:
+        """런타임 관심종목. market 을 주면 그 시장 종목만 접두사 없이."""
+        ...
+
+
+class StockExecPort(Protocol):
+    """현물 집행 서비스(spot 제공). 결정 행 없는 파이썬 주문(단타)을 게이트·승인·멱등·기록을
+    거쳐 낸다."""
+
+    def execute(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        decision: dict,
+        date: date,
+        market: str,
+        price: Decimal,
+        exchange: str | None,
+        dry_run: bool,
+        scalp_leg: str,
+        skip_accounts: frozenset[str],
+        max_qty: dict[str, int] | None,
+        trade_block: str | None,
+        notifier: Any,
+        now: Callable[[], datetime],
+        state: Path | None,
+    ) -> list[dict]:
+        """`decision`(Decision 모양 dict)을 계좌마다 판정·주문하고 계좌별 결과를 돌려준다."""
+        ...
+
+    def cancel(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        account_id: str,
+        order_id: int,
+        order_no: str,
+        market: str,
+        exchange: str | None,
+        dry_run: bool,
+        reason: str,
+        notifier: Any,
+        now: Callable[[], datetime],
+    ) -> dict:
+        """미체결 주문 1건을 코어 취소 경로로 취소한다."""
+        ...
+
+    def sync_fills(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        account_id: str,
+        d: date,
+        now: Callable[[], datetime],
+        notifier: Any,
+    ) -> dict:
+        """계좌 1개의 체결을 원장에 적재한다. 계좌·브로커가 없으면 `{"error": …}`."""
+        ...
+
+
+class ScalpPort(Protocol):
+    """단타 레인 조회(scalp 제공) — 다른 레인이 단타 보유분을 건드리지 않게 한다."""
+
+    def open_tickers(self, state: Path | None, market: str, today: date) -> set[str]:
+        """오늘 단타가 들고 있는(진입·청산 대기 포함) 종목 집합."""
+        ...
+
 
 class MlPort(Protocol):
     """정량(ML) 모델 조회·보고·스냅샷 — 구현은 ml 기능이 맡는다."""

@@ -14,6 +14,7 @@ from decimal import Decimal
 
 from trader.kernel.execution import costs
 from trader.kernel.execution import ledger as repo
+from trader.kernel.execution.types import OPEN_STATUSES as OPEN
 from trader.kernel.notify import messages
 
 MIN_ORDERS = 5
@@ -21,7 +22,6 @@ MIN_FILL_RATE = 0.80
 SLIP_MULT = 2.0
 # partial 은 잔량이 살아 있는 진행 중 상태다(마감 뒤 잔량은 expired 로 바뀐다)
 TERMINAL = ("filled", "expired", "cancelled")
-OPEN = ("accepted", "unknown", "partial")
 
 
 # 결정 주문 사슬에 넣는 origin — 손절·헤지·단타·현금 주차·외부는 LLM 결정 체결 가정과 무관

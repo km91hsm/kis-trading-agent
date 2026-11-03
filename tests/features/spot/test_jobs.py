@@ -3,6 +3,9 @@
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from tests.features.spot.approval_helpers import (
     fake_brokers,
     make_account,
@@ -14,7 +17,7 @@ from trader.features.spot import fills as fills_mod
 from trader.features.spot import jobs as spot_jobs
 from trader.features.spot import monitor as monitor_mod
 from trader.features.spot.feature import FEATURE
-from trader.features.spot.jobs import APPROVALS_EXPIRE
+from trader.features.spot.jobs import APPROVALS_EXPIRE, QUEUE_KINDS, RebalanceParams
 from trader.kernel.broker.fake import FakeMarket
 from trader.kernel.config import Secrets
 from trader.kernel.execution import ledger as xledger
@@ -299,3 +302,12 @@ def test_monitor_body_and_cli_fill_us_exchanges_from_ledger(project, conn, setti
     )  # fmt: skip
     assert pos.exchange is None
     assert monitor_mod._exchange(seen["ctx"], pos) == "NYS"
+
+
+def test_rebalance_params_market_literal():
+    assert RebalanceParams(market="KR").market == "KR"
+    assert RebalanceParams().market is None
+    with pytest.raises(ValidationError):
+        RebalanceParams(market="JP")
+    kinds = {q.kind: q for q in QUEUE_KINDS}
+    assert kinds["rebalance"].params_model is RebalanceParams

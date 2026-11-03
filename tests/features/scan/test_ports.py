@@ -70,3 +70,11 @@ def test_sector_of_prefers_yaml_then_auto_cache(project, settings):
     assert fn("005930") == "반도체"  # yaml 우선
     assert fn("105560") == "금융"  # 자동 캐시
     assert fn("999999") is None
+
+
+def test_watchlist_port_reads_scan_watchlist(conn, settings):
+    from trader.features.scan import watchlist
+
+    watchlist.set_watchlist(conn, ["005930", "000660"])
+    port = ports.build_port(SimpleNamespace(settings=settings))
+    assert port.watchlist(conn, "KR") == ["005930", "000660"]

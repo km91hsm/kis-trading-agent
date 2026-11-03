@@ -14,9 +14,8 @@ from decimal import Decimal
 
 from trader.features.regime.api import killswitch_reason
 from trader.kernel.execution import ledger as repo
+from trader.kernel.execution.types import OPEN_STATUSES as OPEN
 from trader.kernel.notify import messages
-
-OPEN = ("accepted", "unknown", "partial")
 
 
 def _row(conn: sqlite3.Connection, account_id: str, market: str, d: date) -> dict | None:

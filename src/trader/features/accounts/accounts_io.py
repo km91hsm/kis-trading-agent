@@ -27,6 +27,7 @@ from trader.features.accounts.settings import (
 )
 from trader.kernel.config import ConfigError, Env, Market
 from trader.kernel.config.secrets import Secrets, account_prefix
+from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.platform.fsutil import atomic_replace
 
 ID_RE = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$")
@@ -34,8 +35,6 @@ ID_RE = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$")
 _RESERVED_PREFIXES = frozenset({"KIS_PAPER_", "KIS_REAL_"})
 _FO_PRODUCT = "03"
 _STOCK_PRODUCT = "01"
-# 끝난 주문 상태. 옛 `repo.DEAD_STATUSES` — M4 가 `kernel/execution` 으로 올리면 import 로 바꾼다
-DEAD_STATUSES = ("rejected", "cancelled", "failed", "expired")
 
 
 class AccountInUse(ConfigError):
@@ -52,11 +51,6 @@ class AccountSpec(BaseModel):
     asset: Asset = "stock"
     markets: list[Market] = ["KR"]
     mode: Mode = "auto"
-
-
-def dead_status_sql() -> str:
-    """`status NOT IN (…)` 에 넣을 목록 문자열."""
-    return ",".join(f"'{s}'" for s in DEAD_STATUSES)
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
