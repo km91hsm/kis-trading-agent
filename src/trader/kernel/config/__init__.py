@@ -108,6 +108,7 @@ KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "anonymize", bool, lambda: False),
     Section("schedule", "job_queue", JobQueueSchedule, JobQueueSchedule),
     Section("schedule", "telegram_poll", TelegramPollSchedule, TelegramPollSchedule),
+    Section("schedule", "ledger_backup", str, lambda: "17:10"),
 )
 
 

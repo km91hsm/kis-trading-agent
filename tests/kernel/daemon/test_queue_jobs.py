@@ -24,6 +24,7 @@ from apscheduler import events as ev
 from pydantic import BaseModel, ConfigDict
 
 from trader.kernel.cli.boot import build_registry
+from trader.kernel.config import LlmSettings
 from trader.kernel.config.loader import load
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon import queue_jobs as qj
@@ -160,6 +161,7 @@ SCHEDULE = SimpleNamespace(
     us=SimpleNamespace(scan=SimpleNamespace(time="08:30", tz="America/New_York")),
     reflect="16:30",
     backup="17:10",
+    ledger_backup="17:10",
     members="17:20",
 )
 
@@ -203,7 +205,7 @@ def make_env(project: Path, now: datetime, *, markets=("KR",), holidays=frozense
     c.close()
     box, order = Box(), []
     deps = DaemonDeps(
-        settings=SimpleNamespace(), schedule=SCHEDULE, conn_factory=factory,
+        settings=SimpleNamespace(llm=LlmSettings()), schedule=SCHEDULE, conn_factory=factory,
         state=project / "state", now=Clock(now), markets=list(markets), gates={},
         stop_event=threading.Event(), dry_run=False, notifier=Sent(),
         queue=qj.QueueState(kinds=make_kinds(box)),

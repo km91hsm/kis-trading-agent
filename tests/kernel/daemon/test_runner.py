@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from trader.kernel.config import LlmSettings
 from trader.kernel.daemon import heartbeat as hb_mod
 from trader.kernel.daemon.jobs import build
 from trader.kernel.daemon.queue_jobs import QUEUE_JOB_IDS
@@ -21,6 +22,7 @@ from trader.kernel.registry import discover
 from trader.kernel.registry.contracts import all_migrations
 from trader.kernel.registry.types import Feature, JobSpec
 
+BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup")
 NOW = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
 
@@ -45,8 +47,8 @@ def make_deps(project: Path, **kw) -> DaemonDeps:
     init_schema(c, all_migrations(discover()))
     c.close()
     base = dict(
-        settings=SimpleNamespace(notify=SimpleNamespace(enabled=False)),
-        schedule=SimpleNamespace(at="03:00"), conn_factory=factory,
+        settings=SimpleNamespace(notify=SimpleNamespace(enabled=False), llm=LlmSettings()),
+        schedule=SimpleNamespace(at="03:00", ledger_backup="17:10"), conn_factory=factory,
         state=state, now=lambda: NOW, markets=["KR"], gates={}, stop_event=threading.Event(),
         dry_run=False,
     )  # fmt: skip
@@ -235,9 +237,9 @@ def test_daemon_start_registers_jobs_heartbeat_and_shutdown(project):
     try:
         assert daemon.start(install_signals=False) is True
         ids = {j.id for j in daemon._scheduler.get_jobs()}
-        assert ids == {"a", "p", "daemon_heartbeat", "telegram_poll"} | QUEUE_JOB_IDS
+        assert ids == {"a", "p", "daemon_heartbeat", *BUILTIN_IDS} | QUEUE_JOB_IDS
         data = json.loads((d.state / hb_mod.FILE_NAME).read_text(encoding="utf-8"))
-        assert set(data["jobs"]) == {"a", "p", "telegram_poll"} | QUEUE_JOB_IDS
+        assert set(data["jobs"]) == {"a", "p", *BUILTIN_IDS} | QUEUE_JOB_IDS
         assert data["jobs"]["a"]["next_run"]
         assert (d.state / "daemon.lock").exists()
     finally:
@@ -286,7 +288,7 @@ def test_tick_runs_job_and_updates_heartbeat(project):
     daemon = make_daemon(d, spec(id="a"))
     try:
         assert daemon.start(install_signals=False) is True
-        (job,) = [j for j in daemon._jobs if j.id not in QUEUE_JOB_IDS | {"telegram_poll"}]
+        (job,) = [j for j in daemon._jobs if j.id not in QUEUE_JOB_IDS | set(BUILTIN_IDS)]
         daemon._tick(job)
         c = d.conn_factory()
         assert [r["status"] for r in rows(c) if r["kind"] == job.spec.kind] == ["ok"]
