@@ -111,14 +111,8 @@ def test_agent_registered_with_common_rules():
 
 
 class _Regime:
-    def state(self, conn, market):
-        return "neutral"
-
     def load(self, conn, market):
-        return {"signals": {"ma_below": True}}
-
-    def core_count(self, state):
-        return 1
+        return {"state": "neutral", "count": 2}
 
     def view_today(self, conn, market, today):
         raise RuntimeError("판단 없음")
@@ -140,7 +134,26 @@ def test_judge_context_sections_and_failures():
     ports, kw = {"regime": _Regime()}, {"ticker": "005930", "today": NOW.date()}
     kr = judge.judge_context(None, ports, Client(), market="KR", exchange=None, **kw)
     assert len(kr["orderbook"]["asks"]) == 5 and kr["orderbook"]["bids"][0] == ["99", 20]
-    assert kr["news"] == [] and kr["regime"] == {"state": "neutral", "count": 1}
+    assert kr["news"] == [] and kr["regime"] == {"state": "neutral", "count": 2}
     assert kr["market_view"] is None  # 실패한 절은 None
     us = judge.judge_context(None, ports, Client(), market="US", exchange="NAS", **kw)
     assert us["orderbook"] is None
+
+
+def test_judge_context_regime_passes_stored_record(conn, settings):
+    """T4-R1: 국면 절은 저장된 기록 그대로 — 없으면 None/None(‘bull’/0 으로 기울이지 않는다)."""
+    from trader.features.regime import regime as regime_mod
+    from trader.features.regime.ports import RegimePortImpl
+    from trader.kernel.ledger import control
+
+    class Client:
+        def get_orderbook_kr(self, ticker):
+            raise RuntimeError("호가 없음")
+
+    ports = {"regime": RegimePortImpl(settings)}
+    kw = {"market": "KR", "ticker": "005930", "exchange": None, "today": NOW.date()}
+    out = judge.judge_context(conn, ports, Client(), **kw)
+    assert out["regime"] == {"state": None, "count": None}
+    control.set_flag(conn, f"{regime_mod.FLAG_PREFIX}KR", {"state": "bear", "count": 3})
+    out = judge.judge_context(conn, ports, Client(), **kw)
+    assert out["regime"] == {"state": "bear", "count": 3}

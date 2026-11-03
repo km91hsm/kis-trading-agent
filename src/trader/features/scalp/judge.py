@@ -135,10 +135,8 @@ def judge_context(
         logger.debug("단타 호가 실패 %s: %s", ticker, e)
     regime = ports["regime"]
     try:
-        reg = {
-            "state": regime.state(conn, market),
-            "count": regime.core_count(regime.load(conn, market)),
-        }
+        rec = regime.load(conn, market) or {}  # 기록 그대로(T4-R1): 없으면 state·count 모두 None
+        reg = {"state": rec.get("state"), "count": rec.get("count")}
     except Exception as e:  # noqa: BLE001 - 국면은 보조 입력
         logger.debug("단타 국면 실패 %s: %s", market, e)
         reg = None
