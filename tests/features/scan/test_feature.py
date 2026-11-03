@@ -12,10 +12,14 @@ def test_feature_declares_theme_sections_and_v11():
     from trader.features.scan.settings import ThemeCfg, ThemeSchedule
 
     assert FEATURE.id == "scan" and FEATURE.tier == "service"
-    assert {(s.file, s.key, s.model) for s in FEATURE.sections} == {
+    assert {(s.file, s.key, s.model) for s in FEATURE.sections if s.file != "events"} == {
         ("settings", "theme", ThemeCfg),
         ("schedule", "theme", ThemeSchedule),
     }
+    assert {s.key for s in FEATURE.sections if s.file == "events"} == {
+        "enabled", "lookback_hours", "max_picks_per_event", "max_event_picks", "events",
+    }  # fmt: skip
+    assert [h.point for h in FEATURE.hooks] == ["news.post_ingest"]
     assert [(m.version, m.name, m.owner) for m in FEATURE.migrations] == [
         (11, "scan_theme_heat", "scan")
     ]

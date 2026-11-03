@@ -95,7 +95,7 @@ def test_build_daemon_deps(project):
         assert deps.now().tzinfo is not None
         assert isinstance(deps.notifier, NullNotifier)  # 시크릿 없음
         assert deps.registry is b.registry
-        assert deps.hooks == {}  # 아직 훅을 선언한 기능이 없다
+        assert set(deps.hooks) == {"news.post_ingest"}  # scan 의 사건 감지 훅
         assert deps.secrets is not None
     finally:
         b.conn.close()
