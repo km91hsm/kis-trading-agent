@@ -60,6 +60,7 @@ def test_boot_loads_settings_and_conn(project):
             "ml",
             "regime",
             "saveticker",
+            "scalp",
             "scan",
             "spot",
         ]

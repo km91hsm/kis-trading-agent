@@ -27,6 +27,7 @@ def test_selfcheck_json_has_version_and_features(project):
         "ml",
         "regime",
         "saveticker",
+        "scalp",
         "scan",
         "spot",
     ]
