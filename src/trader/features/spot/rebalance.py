@@ -111,8 +111,10 @@ def run(
     if ctx.paused(ctx.conn):
         # 판정·플래그 없이 건너뛴다 — 재개 뒤 그 주 리밸런스 유지(2-O15)
         return {"skipped": "일시정지"}
-    # 단타(scalp) 보유 제외는 M9 에서 더한다
     exclude = set(excluded_tickers(ctx.settings, ctx.ports.get("regime"), market))
+    sc = ctx.ports.get("scalp")
+    if sc is not None:  # 단타가 들고 있는 종목은 건드리지 않는다(A9)
+        exclude |= set(sc.open_tickers(ctx.state, market, today))
     accounts = [a for a in ctx.accounts if market in a.markets and a.id in ctx.brokers]
     need: dict[tuple[str, str], set[str]] = {}  # (action, ticker) → 계좌들
     legs_out: list[dict] = []
