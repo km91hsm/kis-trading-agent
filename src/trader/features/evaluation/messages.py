@@ -1,1 +1,1 @@
-"""evaluation 알림 문구 (뒤 Task 가 채운다)."""
+"""evaluation 알림 문구: 일일 리포트·모의 체결 점검 문구는 각 모듈의 `message()` 가 만든다."""

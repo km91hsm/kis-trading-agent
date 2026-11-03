@@ -1,6 +1,13 @@
 """evaluation 공개면. 다른 기능은 이 모듈만 import 한다."""
 
-from trader.features.evaluation import lots, open_window, performance, shadow
+from trader.features.evaluation import (
+    daily_report,
+    lots,
+    open_window,
+    paper_review,
+    performance,
+    shadow,
+)
 from trader.features.evaluation.memory.outcomes import SIGN, close_table, window_return
 from trader.features.evaluation.memory.outcomes import mature as mature_memory
 from trader.features.evaluation.memory.store import (
@@ -33,6 +40,7 @@ __all__ = [
     "cash_effect",
     "convergence_rate",
     "cosine",
+    "daily_report",
     "decision_distribution",
     "fill_outcome",
     "get_entry",
@@ -40,6 +48,7 @@ __all__ = [
     "lots_report",
     "mature_memory",
     "open_window_targets",
+    "paper_review",
     "paired_stats",
     "performance_report",
     "matured_count",
