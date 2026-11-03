@@ -14,6 +14,9 @@ from trader.features.ml.features import (
     write_rows,
     zscore,
 )
+from trader.features.ml.models.quant import QuantModel, align
+from trader.features.ml.registry import latest as latest_model
+from trader.features.ml.registry import list_models
 from trader.features.ml.settings import PitCfg, load_ml, ml_config
 
 __all__ = [
@@ -22,10 +25,14 @@ __all__ = [
     "MIN_SECTOR_PEERS",
     "RATIO_COLUMNS",
     "PitCfg",
+    "QuantModel",
+    "align",
     "close_table",
     "has_files",
     "known_tickers",
+    "latest_model",
     "latest_rows",
+    "list_models",
     "load_all",
     "load_ml",
     "ml_config",
