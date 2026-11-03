@@ -220,6 +220,7 @@ def test_interval_kinds_of_collects_kind_and_expanded_id():
 
     kinds = readiness.interval_kinds_of(discover())
     assert {"kr_monitor", "us_monitor"} <= kinds
+    assert "monitor" not in kinds
 
 
 def test_llm_alpha_judged_per_market_of_live_accounts(project, conn):
