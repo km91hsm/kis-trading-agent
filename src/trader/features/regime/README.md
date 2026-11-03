@@ -51,3 +51,7 @@
 11. 킬스위치 CLI 는 `trader control killswitch on|off|show [--note]` → `trader regime killswitch on [--reason]|off --note|show`. 켜는 사유는 `--reason`(옛 `--note` 겸용 아님), off 의 짧은 메모는 원장을 열기 전에 거부한다.
 12. `regime backtest` 의 시세 클라이언트는 `cli._build_market(secrets)` 대신 계좌 포트(`_market_client(boot)` → `ports["accounts"].market_client()`)이고, 시장 검사를 설정 로드 앞에서 한다.
 13. `/kill` 해제 안내는 `trader regime killswitch off`(옛 `control killswitch off`).
+14. `market_view` 큐 kind 는 `trading=False` 다(옛 `TRADING_KINDS` 에는 포함). stale 예탁원 알림은 `ksd_events` 가 돌 때마다 낸다(옛 동일).
+15. `regime.messages.ml_trained`(학습 완료 알림 문구)는 이식하지 않았다(M8).
+16. `{market}_regime` 은 `heavy=True` 다(Ruling P6 — 옛 시장 세션이 `scan_analyze` 의 heavy 락 안에서 돌던 것을 보존). `ksd_events` 는 `event_blackout.enabled` 가 아니라 `"KR" in settings.markets` 일 때 등록된다(Ruling P7 — 옛 데몬도 블랙아웃이 꺼져 있어도 미리 수집). `event_blackout.enabled` 는 `blackout.reason` 게이트와 stale 알림에만 쓴다.
+17. `/status` 의 「국면」 절은 커널 `status_message` 가 절별 실패를 격리하지 않으므로 `settings=None` 이면 빈 목록을 돌려준다(커널 격리는 M9 ops).

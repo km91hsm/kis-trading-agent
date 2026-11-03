@@ -10,7 +10,7 @@
 - 주문: 파이썬이 만든 Decision(원 결정의 보유기간·익절·손절, 현재가 지정가) → `executor.execute(
   is_rebalance=True, decision_id=None)` → 체크포인트 `43_rebalance_*`·`53_order_rebalance_*`. 게이트
   규칙(최소 보유·주 2회·비중·섹터·테마·현금)은 그대로 적용된다. ADD 인데 원 손절선이 현재가 이상이면
-  건너뛴다. 오늘 같은 방향 살아 있는 주문·대기 승인이 있는 계좌도 건너뛴다.
+  건너뛴다. 오늘 같은 방향 주문(체결 완료 포함, 취소·거부 제외)·대기 승인이 있는 계좌도 건너뛴다.
 - 운영일 1회(`control.rebalance_done:<market>:<date>`). 일시정지면 플래그 없이 건너뛴다.
 - 잡 `{market}_rebalance`(금요일 크론)·큐 kind `rebalance` 의 본문이 이 파일에 있다."""
 

@@ -29,3 +29,4 @@
 4. `events check`(수혜 표 시세 확인 CLI)는 이식하지 않았다. 세이브티커 폴더는 `saveticker.api.load_cfg().dir`(옛 `sources.news.saveticker_dir`)이다.
 5. discovery(scout 후보 검증·병합·`event_watch` 입력)는 M7 로 이연 — 옛 test_events 의 discovery 관련 단언은 이식하지 않았다. 옛 게이트 테스트(shock 종목 테마 안전장치)는 `tests/features/spot/test_executor_theme.py` 로 이식했다(`ports["scan"]`). 사건 감지는 데몬 직접 호출 대신 `news.post_ingest` 훅으로 돈다.
 6. 알림 순서는 옛 코드 그대로 "알림 완료 표시(`new_for_alert`) 후 전송"이다. 전송이 실패해도(로그 debug) 그 사건은 그날 다시 알리지 않는다. `notifier=None` 이면 전송만 건너뛰고 `alerted` 는 채워진다.
+7. `compute` 의 섹터 맵 폴백 `_default_sector_of` 의 예외는 로그 없이 키워드 테마로 넘어간다. `mature(close_table=None)` 경로는 테스트가 없다(M8 에서 종가표 주입과 함께 정리).

@@ -22,6 +22,8 @@
 | `uv run trader spot fills sync [--account … --date …]` | 체결 동기화(원장 적재, 멱등, 계좌마다 JSON 1줄) |
 | `uv run trader spot balance refresh [--market KR\|US --force]` | 잔고 스냅샷 갱신(조회만) |
 | `uv run trader spot reconcile --market KR\|US` | 브로커 보유 vs 스냅샷 대사(스냅샷만 보정, 주문 유지) |
+| `uv run trader regime show\|backtest --market KR\|US --days N\|killswitch on [--reason]\|off --note …\|show` | 국면·킬스위치 조회·백테스트·수동 발동/해제 (`killswitch on`·`off` 는 사용자 전용) |
+| `uv run trader scan theme show [--market KR\|US --live]\|events show [--market KR\|US]` | 테마 열기·사건 감지 결과 조회 (조회만) |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
 | `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
