@@ -171,4 +171,10 @@ def test_gate_names_unique_and_known():
 
 
 def test_evaluation_port_declared_in_kernel_ports():
-    from trader.kernel.execution.ports import EvaluationPort  # noqa: F401
+    from trader.kernel.execution.ports import EvaluationPort
+
+    methods = {
+        "memory_context", "calibration_injected", "calibration_report", "record_decision",
+        "update_breaker", "rl_sizer", "rl_propose", "rl_record",
+    }  # fmt: skip
+    assert all(callable(getattr(EvaluationPort, m, None)) for m in methods)

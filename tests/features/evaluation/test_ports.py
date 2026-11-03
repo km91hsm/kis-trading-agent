@@ -160,7 +160,7 @@ def test_update_breaker_writes_market_flag(conn, settings):
     ).fetchone()[0] == 1
 
 
-def test_rl_sizer_is_none_until_task_11(settings):
+def test_rl_sizer_is_none_by_default(settings):
     assert _port(settings).rl_sizer(None) is None
 
 

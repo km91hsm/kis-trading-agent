@@ -46,7 +46,6 @@ def test_trader_context_memory_from_port(ctx, project, conn, ports, ml_port):
     ctx.ports = ports
     inputs = {"meta": {"ticker": "005930", "market": "KR"}}
     got = tools.trader_context(ctx, "KR", D, "005930", inputs)
-    assert got["memory"] or got["memory_status"]["warmup"] is False
     assert got["memory_status"]["warmup"] is False and "error" not in got["memory_status"]
     assert got["calibration"] is None  # inject 기본 false
 
