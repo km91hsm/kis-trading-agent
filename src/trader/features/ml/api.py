@@ -15,7 +15,10 @@ from trader.features.ml.features import (
     write_rows,
     zscore,
 )
+from trader.features.ml.jobs import bootstrap, features_action
+from trader.features.ml.messages import adjusted_prices, ml_trained
 from trader.features.ml.models.quant import QuantModel, align
+from trader.features.ml.ports import MlPortImpl
 from trader.features.ml.registry import latest as latest_model
 from trader.features.ml.registry import list_models
 from trader.features.ml.settings import PitCfg, load_ml, ml_config
@@ -35,12 +38,16 @@ __all__ = [
     "KEY_COLUMNS",
     "MIN_SECTOR_PEERS",
     "RATIO_COLUMNS",
+    "MlPortImpl",
     "PitCfg",
     "QuantModel",
+    "adjusted_prices",
     "align",
+    "bootstrap",
     "build_report",
     "effective_day",
     "close_table",
+    "features_action",
     "has_files",
     "known_tickers",
     "latest_model",
@@ -50,6 +57,7 @@ __all__ = [
     "load_all",
     "load_ml",
     "ml_config",
+    "ml_trained",
     "pit_apply",
     "pit_members",
     "pit_record",
