@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from trader.features.spot import (
     balance,
+    cash_park,
     executor,
     fills,
     hedge,
@@ -299,11 +300,26 @@ def _hedge_if_due(ctx, market: str) -> dict | None:
     return None if "skipped" in out else out
 
 
+def _cash_park_if_due(ctx, market: str) -> dict | None:
+    """현금 단기금리 ETF 운용 틱(`cash_park.cash_park_tick`, KR·`cash_park.enabled` 일 때만).
+    건너뜀(`skipped`)이면 None. 예외는 로그 + `{"error": …}`(알림 없음 — 옛 동작)로 돌려 손절
+    점검을 막지 않는다."""
+    if market != "KR" or not ctx.settings.cash_park.enabled:
+        return None
+    try:
+        out = cash_park.cash_park_tick(ctx)
+    except Exception as e:  # noqa: BLE001 - 현금 운용 실패가 손절 점검을 막지 않는다
+        logger.exception("현금 운용 실패")
+        return {"error": f"{type(e).__name__}: {e}"}
+    return None if "skipped" in out else out
+
+
 def monitor_body(ctx, job) -> dict:
     """`{market}_monitor` interval 잡 본문(장중 창은 게이트 `monitor` 가 본다). 재평가 세션은 틱
     안에서 돌리지 않고 큐 kind `reevaluate` 로 넘긴다 — 세션이 도는 동안 손절 점검이 멈추면 안
-    된다. 운영일은 시장 현지(US 는 뉴욕 날짜). 손절 점검 전에 국면 헤지(`hedge`, 운영일 1회)와
-    아침 재호가(`reprice`)를 시도하고, 건너뛰지 않았으면 결과에 그 키로 싣는다."""
+    된다. 운영일은 시장 현지(US 는 뉴욕 날짜). 손절 점검 전에 국면 헤지(`hedge`, 운영일 1회)·
+    현금 운용(`cash_park`, KR)·아침 재호가(`reprice`)를 시도하고,
+    건너뛰지 않았으면 결과에 그 키로 싣는다."""
     market = job.market or "KR"
     port = ctx.ports.get("accounts")
     if port is None:
@@ -321,6 +337,9 @@ def monitor_body(ctx, job) -> dict:
         hd = _hedge_if_due(ctx, market)
         if hd is not None:
             extra["hedge"] = hd
+        park = _cash_park_if_due(ctx, market)
+        if park is not None:
+            extra["cash_park"] = park
         try:  # 재호가 실패가 손절 점검을 막지 않는다
             rp = _reprice_if_due(ctx, ectx, market, today)
             if not isinstance(rp.get("skipped"), str):  # 건너뜀 사유(문자열)는 싣지 않는다

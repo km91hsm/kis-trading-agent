@@ -119,3 +119,11 @@ debate:
 # HTS ID(secrets KIS_HTS_ID)가 필요하고, 실전은 실전 계좌 모드가 off 가 아닐 때만 붙는다
 fill_notice:
   enabled: false
+
+# 노는 현금 단기금리 ETF 운용(기본 끔): 하락(bear) 국면이라 신규 매수가 막힌 동안만 남는 현금을
+# 사고(reserve_pct 는 NAV 대비 현금으로 남김, min_amount 보다 적으면 사지 않음), 국면이 풀리면 판다. 국내만
+cash_park:
+  enabled: false
+  ticker: "357870"
+  reserve_pct: 0.20
+  min_amount: 500000

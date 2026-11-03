@@ -1,10 +1,11 @@
-"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`.
+"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`·`cash_park`.
 
 yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -117,11 +118,25 @@ class FillNoticeCfg(BaseModel):
     enabled: bool = False
 
 
+class CashParkCfg(BaseModel):
+    """노는 현금 단기금리 ETF 운용(Stock D-115, **기본 끔**): 하락 국면이라 신규 매수가 막힌 동안만
+    남는 현금(`reserve_pct` 는 남김)을 `ticker` 로 사고, 국면이 풀리면 판다. 국내만."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    ticker: str = "357870"  # TIGER CD금리투자KIS(합성)
+    # NAV 대비 현금으로 남길 몫(조건부 매수·헤지)
+    reserve_pct: float = Field(default=0.20, ge=0, le=1)
+    min_amount: Decimal = Decimal("500000")  # 이보다 적으면 사지 않는다(수수료)
+
+
 SECTIONS = (
     Section("settings", "risk", RiskLimits, RiskLimits),
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
     Section("settings", "fill_notice", FillNoticeCfg, FillNoticeCfg),
+    Section("settings", "cash_park", CashParkCfg, CashParkCfg),
 )
 
 

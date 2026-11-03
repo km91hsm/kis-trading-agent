@@ -26,6 +26,7 @@ from trader.features.spot import executor, monitor
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot.monitor_rules import Signal, rule_hit
 from trader.features.spot.schemas import Decision
+from trader.features.spot.settings import CashParkCfg
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.broker.fake import FakeBroker, FakeMarket
 from trader.kernel.broker.models import Cash, Fill, Position
@@ -944,8 +945,7 @@ def test_monitor_skips_excluded_hedge_and_park_tickers(conn, settings, ports):
     """M5 표의 "hedge/cash_park 가 섞인 단언" 복원(M6): 헤지 ETF(regime 포트)·현금 운용 ETF 는
     손절·트리거 대상이 아니다(국면 해제·현금 운용 규칙으로만 판다) — 손절선 아래여도 주문 없이
     `skipped_excluded` 로 센다. 일반 종목은 그대로 점검한다."""
-    # cash_park 섹션은 Task 8 이 등록한다 — 지금은 덕 타이핑 객체로 켠다
-    s = settings.model_copy(update={"cash_park": SimpleNamespace(enabled=True, ticker="423160")})
+    s = settings.model_copy(update={"cash_park": CashParkCfg(enabled=True, ticker="423160")})
     _decision(conn, stop_loss=65000.0)
     positions = [
         _pos(cur="63000"),

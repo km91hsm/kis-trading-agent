@@ -22,6 +22,7 @@ from trader.features.spot import executor
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.schemas import Decision
+from trader.features.spot.settings import CashParkCfg
 from trader.kernel.broker.fake import FakeBroker
 from trader.kernel.broker.models import Cash, Position
 from trader.kernel.execution import ledger as xledger
@@ -257,11 +258,9 @@ def test_excluded_tickers_union_of_hedge_and_cash_park(settings, ports):
     port = ports["regime"]
     assert excluded_tickers(settings, port, "KR") == frozenset({"114800", "252670"})
     assert excluded_tickers(settings, port, "US") == frozenset({"SH", "SDS"})
-    # cash_park 섹션은 Task 8 이 추가한다 — 지금은 덕 타이핑 객체로 합집합만 본다
-    park = SimpleNamespace(enabled=True, ticker="423160")
-    s = SimpleNamespace(cash_park=park)
+    s = settings.model_copy(update={"cash_park": CashParkCfg(enabled=True, ticker="423160")})
     assert excluded_tickers(s, port, "KR") == frozenset({"114800", "252670", "423160"})
     assert excluded_tickers(s, port, "US") == frozenset({"SH", "SDS"})  # 현금 운용은 KR 만
-    off = SimpleNamespace(cash_park=SimpleNamespace(enabled=False, ticker="423160"))
+    off = settings.model_copy(update={"cash_park": CashParkCfg(ticker="423160")})
     assert excluded_tickers(off, port, "KR") == frozenset({"114800", "252670"})
     assert excluded_tickers(s, None, "KR") == frozenset({"423160"})

@@ -9,10 +9,9 @@ from trader.kernel.execution.ports import RegimePort
 
 def excluded_tickers(settings: Any, regime: RegimePort | None, market: str) -> frozenset[str]:
     """헤지 ETF(regime 포트, 헤지 꺼져 있으면 없음) ∪ 현금 단기금리 ETF(`cash_park` 켜져 있고 KR).
-    헤지 진입·해제가 볼 종목은 포트의 `hedge_tickers` 그대로. regime 포트가 없으면 헤지 없음.
-    `cash_park` 섹션이 아직 없을 수 있어(설정 등록 전) 없으면 건너뛴다."""
+    헤지 진입·해제가 볼 종목은 포트의 `hedge_tickers` 그대로. regime 포트가 없으면 헤지 없음."""
     out = set(regime.hedge_tickers(market)) if regime is not None else set()
-    park = getattr(settings, "cash_park", None)
-    if park is not None and park.enabled and market == "KR":
+    park = settings.cash_park
+    if park.enabled and market == "KR":
         out.add(park.ticker)
     return frozenset(out)
