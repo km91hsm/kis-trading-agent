@@ -109,7 +109,10 @@ def scan_run(
     """정량 필터 → screener 세션 → 오늘 분석 대상 목록 (_scan.json, stdout JSON)."""
     if market not in ("KR", "US"):
         raise ConfigError(f"시장은 KR 또는 US 여야 합니다: {market}")
-    when = datetime.fromisoformat(asof) if asof else datetime.now(UTC)
+    try:
+        when = datetime.fromisoformat(asof) if asof else datetime.now(UTC)
+    except ValueError as e:
+        raise ConfigError(f"--asof 는 ISO8601 이어야 합니다: {asof}") from e
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     b = boot(ports=True)

@@ -92,3 +92,44 @@ def test_run_screen_session_failure_falls_back_to_top3_and_keeps_held_watch(
         ("000007", "held"), ("005930", "watch"),
     ]  # fmt: skip
     assert r["session"] == {"ok": False, "fake": False, "cost_usd": None}
+
+
+def _capture_screen(monkeypatch):
+    got = {}
+
+    def fake_screen(ctx, **kw):
+        got.update(kw)
+        got["closed_at_call"] = getattr(kw["http"], "is_closed", None)
+        return {"picks": [], "analyze_targets": [], "discovery": None, "session": None}
+
+    monkeypatch.setattr(run.screener, "run_screen", fake_screen)
+    monkeypatch.setattr(run.quant, "candidates", lambda *a, **k: CANDS)
+    return got
+
+
+def test_run_scan_passes_injected_http_to_run_screen(project, conn, settings, monkeypatch):
+    got = _capture_screen(monkeypatch)
+    lc = lane(conn, settings)
+    marker = object()
+    lc.ext["http"] = marker
+    run.run_scan(lc, market="KR", dry_run=True)
+    assert got["http"] is marker
+
+
+def test_run_scan_builds_and_closes_default_http_client(project, conn, settings, monkeypatch):
+    import httpx
+
+    got = _capture_screen(monkeypatch)
+    run.run_scan(lane(conn, settings), market="KR", dry_run=True)
+    client = got["http"]
+    assert isinstance(client, httpx.Client) and got["closed_at_call"] is False
+    assert client.is_closed
+
+
+def test_cli_scan_run_bad_asof_exits_1(project):
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    r = CliRunner().invoke(app, ["scan", "run", "--market", "KR", "--asof", "nope"])
+    assert r.exit_code == 1 and "오류" in r.output
