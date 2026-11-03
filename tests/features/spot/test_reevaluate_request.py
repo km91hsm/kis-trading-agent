@@ -354,3 +354,30 @@ def test_monitor_body_enqueues_registered_reevaluate_and_queue_runs_it(
     rows = conn.execute("SELECT handled_at, session_id FROM triggers").fetchall()
     assert rows and all(r["handled_at"] and r["session_id"] == "s-re" for r in rows)
     assert brokers["paper-main"].orders == []
+
+
+def test_reevaluate_start_failure_still_notifies_when_bookkeeping_raises(
+    project, conn, settings, monkeypatch
+):
+    """S2: 기동 실패 정리(트리거 마감·종목 표기)가 다시 예외를 내도 원래 예외가 알림·요청
+    오류로 올라간다(정리 예외가 원인을 가리지 않는다)."""
+    from trader.features.spot import labels
+
+    def boom(*a, **kw):
+        raise RuntimeError("세션 상한")
+
+    def broken(*a, **kw):
+        raise OSError("원장 잠김")
+
+    monkeypatch.setattr(spot_jobs, "run_session", boom)
+    monkeypatch.setattr(spot_ledger, "mark_trigger_handled", broken)
+    monkeypatch.setattr(labels, "resolve", broken)
+    sent = []
+    deps = replace(_deps(settings, project), notifier=SimpleNamespace(send=sent.append))
+    t1 = _trig(conn)
+    p = {"market": "KR", "ticker": "005930", "trigger_id": t1}
+    jobq.enqueue(conn, deps.queue.kinds, "reevaluate", p, source="web", now=NOW)
+    queue_tick(deps, lanes=REEVAL)
+    req = jobq.list_recent(conn)[0]
+    assert req["status"] == "error" and "세션 상한" in req["error"]
+    assert len(sent) == 1 and "재평가 실패" in sent[0] and "세션 상한" in sent[0]

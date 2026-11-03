@@ -198,7 +198,8 @@ def _floor_data(
 def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
     """계좌별 보유종목 1회 점검. 1차: 손절(전 계좌), 2차: 트리거 기록·재평가.
 
-    재평가 세션 실패는 트리거에 기록하고 다음 종목으로 넘어간다 (손절 점검을 막지 않는다).
+    재평가 세션 실패는 트리거에 기록하고 다음 종목으로 넘어간다 (손절 점검을 막지 않는다). 한
+    종목 점검의 예상 밖 예외도 `result["errors"]` 에 적고 다음 종목으로 넘어간다.
     """
     ex = ctx.exec
     result: dict[str, Any] = {"checked": 0, "stop_loss_orders": 0, "triggers": 0, "reevaluated": 0}
@@ -214,37 +215,75 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
             logger.warning("보유 조회 실패 %s: %s", account.id, e)
             continue
         for pos in positions:
-            quote = _cached_quote(ctx, market, pos, quotes)
-            if quote is None:
-                continue
-            result["checked"] += 1
-            latest = spot_ledger.latest_decision(ex.conn, market, pos.ticker)
-            dec_data = _floor_data(ctx, account, market, pos, (latest or {}).get("data"))
-            _, profile = horizon.of_decision(ex.settings.risk, dec_data)
-            signals = check_position(
-                pos,
-                dec_data,
-                quote,
-                stop_loss_pct=ex.settings.risk.stop_loss_pct,
-                now=ex.now(),
-                move_pct=Decimal(str(profile.move_pct)),
-                closes=_closes_if_needed(ctx, market, pos.ticker, today, dec_data),
-                holiday_fn=ex.holiday_fn,
-            )
-            if not signals or signals[0].kind != "stop_loss":
-                per = _periodic(ctx, market, pos, quote, profile, today)
-                if per is not None:
-                    signals.append(per)
-            if not signals:
-                continue
-            if signals[0].kind == "stop_loss":
-                result["stop_loss_orders"] += _sell_now(
-                    ctx, account, market, pos, quote, signals[0], today, latest
+            try:
+                _check_one(ctx, account, market, pos, today, quotes, pending, result)
+            except Exception as e:  # noqa: BLE001 - 한 종목 오류가 다른 종목 손절 점검을 막지 않는다
+                logger.exception("종목 점검 실패 %s %s %s", account.id, market, pos.ticker)
+                result.setdefault("errors", []).append(
+                    f"{account.id} {market} {pos.ticker}: {type(e).__name__}: {e}"[:200]
                 )
-            else:
-                pending.append((account, pos, signals, latest))
     _handle_triggers(ctx, market, today, pending, result)
     return result
+
+
+def _check_one(
+    ctx: MonitorContext,
+    account: Any,
+    market: str,
+    pos: Position,
+    today: date,
+    quotes: dict[str, Decimal | None],
+    pending: list[tuple[Any, Position, list[Signal], dict | None]],
+    result: dict[str, Any],
+) -> None:
+    """보유 1종목: 시세 → 결정·손절 바닥 → 신호. 손절은 즉시 매도, 그 밖의 신호는 pending 에."""
+    ex = ctx.exec
+    quote = _cached_quote(ctx, market, pos, quotes)
+    if quote is None:
+        return
+    result["checked"] += 1
+    latest = spot_ledger.latest_decision(ex.conn, market, pos.ticker)
+    dec_data = _floor_data(ctx, account, market, pos, (latest or {}).get("data"))
+    _, profile = horizon.of_decision(ex.settings.risk, dec_data)
+    _warn_close_rule_unchecked(ctx, market, today, dec_data)
+    signals = check_position(
+        pos,
+        dec_data,
+        quote,
+        stop_loss_pct=ex.settings.risk.stop_loss_pct,
+        now=ex.now(),
+        move_pct=Decimal(str(profile.move_pct)),
+        closes=_closes_if_needed(ctx, market, pos.ticker, today, dec_data),
+        holiday_fn=ex.holiday_fn,
+    )
+    if not signals or signals[0].kind != "stop_loss":
+        per = _periodic(ctx, market, pos, quote, profile, today)
+        if per is not None:
+            signals.append(per)
+    if not signals:
+        return
+    if signals[0].kind == "stop_loss":
+        result["stop_loss_orders"] += _sell_now(
+            ctx, account, market, pos, quote, signals[0], today, latest
+        )
+    else:
+        pending.append((account, pos, signals, latest))
+
+
+def _warn_close_rule_unchecked(
+    ctx: MonitorContext, market: str, today: date, dec: dict | None
+) -> None:
+    """Ruling 14 가시화: `close` 무효화 조건이 있는데 종가표 주입이 없으면 그 조건은 미판정이다 —
+    시장·운영일당 경고 1회(control 플래그 `close_rule_unchecked:<시장>:<날짜>`)."""
+    if ctx.close_table is not None or not needs_closes(dec):
+        return
+    key = f"close_rule_unchecked:{market}:{today.isoformat()}"
+    if control.get_flag(ctx.exec.conn, key):
+        return
+    control.set_flag(ctx.exec.conn, key, True)
+    logger.warning(
+        "close 무효화 조건이 있지만 종가표(close_table) 주입이 없어 미판정 %s %s", market, today
+    )
 
 
 def _handle_triggers(

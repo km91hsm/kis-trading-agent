@@ -269,3 +269,33 @@ def test_paused_daemon_monitor_tick_notifies_stop_paused_once(project, conn, set
     rows = conn.execute("SELECT ticker, kind, handled_at FROM triggers").fetchall()
     assert {r["ticker"] for r in rows} == {"000660"} and all(r["handled_at"] is None for r in rows)
     assert "queued" not in outs[0]
+
+
+def test_monitor_body_and_cli_fill_us_exchanges_from_ledger(project, conn, settings, monkeypatch):
+    """S4: 잔고가 거래소(ovrs_excg_cd)를 주지 않은 US 보유도 `ticker_exchanges` 로 거래소를 얻는다
+    — 데몬 `monitor_body` 가 `MonitorContext.exchanges` 를 채운다."""
+    from decimal import Decimal
+
+    from trader.features.spot import ledger as spot_ledger
+    from trader.kernel.broker.models import Position
+
+    spot_ledger.upsert_ticker_exchange(conn, "US", "KO", "NYS")
+    assert spot_ledger.ticker_exchanges(conn, "US") == {"KO": "NYS"}
+    assert spot_ledger.ticker_exchanges(conn, "KR") == {}
+    accounts = [make_account("paper-main", "paper", "auto", markets=["US"])]
+    port = _MonitorPort(accounts, fake_brokers(accounts), FakeMarket())
+    seen = {}
+
+    def fake_once(ctx, *, market, today):
+        seen["ctx"] = ctx
+        return {"checked": 0}
+
+    monkeypatch.setattr(monitor_mod, "monitor_once", fake_once)
+    at = datetime(2026, 10, 27, 15, 30, tzinfo=UTC)
+    spot_jobs.monitor_body(_monitor_deps(settings, port, at), SimpleNamespace(market="US"))
+    pos = Position(
+        ticker="KO", market="US", qty=1, avg_price=Decimal("60"), current_price=Decimal("60"),
+        eval_amount=Decimal("60"), pnl_pct=0.0,
+    )  # fmt: skip
+    assert pos.exchange is None
+    assert monitor_mod._exchange(seen["ctx"], pos) == "NYS"

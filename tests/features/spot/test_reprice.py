@@ -325,3 +325,32 @@ def test_reprice_body_quote_fn_returns_full_quote(conn, settings, monkeypatch):
     }
     q = seen["q"]
     assert Decimal(str(q.price)) == Decimal("70300") and hasattr(q, "change_pct")
+
+
+def test_candidates_exclude_already_repriced_orders(conn):
+    """S5: 이미 재호가로 다시 낸 주문(origin='reprice')은 후보가 아니다 — 틱 중간 예외로 완료
+    플래그가 안 서도 다음 틱이 재제출분을 다시 쫓지 않는다."""
+    did, _ = _order(conn)
+    repo.insert_order(
+        conn, decision_id=did, account_id="paper-main", ticker="005930", market="KR",
+        side="BUY", qty=10, order_type="LIMIT", price=Decimal("70300"), status="accepted",
+        order_no="R1", message="", mode="auto", created_at="2026-10-23T00:41:00+00:00",
+        origin="reprice",
+    )  # fmt: skip
+    rows = reprice.candidates(conn, "paper-main", "KR", D)
+    assert [r["order_no"] for r in rows] == ["0001"]
+
+
+def test_reprice_body_reads_us_exchanges_from_ledger(conn, settings, monkeypatch):
+    """S4: 데몬 재호가는 US 거래소를 `spot.ledger.ticker_exchanges` 로 읽는다."""
+    spot_ledger.upsert_ticker_exchange(conn, "US", "AAPL", "NAS")
+    deps = _deps(settings, FakeMarket(), datetime(2026, 10, 23, 14, 30, tzinfo=UTC))
+    seen = {}
+
+    def fake_run_once(ctx, *, exchanges, **kw):
+        seen["ex"] = exchanges
+        return {"repriced": [], "skipped": []}
+
+    monkeypatch.setattr(reprice, "run_once", fake_run_once)
+    spot_jobs._reprice_if_due(deps, _ectx(deps, conn), "US", D)
+    assert seen.get("ex") == {"AAPL": "NAS"}

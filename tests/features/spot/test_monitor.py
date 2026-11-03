@@ -9,6 +9,7 @@
 `repo.insert_order` monkeypatch → `core.insert_order`, `decisions.json` → `decisions.data_json`,
 `dataset.close_table` monkeypatch → `MonitorContext.close_table` 주입(Ruling 14)."""
 
+import dataclasses
 import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -890,3 +891,50 @@ def test_paused_tick_records_trigger_notifies_once_and_places_no_order(conn, set
     # 일시정지에서는 손절 주문도 승인 요청도 남지 않는다
     assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
     assert repo.pending_approvals(conn) == []
+
+
+# --- 최종 리뷰 I3·S6 ------------------------------------------------------------------
+
+
+def test_unexpected_ticker_error_does_not_stop_other_stop_losses(conn, settings, monkeypatch):
+    """I3: 한 종목 판정에서 예상 밖 예외(TypeError 등)가 나도 같은 틱의 다음 종목 손절은 나간다."""
+    _decision(conn, stop_loss=65000.0)  # 005930 손절
+    dec_b = Decision(**ok_decision(ticker="000660", stop_loss=90000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D, "KR", "000660", "30_decision", {"data": dec_b.model_dump()}
+    )
+    positions = [_pos("000660", avg="100000", cur="95000"), _pos("005930", cur="63000")]
+    ctx = _ctx(conn, settings, positions=positions)
+    ctx.exec = dataclasses.replace(ctx.exec, accounts=ctx.exec.accounts[:1])  # paper-main 만
+    ctx.market_client = FakeMarket(prices={"005930": Decimal("63000"), "000660": Decimal("95000")})
+    real = monitor.check_position
+
+    def flaky(pos, *a, **kw):
+        if pos.ticker == "000660":
+            raise TypeError("깨진 결정 데이터")
+        return real(pos, *a, **kw)
+
+    monkeypatch.setattr(monitor, "check_position", flaky)
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+    assert len(out["errors"]) == 1 and "000660" in out["errors"][0]
+    sells = [o for o in ctx.exec.brokers["paper-main"].orders if o.side == "SELL"]
+    assert [o.ticker for o in sells] == ["005930"]
+
+
+def test_close_rule_without_close_table_warns_once_per_market_day(conn, settings, caplog):
+    """S6(Ruling 14): `close` 무효화 조건이 있는데 종가표 주입이 없으면 운영일·시장당 경고 1회."""
+    _decision(
+        conn,
+        stop_loss=50000.0,
+        take_profit=None,
+        invalidation_rules=[{"metric": "close", "op": "<", "value": 60000, "days": 2}],
+    )
+    ctx = _ctx(conn, settings, positions=[_pos(cur="70000")], price="70000")
+    assert ctx.close_table is None
+    with caplog.at_level("WARNING", logger="trader.spot"):
+        monitor.monitor_once(ctx, market="KR", today=D)
+        monitor.monitor_once(ctx, market="KR", today=D)
+    warned = [r for r in caplog.records if "종가표" in r.getMessage()]
+    assert len(warned) == 1
+    assert control.get_flag(conn, f"close_rule_unchecked:KR:{D.isoformat()}")

@@ -265,11 +265,7 @@ def _reprice_if_due(ctx, ectx, market: str, today) -> dict:
             return mc.get_price_us(ticker, exchange)
         return mc.get_price_kr(ticker)
 
-    exchanges: dict[str, str] = {}
-    if market == "US":
-        rows = ectx.conn.execute("SELECT ticker, exchange FROM ticker_exchanges WHERE market='US'")
-        for r in rows:
-            exchanges[r["ticker"]] = r["exchange"]
+    exchanges = spot_ledger.ticker_exchanges(ectx.conn, market) if market == "US" else {}
     return reprice.run_once(
         ectx,
         market=market,
@@ -313,6 +309,7 @@ def monitor_body(ctx, job) -> dict:
             enqueue_reevaluate=lambda params: enqueue_from_job(
                 ctx, "reevaluate", params, source="daemon"
             ),
+            exchanges=spot_ledger.ticker_exchanges(conn, market) if market == "US" else {},
             dry_run=bool(ctx.dry_run),
             ports=ctx.ports,
         )
@@ -444,12 +441,20 @@ def reevaluate_request(deps, params: dict, progress) -> dict:
                 )
         except Exception as e:  # 기동 실패: 트리거를 '실패:' 로 닫아 30분 뒤 재시도하게 한다
             logger.exception("재평가 세션 기동 실패 %s %s", market, ticker)
-            for tid in tids:
-                spot_ledger.mark_trigger_handled(
-                    conn, tid, f"실패: {type(e).__name__}: {e}"[:200],
-                    handled_at=deps.now().isoformat(),
-                )  # fmt: skip
-            label = labels.label(ticker, labels.resolve(conn, market, ticker))
+            # 정리(트리거 마감·종목 표기)가 다시 실패해도 원래 예외가 알림·요청 오류로 가야 한다
+            try:
+                for tid in tids:
+                    spot_ledger.mark_trigger_handled(
+                        conn, tid, f"실패: {type(e).__name__}: {e}"[:200],
+                        handled_at=deps.now().isoformat(),
+                    )  # fmt: skip
+            except Exception as ee:  # noqa: BLE001
+                logger.warning("재평가 실패 트리거 마감 실패 %s %s: %s", market, ticker, ee)
+            try:
+                label = labels.label(ticker, labels.resolve(conn, market, ticker))
+            except Exception as ee:  # noqa: BLE001
+                logger.warning("종목 표기 실패 %s %s: %s", market, ticker, ee)
+                label = ticker
             core.notify_quietly(
                 lane.notifier, messages.reevaluation_failed(market=market, label=label, err=e)
             )

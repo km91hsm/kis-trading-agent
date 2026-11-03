@@ -45,10 +45,12 @@ def candidates(conn: sqlite3.Connection, account_id: str, market: str, today: da
     로 재제출하면 손절이 사라지거나(BUY 로 재실행) bear 에서 헤지가 거부되므로 뺀다 — 주문 방향이
     결정 행동(BUY/ADD→BUY, SELL/TRIM→SELL)과 같고 일반(LLM) 결정일 때만(전체 검토 O2). 주문 행의
     origin 이 stop·hedge 인 것은 원장 조회(`open_limit_orders_today`)가 이미 뺀다 — 최신 결정이
-    SELL/TRIM 인 날의 US 손절 지정가 SELL 은 방향이 같아도 손절이라 빠진다(2-O3)."""
+    SELL/TRIM 인 날의 US 손절 지정가 SELL 은 방향이 같아도 손절이라 빠진다(2-O3). 이미 재호가로
+    다시 낸 주문(origin reprice)도 뺀다 — 틱 중간 예외로 완료 플래그가 안 서도 다음 틱이 재제출분을
+    다시 쫓지 않는다."""
     out = []
     for r in xledger.open_limit_orders_today(
-        conn, account_id, market, today, exclude_origins=("stop", "hedge")
+        conn, account_id, market, today, exclude_origins=("stop", "hedge", "reprice")
     ):
         if r["status"] != "accepted" or r["order_type"] != "LIMIT" or not r["order_no"]:
             continue

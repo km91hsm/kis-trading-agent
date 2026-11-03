@@ -15,6 +15,7 @@ import typer
 from trader.features.spot import analyze as analyze_mod
 from trader.features.spot import balance as balance_mod
 from trader.features.spot import executor, fills
+from trader.features.spot import ledger as spot_ledger
 from trader.features.spot import monitor as monitor_mod
 from trader.features.spot import reconcile as reconcile_mod
 from trader.features.spot.messages import approval_line
@@ -260,6 +261,9 @@ def monitor_cmd(
             exec=ectx,
             market_client=ectx.market_client,
             session_runner=run_session,
+            exchanges=(
+                spot_ledger.ticker_exchanges(ectx.conn, market) if market == "US" else {}
+            ),
             dry_run=dry_run,
             ports=b.ports,
         )

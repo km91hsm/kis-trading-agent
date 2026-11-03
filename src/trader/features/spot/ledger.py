@@ -250,6 +250,14 @@ def exchange_of(conn: sqlite3.Connection, market: str, ticker: str) -> str | Non
     return str(row["exchange"]) if row else None
 
 
+def ticker_exchanges(conn: sqlite3.Connection, market: str) -> dict[str, str]:
+    """시장의 관측 거래소 표(종목 → NAS|NYS|AMS). 잔고가 거래소를 주지 않은 US 보유의 폴백."""
+    rows = conn.execute(
+        "SELECT ticker, exchange FROM ticker_exchanges WHERE market=?", (market,)
+    ).fetchall()
+    return {str(r["ticker"]): str(r["exchange"]) for r in rows}
+
+
 # --- 트리거 (monitor) -----------------------------------------------------------------
 
 

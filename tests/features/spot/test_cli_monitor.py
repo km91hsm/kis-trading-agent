@@ -46,3 +46,41 @@ def test_cli_monitor_once(project, monkeypatch):
     assert r.exit_code == 0, r.stdout
     assert '"checked": 0' in r.stdout
     assert CliRunner().invoke(app, ["spot", "monitor", "--market", "XX", "--once"]).exit_code == 1
+
+
+def test_cli_monitor_fills_us_exchanges_from_ledger(project, monkeypatch):
+    """S4: `trader spot monitor` 도 `ticker_exchanges` 로 `MonitorContext.exchanges` 를 채운다."""
+    from trader.features.spot import ledger as spot_ledger
+    from trader.features.spot import monitor as monitor_mod
+    from trader.kernel.ledger import db
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.contracts import all_migrations
+
+    (project / "config" / "accounts.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "accounts": [
+                    {"id": "paper-main", "env": "paper", "cano": "00000000",
+                     "markets": ["US"], "mode": "auto"}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )  # fmt: skip
+    c = db.connect()
+    db.init_schema(c, all_migrations(discover()))
+    spot_ledger.upsert_ticker_exchange(c, "US", "KO", "NYS")
+    c.close()
+    monkeypatch.setattr(AccountsPortImpl, "brokers", lambda self: [])
+    monkeypatch.setattr(AccountsPortImpl, "market_client", lambda self: FakeMarket())
+    seen = {}
+
+    def fake_once(ctx, *, market, today):
+        seen["ex"] = dict(ctx.exchanges)
+        return {"checked": 0}
+
+    monkeypatch.setattr(monitor_mod, "monitor_once", fake_once)
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    r = CliRunner().invoke(app, ["spot", "monitor", "--market", "US", "--once"])
+    assert r.exit_code == 0, r.stdout
+    assert seen["ex"] == {"KO": "NYS"}
