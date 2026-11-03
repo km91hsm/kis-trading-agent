@@ -25,7 +25,7 @@ GOOGLE = "https://news.google.com/rss/search"
 SAMPLE = Path(__file__).parent.parent / "saveticker" / "fixtures" / "saveticker"
 
 
-def _deps(project, *, hooks=None, markets=("KR", "US"), now=NOW):
+def _deps(project, *, hooks=None, markets=("KR", "US"), now=NOW, notifier=None):
     path = project / "state" / "t.db"
 
     def factory():
@@ -40,7 +40,7 @@ def _deps(project, *, hooks=None, markets=("KR", "US"), now=NOW):
         settings=SimpleNamespace(), schedule=SimpleNamespace(), conn_factory=factory,
         state=project / "state", now=lambda: now, markets=list(markets), gates={},
         stop_event=threading.Event(), dry_run=False, secrets=Secrets(),
-        registry=build_registry(discover()), hooks=hooks,
+        registry=build_registry(discover()), hooks=hooks, notifier=notifier,
     )  # fmt: skip
 
 
@@ -133,6 +133,17 @@ def test_news_body_stops_before_markets_when_stop_event_set(project, monkeypatch
     deps.stop_event.set()
     out = job.news_collect(deps, job.JOB)
     assert isinstance(out, dict) and calls == [] and "KR" not in out and "US" not in out
+
+
+def test_post_ingest_hook_receives_notifier(project, monkeypatch):
+    monkeypatch.setattr(news_store, "collect", lambda *a, **k: {"inserted": 0})
+    seen = {}
+    hooks = {"news.post_ingest": (Hook("news.post_ingest", lambda **kw: seen.update(kw)),)}
+    sentinel = object()
+    deps = _deps(project, hooks=hooks, notifier=sentinel)
+    job.news_collect(deps, job.JOB)
+    assert seen["notifier"] is sentinel
+    assert {"conn", "markets", "now", "result"} <= set(seen)
 
 
 def test_post_ingest_hook_failure_does_not_fail_job(project, monkeypatch):

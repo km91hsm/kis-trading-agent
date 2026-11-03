@@ -254,7 +254,6 @@ def _check_one(
         now=ex.now(),
         move_pct=Decimal(str(profile.move_pct)),
         closes=_closes_if_needed(ctx, market, pos.ticker, today, dec_data),
-        holiday_fn=ex.holiday_fn,
     )
     if not signals or signals[0].kind != "stop_loss":
         per = _periodic(ctx, market, pos, quote, profile, today)

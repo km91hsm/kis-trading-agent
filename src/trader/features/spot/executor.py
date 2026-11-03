@@ -370,13 +370,6 @@ def _balance(broker: Any, market: str) -> tuple[list, Any]:
     return broker.get_positions(market), broker.get_cash(market)
 
 
-def _nav_of(pos_list: list, cash: Any) -> Decimal:
-    """NAV: 잔고 응답의 총평가가 있으면 그것(예수금 + 평가 합은 결제 전 매수를 이중 계산한다)."""
-    if getattr(cash, "nav", None):
-        return cash.nav
-    return cash.total + sum((p.eval_amount for p in pos_list), Decimal(0))
-
-
 def build_portfolio(
     conn: sqlite3.Connection,
     broker: Any,
@@ -397,7 +390,7 @@ def build_portfolio(
             conn, p.market, p.ticker, getattr(p, "name", None), "balance"
         )
         spot_ledger.upsert_ticker_exchange(conn, p.market, p.ticker, getattr(p, "exchange", None))
-    nav = _nav_of(pos_list, cash)
+    nav = spot_ledger.nav_of(pos_list, cash)
     prev = xledger.latest_nav_before(conn, account.id, today, market=market)
     today_pnl = float(nav / prev - 1) if prev else 0.0
     if record:
@@ -985,7 +978,7 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
             return KeepPending("balance")
         prev = xledger.latest_nav_before(ctx.conn, a["account_id"], today, market=market)
         if prev:
-            pnl = float(_nav_of(pos_list, cash) / prev - 1)
+            pnl = float(spot_ledger.nav_of(pos_list, cash) / prev - 1)
             stop = ctx.settings.risk.daily_loss_stop_pct
             if pnl <= stop:
                 return f"일일 손실 {pnl:.2%} 이 한도 {stop:.0%} 초과 — 신규 매수 금지"

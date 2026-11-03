@@ -181,7 +181,8 @@ def open_limit_orders_today(
     *,
     exclude_origins: tuple[str, ...] = ("stop", "hedge"),
 ) -> list[dict]:
-    """운영일 today(시장 현지 하루)에 낸 살아 있는 주문 중 exclude_origins 가 아닌 것(id 순)."""
+    """운영일 today(시장 현지 하루)에 낸 살아 있는 주문 중 exclude_origins 가 아닌 것(id 순).
+    origin 이 NULL 인 행은 'llm' 으로 본다."""
     lo, hi = day_bounds(today, market)
     sql = (
         "SELECT * FROM orders WHERE account_id=? AND market=? "
@@ -189,7 +190,7 @@ def open_limit_orders_today(
     )
     args: list = [account_id, market, lo, hi]
     if exclude_origins:
-        sql += f" AND origin NOT IN ({','.join('?' * len(exclude_origins))})"
+        sql += f" AND COALESCE(origin, 'llm') NOT IN ({','.join('?' * len(exclude_origins))})"
         args += list(exclude_origins)
     return [dict(r) for r in conn.execute(sql + " ORDER BY id", args).fetchall()]
 

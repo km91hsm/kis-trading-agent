@@ -24,6 +24,14 @@ _BUY_ACTIONS = ("BUY", "ADD")
 _SELL_ACTIONS = ("SELL", "TRIM")
 
 
+def nav_of(positions: list, cash: Any) -> Decimal:
+    """NAV 단일 산식: 잔고 응답의 총평가가 있으면 그것(예수금 + 평가 합은 결제 전 매수를
+    이중 계산한다), 없으면 예수금 + 평가 합."""
+    if getattr(cash, "nav", None):
+        return cash.nav
+    return cash.total + sum((p.eval_amount for p in positions), Decimal(0))
+
+
 def _txt(v: Any) -> str | None:
     """금액·비중은 TEXT(Decimal 문자열)로 저장한다."""
     return None if v is None else str(Decimal(str(v)))

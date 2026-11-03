@@ -13,7 +13,6 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from decimal import Decimal
 from typing import Any
 
 from trader.features.spot import ledger as spot_ledger
@@ -83,8 +82,7 @@ def reconcile_account(
         "snapshot_fixed": False,
     }
     if mismatches:
-        eval_sum = sum((p.eval_amount for p in positions), Decimal(0))
-        nav = cash.nav if getattr(cash, "nav", None) else cash.total + eval_sum
+        nav = spot_ledger.nav_of(positions, cash)
         xledger.snapshot_positions(
             conn,
             account_id=account.id,
