@@ -28,3 +28,18 @@
 - 미국 일일 리포트(16:20 ET)는 07:10 KST `fills_sync` 보다 먼저 돌아 `realized_5d` 가 하루 늦을 수 있다.
 - 이연: M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market`; M12 status/health 보정 재점검.
 - `theme.mature`/`mature_views` 는 reflect 가 부른다(M6 이연 회수).
+
+### 보존한 옛 결함 (고치지 않음)
+
+- `fill_outcome` 를 이미 채점된 항목에 다시 부르면 재승격(재채점)된다 — 옛 동작 그대로. 같은 항목에 반복 호출하지 않는다.
+- `cash_effect` 는 `x.partial` 을 보지 않는다(부분 체결도 전량으로 계산) — 옛 동작. 부분 체결 비중이 큰 계좌는 성과 현금 흐름을 눈으로 확인한다.
+- `calibration_runs` 는 기록만 하고 읽는 곳이 없다(write-only) — 이력 확인은 DB 를 직접 조회한다.
+- `_paper_days` 는 창이 무제한이다(전 기간 페이퍼 일수) — 오래된 계정은 readiness 일수 기준이 쉽게 충족된다.
+- `build_calibration` 의 날짜 중복 검사는 마지막 1행만 본다 — 같은 날짜가 떨어져 중복되면 걸러지지 않으니 입력 CSV 를 직접 정리한다.
+
+### 이 플랜이 고치거나 바꾼 것
+
+- A4: `shadow_portfolios.def_version` 은 NOT NULL 이라 옛 legacy NULL 행 테스트 절반은 이식하지 않았다(`record` 가 `DEF_VERSION` 을 쓰는 단언만).
+- A11: `readiness.check` 는 interval 잡 종류를 하드코딩하지 않고 `interval_kinds_of(features)` 로 받는다(옛 `INTERVAL_KIND_SQL` 대체). 보정 설정은 `calibration` 인자로 받는다.
+- A12: `memory_context` 의 `latest_row` 는 `asof=당일` 로 통일(옛은 asof 없이 최신 행이라 기록·질의 벡터 피처 날짜가 달랐다). `ReflectParams.market` 이 주어지면 그 시장만 복기한다(옛은 무시).
+- A14: `metrics.decision_distribution`·`convergence_rate` 는 evaluation `metrics.py` 소유(`kernel.session.debate.CONVERGENCE_GAP` 사용). 옛 `metrics.pending_approvals`·`account_stance`·`stance_by_market` 는 M11 웹에서.

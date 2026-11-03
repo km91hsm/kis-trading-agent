@@ -11,5 +11,6 @@
 ## 알려진 차이
 
 - 옛 `orchestrator/briefing` 의 5줄 형식은 유지하되 `quick.ask_json`(`agents.with_schema` 재사용, T2-R1)으로 부른다. CLI 는 없다(잡 `morning_briefing` 만).
-- `morning_briefing` 은 KR 전용 가드를 본문에서 직접 건다(`per_market=False`).
+- A9: 시각 키가 `settings.briefing.time` 에서 `schedule.yaml briefing: "07:20"`(KST)로 옮겨졌다. `enabled`·`daily_cap`·`timeout_s` 는 `settings.yaml briefing:` 에 남는다. 기존 `config/settings.yaml` 의 `briefing.time` 은 읽지 않으니 `schedule.yaml` 로 옮긴다.
+- `morning_briefing` 은 KR 전용 가드를 본문에서 직접 건다(`per_market=False`; 본문이 KR 휴장일·일시정지를 직접 본다 — 옛 `market_job(deps,"KR",…)` 와 같은 효과).
 - 텔레그램 `/daily` 는 evaluation 이 소유한다(briefing 아님).
