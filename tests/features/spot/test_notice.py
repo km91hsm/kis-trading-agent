@@ -277,6 +277,15 @@ def _wait_threads_gone(timeout: float = 5.0) -> bool:
     return not [t for t in threading.enumerate() if t.name.startswith("kis-notice-")]
 
 
+def _wait_key(d: dict, key: str, timeout: float = 5.0):
+    """리스너 스레드가 connect 로 d[key] 를 넣을 때까지 조건부로 기다린다(느린 CI 러너 대비)."""
+    end = time.monotonic() + timeout
+    while key not in d:
+        assert time.monotonic() < end, f"{key} 소켓이 {timeout}s 안에 만들어지지 않았다"
+        time.sleep(0.01)  # 조건(키 등장) 폴링
+    return d[key]
+
+
 def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
     project, conn, settings, monkeypatch
 ):
@@ -324,7 +333,7 @@ def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
     try:
         out = spec.body(deps, None)
         assert set(out["listeners"]) == {"paper", "real"}
-        assert socks["paper"].subscribed.wait(timeout=5)
+        assert _wait_key(socks, "paper").subscribed.wait(timeout=5)
         threads = dict(spot_jobs._LISTENERS)
         again = spec.body(deps, None)  # 이미 도는 리스너는 그대로(새로 만들지 않는다)
         assert set(again["listeners"]) == {"paper", "real"}
