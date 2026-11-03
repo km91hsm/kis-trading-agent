@@ -103,7 +103,7 @@ CLI·명령
 - 승인 재판정의 킬스위치·bear 거부 문구는 게이트와 같은 꼴(`킬스위치(신규 매수 중단): …`·`국면 bear: 신규 매수 중단`)이다(옛 `킬스위치 켜짐(…) — 신규 매수 중단`·`하락 국면(bear) 전환 — 신규 매수 금지`). `ports["regime"]` 가 없으면 이 둘은 보지 않는다. 승인 계좌가 설정에 없으면 `expired` 로 처리한다. (트리거 가격 재검사는 M5 에서 `resume` 이 맡는다).
 - `submit-decision` 결과 dict 에 `memory_entry_id` 가 없다(M8). `memory_entries` 단언은 삭제했다(M8).
 - `approvals.fingerprint` 는 NOT NULL 이라 NULL 지문 승인은 만들 수 없다(옛 `test_approve_legacy_null_fingerprint_passes` → `test_approval_without_fingerprint_cannot_be_created`). 옛 pending 승인의 지문 불일치는 옛 데이터를 옮기지 않으므로 해당 없음.
-- 메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다. 국면·전략가 기울기·킬스위치(관측·당일 미체결 BUY 회수)·권리 일정은 `ports["regime"]`, 테마는 `ports["scan"]`(M6 Task 12 전까지 없음)로 받는다. 킬스위치 회수의 US 거래소는 옛 `universe.us` 대신 관측 표(`ledger.exchange_of`)다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
+- 메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다. 국면·전략가 기울기·킬스위치(관측·당일 미체결 BUY 회수)·권리 일정은 `ports["regime"]`, 테마는 `ports["scan"]`로 받는다. 킬스위치 회수의 US 거래소는 옛 `universe.us` 대신 관측 표(`ledger.exchange_of`)다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
 
 M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·큐 reevaluate)
 - 미이식(범위): 섹터 자동분류(`_classify`, M11 분류), 메모리 브레이커·메모리 항목(M8), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡은 M9. 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile`·`rebalance`(M6) 4종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.

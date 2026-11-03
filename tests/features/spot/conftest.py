@@ -10,6 +10,7 @@ from tests.features.accounts.conftest import make_account  # noqa: F401
 from trader.features.accounts import api as accounts_api
 from trader.features.accounts.ports import AccountsPortImpl
 from trader.features.regime import ports as regime_ports
+from trader.features.scan import ports as scan_ports
 from trader.features.spot import executor
 from trader.kernel.cli.boot import build_registry
 from trader.kernel.config import Secrets
@@ -46,11 +47,11 @@ def accounts_port():
 
 @pytest.fixture
 def ports(settings, accounts_port):
-    """레인이 받는 포트 dict 모양(`Boot.ports`). scan 은 Task 12 전까지 None."""
+    """레인이 받는 포트 dict 모양(`Boot.ports`). scan 은 실제 `ScanPortImpl`."""
     return {
         "accounts": accounts_port,
         "regime": regime_ports.build_port(SimpleNamespace(settings=settings)),
-        "scan": None,
+        "scan": scan_ports.build_port(SimpleNamespace(settings=settings)),
     }
 
 

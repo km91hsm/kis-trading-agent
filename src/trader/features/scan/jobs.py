@@ -1,4 +1,5 @@
-"""scan 잡·훅 본문: 사건 감지(`events_check`)와 `news.post_ingest` 훅(`events_post_ingest`)."""
+"""scan 잡·훅 본문: 테마 열기 interval 잡(`{market}_theme`), 사건 감지(`events_check`)와
+`news.post_ingest` 훅(`events_post_ingest`)."""
 
 from __future__ import annotations
 
@@ -7,11 +8,48 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from trader.features.scan import events, messages
+from trader.features.saveticker import api as saveticker_api
+from trader.features.scan import events, messages, theme
 from trader.features.scan.settings import load_events
+from trader.kernel.registry.types import JobSpec
 from trader.kernel.session.run_store import run_date_for
 
 logger = logging.getLogger("trader.scan")
+
+
+def theme_body(deps, job) -> dict:
+    """테마 열기 감지 1회. 결과를 control·원장에 남기고 상위 테마가 바뀔 때만 알림(장중 창·휴장은
+    게이트 `monitor` 가 본다). 시세는 `ports["accounts"]`, 세이브티커 폴더는 sources.yaml."""
+    market = job.market
+    port = (deps.ports or {}).get("accounts")
+    root = saveticker_api.resolve_dir(
+        saveticker_api.load_cfg(registry=deps.registry).dir
+    )
+    conn = deps.conn_factory()
+    try:
+        heat = theme.compute(
+            conn,
+            deps.settings,
+            market=market,
+            today=run_date_for(market, deps.now()),
+            now=deps.now(),
+            market_client=port.market_client() if port is not None else None,
+            saveticker_root=root,
+        )
+        msg = theme.record(conn, heat, top_n=deps.settings.theme.top_n)
+    finally:
+        conn.close()
+    if msg and deps.notifier is not None:
+        deps.notifier.send(msg)
+    return {"themes": len(heat["themes"]), "alerted": bool(msg), **heat["signals"]}
+
+
+THEME = JobSpec(
+    id="{market}_theme", kind="theme", trigger="interval", per_market=True,
+    schedule_key="theme.interval_s", interval_s=1800, enabled=lambda s: s.theme.enabled,
+    gate="monitor", heavy=False, misfire="default", catch_up="none", start_soon_s=60,
+    body=theme_body,
+)  # fmt: skip
 
 
 def events_check(
