@@ -189,7 +189,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 11 scan 트리거(뉴스/공시 재분석)·큐 kind `discover`·텔레그램 `/watch`
 - [x] Task 12 spot `{market}_scan_analyze`·큐 kind `scan_analyze`/`analyze_ticker`·`05_quant`·`sector_of`·스케줄
 - [x] Task 13 문서·템플릿·체크리스트·전체 재검증
-- [ ] PR·CI(ubuntu+windows)·머지 (#8 열림, 머지는 사용자)
+- [x] PR·CI(ubuntu+windows)·머지 (#8, main d72d434)
 - Ruling(M7): A1 랭커는 scan 소유(ml→scan 순환 방지, `ml.api` 소비) · K1 `AnalystRole` 은 4종 유지, `QuantReport.role="quant"` 별도 · S1 `regime` 스케줄을 `07:25`/`08:25 ET` 로 앞당겨 scan 앞에 둠 · `features/jobs` 는 커널 큐로 흡수(QueueKind 만 추가, `/run` 은 커널 내장) · `universe_pit` 는 ml 소유
 - Ruling(M7, 실행 중 추가): L1 lightgbm 은 선택 의존이고 `import` 가 OSError(libomp 없음)여도 sklearn 으로 대체 · P1 `ROUND_TRIP_BP` 는 scan 백테스트에 복제(레인 `costs` 를 못 씀) · P2 플랜이 강제한 옛 결함(mkdir-on-read·promote 미강등·`max_event` 8/0·`schema_version` 1·`news_trigger_at` 선갱신)은 동작 보존 · T6-1 `peer_medians` 는 옛 `_peer_section` 모양 유지 · T9-1 발굴 세이브티커 폴더는 `saveticker_api.load_cfg().dir` · T10-1 옛 `scan_line` TypeError 는 고침 · T10-2 `run_scan` http 는 `ingest_api.owned_client(ctx.ext.get("http"), timeout=15)`
 - 이연(M2, M7 가 한 것): watchlist·`/watch`(옛 `test_control` watchlist 2건)
@@ -203,8 +203,24 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - 알려진 차이(README 에 기록): `QuantModel` pickle 모듈 경로 변경으로 옛 `state/models/quant/*` 재학습 필요; `ROUND_TRIP_BP` 상수가 scan 백테스트에 중복(spot `costs` 는 레인 모듈)
 
 ## M8 — features/evaluation + briefing
-메모리·보정·reflect·섀도·성과·readiness·backtest·paper_review·일일 리포트, 아침 브리핑. 완료 기준: 옛 테스트 이식 통과.
-- [ ] 착수 전
+메모리·보정·reflect·섀도·성과·readiness·backtest·paper_review·일일 리포트·RL 사이저(M7 이연), 아침 브리핑. 완료 기준: 옛 테스트 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m8-evaluation-briefing.md`(브랜치 `feat/m8-evaluation-briefing`).
+- [x] 플랜 작성(Task 1~14, Ruling A1~A15)
+- [ ] Task 1 커널 비용 상수 승격·`EvaluationPort`·`MlPort.close_table`/`extra_targets`·ml/scan/regime api 수출·MonitorContext 종가표 주입
+- [ ] Task 2 커널 `session/quick.py`(ask_json·probe_usage)·내장 잡 `usage_probe`·`ledger_backup`
+- [ ] Task 3 evaluation 뼈대·설정 절·원장 v13·스키마·메모리 store/vector
+- [ ] Task 4 메모리 만기 채점 outcomes·FIFO 로트 lots
+- [ ] Task 5 보정 calibration·backtest·evaluation 포트(메모리·보정·브레이커)
+- [ ] Task 6 섀도 포트폴리오·open_window·`scan_analyze.post` 훅
+- [ ] Task 7 성과 performance·metrics
+- [ ] Task 8 일일 리포트·paper_review·`/daily`·status 「성과」·잡
+- [ ] Task 9 readiness·CLI `trader evaluation readiness|backtest|paper-review|calibration build`
+- [ ] Task 10 복기 세션 kind `reflect`·에이전트·FAKE·`submit-reflection`·`reflect` 잡/큐·CLI·`reflect.mature` 훅 발화
+- [ ] Task 11 RL 사이저 `rl/`·`rl_train` 잡/큐·CLI `rl …`·포트 RL 메서드
+- [ ] Task 12 spot 통합(메모리/보정 컨텍스트·`35_calibration`·`memory_entry_id`·브레이커·RL)
+- [ ] Task 13 features/briefing(아침 브리핑, haiku 단발)
+- [ ] Task 14 문서·템플릿·TODO·전체 재검증
+- [ ] PR·CI(ubuntu+windows)·머지(머지는 사용자)
+- Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
 
 ## M9 — features/scalp
 단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과.
