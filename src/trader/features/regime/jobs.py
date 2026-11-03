@@ -238,7 +238,8 @@ def regime_job(deps, job) -> dict:
 
 
 def ksd_body(deps, job) -> dict:
-    """예탁원 권리 일정 수집(평일 07:05 KST) → control `ksd_events:KR`. 시세 없으면 생략."""
+    """예탁원 권리 일정 수집(평일 07:05 KST) → control `ksd_events:KR`. 시세 없으면 생략.
+    KR 시장이면 블랙아웃이 꺼져 있어도 모아 둔다(켜는 날 바로 쓰게). stale 알림만 켜져 있을 때."""
     mc = _market_client(deps)
     if mc is None or not hasattr(mc, "ksd_schedule"):
         return {"skipped": "시세 클라이언트 없음"}
@@ -268,16 +269,17 @@ def market_view_request(deps, params: dict, progress) -> dict:
     return market_view_body(deps, params["market"])
 
 
+# heavy: 시장 세션(LLM)이 다른 무거운 잡·큐 세션과 겹치지 않게(옛 scan_analyze heavy 락)
 REGIME = JobSpec(
     id="{market}_regime", kind="regime", trigger="cron", per_market=True,
     schedule_key="regime.{market}", interval_s=None, enabled=lambda s: s.hedge.enabled,
-    gate="market", heavy=False, misfire="idempotent", catch_up="direct", start_soon_s=0,
+    gate="market", heavy=True, misfire="idempotent", catch_up="direct", start_soon_s=0,
     body=regime_job, days="mon-fri",
 )  # fmt: skip
 
 KSD_EVENTS = JobSpec(
     id="ksd_events", kind="ksd_events", trigger="cron", per_market=False,
-    schedule_key="ksd_events", interval_s=None, enabled=lambda s: s.event_blackout.enabled,
+    schedule_key="ksd_events", interval_s=None, enabled=lambda s: "KR" in s.markets,
     gate="none", heavy=False, misfire="idempotent", catch_up="direct", start_soon_s=0,
     body=ksd_body, days="mon-fri",
 )  # fmt: skip

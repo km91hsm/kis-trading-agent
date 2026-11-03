@@ -279,6 +279,26 @@ def test_ksd_body_keeps_last_success_and_notifies_when_stale(project, settings, 
     assert any("[권리 일정 수집 실패]" in m and "액면교체" in m for m in deps.notifier.msgs)
 
 
+def test_ksd_body_collects_when_blackout_off_without_alert(project, settings, conn):
+    """Ruling P7: 블랙아웃이 꺼져 있어도 KR 권리 일정을 모아 두고(켜는 날 바로 쓰게), 오래된
+    종류가 있어도 꺼진 기능이라 알림은 보내지 않는다."""
+
+    class M:
+        def ksd_schedule(self, kind, start, end):
+            if kind == "rev_split":
+                raise RuntimeError("x")
+            return [{"ticker": "005930", "kind": kind, "date": "2026-10-30", "name": "삼성전자"}]
+
+    deps = _hedge_deps(project, settings, closes=[100] * 30)
+    blk = BlackoutCfg(enabled=False, kinds=["paidin", "rev_split"])
+    deps = replace(deps, settings=deps.settings.model_copy(update={"event_blackout": blk}))
+    deps.ports["accounts"].market = M()
+    out = jobs.ksd_body(deps, None)
+    assert out["events"] == 1 and out["stale"] == ["rev_split"]
+    assert [e["kind"] for e in control.get_flag(conn, blackout.FLAG)["events"]] == ["paidin"]
+    assert deps.notifier.msgs == []
+
+
 # --- 신규 -----------------------------------------------------------------------------
 
 
@@ -336,21 +356,27 @@ def test_jobs_build_registers_regime_and_ksd_ids(project, settings):
     schedule = load("schedule", build_registry(discover()), path=project / "config" / "x.yaml")
     ctx = SimpleNamespace(gates={"market": lambda job: None})
 
-    def built(s):
+    def built(s, markets=("KR", "US")):
         out = daemon_jobs.build(
-            [FEATURE], schedule=schedule, settings=s, markets=["KR", "US"], ctx=ctx
+            [FEATURE], schedule=schedule, settings=s, markets=list(markets), ctx=ctx
         )
         return {j.id: j for j in out}
 
+    # event_blackout 기본 꺼짐이어도 KR 이 있으면 ksd_events 를 등록한다(Ruling P7, 옛 daemon:401)
+    assert settings.event_blackout.enabled is False
     got = built(settings)
-    assert set(got) == {"kr_regime", "us_regime"}  # ksd_events 는 event_blackout 꺼짐 → 없음
+    assert set(got) == {"kr_regime", "us_regime", "ksd_events"}
     kr, us = got["kr_regime"], got["us_regime"]
     assert (kr.market, kr.cron, kr.spec.gate) == (
         "KR", {"hour": 8, "minute": 25, "day_of_week": "mon-fri"}, "market",
     )  # fmt: skip
+    # Ruling P6: 시장 세션(LLM)을 띄우므로 heavy 락 아래서 돈다
+    assert (kr.spec.heavy, kr.spec.misfire, kr.spec.catch_up) == (True, "idempotent", "direct")
     assert str(us.trigger_kwargs["timezone"]) == "America/New_York" and us.cron["hour"] == 9
-    on = settings.model_copy(update={"event_blackout": BlackoutCfg(enabled=True)})
-    got = built(on)
     assert got["ksd_events"].cron == {"hour": 7, "minute": 5, "day_of_week": "mon-fri"}
+    assert (got["ksd_events"].spec.gate, got["ksd_events"].spec.heavy) == ("none", False)
+    # US 만 쓰면 KR 예탁원 수집을 등록하지 않는다
+    us_only = settings.model_copy(update={"markets": ["US"]})
+    assert set(built(us_only, ["US"])) == {"us_regime"}
     off = settings.model_copy(update={"hedge": HedgeCfg(enabled=False)})
     assert "kr_regime" not in built(off)
