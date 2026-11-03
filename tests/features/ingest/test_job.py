@@ -146,6 +146,15 @@ def test_post_ingest_hook_receives_notifier(project, monkeypatch):
     assert {"conn", "markets", "now", "result"} <= set(seen)
 
 
+def test_post_ingest_hook_receives_deps(project, monkeypatch):
+    monkeypatch.setattr(news_store, "collect", lambda *a, **k: {"inserted": 0})
+    seen = {}
+    hooks = {"news.post_ingest": (Hook("news.post_ingest", lambda **kw: seen.update(kw)),)}
+    deps = _deps(project, hooks=hooks)
+    job.news_collect(deps, job.JOB)
+    assert seen["deps"] is deps
+
+
 def test_post_ingest_hook_failure_does_not_fail_job(project, monkeypatch):
     monkeypatch.setattr(news_store, "collect", lambda *a, **k: {"inserted": 0})
 

@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from trader.features.regime import blackout, killswitch, market_view, messages, regime
-from trader.features.regime.settings import HedgeCfg, HedgeInstrument
+from trader.features.regime.settings import HedgeCfg, HedgeInstrument, hedge_tickers
 from trader.kernel.registry.types import Port
 
 
@@ -45,8 +45,7 @@ class RegimePortImpl:
         return market_view.clamp_weight(view, self.hedge_cfg())
 
     def hedge_tickers(self, market: str) -> frozenset[str]:
-        cfg = self.hedge_cfg()
-        return frozenset(cfg.tickers(market)) if cfg.enabled else frozenset()
+        return hedge_tickers(self.hedge_cfg(), market)
 
     def instrument(self, market: str, *, leveraged: bool) -> HedgeInstrument | None:
         return self.hedge_cfg().instrument(market, leveraged=leveraged)

@@ -160,3 +160,52 @@ def test_status_without_sections(conn):
     )
     commands.poll_once(ctx, Recv(["/status"]))
     assert "등록된 상태 절 없음" in sent.msgs[-1]
+
+
+def test_telegram_run_enqueues_when_daemon_alive(project):
+    from trader.kernel.daemon import heartbeat
+    from trader.kernel.daemon.lock import Lock
+    from trader.kernel.ledger import db
+    from trader.kernel.platform import paths
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.contracts import all_migrations
+
+    conn = db.connect()
+    db.init_schema(conn, all_migrations(discover()))
+    sent = Sent()
+    ctx = commands.CommandContext(
+        conn=conn, settings=None, state=None,
+        now=lambda: datetime(2026, 10, 28, 1, 0, tzinfo=UTC),
+        notifier=sent, features=discover(),
+    )  # fmt: skip
+
+    def run(text):
+        commands.poll_once(ctx, Recv([text]))
+        return sent.msgs[-1]
+
+    usage = run("/run")
+    assert "사용법" in usage and "fills_sync" in usage
+    assert "데몬이 꺼져" in run("/run reconcile KR")
+    assert conn.execute("SELECT COUNT(*) FROM job_requests").fetchone()[0] == 0
+    lock = Lock(paths.state_dir() / heartbeat.LOCK_NAME)
+    assert lock.acquire()
+    try:
+        first = run("/run reconcile KR")
+        assert first.startswith("[요청 #") and "대사" in first
+        assert "이미 대기" in run("/run reconcile KR")
+        assert "알 수 없는 작업" in run("/run nope")
+        assert "파라미터 오류" in run("/run reconcile 005930")
+    finally:
+        lock.release()
+    assert conn.execute("SELECT COUNT(*) FROM job_requests").fetchone()[0] == 1
+
+
+def test_run_untrusted_refused_and_not_registrable(conn):
+    sent = Sent()
+    ctx = _ctx(conn, sent, {})
+    commands.poll_once(ctx, Recv(["/run reconcile KR"], trusted=False))
+    assert sent.msgs[-1].startswith("[명령 거부]")
+    cmd = TelegramCommand("run", True, "", lambda c, a: "")
+    bad = Feature(id="x", tier="service", telegram_commands=(cmd,))
+    with pytest.raises(RegistryError):
+        commands.registry([bad])
