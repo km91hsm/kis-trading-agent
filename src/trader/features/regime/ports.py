@@ -8,21 +8,9 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from trader.features.regime import blackout, killswitch, regime
+from trader.features.regime import blackout, killswitch, market_view, regime
 from trader.features.regime.settings import HedgeCfg, HedgeInstrument
-from trader.kernel.ledger import control
 from trader.kernel.registry.types import Port
-
-MARKET_VIEW_FLAG = "market_view:"
-
-
-def _view_today(conn: sqlite3.Connection, market: str, today: date) -> dict | None:
-    """오늘 제출된 시장 판단(없거나 다른 날짜 것이면 None). 옛 `tools.market_view_today`.
-    Task 5 의 `market_view.load_view` 가 들어오면 그것으로 바꾼다."""
-    v = control.get_flag(conn, f"{MARKET_VIEW_FLAG}{market}")
-    if not v or v.get("date") != today.isoformat():
-        return None
-    return v
 
 
 class RegimePortImpl:
@@ -49,15 +37,12 @@ class RegimePortImpl:
         return regime.core_count(state)
 
     def view_today(self, conn: sqlite3.Connection, market: str, today: date) -> dict | None:
-        return _view_today(conn, market, today)
+        """오늘 제출된 시장 판단(없거나 다른 날짜 것이면 None)."""
+        return market_view.load_view(conn, market, today)
 
     def clamp_weight(self, view: dict | None) -> float:
         """제안 비중을 [min_weight_pct, max_weight_pct] 로 자른다. 제안이 없으면 max."""
-        cfg = self.hedge_cfg()
-        if not view or view.get("hedge_weight") is None:
-            return float(cfg.max_weight_pct)
-        w = float(Decimal(str(view["hedge_weight"])))
-        return float(min(max(w, cfg.min_weight_pct), cfg.max_weight_pct))
+        return market_view.clamp_weight(view, self.hedge_cfg())
 
     def hedge_tickers(self, market: str) -> frozenset[str]:
         cfg = self.hedge_cfg()

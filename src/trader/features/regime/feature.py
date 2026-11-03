@@ -2,9 +2,18 @@
 
 from trader.features.regime.migrations import MIGRATIONS
 from trader.features.regime.ports import PORT
+from trader.features.regime.session_kinds import AGENTS, MARKET
 from trader.features.regime.settings import SECTIONS
+from trader.features.regime.tool_cli import TOOLS
 from trader.kernel.registry.types import Feature
 
 FEATURE = Feature(
-    id="regime", tier="service", sections=SECTIONS, migrations=MIGRATIONS, ports=(PORT,)
+    id="regime",
+    tier="service",
+    sections=SECTIONS,
+    migrations=MIGRATIONS,
+    ports=(PORT,),
+    tools=TOOLS,
+    agents=AGENTS,
+    session_kinds=(MARKET,),
 )

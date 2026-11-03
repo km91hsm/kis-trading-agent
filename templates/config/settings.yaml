@@ -78,6 +78,7 @@ models:
   researcher_bear: sonnet  # 강세와 같은 모델(전체 검토 L11 — 비대칭이면 정당한 수렴도 '아첨' 으로 판정)
   trader: opus
   reflector: sonnet
+  strategist: sonnet  # 시장 세션 전략가(헤지 비중 제안). md 기본은 opus
 
 anonymize: false      # true 면 프롬프트 직전 종목명·티커 치환
 claude_bin: null      # null 이면 PATH 에서 claude 탐색
@@ -86,6 +87,13 @@ claude_bin: null      # null 이면 PATH 에서 claude 탐색
 llm:
   budget_usd: 5.0        # 세션당 --max-budget-usd (전문 전달 세션은 $2~3, 실기 확인)
   timeout_s: 900         # 세션 타임아웃(종류별은 timeout_by_kind 기본값: 스크리너·발굴 300, 재평가 600). 600 에서 분석 35% 가 시간 초과(2026-10-29)
+  timeout_by_kind:       # 종류별 타임아웃(초). 키를 두면 기본 dict 를 통째로 바꾸므로 기본값도 함께 적는다
+    screen: 300
+    discover: 300
+    resume: 600
+    fo_resume: 600
+    reflect: 600
+    market: 600          # 시장 세션(거시·토론·전략가)
   daily_session_cap: 80  # 하루 세션 수 고정 상한 (종목 analyze + 시장 세션 + 장중 발굴·재분석). Phase 24 에 40→80 — 2~4주 통계 뒤 다시 정한다
   usage_throttle:        # 구독 사용률 감속: 세션 rate_limit_event·상태줄 파일의 최신 관측 기준
     enabled: true
