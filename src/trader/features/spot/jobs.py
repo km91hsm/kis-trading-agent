@@ -1,5 +1,6 @@
 """spot 데몬 잡: `approvals_expire`(만료 승인 정리)·`fills_sync`(체결 동기화)·`balance_refresh`·
-`{market}_reconcile`(야간 대사)·`{market}_monitor`(장중 감시)·`notice_listener`(체결통보)."""
+`{market}_reconcile`(야간 대사)·`{market}_rebalance`(주간 리밸런스)·`{market}_monitor`(장중 감시)·
+`notice_listener`(체결통보)."""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from trader.features.spot import (
     locks,
     monitor,
     notice,
+    rebalance,
     reconcile,
     reprice,
     resume,
@@ -240,6 +242,13 @@ RECONCILE = JobSpec(
     id="{market}_reconcile", kind="reconcile", trigger="cron", per_market=True,
     schedule_key="reconcile.{market}", interval_s=None, enabled=None, gate="market", heavy=False,
     misfire="idempotent", catch_up="queue", start_soon_s=0, body=reconcile_body, days="mon-fri",
+)  # fmt: skip
+
+REBALANCE = JobSpec(
+    id="{market}_rebalance", kind="rebalance", trigger="cron", per_market=True,
+    schedule_key="rebalance.{market}", interval_s=None, enabled=lambda s: s.rebalance.enabled,
+    gate="market", heavy=False, misfire="idempotent", catch_up="queue", start_soon_s=0,
+    body=rebalance.rebalance_body, days="fri",
 )  # fmt: skip
 
 
@@ -522,6 +531,10 @@ QUEUE_KINDS = (
     ),
     QueueKind(
         "reconcile", ReconcileParams, "대사", "fast", 0, False, True, reconcile_request
+    ),
+    QueueKind(
+        "rebalance", ReconcileParams, "리밸런스", "fast", 0, True, False,
+        rebalance.rebalance_request,
     ),
     QueueKind(
         "reevaluate", ReevaluateParams, "재평가", "reeval", 10, True, False, reevaluate_request

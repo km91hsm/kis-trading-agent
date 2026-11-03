@@ -11,6 +11,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.execution.ledger import latest_positions as latest_positions  # 재export
 from trader.kernel.ledger.db import now_iso
@@ -296,6 +297,40 @@ def ticker_exchanges(conn: sqlite3.Connection, market: str) -> dict[str, str]:
         "SELECT ticker, exchange FROM ticker_exchanges WHERE market=?", (market,)
     ).fetchall()
     return {str(r["ticker"]): str(r["exchange"]) for r in rows}
+
+
+def has_open_order_today(
+    conn: sqlite3.Connection,
+    account_id: str,
+    ticker: str,
+    side: str,
+    d: date,
+    *,
+    market: str | None = None,
+) -> bool:
+    """오늘 같은 계좌·종목·방향의 살아 있고 체결이 끝나지 않은 주문이 있으면 True(리밸런스 중복
+    발주 방지). `market` 을 주면 `d` 를 그 시장 현지 날짜로 본다."""
+    return bool(xledger.open_orders_today(conn, account_id, ticker, side, d, market=market))
+
+
+def has_pending_approval(
+    conn: sqlite3.Connection,
+    account_id: str,
+    ticker: str,
+    side: str,
+    *,
+    market: str,
+    now: str,
+) -> bool:
+    """만료 전 pending 승인 요청이 같은 계좌·시장·종목·방향에 있으면 True(결정 무관 — 결정 행이
+    없는 리밸런스가 같은 감축·증액을 두 번 요청하지 않게)."""
+    return any(
+        a["account_id"] == account_id
+        and str(a["expires_at"]) > now
+        and (a["order"].get("ticker"), a["order"].get("side"), a["order"].get("market"))
+        == (ticker, side, market)
+        for a in xledger.pending_approvals(conn)
+    )
 
 
 # --- 트리거 (monitor) -----------------------------------------------------------------

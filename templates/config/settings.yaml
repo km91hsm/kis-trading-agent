@@ -127,3 +127,10 @@ cash_park:
   ticker: "357870"
   reserve_pct: 0.20
   min_amount: 500000
+
+# 주간 리밸런스: 최근 결정(lookback_days 안)의 target_weight 대비 band_pct(비중) 넘게 벗어난 보유만
+# 되돌린다(TRIM 먼저). 시각은 schedule.yaml rebalance
+rebalance:
+  enabled: true
+  band_pct: 0.05
+  lookback_days: 30

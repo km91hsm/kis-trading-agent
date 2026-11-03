@@ -9,6 +9,7 @@ from trader.features.spot.jobs import (
     MONITOR,
     NOTICE_LISTENER,
     QUEUE_KINDS,
+    REBALANCE,
     RECONCILE,
 )
 from trader.features.spot.migrations import MIGRATIONS
@@ -29,6 +30,9 @@ FEATURE = Feature(
     agents=AGENTS,
     session_kinds=(ANALYZE, RESUME),
     telegram_commands=TELEGRAM_COMMANDS,
-    jobs=(APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE, MONITOR, NOTICE_LISTENER),
+    jobs=(
+        APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE, REBALANCE, MONITOR,
+        NOTICE_LISTENER,
+    ),  # fmt: skip
     queue_kinds=QUEUE_KINDS,
 )

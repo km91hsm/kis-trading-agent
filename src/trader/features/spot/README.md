@@ -11,6 +11,7 @@
 - 운영 경로(M5): `cli.py`(`trader spot …`), `telegram.py`(`/approve`·`/reject`), `jobs.py`(데몬 잡·큐 kind·체결통보 리스너 조립), `messages.py`(`approval_line` — 종목 표기는 spot 소유).
 - 체결·잔고·대사: `fills.py`(외부 체결 행·부분/전량·만료·모호 플래그), `balance.py`(`positions_snapshot`·`account_nav` 갱신), `reconcile.py`(브로커 보유 vs 스냅샷 대사 — 스냅샷만 덧쓰고 주문은 유지, 하루 1회 알림), `notice.py`(KIS 체결통보 웹소켓 리스너 — 공시 알림이 아니다).
 - 장중 감시·재평가: `monitor_rules.py`(손절·익절·급등락·무효화·정기 순수 규칙), `monitor.py`(`monitor_once` — 손절 집행·트리거 기록·재평가 큐 등록), `resume.py`(`RESUME` 세션 종류·`31_decision_r<n>` 재평가·`stop_floor`·트리거 가격 게이트), `reprice.py`(아침 미체결 재호가, 하루 1회), `hedge.py`(국면 헤지 의도 생산자 — `rebalance`·`hedge_tick`, bear 면 인버스 ETF 진입·벗어나면 전량 해제, 운영일 1회 `hedge_done:<시장>:<날짜>`, 설정·국면·제안·상품은 `ports["regime"]`), `cash_park.py`(현금 단기금리 ETF 운용 — `run`·`cash_park_tick`, bear 면 남는 현금 매수·벗어나면 전량 해제, 상태 `cash_park_done:KR:<날짜>`, 국면은 `ports["regime"].state`), `locks.py`(`lock_for(market, ticker)` 종목 락 — 재평가와 분석이 겹치지 않게; M7 `analyze_ticker` 가 공유할 예정).
+- 주간 리밸런스: `rebalance.py`(`drift_legs`·`target_decision`·`run`·`rebalance_body`·`rebalance_request` — 최근 결정 `target_weight` 대비 `rebalance.band_pct` 밖 보유만 TRIM 먼저·ADD 나중으로 `executor.execute(is_rebalance=True)`. 설정 절 `rebalance`(`enabled=true`·`band_pct=0.05`·`lookback_days=30`), 스케줄 절 `rebalance`(`kr` `{14:30, fri}`·`us` `{15:00, America/New_York, fri}`)).
 
 ## 공개면 (`api.py`)
 
@@ -38,6 +39,7 @@ CLI(`uv run trader spot --help` 로 확인):
 | `fills_sync` | `fills_sync` | cron | `fills_sync.times`(리스트: `16:10`·`07:10`) | none | queue | 요일 `mon-sat`, misfire `idempotent`. 놓치면 큐 `fills_sync` 로 따라잡기 |
 | `balance_refresh` | `balance_refresh` | interval(기본 300s) | `balance_refresh.interval_s` | none | none | misfire `idempotent`. 장중 시장은 매 틱, 장 밖은 30분 넘은 스냅샷만. `ports["regime"]` 가 있으면 실제 NAV 로 킬스위치(`risk.killswitch_drawdown_pct`)를 관측하고, dry-run 이 아니면 장중 시장에서 켜진 계좌의 당일 미체결 BUY 를 거둔다(헤지·현금 운용 ETF 제외, 옛 `on_killswitch`) |
 | `{market}_reconcile` | `reconcile` | cron | `reconcile.{market}`(`reconcile.kr` `15:45` / `reconcile.us` `{time, tz}`) | market | queue | 요일 `mon-fri`(시장 tz), misfire `idempotent`. 대사 전에 체결 동기화를 먼저 돈다 |
+| `{market}_rebalance` | `rebalance` | cron | `rebalance.{market}`(`rebalance.kr` `{time 14:30, days fri}` / `rebalance.us` `{time 15:00, tz America/New_York, days fri}`) | market | queue | `enabled=settings.rebalance.enabled`, 요일 `fri`, misfire `idempotent`. 운영일 1회(`control.rebalance_done:<시장>:<날짜>`), 일시정지면 플래그 없이 건너뜀. 주문을 시도하면 `[리밸런스]` 알림 |
 | `{market}_monitor` | `monitor` | interval(기본 60s) | `{market}.monitor.interval_s` | monitor | none | start_soon 20s. 재평가는 큐 `reevaluate` 로 넘기고, 같은 틱에서 국면 헤지(`hedge.hedge_tick`, 하루 1회 — 결과 키 `hedge`, 실패는 `[헤지 실패]` 알림 + `hedge.error`)와 KR 이고 `cash_park.enabled` 면 현금 운용(`cash_park.cash_park_tick` — 결과 키 `cash_park`, 실패는 알림 없이 `cash_park.error`)과 개장 + `risk.reprice.after_min` 뒤 하루 1회 재호가(`reprice`)를 시도. `excluded_tickers` 보유는 점검하지 않고 결과 `skipped_excluded` 로 센다 |
 | `notice_listener` | `notice_listener` | interval 30s(코드 고정) | — | none | none | `enabled=settings.fill_notice.enabled`(기본 False), teardown `notice_stop`. env 별 리스너 1개를 보장 |
 
@@ -47,6 +49,7 @@ CLI(`uv run trader spot --help` 로 확인):
 |---|---|---|---|---|---|---|
 | `fills_sync` | fast | 0 | False | True | 없음(`EmptyParams`) | `fills_then_balance` — 체결 동기화 뒤 장 밖이어도 잔고를 바로 다시 읽음 |
 | `reconcile` | fast | 0 | False | True | `market`(선택) | `reconcile_request` |
+| `rebalance` | fast | 0 | True | False | `market`(선택, 없으면 전 시장) | `rebalance_request` — 시장별 `{market: 결과}`, 일시정지면 `skipped` 만 |
 | `reevaluate` | reeval | 10 | True | False | `market`·`ticker`·`exchange`·`trigger_id`·`trigger_ids` (`dry_run` 칸 없음, `extra=forbid`) | `reevaluate_request` — 트리거 확인·뉴스면 재수집·종목 락·세션·형제 트리거 마감 |
 
 게이트는 accounts 가 `Feature.gates` 로 공급한다: `market`(일시정지·주말·휴장), `monitor`(market + schedule 의 `<시장>.monitor.start/end` 창). `news_collect` 는 ingest 의 interval 잡이고 spot 큐 kind 가 아니다. 데몬 기동 때 커널 내장 잡 `telegram_poll` 과 큐 틱 4개(`job_queue`·`_fast`·`_reeval`·`_info`)가 함께 등록된다(`docs/architecture.md` daemon).
@@ -103,11 +106,12 @@ CLI·명령
 - 메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다. 국면·전략가 기울기·킬스위치(관측·당일 미체결 BUY 회수)·권리 일정은 `ports["regime"]`, 테마는 `ports["scan"]`(M6 Task 12 전까지 없음)로 받는다. 킬스위치 회수의 US 거래소는 옛 `universe.us` 대신 관측 표(`ledger.exchange_of`)다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
 
 M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·큐 reevaluate)
-- 미이식(범위): 섹터 자동분류(`_classify`, M11 분류), 메모리 브레이커·메모리 항목(M8), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡은 M9. 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile` 3종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.
+- 미이식(범위): 섹터 자동분류(`_classify`, M11 분류), 메모리 브레이커·메모리 항목(M8), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡은 M9. 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile`·`rebalance`(M6) 4종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.
 - `notice` 는 KIS 체결통보(웹소켓) 리스너이지 공시 알림이 아니다. `fill_notice.enabled` 기본값이 True→False 로 바뀌었다. 리스너는 (env, HTS ID) 가 아니라 **env 별 1개**다 — 같은 env 에 HTS ID 가 여럿이면 첫 계좌 것만 구독하고 경고한다. `interval_s=30` 은 코드 고정(`schedule_key=None`). `websockets` 는 `uvicorn[standard]` 전이 의존이다(직접 선언 없음, 옛과 같음). 실전 키는 시세 허브와 다른 앱키를 먼저 고른다(Ruling 18). 같은 키뿐이면 공유 표시만 하고, 웹 시세 허브의 `hub_blocked` 비켜서기(live_quotes yielding)는 M11 이다.
 - `reevaluate` 큐 kind 는 `restart_requeue=False` 라 데몬 재기동 때 다시 등록하지 않는다(끊긴 요청은 알림만; 중복 주문 방지). `fills_sync`·`reconcile` 만 재등록한다. 세션 기동 예외 시 트리거를 `실패: …` 로 마감하고 `reevaluation_failed` 알림을 보낸 뒤 예외를 다시 올린다(옛 큐 경로는 예외 전파 → 다음 틱 재등록; Ruling 19). 장 마감 skip(`session_over`)은 사람 요청(web/telegram)에도 적용되고 KR 휴장일은 모른다(daemon 출처는 `auto_gate` 시장 게이트가 막는다). 요청에 `dry_run` 이 없어 데몬 `--dry-run` 을 요청이 뒤집지 못한다. `_close_stale_sessions` 는 커널 runner 의 private 과 중복이다(커널 공개 헬퍼 후보).
 - fills: `trader spot fills sync` 출력은 계좌마다 JSON 한 줄이다(옛 표 형식 아님). `AUTO_SOURCES` 에 `"restart"` 가 포함된다(Ruling 9). 조회 실패 계좌·시장은 잡 결과의 최상위 `error` 로 올라온다.
 - reconcile: 알림이 라벨이 아닌 티커 표기, `snapshot_age`·nav/cash 는 `account_nav` 기준, `reconcile.us` 는 `{time, tz}` 형태이고 `reconcile.kr` 은 문자열도 허용한다(Ruling 11).
+- rebalance(`rebalance.py`): 옛 `_scalp_open` 제외는 M9(scalp) 전까지 빈 집합이다. 「오늘 같은 방향 주문」 검사는 커널 `open_orders_today`(체결 완료 주문 제외)를 쓰므로, 옛 `has_open_order_today`(체결 완료 포함)보다 한 칸 느슨하다 — 이미 체결된 주문은 잔고에 반영돼 다음 드리프트 계산에 들어간다. US 거래소는 `ledger.ticker_exchanges`(관측 표), 없으면 `NAS`. 큐 kind `rebalance` 는 `restart_requeue=False`(끊긴 요청 재등록 안 함, 중복 주문 방지).
 - resume: `_ingest_run` 이 sorted 순서로 적재해 `31_decision_r10` 이 `r2` 보다 먼저 온다 → `already` 경로에서 라운드가 10개 이상이면 decisions 행이 최신이 아닐 수 있다(옛 결함 그대로). `handled_marker` 실패는 `"실패: <error> (<session_id>)"` 문자열이다.
 - monitor: `check_position(holiday_fn)` 은 받지만 쓰지 않는다(옛 로직에 사용처 없음). 종목별 오류 격리: 시세·보유 조회는 `KisApiError`·`ValueError` 를 경고로, 한 종목 점검의 그 밖 예외는 `logger.exception` + 결과 `errors` 에 적고 다음 종목으로 넘어간다(옛은 틱 전체가 멈췄다 — 의도한 개선). US `Position.exchange` 는 KIS 잔고 응답에 의존한다. 데몬 `{market}_monitor` 주기는 per_market `schedule_key` 의 `{market}` 포맷(Ruling 15, 커널 수정)으로 `kr/us.monitor.interval_s` 가 실제 적용된다.
 - reprice: `run_once` 반환은 `{repriced, skipped}`(Ruling 17). "개장" 기준은 `monitor.start`(옛 동일). US 거래소 코드는 `ledger.ticker_exchanges` 에서 읽는다. 이미 재호가로 다시 낸 주문(origin `reprice`)은 후보가 아니다 — 틱 중간 예외로 완료 플래그가 안 서도 재제출분을 다시 쫓지 않는다.

@@ -131,12 +131,24 @@ class CashParkCfg(BaseModel):
     min_amount: Decimal = Decimal("500000")  # 이보다 적으면 사지 않는다(수수료)
 
 
+class RebalanceCfg(BaseModel):
+    """주간 리밸런스(Phase 25): 최근 LLM 결정의 `target_weight` 대비 ±`band_pct` 넘게 벗어난 보유만
+    되돌린다. 결정은 `lookback_days` 안의 것만 목표로 쓴다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    band_pct: float = 0.05
+    lookback_days: int = 30
+
+
 SECTIONS = (
     Section("settings", "risk", RiskLimits, RiskLimits),
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
     Section("settings", "fill_notice", FillNoticeCfg, FillNoticeCfg),
     Section("settings", "cash_park", CashParkCfg, CashParkCfg),
+    Section("settings", "rebalance", RebalanceCfg, RebalanceCfg),
 )
 
 
@@ -166,6 +178,7 @@ class ReconcileAt(BaseModel):
 
     time: str = Field(pattern=_HM)
     tz: str | None = None
+    days: str | None = None  # APScheduler 요일 표기(없으면 잡 기본)
 
 
 class ReconcileSchedule(BaseModel):
@@ -176,6 +189,17 @@ class ReconcileSchedule(BaseModel):
     kr: str | ReconcileAt = "15:45"  # 문자열이면 KST
     us: str | ReconcileAt = Field(
         default_factory=lambda: ReconcileAt(time="16:15", tz="America/New_York")
+    )
+
+
+class RebalanceSchedule(BaseModel):
+    """schedule.yaml `rebalance`: 시장별 주간 리밸런스 시각(금요일, US 는 뉴욕 시각)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: str | ReconcileAt = Field(default_factory=lambda: ReconcileAt(time="14:30", days="fri"))
+    us: str | ReconcileAt = Field(
+        default_factory=lambda: ReconcileAt(time="15:00", tz="America/New_York", days="fri")
     )
 
 
@@ -190,5 +214,6 @@ class BalanceRefreshSchedule(BaseModel):
 SCHEDULE_SECTIONS = (
     Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),
     Section("schedule", "reconcile", ReconcileSchedule, ReconcileSchedule),
+    Section("schedule", "rebalance", RebalanceSchedule, RebalanceSchedule),
     Section("schedule", "balance_refresh", BalanceRefreshSchedule, BalanceRefreshSchedule),
 )
