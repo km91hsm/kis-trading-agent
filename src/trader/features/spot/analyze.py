@@ -14,6 +14,7 @@ import typer
 from trader.features.spot.executor import boot_notifier
 from trader.features.spot.schemas import CHECKPOINT_NAMES
 from trader.features.spot.session_kinds import AGENTS, ANALYZE
+from trader.features.spot.tools import ensure_quant, tool_ctx
 from trader.kernel.cli.boot import Boot
 from trader.kernel.config import ConfigError
 from trader.kernel.lane.types import LaneContext
@@ -91,6 +92,8 @@ def _run(
             market_client=acc.market_client() if acc is not None else None,
             state=state,
         )
+    # 승격된 퀀트 모델이 있으면 05_quant 도(ml 포트 없음·꺼짐이면 조용히 건너뜀)
+    ensure_quant(tool_ctx(boot), ticker=ticker, market=market, date=day)
     ctx = LaneContext(
         settings=boot.settings,
         conn=boot.conn,

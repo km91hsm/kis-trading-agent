@@ -411,6 +411,7 @@ def build_portfolio(
     record: bool = True,
     hedge_tickers: frozenset[str] = frozenset(),
     theme_of: Callable[[str], list[str] | None] | None = None,
+    sector_of: Callable[[str], str | None] | None = None,
     cancel_buys: bool = False,
     killswitch_pct: float = 0.0,
     regime: Any | None = None,
@@ -510,6 +511,7 @@ def build_portfolio(
         trades_this_week=xledger.trades_this_week(conn, account.id, today, market=market),
         hedge_tickers=hedge_tickers,
         theme_of=theme_of,
+        sector_of=sector_of,
         ledger_marks=marks,
     )
 
@@ -634,6 +636,7 @@ class _Gates:
     agent_tilt: int = 0
     excluded: frozenset[str] = frozenset()
     theme_of: Callable[[str], list[str] | None] | None = None
+    sector_of: Callable[[str], str | None] | None = None
     hedge_max_weight: float | None = None  # 헤지 주문의 비중 상한(`hedge.max_weight_pct`)
 
 
@@ -662,17 +665,32 @@ def _theme_of(
         return None
 
 
+def sector_of_for(ports: Any, market: str) -> Callable[[str], str | None] | None:
+    """`ports["scan"]` 의 종목→섹터(섹터 상한 판정용). 포트가 없거나 조회가 실패하면 None
+    (섹터 규칙만 빠진다)."""
+    scan = (ports or {}).get("scan")
+    if scan is None:
+        return None
+    try:
+        return scan.sector_of(market)
+    except Exception as e:  # noqa: BLE001 - 섹터 조회 실패가 주문 판정을 막지 않는다
+        logger.warning("섹터 조회 실패, 섹터 규칙 생략 %s: %s", market, e)
+        return None
+
+
 def _gates(ctx: ExecContext, market: str, today: date) -> _Gates:
     port = ctx.ports.get("regime")
     excluded = excluded_tickers(ctx.settings, port, market)
     theme_of = _theme_of(ctx, market, today)
+    sector_of = sector_of_for(ctx.ports, market)
     if port is None:
-        return _Gates(excluded=excluded, theme_of=theme_of)
+        return _Gates(excluded=excluded, theme_of=theme_of, sector_of=sector_of)
     return _Gates(
         regime=port.state(ctx.conn, market),
         agent_tilt=_agent_tilt(port, ctx.conn, market, today),
         excluded=excluded,
         theme_of=theme_of,
+        sector_of=sector_of,
         hedge_max_weight=port.hedge_cfg().max_weight_pct,
     )
 
@@ -883,6 +901,7 @@ def _execute_account(
             record=ctx.record_portfolio,
             hedge_tickers=gates.excluded,
             theme_of=gates.theme_of,
+            sector_of=gates.sector_of,
             cancel_buys=not dry_run,
             killswitch_pct=ctx.settings.risk.killswitch_drawdown_pct,
             regime=port,

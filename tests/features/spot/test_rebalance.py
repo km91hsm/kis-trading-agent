@@ -426,3 +426,24 @@ def test_rebalance_queue_kind_skips_when_paused_without_done_flag(
     modes.set_paused(conn, False)
     again = rebalance.rebalance_request(_deps(settings, ports, port), {"market": "KR"}, None)
     assert len(again["KR"]["orders"]) == 2
+
+
+def test_rebalance_injects_sector_of_from_scan_port(ctx, conn, monkeypatch):
+    """M6 이연 해소: 리밸런스 Portfolio 에 `ports["scan"].sector_of` 가 들어간다(없으면 None)."""
+    _seed(conn)
+    got = []
+    real = executor.build_portfolio
+
+    def spy(*a, **kw):
+        pf = real(*a, **kw)
+        got.append(pf.sector_of)
+        return pf
+
+    monkeypatch.setattr(executor, "build_portfolio", spy)
+    ctx.ports = {**ctx.ports, "scan": SimpleNamespace(sector_of=lambda m: {"005930": "반도체"}.get)}
+    _run(ctx, dry_run=True)
+    assert got and got[0]("005930") == "반도체" and got[0]("000660") is None
+    got.clear()
+    ctx.ports = {k: v for k, v in ctx.ports.items() if k != "scan"}
+    _run(ctx, dry_run=True)
+    assert got and all(s is None for s in got)

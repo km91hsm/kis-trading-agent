@@ -369,11 +369,11 @@ def test_jobs_build_registers_regime_and_ksd_ids(project, settings):
     assert set(got) == {"kr_regime", "us_regime", "ksd_events"}
     kr, us = got["kr_regime"], got["us_regime"]
     assert (kr.market, kr.cron, kr.spec.gate) == (
-        "KR", {"hour": 8, "minute": 25, "day_of_week": "mon-fri"}, "market",
+        "KR", {"hour": 7, "minute": 25, "day_of_week": "mon-fri"}, "market",
     )  # fmt: skip
     # Ruling P6: 시장 세션(LLM)을 띄우므로 heavy 락 아래서 돈다
     assert (kr.spec.heavy, kr.spec.misfire, kr.spec.catch_up) == (True, "idempotent", "direct")
-    assert str(us.trigger_kwargs["timezone"]) == "America/New_York" and us.cron["hour"] == 9
+    assert str(us.trigger_kwargs["timezone"]) == "America/New_York" and us.cron["hour"] == 8
     assert got["ksd_events"].cron == {"hour": 7, "minute": 5, "day_of_week": "mon-fri"}
     assert (got["ksd_events"].spec.gate, got["ksd_events"].spec.heavy) == ("none", False)
     # US 만 쓰면 KR 예탁원 수집을 등록하지 않는다

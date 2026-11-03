@@ -27,6 +27,7 @@ from trader.features.spot import (
     resume,
 )
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.scan_analyze import QUEUE_KINDS_SCAN
 from trader.kernel.broker import factory
 from trader.kernel.config.market_hours import REGULAR, session_over
 from trader.kernel.config.time import MARKET_TZ
@@ -540,6 +541,7 @@ QUEUE_KINDS = (
     QueueKind(
         "reevaluate", ReevaluateParams, "재평가", "reeval", 10, True, False, reevaluate_request
     ),
+    *QUEUE_KINDS_SCAN,
 )
 
 

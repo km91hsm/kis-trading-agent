@@ -71,3 +71,36 @@ def test_theme_cap_rejects_second_theme_buy_over_max_theme_pct(project, conn, se
     paper = res[0]
     assert not paper["approved"]
     assert any("테마 '섹터:반도체' 비중" in r and "상한" in r for r in paper["reasons"])
+
+
+def test_sector_cap_rejects_via_scan_port_sector_of(project, conn, settings, ports):
+    """실행 게이트의 `Portfolio.sector_of` 는 `ports["scan"].sector_of(market)` — 같은 섹터 보유분이
+    있으면 주문 뒤 합계가 `max_sector_pct` 를 넘는 매수는 거부된다. 포트가 없으면 규칙 생략."""
+    from types import SimpleNamespace
+
+    acct = make_account("paper-main", "paper", "auto", markets=["KR"])
+    held = Position(
+        ticker="000660", market="KR", qty=200, avg_price=Decimal("7500"),
+        current_price=Decimal("7500"), eval_amount=Decimal("1500000"), pnl_pct=0.0,
+    )  # fmt: skip
+    cash = {"KR": Cash(currency="KRW", available=Decimal("8500000"), total=Decimal("8500000"))}
+    settings = settings.model_copy(
+        update={"risk": settings.risk.model_copy(update={"max_sector_pct": 0.2})}
+    )
+    dec = Decision(**ok_decision(target_weight=0.1))
+    data = {"data": dec.model_dump()}
+    spot_ledger.ingest_checkpoint(conn, D, "KR", dec.ticker, "30_decision", data)
+
+    def run(scan_port):
+        broker = FakeBroker(to_broker_account(acct), cash=cash, positions=[held])
+        pts = {k: v for k, v in ports.items() if k != "scan"}
+        if scan_port is not None:
+            pts["scan"] = scan_port
+        ctx = ectx(pts, settings, conn, [acct], {acct.id: broker})
+        res = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+        return res[0]["reasons"]
+
+    sectors = {"005930": "반도체", "000660": "반도체"}
+    scan = SimpleNamespace(theme_of=lambda *a: (lambda t: None), sector_of=lambda m: sectors.get)
+    assert any("섹터 '반도체' 비중" in r and "상한" in r for r in run(scan))
+    assert not any("섹터" in r and "비중" in r for r in run(None))  # scan 포트 없음 → 규칙 생략

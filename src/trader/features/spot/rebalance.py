@@ -122,6 +122,7 @@ def run(
             pf = executor.build_portfolio(
                 ctx.conn, ctx.brokers[a.id], a, market, today,
                 now=ctx.now(), record=ctx.record_portfolio,
+                sector_of=executor.sector_of_for(ctx.ports, market),
             )  # fmt: skip
         except Exception as e:  # noqa: BLE001 - 계좌 하나의 잔고 실패는 그 계좌만 건너뛴다
             logger.warning("리밸런스 잔고 실패 %s: %s", a.id, e)

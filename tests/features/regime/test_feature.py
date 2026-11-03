@@ -87,3 +87,15 @@ def test_tool_cli_market_bundle_outputs_json_line(project, monkeypatch):
     )
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert r.exit_code == 1 and out["ok"] is False and "_market_inputs" in out["error"]
+
+
+def test_schedule_template_regime_runs_five_minutes_before_scan_analyze(monkeypatch):
+    """국면 → scan → analyze 순서: regime 07:25 KST / 08:25 ET (scan_analyze 는 07:30 / 08:30)."""
+    from trader.features.regime.settings import RegimeSchedule
+
+    monkeypatch.setenv("TRADER_HOME", str(Path(__file__).resolve().parents[3]))
+    raw = yaml.safe_load(
+        (templates_dir() / "config" / "schedule.yaml").read_text(encoding="utf-8")
+    )
+    assert RegimeSchedule(**raw["regime"]) == RegimeSchedule()
+    assert raw["regime"]["kr"] == "07:25" and raw["regime"]["us"]["time"] == "08:25"

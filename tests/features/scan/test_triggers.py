@@ -13,8 +13,6 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
-from pydantic import BaseModel, ConfigDict
-
 from tests.features.scan.conftest import Sent
 from trader.features.ingest import api as ingest_api
 from trader.features.scan import triggers
@@ -26,33 +24,9 @@ from trader.kernel.daemon.queue import kinds_of
 from trader.kernel.daemon.queue_jobs import QueueState
 from trader.kernel.daemon.runner import DaemonDeps
 from trader.kernel.ledger import control, db
-from trader.kernel.registry.types import Feature, QueueKind
 
 NOW = datetime(2026, 10, 24, 1, 0, tzinfo=UTC)  # 10:00 KST
 UNI = SimpleNamespace(kr=["005930", "000660"], us=[], watch=[], exclude=[])
-
-
-class AnalyzeParams(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    market: str
-    ticker: str
-    dry_run: bool = False
-    exchange: str | None = None
-
-
-def _analyze(deps, params, progress):  # pragma: no cover - 큐에 넣기만 한다
-    return {}
-
-
-# analyze_ticker 는 Task 12 가 등록한다 — 여기서는 같은 모양의 가짜 kind
-FAKE_ANALYZE = Feature(
-    id="fake_analyze",
-    tier="service",
-    queue_kinds=(
-        QueueKind("analyze_ticker", AnalyzeParams, "분석", "slow", 0, True, False, _analyze),
-    ),
-)
 
 
 class Port:
@@ -93,7 +67,7 @@ def trigger_deps(
         dry_run=dry_run,
         notifier=notifier,
         ports={"accounts": Port(brokers)},
-        queue=QueueState(kinds_of([SCAN, SPOT, FAKE_ANALYZE])),
+        queue=QueueState(kinds_of([SCAN, SPOT])),
     )
 
 

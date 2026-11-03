@@ -203,6 +203,18 @@ class RebalanceSchedule(BaseModel):
     )
 
 
+class ScanAnalyzeSchedule(BaseModel):
+    """schedule.yaml `scan_analyze`: 시장별 아침 스캔 → 분석 시각(평일, US 는 뉴욕 시각).
+    국면(`regime`)이 5분 앞서 돈다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: str | ReconcileAt = "07:30"  # 문자열이면 KST
+    us: str | ReconcileAt = Field(
+        default_factory=lambda: ReconcileAt(time="08:30", tz="America/New_York")
+    )
+
+
 class BalanceRefreshSchedule(BaseModel):
     """schedule.yaml `balance_refresh`: 잔고 갱신 틱 주기(초)."""
 
@@ -215,5 +227,6 @@ SCHEDULE_SECTIONS = (
     Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),
     Section("schedule", "reconcile", ReconcileSchedule, ReconcileSchedule),
     Section("schedule", "rebalance", RebalanceSchedule, RebalanceSchedule),
+    Section("schedule", "scan_analyze", ScanAnalyzeSchedule, ScanAnalyzeSchedule),
     Section("schedule", "balance_refresh", BalanceRefreshSchedule, BalanceRefreshSchedule),
 )

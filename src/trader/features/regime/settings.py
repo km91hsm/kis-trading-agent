@@ -148,12 +148,12 @@ class AtTime(BaseModel):
 
 
 class RegimeSchedule(BaseModel):
-    """schedule.yaml `regime`: 시장별 국면 판정 시각(scan 앞, US 는 뉴욕 시각)."""
+    """schedule.yaml `regime`: 시장별 국면 판정 시각(scan_analyze 5분 앞, US 는 뉴욕 시각)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kr: str | AtTime = "08:25"  # 문자열이면 KST
-    us: str | AtTime = Field(default_factory=lambda: AtTime(time="09:20", tz="America/New_York"))
+    kr: str | AtTime = "07:25"  # 문자열이면 KST
+    us: str | AtTime = Field(default_factory=lambda: AtTime(time="08:25", tz="America/New_York"))
 
 
 REGIME_SCHEDULE = Section("schedule", "regime", RegimeSchedule, RegimeSchedule)

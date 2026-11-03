@@ -20,7 +20,7 @@
 - 큐 kind(`jobs.QUEUE_KINDS`): `market_view`(`{market: KR|US}`, slow 레인, 라벨 "시장 세션") = `market_view_body`.
 - CLI(`cli.py`): `trader regime show`(헤지 설정 + `summary` JSON)·`backtest --market KR|US --days 260~1000`·`killswitch on [--reason]|off --note <MIN_NOTE 자 이상>|show`.
 - 텔레그램(`telegram.py`): `/kill`(켜기만, 신뢰 발신자만) → `killswitch.engage(source="telegram")` + `killswitch_on` 문구. `/status` 절 「국면」 = `regime.line`.
-- 설정(schedule): `regime`(`RegimeSchedule`: kr "08:25" KST, us 09:20 America/New_York, 값은 "HH:MM" 또는 `AtTime{time, tz, days}`)·`ksd_events`("HH:MM", KST).
+- 설정(schedule): `regime`(`RegimeSchedule`: kr "07:25" KST, us 08:25 America/New_York, 값은 "HH:MM" 또는 `AtTime{time, tz, days}`)·`ksd_events`("HH:MM", KST).
 - 문구(`messages.py`): `regime_change`·`market_view`·`killswitch_on`·`ksd_stale`. 코드값은 커널 `REGIME`·`STANCE` 표로 한글.
 
 ## 규칙
