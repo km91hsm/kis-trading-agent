@@ -275,3 +275,30 @@ def test_post_ingest_hook_isolates_exception_and_alerts_once_per_day(conn, proje
     ]
     second = hooks.run(table, "news.post_ingest", **kw)
     assert second[1]["result"]["events:KR"]["alerted"] == [] and len(sent.msgs) == 1
+
+
+def test_events_check_without_notifier_and_failed_send_still_marks_alerted(conn, project):
+    """notifier=None 은 전송만 건너뛴다. 전송이 예외여도 옛 동작대로 그날 다시 알리지 않는다."""
+    from trader.features.scan.jobs import events_check
+
+    cfg = _cfg(
+        {
+            "enabled": True,
+            "events": [
+                {
+                    "id": "war_geopolitics", "label": "전쟁", "min_news": 1, "keywords": ["공습"],
+                    "beneficiaries": {"KR": [{"ticker": "012450", "name": "한화에어로"}]},
+                }
+            ],
+        }
+    )  # fmt: skip
+    _news(conn, ["공습 개시"])
+    now = datetime.now(UTC) + timedelta(seconds=5)
+    r = events_check(conn, "KR", cfg=cfg, now=now, notifier=None)
+    assert r["alerted"] == ["war_geopolitics"]
+
+    class Boom:
+        def send(self, *a, **k):
+            raise RuntimeError("x")
+
+    assert events_check(conn, "KR", cfg=cfg, now=now, notifier=Boom())["alerted"] == []

@@ -26,7 +26,7 @@ def events_check(
     found = events.detect(conn, cfg, market=market, asof=now)
     events.record(conn, market, today, found, now=now)
     fresh = events.new_for_alert(conn, market, today, found)
-    for ev in fresh:
+    for ev in fresh if notifier is not None else []:
         try:
             notifier.send(messages.event_detected(market=market, event=ev))
         except Exception:  # noqa: BLE001
