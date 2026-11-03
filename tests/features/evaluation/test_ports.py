@@ -169,3 +169,13 @@ def test_build_port_registers_evaluation(settings):
 
     assert [p.name for p in FEATURE.ports] == ["evaluation"]
     pytest.importorskip("trader")
+
+
+def test_held_at_sees_empty_account_nav_snapshot(conn):
+    """원장 v5 빈 계좌는 account_nav 만 남는다 — 보유 없음(False)이지 모름(None)이 아니다."""
+    assert store.held_at(conn, account_id="p", market="KR", ticker="A", d="2026-09-01") is None
+    kledger.snapshot_positions(
+        conn, account_id="p", d=date(2026, 9, 1), nav=Decimal(100), cash=Decimal(100),
+        positions=[], market="KR",
+    )  # fmt: skip
+    assert store.held_at(conn, account_id="p", market="KR", ticker="A", d="2026-09-01") is False

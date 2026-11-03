@@ -41,10 +41,13 @@ def held_at(
     conn: sqlite3.Connection, *, account_id: str, market: str, ticker: str, d: str
 ) -> bool | None:
     """결정일 d 기준 보유 여부: d 이하 최신 스냅샷 날짜에 그 종목 qty>0 이면 True.
-    그 계좌·시장 스냅샷이 아예 없으면 None(모름)."""
+    그 계좌·시장 스냅샷이 아예 없으면 None(모름). 스냅샷 날짜는 `account_nav` 도 본다 — 원장 v5
+    부터 빈 계좌는 positions_snapshot 행 없이 account_nav 만 남는다(옛 `_CASH` 행 대체)."""
     last = conn.execute(
-        "SELECT MAX(date) AS d FROM positions_snapshot WHERE account_id=? AND market=? AND date<=?",
-        (account_id, market, d),
+        "SELECT MAX(d) AS d FROM (SELECT date AS d FROM positions_snapshot WHERE account_id=? "
+        "AND market=? AND date<=? UNION ALL SELECT date FROM account_nav WHERE account_id=? "
+        "AND market=? AND date<=?)",
+        (account_id, market, d, account_id, market, d),
     ).fetchone()["d"]
     if last is None:
         return None
