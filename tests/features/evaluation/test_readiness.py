@@ -16,7 +16,7 @@ from trader.kernel.ledger import runs
 from trader.kernel.session.agents import ORCHESTRATOR
 
 TODAY = date(2026, 10, 17)
-INTERVALS = frozenset({"kr_monitor", "us_monitor", "fills_sync", "telegram_poll"})
+INTERVALS = frozenset({"monitor", "theme", "approvals", "telegram_poll", "job_queue"})
 
 
 def _runs(conn, n_ok: int, n_err: int = 0, kind="analyze", model="claude-opus"):
@@ -204,23 +204,27 @@ def test_stale_approvals_ignores_unexpired(project, conn):
     assert item["ok"] and item["value"] == 0
 
 
-def test_run_error_rate_ignores_interval_jobs(conn, project):
+def test_run_error_rate_ignores_interval_job_kinds(conn, project):
     _runs(conn, 9, 1)  # cron 잡(analyze): ok 9 + error 1
-    _runs(conn, 0, 5, kind="kr_monitor")
-    _runs(conn, 0, 2, kind="fills_sync")
-    _runs(conn, 0, 1, kind="telegram_poll")
-    _runs(conn, 10, 0, kind="monitor")  # 재평가 세션은 ok 도 기록되니 포함
+    # 데몬은 interval 잡 오류를 runs.kind=job.kind 로 남긴다(kr_monitor·us_monitor → monitor)
+    _runs(conn, 0, 5, kind="monitor")
+    _runs(conn, 0, 2, kind="theme")
+    _runs(conn, 0, 1, kind="approvals")
+    _runs(conn, 0, 3, kind="telegram_poll")
+    _runs(conn, 0, 2, kind="job_queue")
+    _runs(conn, 10, 0, kind="resume")  # 세션 kind 는 ok 도 기록되니 포함
     r = _check(conn, project, [], interval_kinds=INTERVALS)
     item = next(i for i in r["items"] if i["key"] == "run_error_rate")
     assert item["value"] == pytest.approx(1 / 20)
 
 
-def test_interval_kinds_of_collects_kind_and_expanded_id():
+def test_interval_kinds_of_collects_kinds_including_kernel_jobs():
     from trader.kernel.registry import discover
 
     kinds = readiness.interval_kinds_of(discover())
-    assert {"kr_monitor", "us_monitor"} <= kinds
-    assert "monitor" not in kinds
+    assert {"monitor", "theme", "approvals", "telegram_poll", "usage_probe", "job_queue"} <= kinds
+    assert not {"kr_monitor", "us_monitor", "approvals_expire"} & kinds  # 펼친 id 는 넣지 않는다
+    assert "analyze" not in kinds
 
 
 def test_llm_alpha_judged_per_market_of_live_accounts(project, conn):

@@ -17,6 +17,8 @@ from typing import Any
 from trader.features.evaluation import performance, shadow
 from trader.features.evaluation.memory import store
 from trader.kernel.config import KST
+from trader.kernel.daemon.builtin_jobs import BUILTIN_FEATURE
+from trader.kernel.daemon.queue_jobs import QUEUE_FEATURE
 from trader.kernel.session.agents import ORCHESTRATOR
 
 MIN_PAPER_DAYS = 20
@@ -33,17 +35,16 @@ def _item(key: str, ok: bool, value, threshold, note: str = "") -> dict:
 
 
 def interval_kinds_of(features: Iterable[Any]) -> frozenset[str]:
-    """interval 잡 id(`{market}` 은 kr/us 로 전개). kind 는 넣지 않는다 — 데몬은 runs.kind=job.kind
-    로 쓰므로 kind(monitor 등)를 넣으면 재평가 세션까지 빠진다.
+    """interval 잡의 kind 집합. 데몬은 runs.kind=job.kind 로 쓰므로(kr_monitor·us_monitor → monitor)
+    펼친 id 가 아니라 kind 를 모은다. 데몬이 함께 올리는 커널 잡(잡 큐·내장 telegram_poll 등)도
+    더한다.
 
     interval 잡은 오류일 때만 runs 에 남아 오류율 분모를 왜곡하므로 점검에서 제외한다."""
     out: set[str] = set()
-    for f in features:
+    for f in (*features, QUEUE_FEATURE, BUILTIN_FEATURE):
         for j in f.jobs:
-            if j.trigger != "interval":
-                continue
-            for m in ("kr", "us") if "{market}" in j.id else ("",):
-                out.add(j.id.replace("{market}", m))
+            if j.trigger == "interval":
+                out.add(j.kind)
     return frozenset(out)
 
 
@@ -74,8 +75,7 @@ def _rate(
     marks = ",".join("?" * len(bad))
     extra, args = "", []
     if table == "runs":
-        # 오류만 기록되는 interval 잡 제외. 재평가 세션(run_session kind='monitor')은 ok 도
-        # 기록되니 interval_kinds 에 넣지 않으면 포함된다. 상태는 ok/error 만 센다(running 제외).
+        # 오류만 기록되는 interval 잡(kind) 제외. 상태는 ok/error 만 센다(running 제외).
         if interval_kinds:
             kinds = sorted(interval_kinds)
             extra = f" AND kind NOT IN ({','.join('?' * len(kinds))})"

@@ -221,7 +221,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 14 문서·템플릿·TODO·전체 재검증
 - [ ] PR·CI(ubuntu+windows)·머지(머지는 사용자)
 - Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
-- Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R1 `readiness.interval_kinds_of` 는 확장된 잡 id 만 수집 · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
+- Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R2(T9-R1 뒤집음) `readiness.interval_kinds_of` 는 interval 잡 `kind` 수집(커널 잡 큐·내장 잡 포함) · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
 - 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영
 
 ## M9 — features/scalp
