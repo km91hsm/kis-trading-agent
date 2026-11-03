@@ -1149,3 +1149,32 @@ def test_submit_with_policy_but_no_paused_callback_places_no_order(ctx, project)
     r = tools.submit_decision(ctx, ticker="005930", market="KR", date=D, payload=ok_decision())
     assert r["ok"] and r["executions"][0]["order"] is None
     assert ctx.brokers["paper-main"].orders == []
+
+
+def test_ensure_quant_writes_05_quant_from_promoted_model(ctx, project, ml_port):
+    """승격 모델이 있으면 `ports["ml"]` 로 05_quant 를 쓴다(call.agent=quant). 재호출은 그대로."""
+    ctx.ports = {"ml": ml_port}
+    data = tools.ensure_quant(ctx, ticker="005930", market="KR", date=D)
+    assert data["role"] == "quant" and data["model"] == "q-test-v1"
+    saved = read_checkpoint(run_dir(D, "KR", "005930"), "05_quant")
+    assert saved["call"]["agent"] == "quant" and saved["call"]["model"] == "q-test-v1"
+    assert saved["data"]["role"] == "quant"
+    ml_port.build_report = lambda *a, **k: (_ for _ in ()).throw(AssertionError("재생성 금지"))
+    assert tools.ensure_quant(ctx, ticker="005930", market="KR", date=D) == data
+
+
+def test_ensure_quant_none_without_port_or_row(ctx, project, ml_port):
+    assert tools.ensure_quant(ctx, ticker="005930", market="KR", date=D) is None  # ml 포트 없음
+    ml_port.latest_row = lambda *a, **k: None
+    ctx.ports = {"ml": ml_port}
+    assert tools.ensure_quant(ctx, ticker="005930", market="KR", date=D) is None
+    assert read_checkpoint(run_dir(D, "KR", "005930"), "05_quant") is None
+
+
+def test_trader_context_includes_quant_or_none(ctx, project, ml_port):
+    _inputs(project)
+    assert tools.trader_context(ctx, "KR", D, "005930", {})["quant"] is None
+    ctx.ports = {"ml": ml_port}
+    tools.ensure_quant(ctx, ticker="005930", market="KR", date=D)
+    got = tools.trader_context(ctx, "KR", D, "005930", {})["quant"]
+    assert got["role"] == "quant" and got["signal"] == "BUY"

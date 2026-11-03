@@ -36,6 +36,7 @@
   - `init_schema` 는 이미 최신이면 쓰기 잠금 없이 반환한다.
   - 저장 시각은 `now_iso()` 의 UTC ISO8601.
   - 커널은 `control`·`runs` 외의 도메인 테이블을 모른다. 기능이 자기 마이그레이션으로 만든다.
+  - M7 에서 종목 표기 `ledger/names.py`(`ticker_names` → 캐시 JSON, 네트워크 없음)가 기능에서 커널로 승격됐다.
 - 테스트: `tests/kernel/ledger/`
 
 ## session
@@ -77,6 +78,7 @@
   - 보낸 뒤(`sent_at`) 주문 행 기록 전에 끊긴 실행 키는 영구 선점이다(같은 결정·계좌·방향 주문이 다시 안 나간다). 사람이 KIS 주문 유무를 확인한 뒤 `ExecKeyStore` 로 푼다.
   - `take_pending` 이 pending 이 아닌 승인은 실제 상태를 돌려주고 DB 를 바꾸지 않는다(approved 행을 expired 로 덮지 않는다). 승인 지문은 항상 비교한다.
   - 마이그레이션 `EXECUTION` 은 `session` 과 같은 방식(`contracts.KERNEL_MODULES`)으로 합쳐진다.
+  - M7 에서 보유기간 프로필 `execution/horizon.py`(결정 `horizon_days` → short|mid|long 의 점검 주기·임계, 순수 함수·덕 타이핑)가 spot 에서 커널로 승격됐다(scan 트리거와 spot 이 함께 쓴다).
 - 테스트: `tests/kernel/execution/`
 
 ## lane
@@ -144,9 +146,9 @@
   - **게이트**: `JobSpec.gate`(`none`|`market`|`monitor`)는 `Feature.gates`(`GateSpec(name, build)`) 가 공급한다. `build(boot, deps)` 가 `gate(job) -> 사유|None` 을 돌려주고 `build_daemon_deps` 가 `deps.gates[name]` 에 채운다(accounts: `market` = 일시정지·주말·휴장, `monitor` = 주말·휴장 + `<시장>.monitor.start/end` 창 — 일시정지는 보지 않는다(장중 감시가 `stop_paused` 알림·트리거 기록을 하고 주문은 레인이 막는다, M5 Ruling 20), 창 밖 사유는 "창 밖"). 판정 순수 함수는 `daemon.gates.should_skip(market, today, *, paused, is_holiday)`. 커널은 게이트 이름만 알고 브로커·계좌를 모른다.
   - **잡 큐**(`daemon.queue`·`queue_jobs`, 원장 v8 `job_requests`): 기능이 `QueueKind(kind, params_model, label, lane, priority, trading, restart_requeue, body)` 를 선언한다. 요청은 `enqueue`(중복은 `DuplicateRequest`)·`claim_next`·`finish`·`cancel` 로 오가고 `trader jobs list|run|kinds` 와 `enqueue_from_job(deps, kind, params, source=…)` 가 등록한다. 큐 잡 4개 `job_queue`(slow)·`job_queue_fast`·`job_queue_reeval`·`job_queue_info` 는 각자 자기 레인 kind 만 `schedule.yaml job_queue.interval_s`(기본 10초) 주기로 꺼낸다. 상태(`QueueState`)는 `DaemonDeps.queue` 에 둔다.
   - **heavy 락·자동 출처**: `JobSpec.heavy` cron 은 락을 기다리며 `heavy_wanted` 를 세우고, slow 레인 요청은 progress 경계에서 락을 양보한다. `AUTO_SOURCES`(`daemon`·`news`·`notice`·`restart`, 출처의 `:` 앞부분으로 맞춘다 — `notice:paper` 는 `notice`) 요청 중 `trading` kind 는 꺼낼 때 시장 게이트·장 마감을 다시 검사한다(큐에서 오래 기다린 요청이 다음 날 주문을 내지 않게). 사람(cli/web/telegram) 요청은 시장 게이트를 보지 않는다.
-  - **재기동 복구·캐치업**: 기동 때 `daemon.bootstrap` 훅 → `bootstrap_queue`(이전 running → error "데몬 재시작", 6시간 넘은 queued 만료, `restart_requeue` kind 만 `source="restart"` 로 재등록, 끊긴 요청 알림 1건) → stale `running` 세션(1시간↑) 정리 → `catch_up_missed`(`JobSpec.catch_up="queue"` 인 놓친 cron 을 큐로 한 번 따라잡기, 조회 범위 20시간). 이 단계는 **잠금을 잡은 뒤에만** 돈다(둘째 데몬이 실행 중 데몬의 행을 닫지 않게). `JobSpec.misfire` 에 따라 grace 가 다르다(`scan` 1시간·`idempotent` 6시간·나머지 2분).
+  - **재기동 복구·캐치업**: 기동 때 `bootstrap_queue`(이전 running → error "데몬 재시작", 6시간 넘은 queued 만료, `restart_requeue` kind 만 `source="restart"` 로 재등록, 끊긴 요청 알림 1건) → `daemon.bootstrap` 훅 → stale `running` 세션(1시간↑) 정리 → `catch_up_missed`(`JobSpec.catch_up="queue"` 인 놓친 cron 을 큐로 한 번 따라잡기, 조회 범위 20시간). 이 단계는 **잠금을 잡은 뒤에만** 돈다(둘째 데몬이 실행 중 데몬의 행을 닫지 않게). `JobSpec.misfire` 에 따라 grace 가 다르다(`scan` 1시간·`idempotent` 6시간·나머지 2분).
   - **내장 잡**: `daemon.builtin_jobs.BUILTIN_FEATURE`(`kernel_builtin`)의 `telegram_poll`(interval, `schedule.yaml telegram_poll.interval_s` 기본 30초) — outbox 재전송(실패 삼킴) 뒤 `getUpdates` 1회로 명령 처리. 수신 설정이 없으면 `skipped`.
-  - **bootstrap 훅·ports**: 훅 지점 `daemon.bootstrap` 은 `deps` 를 받아 잠금 직후 한 번 돈다. `DaemonDeps.ports` 는 부트의 `Port` 구현체(`accounts`·`inputs`)이고 잡 본문(spot 포함)은 이것만 통해 계좌·브로커·시세·휴장일·수집에 닿는다(기능 간 import 금지).
+  - **bootstrap 훅·ports**: 훅 지점 `daemon.bootstrap` 은 `deps` 를 받아 잠금·`bootstrap_queue` 직후 한 번 돈다. `DaemonDeps.ports` 는 부트의 `Port` 구현체(`accounts`·`inputs`)이고 잡 본문(spot 포함)은 이것만 통해 계좌·브로커·시세·휴장일·수집에 닿는다(기능 간 import 금지).
   - `JobSpec.days`(cron 요일, 예 `mon-sat`)와 `schedule_key` 가 리스트(`fills_sync.times`)이면 시각마다 cron 트리거를 펼친다. per_market 잡의 id·`schedule_key` 의 `{market}` 은 소문자(`kr_monitor`, `reconcile.kr`)로 치환된다.
 - 테스트: `tests/kernel/daemon/`
 
@@ -197,4 +199,4 @@
 
 ## features 층
 
-`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). `regime`(M6, 서비스: 국면·킬스위치·권리 일정 블랙아웃·시장 세션·`{market}_regime`/`ksd_events` 잡·`ports["regime"]`·`trader regime`·텔레그램 `/kill`, `features/regime/README.md`), `scan`(M6, 서비스: 테마 열기·사건 감지·`news.post_ingest` 훅·`ports["scan"]`·`trader scan`, `features/scan/README.md`). 레인(spot)은 두 기능을 `LaneContext.ports["regime"]`·`ports["scan"]` 로만 받고 import 하지 않는다. spot 에는 헤지·현금 운용·주간 리밸런스(M6)도 있다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). `regime`(M6, 서비스: 국면·킬스위치·권리 일정 블랙아웃·시장 세션·`{market}_regime`/`ksd_events` 잡·`ports["regime"]`·`trader regime`·텔레그램 `/kill`, `features/regime/README.md`), `scan`(M6, 서비스: 테마 열기·사건 감지·`news.post_ingest` 훅·`ports["scan"]`·`trader scan`, `features/scan/README.md`). 레인(spot)은 두 기능을 `LaneContext.ports["regime"]`·`ports["scan"]` 로만 받고 import 하지 않는다. spot 에는 헤지·현금 운용·주간 리밸런스(M6)도 있다. `ml`(M7, 서비스: 피처 스토어·퀀트 학습·튠·레지스트리·시점 유니버스·`05_quant` 리포트·`ml_train`/`universe_members` 잡·큐 kind `features_*`/`ml_train`·`ports["ml"]`·`trader ml`, `features/ml/README.md`). `scan` 은 M7 에서 정량 필터·ML 랭커·발굴·스크리너·뉴스/공시 트리거·관심종목(`/watch`)·유니버스 점검·`trader scan run|backtest|universe`로 확장됐다(ML 랭커는 ml→scan 순환을 피해 scan 소유). spot 에는 `{market}_scan_analyze` 잡·큐 kind `scan_analyze`/`analyze_ticker`(M7)가 들어왔다. 옛 `features/jobs` 는 별도 기능이 되지 않고 커널 작업 큐로 흡수됐다(`QueueKind` 선언만 각 기능이 더하고 `/run` 은 커널 내장). 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.

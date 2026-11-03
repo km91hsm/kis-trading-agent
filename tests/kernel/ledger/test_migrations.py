@@ -40,7 +40,7 @@ def test_all_migrations_include_session_v4(project):
     from trader.kernel.registry.contracts import all_migrations
 
     migs = all_migrations(discover())
-    assert [m.version for m in migs] == list(range(1, 12))
+    assert [m.version for m in migs] == list(range(1, 13))
     v4 = next(m for m in migs if m.version == 4)
     assert v4.owner == "kernel/session"
     c = db.connect()

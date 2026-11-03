@@ -89,6 +89,26 @@ class CallMeta(BaseModel):
     duration_ms: int | None = None
 
 
+class QuantReport(BaseModel):
+    """정량(ML) 모델 보고. 4개 분석가 역할(`AnalystRole`)과 별개 — 모델이 낸 확률과 신호."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticker: str
+    asof: str
+    role: Literal["quant"] = "quant"
+    model: str
+    p_up: float = Field(ge=0, le=1)
+    p_flat: float = Field(ge=0, le=1)
+    p_down: float = Field(ge=0, le=1)
+    signal: Signal
+    horizon_days: int = Field(ge=1)
+    label_mode: Literal["absolute", "relative_tercile"] = "absolute"
+    features_used: list[str]
+    data_gaps: list[str] = Field(default_factory=list)
+    feature_date: str | None = None
+
+
 __all__ = [
     "CHECKPOINT_SCHEMA_VERSION",
     "AnalystReport",
@@ -97,6 +117,7 @@ __all__ = [
     "DebateTurn",
     "Evidence",
     "Horizon",
+    "QuantReport",
     "Side",
     "Signal",
     "Stance",

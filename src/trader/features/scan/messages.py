@@ -41,3 +41,8 @@ def event_detected(*, market: str, event: dict) -> str:
             "다음 scan 에서 scout 가 이 묶음 안에서 고르고, 분석·리스크 게이트를 거쳐요",
         ],
     )
+
+
+def disclosure(*, market: str, label: str, title: str, url: str, action: str) -> str:
+    """중요 공시(critical, Phase 25) — 보유·유니버스 종목. action 은 '재분석 요청 #n' 등."""
+    return render("중요 공시", f"{market} {label}", [title, url, action])

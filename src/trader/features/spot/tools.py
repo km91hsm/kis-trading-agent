@@ -342,8 +342,8 @@ def _regime_context(ctx: ToolContext, market: str) -> dict | None:
 
 def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: dict) -> dict:
     """트레이더 입력의 파이썬 제공분: quote·risk_limits·costs_bp·portfolio·holding·regime·
-    market_view(`ports["regime"]` 가 없으면 둘 다 None).
-    (memory·calibration·quant·theme 은 이연 — README 알려진 차이)"""
+    market_view(`ports["regime"]` 가 없으면 둘 다 None)·quant(`05_quant` 체크포인트, 없으면 None).
+    (memory·calibration·theme 은 이연 — README 알려진 차이)"""
     quote = ((inputs.get("technical") or {}).get("quote") or {}).get("data")
     return {
         "quote": quote,
@@ -353,7 +353,52 @@ def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: 
         "holding": holding_context(ctx, ticker, market, d),
         "regime": _regime_context(ctx, market),
         "market_view": _market_view_context(ctx, market),
+        "quant": _quant_context(ctx, market, d, ticker),
     }
+
+
+def _quant_context(ctx: ToolContext, market: str, d: date, ticker: str) -> dict | None:
+    """`05_quant` 체크포인트의 data. 없으면 None."""
+    saved = read_checkpoint(_dir(ctx, ticker, market, d), "05_quant")
+    return saved["data"] if saved is not None else None
+
+
+def ensure_quant(ctx: ToolContext, *, ticker: str, market: str, date: date) -> dict | None:
+    """승격된 퀀트 모델·피처 행이 있으면 05_quant 를 쓴다(이미 있으면 그대로). 없으면 None.
+    모델·피처는 `ports["ml"]` 로 얻는다 — 포트가 없거나 퀀트가 꺼져 있으면 조용히 None."""
+    d = _dir(ctx, ticker, market, date)
+    existing = read_checkpoint(d, "05_quant")
+    if existing is not None:
+        return existing.get("data")
+    ml = ctx.ports.get("ml")
+    if ml is None:
+        return None
+    try:
+        if not ml.quant_enabled():
+            return None
+        # 그 시장 모델 우선·전시장 폴백, 다른 시장 한정 모델은 쓰지 않는다(registry.latest 계약)
+        found = ml.latest_model(market)
+    except Exception as e:  # noqa: BLE001 - ML 은 선택 입력: 어떤 오류도 수집·분석을 막지 않는다
+        logger.warning("05_quant 생략(레지스트리 오류): %s", e)
+        return None
+    if found is None:
+        return None
+    model, meta = found
+    try:
+        row = ml.latest_row(ticker, market, asof=date)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("05_quant 생략(피처 읽기 실패) %s %s: %s", market, ticker, e)
+        return None
+    if row is None:
+        logger.info("05_quant 생략 %s %s: 피처 행 없음", market, ticker)
+        return None
+    try:
+        data = ml.build_report(model, meta, row, ticker=ticker, asof=ctx.now().isoformat())
+    except Exception as e:  # noqa: BLE001 - 모델 오류는 분석을 막지 않는다
+        logger.warning("05_quant 생성 실패 %s %s: %s", market, ticker, e)
+        return None
+    write_checkpoint(d, "05_quant", _wrap(data, _call("quant", {"model": data["model"]})))
+    return data
 
 
 # --- 절 압축 ----------------------------------------------------------------------

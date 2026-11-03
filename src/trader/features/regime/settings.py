@@ -24,6 +24,11 @@ def _coerce_instrument(v: Any) -> Any:
     return {"symbol": v} if isinstance(v, str) else v
 
 
+def hedge_tickers(cfg: HedgeCfg, market: str) -> frozenset[str]:
+    """그 시장의 헤지 상품 코드. 헤지가 꺼져 있으면 빈 집합."""
+    return frozenset(cfg.tickers(market)) if cfg.enabled else frozenset()
+
+
 class HedgeCfg(BaseModel):
     """하락장 대응 (Phase 17 H): 국면 판정 3지표 + 인버스 ETF 헤지 슬리브. 전부 파이썬 규칙.
 
@@ -143,12 +148,12 @@ class AtTime(BaseModel):
 
 
 class RegimeSchedule(BaseModel):
-    """schedule.yaml `regime`: 시장별 국면 판정 시각(scan 앞, US 는 뉴욕 시각)."""
+    """schedule.yaml `regime`: 시장별 국면 판정 시각(scan_analyze 5분 앞, US 는 뉴욕 시각)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kr: str | AtTime = "08:25"  # 문자열이면 KST
-    us: str | AtTime = Field(default_factory=lambda: AtTime(time="09:20", tz="America/New_York"))
+    kr: str | AtTime = "07:25"  # 문자열이면 KST
+    us: str | AtTime = Field(default_factory=lambda: AtTime(time="08:25", tz="America/New_York"))
 
 
 REGIME_SCHEDULE = Section("schedule", "regime", RegimeSchedule, RegimeSchedule)

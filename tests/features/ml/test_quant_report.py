@@ -1,0 +1,135 @@
+from datetime import UTC, datetime
+
+import pytest
+from pydantic import ValidationError
+
+from tests.features.ml.helpers import synthetic_features
+from trader.features.ml import dataset, features, quant_report, registry
+from trader.features.ml.models import quant
+from trader.kernel.session.schemas import QuantReport
+
+NOW = datetime(2026, 10, 17, tzinfo=UTC)
+
+
+def _promoted(project):
+    df = dataset.make_labels(
+        synthetic_features(3, 120, signal=True), horizon_days=5, up=0.02, down=-0.02
+    )
+    cols = dataset.feature_columns(df)
+    X, y = dataset.split_xy(df, cols)
+    m = quant.QuantModel(cols).fit(X, y)
+    v = registry.save("quant", m, {"features": cols, "label": {"horizon_days": 5}}, now=lambda: NOW)
+    registry.promote("quant", v)
+    features.write_rows(synthetic_features(3, 120, signal=True))
+    return m, cols, v
+
+
+def test_quant_report_schema_and_signal():
+    base = dict(
+        ticker="005930",
+        asof="2026-10-17T00:00:00+00:00",
+        role="quant",
+        model="quant@v",
+        p_up=0.6,
+        p_flat=0.3,
+        p_down=0.1,
+        horizon_days=5,
+        features_used=["roc_10"],
+        data_gaps=[],
+    )
+    r = QuantReport(**base, signal="BUY")
+    assert r.signal == "BUY"
+    assert (
+        quant_report.signal_for(0.6, 0.1) == "BUY" and quant_report.signal_for(0.2, 0.55) == "SELL"
+    )
+    assert quant_report.signal_for(0.4, 0.3) == "NEUTRAL"
+    with pytest.raises(ValidationError):
+        QuantReport(**{**base, "p_up": 1.5}, signal="BUY")
+    assert quant_report.SCHEMA is QuantReport
+
+
+def test_build_report_from_latest_row(project):
+    m, cols, v = _promoted(project)
+    row = quant_report.latest_row("T00", "KR")
+    assert row is not None and row["ticker"] == "T00"
+    model, meta = registry.latest("quant")
+    rep = quant_report.build(model, meta, row, ticker="T00", asof=NOW.isoformat())
+    assert rep["role"] == "quant" and rep["model"] == f"quant@{v}" and rep["horizon_days"] == 5
+    assert abs(rep["p_up"] + rep["p_flat"] + rep["p_down"] - 1) < 1e-6 and rep["signal"] in (
+        "BUY",
+        "SELL",
+        "NEUTRAL",
+    )
+    assert rep["features_used"] == cols and rep["feature_date"] == row["date"]
+    assert quant_report.latest_row("ZZZZ", "KR") is None
+
+
+def test_predict_aligns_feature_columns(project):
+    m, cols, v = _promoted(project)
+    model, meta = registry.latest("quant")
+    row = {c: 1.0 for c in cols[1:]}  # 첫 피처 누락 + 여분 열
+    row["extra"] = 9.9
+    rep = quant_report.build(model, meta, row, ticker="X", asof=NOW.isoformat())
+    assert cols[0] in rep["data_gaps"][0]
+
+
+def test_latest_row_respects_asof(project):
+    from datetime import date
+
+    features.write_rows(synthetic_features(1, 30, signal=False))
+    newest = quant_report.latest_row("T00", "KR")
+    capped = quant_report.latest_row("T00", "KR", asof=date(2025, 1, 10))
+    assert newest["date"] > capped["date"] and capped["date"] <= "2025-01-10"
+    assert quant_report.latest_row("T00", "KR", asof=date(2024, 1, 1)) is None
+
+
+def test_latest_row_is_memoized_per_process(project, monkeypatch):
+    """같은 tool 서브프로세스 안에서 같은 종목을 3번 조회한다(메모리·보정·05_quant). 피처 스토어에
+    없는 종목은 조회마다 60파일(0.9초)을 읽으므로 (종목·시장·asof·최신 파일) 키로 메모이즈한다."""
+    from tests.features.ml.helpers import synthetic_features
+    from trader.features.ml import features
+
+    features.write_rows(synthetic_features(1, 30, signal=False))
+    calls = {"n": 0}
+    real = features.latest_rows
+
+    def counting(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    monkeypatch.setattr(quant_report.features, "latest_rows", counting)
+    quant_report.latest_row.cache_clear()
+    r1 = quant_report.latest_row("T00", "KR")
+    r2 = quant_report.latest_row("T00", "KR")
+    assert r1 == r2 and r1 is not None and calls["n"] == 1
+    assert quant_report.latest_row("NOPE", "KR") is None
+    assert quant_report.latest_row("NOPE", "KR") is None and calls["n"] == 2
+    # 새 파일이 생기면 키가 바뀌어 다시 읽는다
+    features.write_rows(synthetic_features(1, 31, signal=False))
+    quant_report.latest_row("T00", "KR")
+    assert calls["n"] == 3
+
+
+def test_latest_row_cache_sees_rewritten_newest_file(project):
+    """데몬처럼 오래 사는 프로세스에서 같은 날짜 파일이 다시 써지면(스냅샷이 종목을 추가) 캐시가
+    새 내용을 봐야 한다. 파일 이름만 키면 그날 내내 옛 결과(None)를 돌려준다."""
+    from tests.features.ml.helpers import synthetic_features
+    from trader.features.ml import features
+
+    quant_report.latest_row.cache_clear()
+    features.write_rows(synthetic_features(1, 30, signal=False))
+    assert quant_report.latest_row("T01", "KR") is None
+    features.write_rows(synthetic_features(2, 30, signal=False))  # 같은 날짜 파일에 T01 추가
+    assert quant_report.latest_row("T01", "KR") is not None
+
+
+def test_build_report_carries_label_mode(project):
+    """상대 라벨 모델의 p_up 은 '같은 날 시장 내 상위 삼분위 확률' 이라 트레이더가 구분해야 한다."""
+    m, cols, v = _promoted(project)
+    row = quant_report.latest_row("T00", "KR")
+    model, meta = registry.latest("quant")
+    rep = quant_report.build(model, meta, row, ticker="T00", asof=NOW.isoformat())
+    assert rep["label_mode"] == (meta.get("label") or {}).get("mode", "absolute")
+    meta2 = {**meta, "label": {**(meta.get("label") or {}), "mode": "relative_tercile"}}
+    rep2 = quant_report.build(model, meta2, row, ticker="T00", asof=NOW.isoformat())
+    assert rep2["label_mode"] == "relative_tercile"

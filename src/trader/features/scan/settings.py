@@ -1,4 +1,5 @@
-"""scan 설정 섹션: settings.yaml 의 `theme`, schedule.yaml 의 `theme`(주기), 파일 `events`(사건 표).
+"""scan 설정 섹션: settings.yaml 의 `theme`·`discovery`, schedule.yaml 의 `theme`(주기),
+파일 `events`(사건 표).
 
 yaml 키를 더하면 `templates/config/*.yaml` 도 같이 바꾼다."""
 
@@ -39,6 +40,35 @@ class ThemeCfg(BaseModel):
     weights: ThemeWeights = Field(default_factory=ThemeWeights)
 
 
+class SimilarityCfg(BaseModel):
+    """유사 뉴스 판정(Phase 23, `news_store.is_similar`): 토큰 Jaccard 또는 문자열 유사도."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    jaccard: float = Field(default=0.6, ge=0, le=1)
+    ratio: float = Field(default=0.8, ge=0, le=1)
+    lookback_days: int = Field(default=3, ge=1, le=30)
+
+
+class IntradayDiscoveryCfg(BaseModel):
+    """장중 뉴스 발굴(Phase 23): 뉴스 수집(30분)마다 **새 내용** 뉴스가 있으면 같은 종목이라도
+    재분석(오늘 결정이 있으면 재평가)하고 유니버스 밖은 scout 세션(kind=discover)으로 발굴한다.
+    유사 기사만 들어오면 세션을 띄우지 않는다. 장중 창 안에서만."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    min_items: int = Field(default=1, ge=1, le=20)  # 종목 재분석에 필요한 새 뉴스 건수
+    discover_cap: int = Field(default=20, ge=0, le=100)  # 시장별 하루 discover 세션 상한
+    similarity: SimilarityCfg = Field(default_factory=SimilarityCfg)
+
+
+class DiscoveryCfg(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intraday: IntradayDiscoveryCfg = Field(default_factory=IntradayDiscoveryCfg)
+
+
 class ThemeSchedule(BaseModel):
     """schedule.yaml `theme`: 시장별 테마 잡 주기(장중만)."""
 
@@ -47,7 +77,10 @@ class ThemeSchedule(BaseModel):
     interval_s: int = Field(default=1800, ge=300, le=86400)
 
 
-SECTIONS = (Section("settings", "theme", ThemeCfg, ThemeCfg),)
+SECTIONS = (
+    Section("settings", "theme", ThemeCfg, ThemeCfg),
+    Section("settings", "discovery", DiscoveryCfg, DiscoveryCfg),
+)
 SCHEDULE_SECTIONS = (Section("schedule", "theme", ThemeSchedule, ThemeSchedule),)
 
 

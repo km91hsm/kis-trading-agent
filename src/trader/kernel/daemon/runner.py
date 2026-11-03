@@ -177,8 +177,9 @@ class Daemon:
         sched = BackgroundScheduler(timezone=KST)
         try:
             # 잠금을 잡은 뒤에만: 둘째 데몬이 실행 중인 데몬의 running 행을 닫으면 안 된다
-            hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
             qj.bootstrap_queue(deps)
+            # 만료된 queued 를 먼저 정리한 뒤 훅이 enqueue 해야 중복으로 빠지지 않는다
+            hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
             self._close_stale_sessions()
             deps.queue.heartbeat = self._hb
             try:

@@ -61,7 +61,7 @@ def news_collect(ctx: Any, job: Any) -> dict:
         )
         out["hooks"] = hooks.run(
             ctx.hooks, "news.post_ingest", conn=conn, markets=ctx.markets, now=ctx.now(),
-            result=out, notifier=ctx.notifier,
+            result=out, notifier=ctx.notifier, deps=ctx,
         )
         return out
     finally:

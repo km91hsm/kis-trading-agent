@@ -9,17 +9,20 @@ from trader.kernel.platform.bundle import templates_dir
 
 def test_feature_declares_theme_sections_and_v11():
     from trader.features.scan.feature import FEATURE
-    from trader.features.scan.settings import ThemeCfg, ThemeSchedule
+    from trader.features.scan.settings import DiscoveryCfg, ThemeCfg, ThemeSchedule
 
     assert FEATURE.id == "scan" and FEATURE.tier == "service"
     assert {(s.file, s.key, s.model) for s in FEATURE.sections if s.file != "events"} == {
         ("settings", "theme", ThemeCfg),
+        ("settings", "discovery", DiscoveryCfg),
         ("schedule", "theme", ThemeSchedule),
     }
     assert {s.key for s in FEATURE.sections if s.file == "events"} == {
         "enabled", "lookback_hours", "max_picks_per_event", "max_event_picks", "events",
     }  # fmt: skip
     assert [h.point for h in FEATURE.hooks] == ["news.post_ingest"]
+    assert [q.kind for q in FEATURE.queue_kinds] == ["discover"]
+    assert [c.name for c in FEATURE.telegram_commands] == ["watch"]
     assert [(m.version, m.name, m.owner) for m in FEATURE.migrations] == [
         (11, "scan_theme_heat", "scan")
     ]
@@ -36,3 +39,24 @@ def test_theme_template_matches_model_fields(monkeypatch):
     assert ThemeCfg(**raw["theme"]) == ThemeCfg()
     sched = yaml.safe_load((cfg / "schedule.yaml").read_text(encoding="utf-8"))
     assert ThemeSchedule(**sched["theme"]) == ThemeSchedule(interval_s=1800)
+
+
+def test_feature_declares_screen_discover_session_kinds():
+    from trader.features.scan.feature import FEATURE
+    from trader.features.scan.session_kinds import AGENTS, DISCOVER, SCREEN
+
+    assert FEATURE.session_kinds == (SCREEN, DISCOVER)
+    assert FEATURE.agents == AGENTS
+    assert (SCREEN.kind, SCREEN.runs_kind, SCREEN.throttle) == ("screen", "scan", "hard")
+    assert (DISCOVER.kind, DISCOVER.agents) == ("discover", ("scout",))
+
+
+def test_scan_does_not_import_accounts_feature():
+    """scan 허용 목록은 커널 + ingest·saveticker·regime·ml 의 api 뿐 — accounts 는 포트로만."""
+    root = Path(__file__).resolve().parents[3] / "src" / "trader" / "features" / "scan"
+    offenders = [
+        str(p)
+        for p in root.rglob("*.py")
+        if "trader.features.accounts" in p.read_text(encoding="utf-8")
+    ]
+    assert offenders == []

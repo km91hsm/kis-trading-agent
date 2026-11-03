@@ -1,5 +1,5 @@
 """scan 잡·훅 본문: 테마 열기 interval 잡(`{market}_theme`), 사건 감지(`events_check`)와
-`news.post_ingest` 훅(`events_post_ingest`)."""
+`news.post_ingest` 훅의 사건 감지 몫, 큐 kind `discover`. 훅 본체는 `triggers.post_ingest`."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from trader.features.saveticker import api as saveticker_api
 from trader.features.scan import events, messages, theme
-from trader.features.scan.settings import load_events
-from trader.kernel.registry.types import JobSpec
+from trader.kernel.config import Market
+from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session.run_store import run_date_for
 
 logger = logging.getLogger("trader.scan")
@@ -70,24 +72,22 @@ def events_check(
     return {"detected": [e["id"] for e in found], "alerted": [e["id"] for e in fresh]}
 
 
-def events_post_ingest(
-    *,
-    conn: sqlite3.Connection,
-    markets: Any,
-    now: datetime,
-    result: dict | None = None,
-    notifier: Any = None,
-    **_: Any,
-) -> dict:
-    """`news.post_ingest` 훅: 시장별 사건 감지. 시장 하나의 실패는 그 시장만 error 로 남긴다."""
-    cfg = load_events()
-    out: dict[str, dict] = {}
-    for market in markets:
-        try:
-            out[f"events:{market}"] = events_check(
-                conn, market, cfg=cfg, now=now, notifier=notifier
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("사건 감지 실패 %s: %s", market, e)
-            out[f"events:{market}"] = {"error": f"{type(e).__name__}: {e}"}
-    return out
+class DiscoverParams(BaseModel):
+    """큐 `discover` 요청: 발굴할 시장."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    market: Market
+
+
+def discover_request(deps, params: dict, progress) -> dict:
+    """큐 `discover` 본문. `triggers` 가 `events_check` 를 이 모듈에서 가져오므로 순환을 피해
+    본문은 호출 때 가져온다."""
+    from trader.features.scan.triggers import discover_request as body
+
+    return body(deps, params, progress)
+
+
+QUEUE_KINDS = (
+    QueueKind("discover", DiscoverParams, "장중 발굴", "slow", 0, True, False, discover_request),
+)

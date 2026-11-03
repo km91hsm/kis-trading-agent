@@ -21,3 +21,35 @@ def test_spot_is_lane_with_v6():
     ]  # accounts 와 같은 기능 이름 규약
     assert [k.retry_guard for k in FEATURE.session_kinds] == [True, False]  # analyze 만 차단
     assert [m.version for m in all_migrations([FEATURE])][-1] == 9
+
+
+def test_spot_declares_scan_analyze_job_queue_kinds_and_schedule():
+    from trader.features.spot.feature import FEATURE
+    from trader.features.spot.scan_analyze import SCAN_ANALYZE
+    from trader.features.spot.settings import ScanAnalyzeSchedule
+
+    assert SCAN_ANALYZE in FEATURE.jobs
+    assert {"scan_analyze", "analyze_ticker"} <= {q.kind for q in FEATURE.queue_kinds}
+    assert ("schedule", "scan_analyze", ScanAnalyzeSchedule) in [
+        (s.file, s.key, s.model) for s in FEATURE.sections
+    ]
+
+
+def test_schedule_template_scan_analyze_and_regime_order(monkeypatch):
+    """템플릿의 scan_analyze·regime 값이 모델 기본과 같고, 국면이 5분 앞선다."""
+    from pathlib import Path
+
+    import yaml
+
+    from trader.features.regime.settings import RegimeSchedule
+    from trader.features.spot.settings import ScanAnalyzeSchedule
+    from trader.kernel.platform.bundle import templates_dir
+
+    monkeypatch.setenv("TRADER_HOME", str(Path(__file__).resolve().parents[3]))
+    raw = yaml.safe_load(
+        (templates_dir() / "config" / "schedule.yaml").read_text(encoding="utf-8")
+    )
+    assert ScanAnalyzeSchedule(**raw["scan_analyze"]) == ScanAnalyzeSchedule()
+    assert RegimeSchedule(**raw["regime"]) == RegimeSchedule()
+    assert (raw["regime"]["kr"], raw["scan_analyze"]["kr"]) == ("07:25", "07:30")
+    assert raw["regime"]["us"]["time"] == "08:25" and raw["scan_analyze"]["us"]["time"] == "08:30"

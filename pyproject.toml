@@ -8,18 +8,25 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "fastapi",
     "httpx",
+    "joblib>=1.4",
+    "numpy>=1.26",
     "pandas>=2",
     "playwright>=1.56,<2",
+    "pyarrow>=17",
     "pydantic>=2",
     "pypdf>=6,<7",
     "python-dotenv",
     "pyyaml",
     "requests>=2",
+    "scikit-learn>=1.5",
     "typer",
     "tzdata",
     "uvicorn[standard]",
     "youtube-transcript-api>=1",
 ]
+
+[project.optional-dependencies]
+lightgbm = ["lightgbm>=4"]
 
 [project.scripts]
 trader = "trader.kernel.cli.main:app"
@@ -48,3 +55,4 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
+markers = ["slow: 학습·백필 등 8초 이상 걸리는 테스트"]

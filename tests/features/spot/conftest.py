@@ -52,7 +52,35 @@ def ports(settings, accounts_port):
         "accounts": accounts_port,
         "regime": regime_ports.build_port(SimpleNamespace(settings=settings)),
         "scan": scan_ports.build_port(SimpleNamespace(settings=settings)),
+        "ml": None,  # 기본은 ml 포트 없음 — 필요한 테스트가 `ml_port` 를 끼운다
     }
+
+
+@pytest.fixture
+def ml_port():
+    """가짜 ml 포트(`MlPort` 모양). 승격 모델 1개·피처 행 1개를 내고 스냅샷 호출을 기록한다."""
+    calls: list = []
+
+    def build_report(model, meta, row, *, ticker, asof):
+        return {
+            "ticker": ticker, "asof": asof, "role": "quant", "model": "q-test-v1",
+            "p_up": 0.5, "p_flat": 0.3, "p_down": 0.2, "signal": "BUY", "horizon_days": 5,
+            "features_used": ["ret_5d"],
+        }  # fmt: skip
+
+    def snapshot(markets, *, tickers=None):
+        calls.append((list(markets), tickers))
+        return len(tickers or [])
+
+    return SimpleNamespace(
+        quant_enabled=lambda: True,
+        latest_model=lambda market: (object(), {"version": "q-test-v1"}),
+        latest_row=lambda ticker, market, *, asof: {"ret_5d": 0.01},
+        build_report=build_report,
+        snapshot=snapshot,
+        peer_medians=lambda **kw: None,
+        calls=calls,
+    )
 
 
 class Notes:

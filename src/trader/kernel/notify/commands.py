@@ -1,5 +1,6 @@
 """텔레그램 명령 디스패처. 명령 집합은 기능이 `Feature.telegram_commands` 로 등록하고,
-커널은 내장 `/status`(기능의 `status_sections` 를 모아 보여 줌)만 가진다. CLI·데몬 공용."""
+커널은 내장 `/status`(기능의 `status_sections` 를 모아 보여 줌)와
+`/run`(큐 요청)만 가진다. CLI·데몬 공용."""
 
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ OFFSET_FLAG = "telegram_offset"
 HELP_FLAG = "telegram_help_at"  # 마지막 도움말 발송 시각(폴링 사이에도 유지)
 HELP_EVERY_S = 60
 STATUS = "status"  # 커널 내장 명령 — 기능이 같은 이름을 등록할 수 없다
+RUN = "run"  # 커널 내장 명령 — 큐에 작업 요청을 넣는다
+BUILTINS = (STATUS, RUN)
 
 
 @dataclass
@@ -41,9 +44,9 @@ def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
     out: dict[str, TelegramCommand] = {}
     for f in features:
         for cmd in f.telegram_commands:
-            if cmd.name == STATUS:
+            if cmd.name in BUILTINS:
                 raise RegistryError(
-                    f"텔레그램 명령 '{STATUS}' 는 커널 내장이라 등록할 수 없어요: {f.id}"
+                    f"텔레그램 명령 '{cmd.name}' 는 커널 내장이라 등록할 수 없어요: {f.id}"
                 )
             if cmd.name in out:
                 raise RegistryError(f"텔레그램 명령 이름 중복: {cmd.name} ({f.id})")
@@ -52,7 +55,7 @@ def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
 
 
 def help_line(features: list[Feature]) -> str:
-    parts = ["/status"]
+    parts = ["/status", "/run <작업> [KR|US] [종목]"]
     parts += [c.help_line for c in registry(features).values() if c.help_line]
     return " · ".join(parts)
 
@@ -63,6 +66,27 @@ def status_message(ctx: CommandContext) -> str:
         for sec in f.status_sections:
             lines.extend(sec.render(ctx))
     return messages.event("상태", *(lines or ["등록된 상태 절 없음"]))
+
+
+def run_message(ctx: CommandContext, arg: str | None) -> str:
+    """`/run <작업> [KR|US] [종목]` — 데몬 큐에 요청을 넣는다(실행은 데몬이 순서대로)."""
+    from trader.kernel.cli.jobs_cmd import daemon_running
+    from trader.kernel.daemon import queue as jobq
+
+    kinds = jobq.kinds_of(ctx.features)
+    tokens = (arg or "").split()
+    if not tokens:
+        return f"사용법: /run <작업> [KR|US] [종목]\n작업: {', '.join(sorted(kinds))}"
+    kind, params = tokens[0], {}
+    for t in tokens[1:]:
+        params["market" if t.upper() in ("KR", "US") else "ticker"] = t.upper()
+    if not daemon_running():
+        return "거부: 데몬이 꺼져 있어 요청을 실행할 주체가 없어요 (`uv run trader daemon`)"
+    try:
+        rid = jobq.enqueue(ctx.conn, kinds, kind, params, source="telegram", now=ctx.now())
+    except ValueError as e:  # 알 수 없는 작업·파라미터 오류·중복(DuplicateRequest)
+        return f"거부: {e}"
+    return messages.event(f"요청 #{rid}", f"{jobq.label(kinds, kind)} — 데몬이 순서대로 실행해요")
 
 
 def _help_due(ctx: CommandContext) -> bool:
@@ -100,7 +124,7 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             continue
         name, arg = parsed
         cmd = cmds.get(name)
-        if cmd is None and name != STATUS:
+        if cmd is None and name not in BUILTINS:
             if _help_due(ctx):
                 ctx.notifier.send(messages.event("명령 안내", help_line(ctx.features)))
             set_flag(conn, OFFSET_FLAG, int(u.update_id) + 1)
@@ -117,7 +141,12 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             set_flag(conn, OFFSET_FLAG, int(u.update_id) + 1)
             continue
         try:
-            reply = status_message(ctx) if name == STATUS else cmd.handler(ctx, arg)
+            if name == STATUS:
+                reply = status_message(ctx)
+            elif name == RUN:
+                reply = run_message(ctx, arg)
+            else:
+                reply = cmd.handler(ctx, arg)
             ctx.notifier.send(reply)
             ctx.echo(f"{name} {arg or ''}".strip())
         except Exception as e:  # noqa: BLE001 - 명령 하나의 실패가 나머지·오프셋을 막지 않는다

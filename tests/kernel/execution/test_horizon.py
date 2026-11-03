@@ -4,8 +4,17 @@ from datetime import date
 
 import pytest
 
-from trader.features.spot import horizon
 from trader.features.spot.settings import RiskLimits
+from trader.kernel.execution import horizon
+
+
+@pytest.fixture
+def settings(project):
+    from trader.kernel.cli.boot import build_registry
+    from trader.kernel.config.loader import load
+    from trader.kernel.registry import discover
+
+    return load("settings", build_registry(discover()), path=project / "config" / "settings.yaml")
 
 
 def test_name_of_bands_and_fallback():

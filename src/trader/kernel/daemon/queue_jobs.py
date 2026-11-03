@@ -359,11 +359,15 @@ QUEUE_JOBS: tuple[JobSpec, ...] = tuple(
 QUEUE_FEATURE = Feature(id="kernel_job_queue", tier="service", jobs=QUEUE_JOBS)
 
 
-def enqueue_from_job(deps: Any, kind: str, params: dict, *, source: str) -> int | None:
+def enqueue_from_job(
+    deps: Any, kind: str, params: dict, *, source: str, priority: int | None = None
+) -> int | None:
     """잡·리스너가 큐에 요청을 넣는다. 같은 요청이 대기·실행 중이면 None."""
     conn = deps.conn_factory()
     try:
-        return jobq.enqueue(conn, deps.queue.kinds, kind, params, source=source, now=deps.now())
+        return jobq.enqueue(
+            conn, deps.queue.kinds, kind, params, source=source, now=deps.now(), priority=priority
+        )
     except jobq.DuplicateRequest:
         return None
     finally:

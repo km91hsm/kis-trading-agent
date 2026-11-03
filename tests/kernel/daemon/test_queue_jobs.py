@@ -727,3 +727,10 @@ def test_auto_gate_matches_source_prefix(project):
     assert qj.auto_gate(env.deps, {**req, "source": "web:paper"}) is None
     assert qj.auto_gate(env.deps, {**req, "source": "noticeboard"}) is None
     assert qj.auto_gate(env.deps, {**req, "source": "notice"}) == "장 마감"
+
+
+def test_enqueue_from_job_passes_priority(env, conn):
+    rid = qj.enqueue_from_job(env.deps, "train", {}, source="news", priority=5)
+    assert rid is not None
+    row = conn.execute("SELECT priority FROM job_requests WHERE id=?", (rid,)).fetchone()
+    assert row[0] == 5

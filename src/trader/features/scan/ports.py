@@ -9,8 +9,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from trader.features.scan import membership
+from trader.features.ingest.api import load_sectors
+from trader.features.scan import membership, run, sector_suggest
 from trader.features.scan.settings import load_events
+from trader.kernel.platform import paths
 from trader.kernel.registry.types import Port
 
 logger = logging.getLogger("trader.scan")
@@ -44,6 +46,17 @@ class ScanPortImpl:
         )
         m = result["map"]
         return lambda ticker: list(m[ticker]) if m.get(ticker) else None
+
+    def run_scan(
+        self, ctx: Any, *, market: str, cancel: Any | None = None, dry_run: bool = False
+    ) -> dict:
+        """정량 필터 → screener 세션 → `_scan` 체크포인트·알림(데몬 scan 작업이 부른다)."""
+        return run.run_scan(ctx, market=market, cancel=cancel, dry_run=dry_run)
+
+    def sector_of(self, market: str) -> Callable[[str], str | None]:
+        """종목 → 섹터: sectors.yaml 우선, 없으면 자동 분류 캐시(`state/cache/sector_auto.json`),
+        그래도 없으면 None."""
+        return sector_suggest.resolver(load_sectors(), market, state=paths.state_dir())
 
 
 def build_port(boot: Any) -> ScanPortImpl:

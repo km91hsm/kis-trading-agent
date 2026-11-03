@@ -24,11 +24,14 @@
 | `uv run trader spot reconcile --market KR\|US` | 브로커 보유 vs 스냅샷 대사(스냅샷만 보정, 주문 유지) |
 | `uv run trader regime show\|backtest --market KR\|US --days N\|killswitch on [--reason]\|off --note …\|show` | 국면·킬스위치 조회·백테스트·수동 발동/해제 (`killswitch on`·`off` 는 사용자 전용) |
 | `uv run trader scan theme show [--market KR\|US --live]\|events show [--market KR\|US]` | 테마 열기·사건 감지 결과 조회 (조회만) |
+| `uv run trader scan run [--market KR\|US --asof … --dry-run]\|backtest\|universe check\|universe sectors` | 정량 필터→screener 세션 스캔(`FAKE_CLAUDE=1` 없이 금지)·후보 백테스트(조회만)·유니버스 시세 점검·섹터 제안 |
+| `uv run trader ml train\|tune\|models\|promote\|demote` | 퀀트 모델 학습·튜닝 리포트·레지스트리 조회·수동 승격/해제 (`promote`·`demote` 는 사용자 전용) |
+| `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
 | `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
-| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 |
+| `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/watch add\|remove\|list` 관심종목 포함) |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
 
@@ -47,7 +50,7 @@
 - **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. (스펙 §2.1)
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (스펙 §2.6)
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
-- **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (M7·M8 에서 구현)
+- **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (피처 `latest_rows(asof)`·유니버스 PIT·라벨 엠바고)
 - **paused**: `control` 의 `paused` 가 켜지면 신규 주문 경로는 모두 멈춘다.
 
 ## 금지사항
