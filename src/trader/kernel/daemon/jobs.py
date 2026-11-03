@@ -55,7 +55,8 @@ def _lookup(schedule: Any, path: str) -> Any:
 
 
 def _cron_kwargs_list(schedule: Any, key: str, days: str | None) -> list[dict[str, Any]]:
-    """schedule 항목이 "HH:MM" 리스트면 시각마다 kwargs 하나, 아니면 하나짜리 목록."""
+    """schedule 항목이 "HH:MM" 리스트면 시각마다 kwargs 하나, 아니면 하나짜리 목록.
+    값(매핑·객체)에 비어 있지 않은 `days` 가 있으면 JobSpec.days 보다 우선한다."""
     entry = _lookup(schedule, key)
     if isinstance(entry, (list, tuple)):
         if not entry:
@@ -65,16 +66,17 @@ def _cron_kwargs_list(schedule: Any, key: str, days: str | None) -> list[dict[st
         out = [_cron_kwargs(schedule, key)]
     if days:
         for kw in out:
-            kw["day_of_week"] = days
+            kw.setdefault("day_of_week", days)
     return out
 
 
 def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any]:
-    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`)을 가진 매핑·객체다. tz 기본은 KST.
+    """schedule 항목은 "HH:MM" 이거나 `time`(+선택 `tz`·`days`)을 가진 매핑·객체다. tz 기본은 KST.
     entry 를 주면 조회 대신 그 값을 쓴다(리스트 원소)."""
     if entry is None:
         entry = _lookup(schedule, key)
     tz: Any = None
+    day_of_week: Any = None
     if isinstance(entry, str):
         hm = entry
     else:
@@ -83,6 +85,10 @@ def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any
             tz = _lookup(entry, "tz")
         except ConfigError:
             tz = None
+        try:
+            day_of_week = _lookup(entry, "days")
+        except ConfigError:
+            day_of_week = None
     m = _HM.match(hm) if isinstance(hm, str) else None
     if m is None:
         raise ConfigError(f"schedule '{key}' 은 HH:MM 형식이어야 합니다: {hm!r}")
@@ -90,7 +96,10 @@ def _cron_kwargs(schedule: Any, key: str, *, entry: Any = None) -> dict[str, Any
         zone = ZoneInfo(tz) if tz else KST
     except (ValueError, OSError, KeyError) as e:
         raise ConfigError(f"schedule '{key}' 의 시간대가 올바르지 않습니다: {tz!r}") from e
-    return {"hour": int(m.group(1)), "minute": int(m.group(2)), "timezone": zone}
+    out: dict[str, Any] = {"hour": int(m.group(1)), "minute": int(m.group(2)), "timezone": zone}
+    if day_of_week:
+        out["day_of_week"] = day_of_week
+    return out
 
 
 def _interval_seconds(spec: JobSpec, schedule: Any, tag: str | None = None) -> int:

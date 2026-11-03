@@ -3,17 +3,18 @@
 주문·승인 요청·승인 실행은 전부 커널 `execution.core` 를 지난다(`transmit`·`request_approval`·
 `approve`). 이 모듈은 게이트(판정)·실행 키 선점·체크포인트·결과 조립만 맡는다. 계좌 모드·일시정지는
 `ExecContext.policy`·`paused` 콜백(accounts 포트)으로 받는다 — 레인은 다른 기능을 import 하지
-않는다. 알림·로그에는 계좌 id 만 쓴다.
+않는다. 국면·전략가 기울기·킬스위치·권리 일정은 `ExecContext.ports["regime"]`, 테마는
+`ports["scan"]` 로 받고, 포트가 없으면 bull·기울기 0·킬스위치/블랙아웃 없음·테마 규칙 생략으로
+본다. 알림·로그에는 계좌 id 만 쓴다.
 
-메모리 서킷브레이커(M8)·RL 사이저(M7)·국면/전략가 기울기·킬스위치·섹터·테마·권리 일정(M6)은
-아직 없다(README 「알려진 차이」).
+메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다(README 「알려진 차이」).
 """
 
 from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -22,6 +23,7 @@ from typing import Any
 
 from trader.features.spot import labels, rules, stance
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.schemas import Decision
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.config.time import KST
@@ -60,6 +62,7 @@ __all__ = [
     "exec_ctx_from",
     "execute",
     "expire_approvals",
+    "killswitch_canceller",
     "origin_of",
     "plan_of",
     "reject",
@@ -133,7 +136,8 @@ def origin_of(
 class ExecContext:
     """실행 의존성. `policy(conn, account) -> (모드, 사유)`·`paused(conn) -> bool` 은 accounts
     포트가 준다. `holiday_fn(시장, 날짜)` 는 보유 거래일 계산용(없으면 평일 수).
-    `record_portfolio=False` 면 판정만 하고 positions_snapshot 을 쓰지 않는다(FAKE 세션)."""
+    `record_portfolio=False` 면 판정만 하고 positions_snapshot 을 쓰지 않는다(FAKE 세션).
+    `ports` 는 `Boot.ports`(이름 → 구현체) — 게이트는 `regime`·`scan` 만 본다."""
 
     settings: Any
     accounts: list
@@ -147,6 +151,7 @@ class ExecContext:
     holiday_fn: Callable[[str, date], bool] | None = None
     record_portfolio: bool = True
     market_client: Any | None = None
+    ports: Mapping[str, Any] = field(default_factory=dict)
 
 
 def exec_ctx_from(
@@ -158,9 +163,10 @@ def exec_ctx_from(
     state: Path | None,
     *,
     record_portfolio: bool = True,
+    ports: Mapping[str, Any] | None = None,
 ) -> ExecContext:
     """ExecContext 단일 조립 경로(CLI·텔레그램 공용). 계좌 포트가 없으면 계좌 없음(fail-closed:
-    정책 없음 → 모든 계좌 off)."""
+    정책 없음 → 모든 계좌 off). `ports` 는 게이트가 볼 regime·scan 포트(없으면 빈 dict)."""
     accounts: list = []
     brokers: dict[str, Any] = {}
     market_client = holiday_fn = None
@@ -187,6 +193,7 @@ def exec_ctx_from(
         holiday_fn=holiday_fn,
         record_portfolio=record_portfolio,
         market_client=market_client,
+        ports=dict(ports or {}),
         **kw,
     )
 
@@ -219,6 +226,7 @@ def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:
         None,
         paths.state_dir(),
         record_portfolio=record_portfolio,
+        ports=boot.ports,
     )
 
 
@@ -327,10 +335,12 @@ def cancel_open_buys(
 ) -> tuple[int, list[str]]:
     """당일(시장 현지) 미체결 주문(기본 BUY)을 `cancel_rows` 로 취소한다 — 결정이 매수에서
     돌아섰을 때·손절 직전 등. (취소 건수, 취소하지 못한 종목들) — 호출자가 알린다. 브로커가 없으면
-    (0, [])."""
+    (0, []). `keep` 종목은 거두지 않는다 — 기본(None)은 `excluded_tickers`(보호용 헤지·현금 운용
+    ETF)."""
     if ctx.brokers.get(account_id) is None:
         return 0, []
-    keep = keep or frozenset()
+    if keep is None:
+        keep = excluded_tickers(ctx.settings, ctx.ports.get("regime"), market)
     rows = [
         r
         for r in xledger.open_orders_today(ctx.conn, account_id, ticker, side, day, market=market)
@@ -340,6 +350,26 @@ def cancel_open_buys(
         ctx, account_id, market, rows, exchange_of=exchange_of,
         reason=reason or f"미체결 {side} 취소",
     )  # fmt: skip
+
+
+def killswitch_canceller(ctx: ExecContext) -> Callable[..., tuple[int, list[str]]]:
+    """`build_portfolio(cancel_fn=…)` 자리: 킬스위치가 켜진 계좌·시장의 당일 미체결 BUY 를
+    `cancel_open_buys` 로 거둔다(옛 `on_killswitch`). US 거래소는 관측 표(`ledger.exchange_of`)."""
+
+    def cancel(
+        account_id: str, market: str, day: date, *, keep: frozenset[str]
+    ) -> tuple[int, list[str]]:
+        return cancel_open_buys(
+            ctx,
+            account_id,
+            market,
+            day,
+            exchange_of=lambda t: spot_ledger.exchange_of(ctx.conn, market, t),
+            keep=keep,
+            reason="킬스위치 미체결 BUY 취소",
+        )
+
+    return cancel
 
 
 # --- 포트폴리오 ------------------------------------------------------------------------
@@ -370,13 +400,6 @@ def _balance(broker: Any, market: str) -> tuple[list, Any]:
     return broker.get_positions(market), broker.get_cash(market)
 
 
-def _nav_of(pos_list: list, cash: Any) -> Decimal:
-    """NAV: 잔고 응답의 총평가가 있으면 그것(예수금 + 평가 합은 결제 전 매수를 이중 계산한다)."""
-    if getattr(cash, "nav", None):
-        return cash.nav
-    return cash.total + sum((p.eval_amount for p in pos_list), Decimal(0))
-
-
 def build_portfolio(
     conn: sqlite3.Connection,
     broker: Any,
@@ -386,10 +409,25 @@ def build_portfolio(
     *,
     now: datetime | None = None,
     record: bool = True,
+    hedge_tickers: frozenset[str] = frozenset(),
+    theme_of: Callable[[str], list[str] | None] | None = None,
+    cancel_buys: bool = False,
+    killswitch_pct: float = 0.0,
+    regime: Any | None = None,
+    cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
+    notifier: Any | None = None,
 ) -> rules.Portfolio:
     """브로커 잔고·현금 + 원장 집계로 Portfolio 를 만들고(`record` 면) positions_snapshot 을 남긴다.
     now 가 있으면 만료된 승인 요청은 현금 예약에서 뺀다. 계좌 `capital_cap` 이 있으면 게이트가
-    쓰는 NAV·가능금액을 그 금액까지로 자른다 — 스냅샷은 실제 NAV 그대로."""
+    쓰는 NAV·가능금액을 그 금액까지로 자른다 — 스냅샷·킬스위치는 실제 NAV 그대로.
+
+    `regime`(RegimePort) 이 있고 `killswitch_pct > 0`·`record` 면 실제 NAV 로 누적 손실 킬스위치를
+    본다(FAKE 세션은 관측하지 않는다). `cancel_buys`(주문을 낼 수 있는 호출만) 이고 킬스위치가 이
+    계좌에 켜져 있으면(자동·수동 어느 경로든) `cancel_fn(account_id, market, today, keep=…)` 로
+    당일 미체결 BUY 를 거둔다 — 게이트는 새 주문만 막는다. `hedge_tickers`(헤지·현금 운용 ETF)는
+    거두지 않고 종목 수·섹터 계산에서도 뺀다(옛 `on_killswitch`). 관측이 킬스위치를 **새로** 켜면
+    `notifier` 로 포트의 `killswitch_message` 문구를 한 번 보낸다(Ruling P11 — 문구는 포트가 만든다,
+    레인은 regime 을 import 하지 않는다)."""
     pos_list, cash = _balance(broker, market)
     positions = {p.ticker: p for p in pos_list}
     for p in positions.values():  # 잔고 응답의 종목명·US 거래소는 추가 호출 없이 얻는 관측값
@@ -397,7 +435,33 @@ def build_portfolio(
             conn, p.market, p.ticker, getattr(p, "name", None), "balance"
         )
         spot_ledger.upsert_ticker_exchange(conn, p.market, p.ticker, getattr(p, "exchange", None))
-    nav = _nav_of(pos_list, cash)
+    nav = spot_ledger.nav_of(pos_list, cash)
+    if regime is not None and killswitch_pct > 0 and record:
+        engaged = regime.killswitch_observe(
+            conn,
+            account_id=account.id,
+            market=market,
+            nav=nav,
+            today=today,
+            limit_pct=killswitch_pct,
+            positions=[(p.ticker, p.qty, p.current_price) for p in pos_list],
+        )
+        message = getattr(regime, "killswitch_message", None)
+        if engaged and notifier is not None and message is not None:
+            text = message(conn, account.id)
+            if text:
+                core.notify_quietly(notifier, text)
+    if (
+        regime is not None
+        and cancel_buys
+        and cancel_fn is not None
+        and regime.killswitch_reason(conn, account.id)
+    ):
+        n, left = cancel_fn(account.id, market, today, keep=hedge_tickers)
+        if n or left:
+            logger.warning(
+                "킬스위치: %s %s 당일 미체결 BUY 취소 %d건, 못 함 %s", account.id, market, n, left
+            )
     prev = xledger.latest_nav_before(conn, account.id, today, market=market)
     today_pnl = float(nav / prev - 1) if prev else 0.0
     if record:
@@ -444,6 +508,8 @@ def build_portfolio(
         pending_buys=xledger.pending_buy_amounts(conn, account.id, today, market=market, now=at),
         held_since=xledger.held_since(conn, account.id, tickers=list(positions)),
         trades_this_week=xledger.trades_this_week(conn, account.id, today, market=market),
+        hedge_tickers=hedge_tickers,
+        theme_of=theme_of,
         ledger_marks=marks,
     )
 
@@ -557,6 +623,60 @@ def _flat_order(out: dict) -> dict:
     }
 
 
+# --- 국면·테마 게이트 입력(포트) -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Gates:
+    """시장 단위 게이트 입력. 포트가 없으면 기본값(bull·기울기 0·제외 종목 없음·테마 규칙 생략)."""
+
+    regime: str = "bull"
+    agent_tilt: int = 0
+    excluded: frozenset[str] = frozenset()
+    theme_of: Callable[[str], list[str] | None] | None = None
+    hedge_max_weight: float | None = None  # 헤지 주문의 비중 상한(`hedge.max_weight_pct`)
+
+
+def _agent_tilt(port: Any, conn: sqlite3.Connection, market: str, today: date) -> int:
+    """오늘 시장 세션 제안의 기울기(+1 RISK_ON / −1 RISK_OFF). 헤지가 꺼져 있거나 `agent_gate` 가
+    꺼져 있거나 확신이 `agent_min_confidence` 미만이면 0(기존 국면 한도 그대로)."""
+    cfg = port.hedge_cfg()
+    if not cfg.enabled or not cfg.agent_gate:
+        return 0
+    view = port.view_today(conn, market, today)
+    return stance.tilt_of(view, min_confidence=cfg.agent_min_confidence)
+
+
+def _theme_of(
+    ctx: ExecContext, market: str, today: date
+) -> Callable[[str], list[str] | None] | None:
+    """`ports["scan"]` 의 종목→오늘 상위 테마. 포트가 없거나 조회가 실패하면 None(테마 규칙만
+    빠진다)."""
+    scan = ctx.ports.get("scan")
+    if scan is None:
+        return None
+    try:
+        return scan.theme_of(ctx.conn, market, today)
+    except Exception as e:  # noqa: BLE001 - 테마 조회 실패가 주문 판정을 막지 않는다
+        logger.warning("테마 조회 실패, 테마 규칙 생략 %s: %s", market, e)
+        return None
+
+
+def _gates(ctx: ExecContext, market: str, today: date) -> _Gates:
+    port = ctx.ports.get("regime")
+    excluded = excluded_tickers(ctx.settings, port, market)
+    theme_of = _theme_of(ctx, market, today)
+    if port is None:
+        return _Gates(excluded=excluded, theme_of=theme_of)
+    return _Gates(
+        regime=port.state(ctx.conn, market),
+        agent_tilt=_agent_tilt(port, ctx.conn, market, today),
+        excluded=excluded,
+        theme_of=theme_of,
+        hedge_max_weight=port.hedge_cfg().max_weight_pct,
+    )
+
+
 # --- 실행 ------------------------------------------------------------------------------
 
 
@@ -590,7 +710,9 @@ def execute(
     실행 종류(손절·단타·재호가·리밸런스·헤지·현금 운용·재평가)는 `origin_of` 표 하나로
     (판정·주문 단계, origin, 결정 행 유무)를 정한다. extra_note 는 판정 note 에 덧붙이는 문구
     (재시세 등), change_pct 는 판정 시점 당일 등락률(급등 추격 금지), trade_block 은 매매 제한 종목
-    사유(BUY 거부), max_qty 는 계좌별 수량 상한(줄이기만 한다), skip_accounts 는 건너뛸 계좌.
+    사유(BUY 거부 — KR 일반 BUY/ADD 는 `ports["regime"]` 의 권리 일정 블랙아웃 사유를 합친다),
+    max_qty 는 계좌별 수량 상한(줄이기만 한다), skip_accounts 는 건너뛸 계좌. 국면·전략가 기울기·
+    헤지 비중 상한·제외 종목·테마는 `_gates`(포트) 가 시장 단위로 한 번 정한다.
     is_stop_loss 면 보유기간·주 2회 규칙을 면제하고 approve 계좌도 승인 없이 즉시 낸다.
 
     접수 뒤 기록 실패(`OrderBookkeepingError`)는 다른 계좌를 마친 뒤 다시 올리고, 그 밖의 예외는
@@ -611,6 +733,25 @@ def execute(
     # 멱등 조건이 이 주문을 막거나 반대로 섞인다
     if decision_id is None and origin.has_decision_row:
         decision_id = spot_ledger.decision_id(ctx.conn, date, market, decision.ticker)
+    port = ctx.ports.get("regime")
+    if (
+        port is not None
+        and market == "KR"
+        and decision.action in ("BUY", "ADD")
+        and not is_hedge
+        and not is_park
+    ):
+        # 권리 일정 블랙아웃(기본 끔): 모든 매수 경로(분석·리밸런스·단타)가 지난다
+        ev = port.blackout_reason(ctx.conn, decision.ticker, date)
+        if ev:
+            trade_block = f"{trade_block} · {ev}" if trade_block else ev
+    gates = _gates(ctx, market, date)
+    if origin.origin == "park" and park_max_weight is not None:
+        hedge_weight: float | None = park_max_weight
+    elif origin.origin in ("hedge", "park"):
+        hedge_weight = gates.hedge_max_weight
+    else:
+        hedge_weight = None
     deps = deps_of(ctx)
     results: list[dict] = []
     bookkeeping_error: OrderBookkeepingError | None = None
@@ -636,8 +777,9 @@ def execute(
                     change_pct=change_pct,
                     max_qty=None if max_qty is None else max_qty.get(account.id),
                     trade_block=trade_block,
-                    hedge_weight=park_max_weight if is_park else None,
+                    hedge_weight=hedge_weight,
                     exec_tag=exec_tag,
+                    gates=gates,
                 )
             )
         except OrderBookkeepingError as e:  # 접수 뒤 기록 실패: 다른 계좌를 마친 뒤 올린다
@@ -712,9 +854,11 @@ def _execute_account(
     trade_block: str | None,
     hedge_weight: float | None,
     exec_tag: str | None,
+    gates: _Gates,
 ) -> dict:
-    """계좌 하나: 정책 → 성향 → 포트폴리오 → 게이트 → 결정 단위 멱등 → 수량 상한 → 실행 키 →
-    판정 기록 → 계획 → 승인 요청/주문(코어). 반환은 results 항목 하나."""
+    """계좌 하나: 정책 → 성향 → 포트폴리오(킬스위치 관측·미체결 BUY 회수) → 게이트 → 결정 단위
+    멱등 → 수량 상한 → 실행 키 → 판정 기록 → 계획 → 승인 요청/주문(코어). 반환은 results 항목
+    하나."""
     is_stop_loss = origin.origin == "stop"
     is_hedge = origin.origin in ("hedge", "park")
     mode, note = ctx.policy(ctx.conn, account)
@@ -723,6 +867,9 @@ def _execute_account(
     st = stance.decide(xledger.realized_pnl_5d(ctx.conn, account.id, date, market=market))
     portfolio: rules.Portfolio | None = None
     gate: Callable[[rules.Portfolio], rules.RiskVerdict] | None = None
+    port = ctx.ports.get("regime")
+
+    cancel = killswitch_canceller(ctx)
     try:
         if broker is None:
             raise KisApiError("NO_BROKER", f"계좌 {account.id} 브로커 없음(앱키 미설정)")
@@ -734,11 +881,19 @@ def _execute_account(
             date,
             now=ctx.now(),
             record=ctx.record_portfolio,
+            hedge_tickers=gates.excluded,
+            theme_of=gates.theme_of,
+            cancel_buys=not dry_run,
+            killswitch_pct=ctx.settings.risk.killswitch_drawdown_pct,
+            regime=port,
+            cancel_fn=cancel,
+            notifier=ctx.notifier,
         )
-        # 재판정(gate)은 쓰기 트랜잭션 안에서 돈다 — 휴장일 조회는 여기서 한 번만
+        # 재판정(gate)은 쓰기 트랜잭션 안에서 돈다 — 휴장일 조회·킬스위치는 여기서 한 번만
         hol = _holidays_between(
             ctx.holiday_fn, market, portfolio.held_since.get(decision.ticker), date
         )
+        kill = port.killswitch_reason(ctx.conn, account.id) if port is not None else None
 
         def gate(pf: rules.Portfolio) -> rules.RiskVerdict:
             return rules.evaluate(
@@ -751,10 +906,13 @@ def _execute_account(
                 today=date,
                 is_stop_loss=is_stop_loss,
                 holidays=hol,
+                regime=gates.regime,
                 is_hedge=is_hedge,
                 hedge_max_weight=hedge_weight,
+                agent_tilt=gates.agent_tilt,
                 is_scalp=origin.origin == "scalp",
                 change_pct=change_pct,
+                killswitch=kill,
                 trade_block=trade_block,
             )
 
@@ -818,6 +976,8 @@ def _execute_account(
             )
     if policy.paused and verdict.approved:
         note = (note + "; " if note else "") + "일시정지 중: 판정만 기록, 주문·승인 요청 없음"
+    if gates.regime != "bull" and not is_hedge:
+        note = (note + "; " if note else "") + f"국면 {gates.regime}"
     if origin.origin == "scalp":
         note = (note + "; " if note else "") + "분 단위 단타(모의 전용)"
     if extra_note:
@@ -965,9 +1125,11 @@ def _decision_row(ctx: ExecContext, decision_id: int | None) -> dict | None:
 
 
 def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPending | None]:
-    """승인 실행 직전 최소 재판정(BUY 만, 헤지 제외): 일일 손실 한도에 닿았으면 사유(→ 만료).
+    """승인 실행 직전 최소 재판정(BUY 만, 헤지 제외). 요청 뒤 킬스위치가 켜졌거나(신규 매수 중단을
+    승인으로 우회하지 않게), bear 로 바뀌었거나(전략가 RISK_ON 기울기 없이), 일일 손실 한도에
+    닿았으면 사유(→ 만료). 킬스위치·국면은 `ports["regime"]` 가 있을 때만 본다.
     잔고를 못 읽으면 `KeepPending("balance")` — 판정할 수 없으니 실행하지도 만료시키지도 않는다.
-    수량은 다시 계산하지 않는다. 킬스위치·하락 국면 재검사는 M6(README 알려진 차이)."""
+    수량은 다시 계산하지 않는다."""
 
     def recheck(a: dict, order: dict) -> str | KeepPending | None:
         if order.get("side") != "BUY" or order.get("origin") == "hedge":
@@ -978,6 +1140,16 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
         market = str(order.get("market"))
         broker = ctx.brokers.get(a["account_id"])
         today = run_date_for(market, ctx.now())
+        port = ctx.ports.get("regime")
+        if port is not None:
+            ks = port.killswitch_reason(ctx.conn, a["account_id"])
+            if ks:
+                return f"킬스위치(신규 매수 중단): {ks}"
+            if (
+                port.state(ctx.conn, market) == "bear"
+                and _agent_tilt(port, ctx.conn, market, today) <= 0
+            ):
+                return "국면 bear: 신규 매수 중단"
         try:
             pos_list, cash = _balance(broker, market)
         except (KisApiError, ValueError, AttributeError) as e:
@@ -985,7 +1157,7 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
             return KeepPending("balance")
         prev = xledger.latest_nav_before(ctx.conn, a["account_id"], today, market=market)
         if prev:
-            pnl = float(_nav_of(pos_list, cash) / prev - 1)
+            pnl = float(spot_ledger.nav_of(pos_list, cash) / prev - 1)
             stop = ctx.settings.risk.daily_loss_stop_pct
             if pnl <= stop:
                 return f"일일 손실 {pnl:.2%} 이 한도 {stop:.0%} 초과 — 신규 매수 금지"

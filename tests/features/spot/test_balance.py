@@ -24,6 +24,7 @@ def _deps(settings, accounts, brokers, now):
         notifier=None,
         markets=["KR"],
         stop_event=threading.Event(),
+        dry_run=False,
         ports={"accounts": make_port(accounts, brokers)},
     )
 
@@ -108,3 +109,73 @@ def test_refresh_isolates_broker_failure(project, conn, settings):
         conn, accounts=[a2, a1], brokers=brokers, market="KR", settings=settings, now=MON_OPEN
     )
     assert out["refreshed"] == ["paper-main"] and "real-main" in out["errors"]
+
+
+def test_daemon_refresh_trips_killswitch_and_cancels_open_non_hedge_buys(
+    project, conn, settings, ports
+):
+    """Ruling P4(옛 `balance._refresh(cancel_buys=…)`·`on_killswitch`): 데몬 잔고 갱신이 실제 NAV 로
+    누적 손실 킬스위치를 보고, 켜지면 장중 그 계좌·시장의 당일 미체결 BUY 를 거두되 헤지 ETF 는
+    남긴다. dry-run 데몬은 관측만 하고 취소하지 않는다."""
+    from tests.features.spot.conftest import T0, D, ectx
+    from tests.features.spot.helpers import ok_decision
+    from trader.features.spot import executor
+    from trader.features.spot import ledger as spot_ledger
+    from trader.features.spot.schemas import Decision
+    from trader.kernel.ledger import control
+
+    accounts = [make_account("paper-main", "paper", "auto")]
+    brokers = fake_brokers(accounts)
+    ctx = ectx(ports, settings, conn, accounts, brokers)
+    for kw in ({}, {"ticker": "114800", "limit_price": 5000.0, "stop_loss": None,
+                    "take_profit": None}):  # fmt: skip
+        dec = Decision(**ok_decision(**kw))
+        spot_ledger.ingest_checkpoint(
+            conn, D, "KR", dec.ticker, "30_decision", {"data": dec.model_dump()}
+        )
+        executor.execute(
+            ctx, dec, date=D, market="KR", price=Decimal(str(dec.limit_price)), dry_run=False,
+            is_hedge=dec.ticker == "114800",
+        )  # fmt: skip
+    b = brokers["paper-main"]
+    assert [o.ticker for o in b.orders] == ["005930", "114800"]
+    # 기준 NAV 를 두 배로 잡아 지금 NAV(1천만)가 −50% 로 보이게 한다(합성)
+    control.set_flag(conn, "killswitch_base:paper-main:KR", {"nav": "20000000"})
+    deps = _deps(settings, accounts, brokers, lambda: T0)
+    deps.ports = {**deps.ports, "regime": ports["regime"]}
+    deps.dry_run = True
+    assert spot_jobs.balance_refresh(deps)["KR"]["refreshed"] == ["paper-main"]
+    assert ports["regime"].killswitch_reason(conn, "paper-main")  # 관측은 dry-run 에서도
+    assert b.cancelled == []  # dry-run 은 취소하지 않는다
+    deps.dry_run = False
+    deps.now = lambda: T0 + timedelta(hours=8)  # 18:00 KST 장 밖(`m not in open_now`)
+    assert spot_jobs.balance_refresh(deps, force=True)["KR"]["refreshed"] == ["paper-main"]
+    assert ports["regime"].killswitch_reason(conn, "paper-main")  # 관측은 장 밖에도
+    assert b.cancelled == []  # 장 밖엔 거두지 않는다
+    deps.now = lambda: T0
+    spot_jobs.balance_refresh(deps)
+    assert b.cancelled == ["FAKE-1"]  # 005930 만, 헤지 114800 은 그대로
+
+
+def test_refresh_killswitch_trip_notifies_once(project, conn, settings, ports):
+    """Ruling P11: 잔고 갱신의 NAV 관측이 킬스위치를 **새로** 켜면 `messages.killswitch_on` 문구를
+    한 번 알린다(옛 코드는 health 점검이 늦게 알렸다). 이미 켜진 뒤 갱신은 다시 알리지 않는다."""
+    from tests.features.spot.conftest import T0
+    from trader.kernel.ledger import control
+
+    sent: list[str] = []
+    accounts = [make_account("paper-main", "paper", "auto")]
+    brokers = fake_brokers(accounts)
+    deps = _deps(settings, accounts, brokers, lambda: T0)
+    deps.ports = {**deps.ports, "regime": ports["regime"]}
+    deps.notifier = SimpleNamespace(send=sent.append)
+    spot_jobs.balance_refresh(deps)  # 기준 NAV 를 남긴다 — 손실 없음
+    assert sent == [] and not ports["regime"].killswitch_message(conn, "paper-main")
+    # 기준 NAV 를 두 배로 잡아 지금 NAV 가 −50% 로 보이게 한다(합성)
+    control.set_flag(conn, "killswitch_base:paper-main:KR", {"nav": "20000000"})
+    spot_jobs.balance_refresh(deps)
+    assert len(sent) == 1
+    assert "킬스위치" in sent[0] and "신규 매수를 멈췄어요" in sent[0]
+    assert sent[0] == ports["regime"].killswitch_message(conn, "paper-main")
+    spot_jobs.balance_refresh(deps)  # 이미 켜져 있다 — 다시 알리지 않는다
+    assert len(sent) == 1

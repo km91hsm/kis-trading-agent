@@ -20,7 +20,9 @@ def _exec_ctx(ctx: CommandContext) -> executor.ExecContext | None:
     port = ctx.ports.get("accounts")
     if port is None:
         return None
-    return executor.exec_ctx_from(ctx.settings, ctx.conn, port, ctx.notifier, ctx.now, ctx.state)
+    return executor.exec_ctx_from(
+        ctx.settings, ctx.conn, port, ctx.notifier, ctx.now, ctx.state, ports=ctx.ports
+    )
 
 
 def _parse(arg: str | None) -> tuple[int, list[str]] | None:

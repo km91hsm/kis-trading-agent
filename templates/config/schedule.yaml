@@ -20,5 +20,14 @@ fills_sync:
 reconcile:
   kr: "15:45"                                     # 야간 대사: KR 마감(15:30 KST) 뒤
   us: {time: "16:15", tz: America/New_York}       # US 마감(16:00 ET) 뒤
+rebalance:                                        # 주간 리밸런스(금요일, 시장 현지 시각)
+  kr: {time: "14:30", days: fri}
+  us: {time: "15:00", tz: America/New_York, days: fri}
 balance_refresh:
   interval_s: 300   # 잔고 스냅샷 갱신 주기(초): 장중 매 틱, 장 밖은 30분 넘은 스냅샷만
+regime:
+  kr: "08:25"                                     # 국면 판정 → 시장 세션 → 재판정(평일, KR 개장 전)
+  us: {time: "09:20", tz: America/New_York}       # US 개장(09:30 ET) 전
+ksd_events: "07:05"   # 예탁원 권리 일정 수집(KST, 평일) — KR 시장이면 블랙아웃이 꺼져 있어도 모아 둔다
+theme:
+  interval_s: 1800   # 테마 열기 감지 주기(초, 300~86400): 장중만

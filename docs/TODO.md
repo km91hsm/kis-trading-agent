@@ -133,7 +133,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 13 체결통보 리스너(`notice`)
 - [x] Task 14 큐 `reevaluate` 요청·종목 락
 - [x] Task 15 문서·템플릿·체크리스트·골든 재검증
-- [ ] PR·CI(ubuntu+windows)·머지
+- [x] PR·CI(ubuntu+windows)·머지 (#6, main a12d41f)
 - 이연(M2, M5 가 한 것): 체결통보 리스너(`_notice_listeners`)
 - 이연(M5):
   - M6: killswitch·hedge·`cash_park`·`excluded_tickers`(monitor 의 헤지/현금 운용 건너뛰기·`cancel_buys`)
@@ -146,7 +146,32 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 
 ## M6 — features/regime + 의도 생산자
 국면·stance·시장 세션·킬스위치·블랙아웃, hedge·cash_park·rebalance, scan 의 테마·사건. 완료 기준: 옛 테스트 이식 통과.
-- [ ] 착수 전
+- [x] 착수
+- [x] Task 1 커널 승격 — 세션 공용 스키마·토론 요약·도구 헬퍼, 포트 Protocol, `latest_positions`
+- [x] Task 2 커널 소수정·M5 이연 정리·플레이크 보강
+- [x] Task 3 regime 뼈대 — 설정·원장 v10·국면·킬스위치·블랙아웃·메시지
+- [x] Task 4 `ports["regime"]` + spot executor 게이트 배선·`excluded_tickers`
+- [x] Task 5 시장 세션 — `market_view`·도구·`trader tool market`·에이전트 5종·fake
+- [x] Task 6 `{market}_regime`·`ksd_events` 잡·큐 `market_view`·`trader regime`·`/kill`·상태 절
+- [x] Task 7 spot 헤지(`hedge_tick`)·킬스위치 회수 배선(balance 경로)
+- [x] Task 8 현금 운용(`cash_park`)
+- [x] Task 9 주간 리밸런스(`{market}_rebalance`·큐 `rebalance`)
+- [x] Task 10 `features/scan` 뼈대 + 테마(`theme.py`)·원장 v11 `theme_heat`
+- [x] Task 11 사건 감지(`events.py`·`membership.py`)·`events.yaml`·`news.post_ingest` 훅
+- [x] Task 12 `{market}_theme` 잡·`ports["scan"].theme_of`·`trader scan`·spot 테마 안전장치 배선
+- [x] Task 13 문서·템플릿·체크리스트·골든 재검증
+- [ ] PR·CI(ubuntu+windows)·머지
+- 이연(M6):
+  - M7: discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·`events check` CLI·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
+  - M8: `theme.mature` 데몬 호출(종가표 주입, 피처 스토어)·`metrics.decision_distribution`(헤지 결정 제외 단언은 `source` 로 대체)·`ml_trained` 메시지·`_default_sector_of` 예외 로그·`mature(close_table=None)` 테스트
+  - M9: `_scalp_open`(리밸런스 단타 보유 제외; 지금은 빈 집합)·`hedge_tick` pending 플래그 시 데몬 재시도 없음(옛 결함 보존, `MAX_RETRIES` 죽은 코드)·리밸런스 잔고·시세 전부 실패에도 done 플래그 기록(옛 동일)·커널 `status_message` 절별 실패 격리·`market_view` QueueKind `trading=False`(옛 `TRADING_KINDS` 포함) 확인·stale 예탁원 알림 매 실행(옛 동일)·`test_cli_regime` scalp 1건
+  - M9: 큐 kind `rebalance` 의 `market` 을 `Literal["KR","US"]` 로 검증(현재 `ReconcileParams` 재사용)
+  - M9: 커널 `llm.timeout_by_kind` 기본값에 `market` 없음 — 기존 settings.yaml 사용자는 템플릿 재복사 필요(README/릴리스 노트 안내)
+  - M10: 커널 `latest_positions` 에 asset 필터 없음 — fo 행 생기면 시장 세션 입력에 파생 포지션 섞임; spot `_latest_positions` 와 통합
+  - M9(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격
+  - M11: 웹 `/api/system/theme`(옛 `test_daemon_theme::test_api_theme`)
+  - M12: `trader status` 의 국면 절(옛 `test_status_regime_section`)
+  - 사용자 확인: `models.market_researcher_bull|bear` 모델 키가 옛 `researcher_bull|bear` 와 분리됨(옛 설정을 따르지 않음) — 필요하면 `config/settings.yaml` 에 키 추가
 
 ## M7 — features/scan + ml + jobs
 quant·screener·discovery·유니버스 PIT, 피처·학습·레지스트리·랭커·rl, 작업 큐. 완료 기준: 옛 테스트 이식 통과.

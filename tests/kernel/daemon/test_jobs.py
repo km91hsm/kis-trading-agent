@@ -60,6 +60,26 @@ def test_cron_trigger_kwargs_read_time_and_tz_from_schedule():
     assert kr.cron == {"hour": 7, "minute": 30} and kr.interval_s is None and kr.kind == "scan"
 
 
+def test_cron_mapping_days_overrides_spec_days():
+    schedule = SimpleNamespace(
+        fri={"time": "14:30", "tz": "Asia/Seoul", "days": "fri"},
+        obj=SimpleNamespace(time="09:00", days="mon"),
+        plain="10:00",
+        lst=[{"time": "08:00", "days": "sat"}, "08:30"],
+    )
+
+    def one(key, **kw):
+        return run_build(
+            [feat(spec(id="x", per_market=False, schedule_key=key, **kw))], schedule=schedule
+        )
+
+    assert one("fri", days="mon-fri")[0].trigger_kwargs["day_of_week"] == "fri"
+    assert one("obj", days="tue")[0].trigger_kwargs["day_of_week"] == "mon"
+    assert one("plain", days="mon-fri")[0].trigger_kwargs["day_of_week"] == "mon-fri"
+    a, b = one("lst", days="mon-fri")
+    assert (a.trigger_kwargs["day_of_week"], b.trigger_kwargs["day_of_week"]) == ("sat", "mon-fri")
+
+
 def test_interval_job_trigger_kwargs():
     s = spec(id="poll", trigger="interval", per_market=False, schedule_key=None, interval_s=30)
     (job,) = run_build([feat(s)])

@@ -26,6 +26,7 @@ from trader.features.spot import executor, monitor
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot.monitor_rules import Signal, rule_hit
 from trader.features.spot.schemas import Decision
+from trader.features.spot.settings import CashParkCfg
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.broker.fake import FakeBroker, FakeMarket
 from trader.kernel.broker.models import Cash, Fill, Position
@@ -938,3 +939,31 @@ def test_close_rule_without_close_table_warns_once_per_market_day(conn, settings
     warned = [r for r in caplog.records if "종가표" in r.getMessage()]
     assert len(warned) == 1
     assert control.get_flag(conn, f"close_rule_unchecked:KR:{D.isoformat()}")
+
+
+def test_monitor_skips_excluded_hedge_and_park_tickers(conn, settings, ports):
+    """M5 표의 "hedge/cash_park 가 섞인 단언" 복원(M6): 헤지 ETF(regime 포트)·현금 운용 ETF 는
+    손절·트리거 대상이 아니다(국면 해제·현금 운용 규칙으로만 판다) — 손절선 아래여도 주문 없이
+    `skipped_excluded` 로 센다. 일반 종목은 그대로 점검한다."""
+    s = settings.model_copy(update={"cash_park": CashParkCfg(enabled=True, ticker="423160")})
+    _decision(conn, stop_loss=65000.0)
+    positions = [
+        _pos(cur="63000"),
+        _pos(ticker="114800", avg="5000", cur="3000"),
+        _pos(ticker="423160", avg="100000", cur="50000"),
+    ]
+    accounts = _accounts()
+    cash = {"KR": Cash(currency="KRW", available=Decimal("10000000"), total=Decimal("10000000"))}
+    brokers = {
+        a.id: FakeBroker(to_broker_account(a), positions=positions, cash=cash) for a in accounts
+    }
+    prices = {"005930": Decimal("63000"), "114800": Decimal("3000"), "423160": Decimal("50000")}
+    ctx = _monitor_ctx(s, conn, accounts, brokers, FakeMarket(prices=prices), ports=ports)
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["skipped_excluded"] == 4  # 계좌 2 × 제외 종목 2
+    assert r["checked"] == 2 and r["stop_loss_orders"] == 1  # 005930 만(실전 off 는 주문 없음)
+    sold = {o.ticker for b in brokers.values() for o in b.orders}
+    assert sold == {"005930"}
+    # regime 포트가 없으면 헤지 ETF 도 일반 보유로 본다(현금 운용 ETF 만 제외)
+    ctx2 = _monitor_ctx(s, conn, accounts, brokers, FakeMarket(prices=prices), ports={})
+    assert monitor.monitor_once(ctx2, market="KR", today=D)["skipped_excluded"] == 2

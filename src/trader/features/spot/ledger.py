@@ -11,7 +11,10 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from trader.kernel.execution import ledger as xledger
 from trader.kernel.execution.ledger import day_bounds
+from trader.kernel.execution.ledger import latest_positions as latest_positions  # 재export
+from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.ledger.db import now_iso
 
 _ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
@@ -21,6 +24,14 @@ _ROUND_RE = re.compile(r"^31_decision_r(\d+)$")  # 재평가 라운드 (M5)
 
 _BUY_ACTIONS = ("BUY", "ADD")
 _SELL_ACTIONS = ("SELL", "TRIM")
+
+
+def nav_of(positions: list, cash: Any) -> Decimal:
+    """NAV 단일 산식: 잔고 응답의 총평가가 있으면 그것(예수금 + 평가 합은 결제 전 매수를
+    이중 계산한다), 없으면 예수금 + 평가 합."""
+    if getattr(cash, "nav", None):
+        return cash.nav
+    return cash.total + sum((p.eval_amount for p in positions), Decimal(0))
 
 
 def _txt(v: Any) -> str | None:
@@ -81,33 +92,7 @@ def ingest_checkpoint(
     elif _DECISION_RE.match(stage) or (m_round := _ROUND_RE.match(stage)) is not None:
         # 30_decision 과 재평가 31_decision_r<n> 모두 (date, market, ticker) 결정 행을 덮어쓴다
         # (옛 동작: 최신 결정이 행이 된다). 손절 바닥은 아래 라운드 행(stop_loss)에서 유지한다
-        conn.execute(
-            "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
-            "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
-            "data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(date, market, ticker) DO UPDATE SET action=excluded.action, "
-            "target_weight=excluded.target_weight, order_type=excluded.order_type, "
-            "limit_price=excluded.limit_price, stop_loss=excluded.stop_loss, "
-            "take_profit=excluded.take_profit, horizon_days=excluded.horizon_days, "
-            "confidence=excluded.confidence, rationale=excluded.rationale, "
-            "data_json=excluded.data_json",
-            (
-                day,
-                market,
-                ticker,
-                data.get("action"),
-                _txt(data.get("target_weight")),
-                data.get("order_type"),
-                _txt(data.get("limit_price")),
-                _txt(data.get("stop_loss")),
-                _txt(data.get("take_profit")),
-                data.get("horizon_days"),
-                data.get("confidence"),
-                data.get("rationale"),
-                js,
-                now,
-            ),
-        )
+        _upsert_decision(conn, day, market, ticker, data, js, now, source="llm")
         did = decision_id(conn, d, market, ticker)
         if did is not None and m_round is None:
             _upsert_round(conn, did, 0, data, js, now)
@@ -116,6 +101,63 @@ def ingest_checkpoint(
             rdata, rjs = _with_stop_floor(conn, did, rnd, market, ticker, data, js)
             _upsert_round(conn, did, rnd, rdata, rjs, now)
     conn.commit()
+
+
+def _upsert_decision(
+    conn: sqlite3.Connection,
+    day: str,
+    market: str,
+    ticker: str,
+    data: dict,
+    js: str,
+    now: str,
+    *,
+    source: str,
+) -> None:
+    """결정 행 (날짜, 시장, 종목) upsert 의 유일한 SQL. `source` 는 마지막 쓴 쪽을 따른다
+    (Ruling P8 — 같은 날 헤지 행 뒤 LLM 결정이 오면 'llm'). commit 은 호출자."""
+    conn.execute(
+        "INSERT INTO decisions(date, market, ticker, action, target_weight, order_type, "
+        "limit_price, stop_loss, take_profit, horizon_days, confidence, rationale, "
+        "data_json, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(date, market, ticker) DO UPDATE SET action=excluded.action, "
+        "target_weight=excluded.target_weight, order_type=excluded.order_type, "
+        "limit_price=excluded.limit_price, stop_loss=excluded.stop_loss, "
+        "take_profit=excluded.take_profit, horizon_days=excluded.horizon_days, "
+        "confidence=excluded.confidence, rationale=excluded.rationale, "
+        "data_json=excluded.data_json, source=excluded.source",
+        (
+            day,
+            market,
+            ticker,
+            data.get("action"),
+            _txt(data.get("target_weight")),
+            data.get("order_type"),
+            _txt(data.get("limit_price")),
+            _txt(data.get("stop_loss")),
+            _txt(data.get("take_profit")),
+            data.get("horizon_days"),
+            data.get("confidence"),
+            data.get("rationale"),
+            js,
+            source,
+            now,
+        ),
+    )
+
+
+def insert_hedge_decision(
+    conn: sqlite3.Connection, d: date, market: str, ticker: str, data: dict
+) -> int:
+    """파이썬이 만든 헤지 결정 행(`source='hedge'`). 같은 날·종목이면 갱신하고 행 id 를 돌려준다.
+    라운드 행은 만들지 않는다 — 손절 바닥·분포(llm 결정)에서 빠진다."""
+    day, js = d.isoformat(), _js(data)
+    _upsert_decision(conn, day, market, ticker, data, js, now_iso(), source="hedge")
+    conn.commit()
+    did = decision_id(conn, d, market, ticker)
+    if did is None:  # 방금 쓴 행이 없을 수 없다 — 원장 이상
+        raise RuntimeError(f"헤지 결정 행을 찾지 못함: {market} {ticker} {d}")
+    return did
 
 
 def _with_stop_floor(
@@ -256,6 +298,47 @@ def ticker_exchanges(conn: sqlite3.Connection, market: str) -> dict[str, str]:
         "SELECT ticker, exchange FROM ticker_exchanges WHERE market=?", (market,)
     ).fetchall()
     return {str(r["ticker"]): str(r["exchange"]) for r in rows}
+
+
+def has_open_order_today(
+    conn: sqlite3.Connection,
+    account_id: str,
+    ticker: str,
+    side: str,
+    d: date,
+    *,
+    market: str | None = None,
+) -> bool:
+    """오늘 같은 계좌·종목·방향의 주문이 있으면 True — **체결 완료 주문도 센다**(옛 동작; 오전에
+    체결된 레그를 리밸런스가 다시 내지 않게). 취소·거부 등 죽은 상태만 뺀다. `market` 을 주면
+    `d` 를 그 시장 현지 날짜로 본다."""
+    lo, hi = day_bounds(d, market)
+    row = conn.execute(
+        "SELECT 1 FROM orders WHERE account_id=? AND ticker=? AND side=? "
+        f"AND status NOT IN ({dead_status_sql()}) AND created_at >= ? AND created_at < ? LIMIT 1",
+        (account_id, ticker, side, lo, hi),
+    ).fetchone()
+    return row is not None
+
+
+def has_pending_approval(
+    conn: sqlite3.Connection,
+    account_id: str,
+    ticker: str,
+    side: str,
+    *,
+    market: str,
+    now: str,
+) -> bool:
+    """만료 전 pending 승인 요청이 같은 계좌·시장·종목·방향에 있으면 True(결정 무관 — 결정 행이
+    없는 리밸런스가 같은 감축·증액을 두 번 요청하지 않게)."""
+    return any(
+        a["account_id"] == account_id
+        and str(a["expires_at"]) > now
+        and (a["order"].get("ticker"), a["order"].get("side"), a["order"].get("market"))
+        == (ticker, side, market)
+        for a in xledger.pending_approvals(conn)
+    )
 
 
 # --- 트리거 (monitor) -----------------------------------------------------------------
@@ -409,38 +492,3 @@ def max_stop_since(
         args,
     ).fetchall()
     return max((Decimal(r["stop_loss"]) for r in rows), default=None)
-
-
-def latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:
-    """해당 계좌·시장의 최신 스냅샷 날짜 포지션 `{date, nav, cash, positions}`. 없으면 None.
-    날짜는 positions_snapshot·account_nav 중 최신(전량 청산일은 빈 positions).
-    nav·cash 는 같은 날짜의 `account_nav` 행(없으면 None)."""
-    # 전량 청산한 날은 positions_snapshot 행이 없다 → 날짜는 두 표 중 최신(NAV 행이 항상 남는다)
-    row = conn.execute(
-        "SELECT MAX(d) AS date FROM ("
-        "SELECT MAX(date) AS d FROM positions_snapshot WHERE account_id=? AND market=? "
-        "UNION ALL SELECT MAX(date) FROM account_nav WHERE account_id=? AND market=?)",
-        (account_id, market, account_id, market),
-    ).fetchone()
-    if row is None or row["date"] is None:
-        return None
-    d = row["date"]
-    nav = conn.execute(
-        "SELECT nav, cash FROM account_nav WHERE account_id=? AND market=? AND date=?",
-        (account_id, market, d),
-    ).fetchone()
-    positions = [
-        dict(r)
-        for r in conn.execute(
-            "SELECT ticker, market, qty, avg_price, current_price, eval_amount "
-            "FROM positions_snapshot WHERE account_id=? AND market=? AND date=? "
-            "AND ticker NOT LIKE '\\_CASH%' ESCAPE '\\' ORDER BY ticker",
-            (account_id, market, d),
-        )
-    ]
-    return {
-        "date": d,
-        "nav": nav["nav"] if nav else None,
-        "cash": nav["cash"] if nav else None,
-        "positions": positions,
-    }

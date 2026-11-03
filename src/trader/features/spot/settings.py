@@ -1,10 +1,11 @@
-"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`.
+"""spot 설정 섹션: settings.yaml 의 `risk`·`debate_rounds`·`debate`·`fill_notice`·`cash_park`.
 
 yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -117,11 +118,37 @@ class FillNoticeCfg(BaseModel):
     enabled: bool = False
 
 
+class CashParkCfg(BaseModel):
+    """노는 현금 단기금리 ETF 운용(Stock D-115, **기본 끔**): 하락 국면이라 신규 매수가 막힌 동안만
+    남는 현금(`reserve_pct` 는 남김)을 `ticker` 로 사고, 국면이 풀리면 판다. 국내만."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    ticker: str = "357870"  # TIGER CD금리투자KIS(합성)
+    # NAV 대비 현금으로 남길 몫(조건부 매수·헤지)
+    reserve_pct: float = Field(default=0.20, ge=0, le=1)
+    min_amount: Decimal = Decimal("500000")  # 이보다 적으면 사지 않는다(수수료)
+
+
+class RebalanceCfg(BaseModel):
+    """주간 리밸런스(Phase 25): 최근 LLM 결정의 `target_weight` 대비 ±`band_pct` 넘게 벗어난 보유만
+    되돌린다. 결정은 `lookback_days` 안의 것만 목표로 쓴다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    band_pct: float = 0.05
+    lookback_days: int = 30
+
+
 SECTIONS = (
     Section("settings", "risk", RiskLimits, RiskLimits),
     Section("settings", "debate_rounds", Annotated[int, Field(ge=0, le=2)], lambda: 1),
     Section("settings", "debate", DebateCfg, DebateCfg),
     Section("settings", "fill_notice", FillNoticeCfg, FillNoticeCfg),
+    Section("settings", "cash_park", CashParkCfg, CashParkCfg),
+    Section("settings", "rebalance", RebalanceCfg, RebalanceCfg),
 )
 
 
@@ -151,6 +178,7 @@ class ReconcileAt(BaseModel):
 
     time: str = Field(pattern=_HM)
     tz: str | None = None
+    days: str | None = None  # APScheduler 요일 표기(없으면 잡 기본)
 
 
 class ReconcileSchedule(BaseModel):
@@ -161,6 +189,17 @@ class ReconcileSchedule(BaseModel):
     kr: str | ReconcileAt = "15:45"  # 문자열이면 KST
     us: str | ReconcileAt = Field(
         default_factory=lambda: ReconcileAt(time="16:15", tz="America/New_York")
+    )
+
+
+class RebalanceSchedule(BaseModel):
+    """schedule.yaml `rebalance`: 시장별 주간 리밸런스 시각(금요일, US 는 뉴욕 시각)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kr: str | ReconcileAt = Field(default_factory=lambda: ReconcileAt(time="14:30", days="fri"))
+    us: str | ReconcileAt = Field(
+        default_factory=lambda: ReconcileAt(time="15:00", tz="America/New_York", days="fri")
     )
 
 
@@ -175,5 +214,6 @@ class BalanceRefreshSchedule(BaseModel):
 SCHEDULE_SECTIONS = (
     Section("schedule", "fills_sync", FillsSyncSchedule, FillsSyncSchedule),
     Section("schedule", "reconcile", ReconcileSchedule, ReconcileSchedule),
+    Section("schedule", "rebalance", RebalanceSchedule, RebalanceSchedule),
     Section("schedule", "balance_refresh", BalanceRefreshSchedule, BalanceRefreshSchedule),
 )

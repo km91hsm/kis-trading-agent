@@ -42,6 +42,8 @@ def test_section_keys_and_debate_rounds_bounds(project):
         ("settings", "debate_rounds"),
         ("settings", "debate"),
         ("settings", "fill_notice"),
+        ("settings", "cash_park"),
+        ("settings", "rebalance"),
     ]
     p = project / "config" / "settings.yaml"
     p.write_text("debate_rounds: 3\n", encoding="utf-8")

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -106,13 +106,11 @@ def check_position(
     now: datetime,
     move_pct: Decimal | None = None,
     closes: list[Decimal | None] | None = None,
-    holiday_fn: Callable[[str, date], bool] | None = None,
 ) -> list[Signal]:
     """순수 함수. 손절이면 손절 신호만, 아니면 take_profit → move_7pct → invalidation 순.
     `move_pct` 는 보유기간 프로필의 급등락 임계(Phase 23 T, 없으면 7%). `closes` 는 `close`
-    무효화 조건용 완성 일봉 종가(없으면 그 조건은 미판정). `now`·`holiday_fn` 은 호출 규약
-    (accounts 가 휴장 판정을 주입)용으로 받으며 현재 판정에는 쓰이지 않는다 — 휴장·세션 정렬은
-    종가 목록을 만드는 쪽에서 이미 반영한다."""
+    무효화 조건용 완성 일봉 종가(없으면 그 조건은 미판정). `now` 는 호출 규약용으로 받으며
+    현재 판정에는 쓰이지 않는다 — 휴장·세션 정렬은 종가 목록을 만드는 쪽에서 이미 반영한다."""
     dec = dec_data or {}
     threshold = move_pct if move_pct is not None else MOVE_PCT
     level, _ = effective_stop(dec.get("stop_loss"), None, pos.avg_price, stop_loss_pct)

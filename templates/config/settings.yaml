@@ -26,6 +26,40 @@ risk:
   # 현재가 지정가 재제출(게이트 재통과). 원 지정가보다 max_chase_pct 넘게 불리하면 재제출 없이 알림만. dry-run·off 제외
   reprice: { enabled: true, after_min: 30, max_chase_pct: 0.01 }
 
+# 하락장 대응: 국면 판정 3지표 + 인버스 ETF 헤지 슬리브 (전부 파이썬 규칙)
+hedge:
+  enabled: true
+  max_weight_pct: 0.20     # 계좌 NAV 대비 헤지 포지션 상한(시장별)
+  min_weight_pct: 0.05     # 시장 세션(에이전트) 제안이 bear 헤지 비중을 낮출 수 있는 하한
+  market_session: true     # 매일 시장 세션(거시 애널리스트 + 강세/약세 토론 + 전략가 제안) 1회. 제안은 비중만 조절, 진입 여부는 국면 규칙
+  leverage: true           # 3지표 모두 켜지면 −2x, 아니면 −1x
+  bear_min_signals: 2      # 3지표(200일선 아래·20일 수익률 ≤ −5%·변동성 높음) 중 n개 이상이면 bear
+  exit_streak_days: 5      # bear 해제: 지표 ≤ 1개가 이 일수 연속
+  agent_signal: false      # 전략가 RISK_OFF 를 국면 4번째 지표로 — 한도 기울기(agent_gate)와 이중 반영이라 기본 끔
+  agent_min_confidence: 0.7  # 전략가 제안을 지표·보류로 쓸 최소 confidence
+  agent_gate: true         # 전략가 제안(확신 ≥ agent_min_confidence)이 국면 한도를 한 칸 옮김
+  flow_signal: false       # KR 외인 수급(KODEX 200 20일·5일 순매수 합 모두 음수)을 보조 국면 지표로 (데이터 확인 뒤 켬)
+  switch_instruments: false  # bear 유지 중 −1x↔−2x 판정이 switch_streak_days 연속 어긋나면 교체(전량 매도 → 다음 날 재진입)
+  switch_streak_days: 3
+  ma_days: 200             # 지표 ①: 지수 proxy 종가 < 이 일수 단순이동평균
+  momentum_days: 20        # 지표 ②: 이 거래일 수익률
+  momentum_min: -0.05      # 지표 ②: 수익률 ≤ 이 값이면 약세
+  vix_min: 25.0            # 지표 ③(US): FRED VIX ≥ 이 값
+  realized_vol_min: 0.25   # 지표 ③(KR·VIX 없음): proxy 20일 실현변동성(연율) ≥ 이 값
+  instruments:
+    KR: {inverse: "114800", inverse2x: "252670"}                       # KODEX 인버스 / KODEX 200선물인버스2X
+    US: {inverse: {symbol: SH, exchange: AMS}, inverse2x: {symbol: SDS, exchange: AMS}}  # ProShares (Arca → KIS AMS)
+  index_proxy:
+    KR: "069500"                                                        # KODEX 200 일봉 = 국면 판정용 지수 proxy
+    US: {symbol: SPY, exchange: AMS}
+
+# 권리 일정 블랙아웃(기본 끔): 예탁원 기준일 5일 전 ~ 2일 뒤 신규 매수 금지(수집은 매일, 국내만)
+event_blackout:
+  enabled: false
+  kinds: [paidin, bonus, rev_split, merger_split]   # 유상증자·무상증자·액면교체·합병·분할
+  before_days: 5
+  after_days: 2
+
 web:
   bind: 127.0.0.1
   port: 8787
@@ -42,8 +76,11 @@ models:
   analyst: sonnet
   researcher_bull: sonnet
   researcher_bear: sonnet  # 강세와 같은 모델(전체 검토 L11 — 비대칭이면 정당한 수렴도 '아첨' 으로 판정)
+  market_researcher_bull: sonnet  # 시장 세션 리서처(regime)
+  market_researcher_bear: sonnet  # 강세와 같은 모델(같은 대칭 이유)
   trader: opus
   reflector: sonnet
+  strategist: sonnet  # 시장 세션 전략가(헤지 비중 제안). md 기본은 opus
 
 anonymize: false      # true 면 프롬프트 직전 종목명·티커 치환
 claude_bin: null      # null 이면 PATH 에서 claude 탐색
@@ -52,6 +89,13 @@ claude_bin: null      # null 이면 PATH 에서 claude 탐색
 llm:
   budget_usd: 5.0        # 세션당 --max-budget-usd (전문 전달 세션은 $2~3, 실기 확인)
   timeout_s: 900         # 세션 타임아웃(종류별은 timeout_by_kind 기본값: 스크리너·발굴 300, 재평가 600). 600 에서 분석 35% 가 시간 초과(2026-10-29)
+  timeout_by_kind:       # 종류별 타임아웃(초). 키를 두면 기본 dict 를 통째로 바꾸므로 기본값도 함께 적는다
+    screen: 300
+    discover: 300
+    resume: 600
+    fo_resume: 600
+    reflect: 600
+    market: 600          # 시장 세션(거시·토론·전략가)
   daily_session_cap: 80  # 하루 세션 수 고정 상한 (종목 analyze + 시장 세션 + 장중 발굴·재분석). Phase 24 에 40→80 — 2~4주 통계 뒤 다시 정한다
   usage_throttle:        # 구독 사용률 감속: 세션 rate_limit_event·상태줄 파일의 최신 관측 기준
     enabled: true
@@ -75,3 +119,26 @@ debate:
 # HTS ID(secrets KIS_HTS_ID)가 필요하고, 실전은 실전 계좌 모드가 off 가 아닐 때만 붙는다
 fill_notice:
   enabled: false
+
+# 노는 현금 단기금리 ETF 운용(기본 끔): 하락(bear) 국면이라 신규 매수가 막힌 동안만 남는 현금을
+# 사고(reserve_pct 는 NAV 대비 현금으로 남김, min_amount 보다 적으면 사지 않음), 국면이 풀리면 판다. 국내만
+cash_park:
+  enabled: false
+  ticker: "357870"
+  reserve_pct: 0.20
+  min_amount: 500000
+
+# 주간 리밸런스: 최근 결정(lookback_days 안)의 target_weight 대비 band_pct(비중) 넘게 벗어난 보유만
+# 되돌린다(TRIM 먼저). 시각은 schedule.yaml rebalance
+rebalance:
+  enabled: true
+  band_pct: 0.05
+  lookback_days: 30
+
+# 테마 열기 감지(scan 기능): 오늘 불이 붙은 테마를 점수로 고른다 — 감지·알림·scout 입력만, 매매는 분석 세션.
+# 주기는 schedule.yaml theme.interval_s
+theme:
+  enabled: true
+  top_n: 3                  # 알림·scout·게이트가 보는 상위 테마 수 (1~10)
+  min_cluster_titles: 3     # 키워드 테마: 새 뉴스 제목 공출현 최소 건수 (≥2)
+  weights: {news: 0.35, rank: 0.25, flow: 0.15, saveticker: 0.10, vol: 0.15}

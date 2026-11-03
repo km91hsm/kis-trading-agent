@@ -6,8 +6,11 @@
 
 import json
 import threading
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
+
+import pytest
 
 from tests.features.accounts.conftest import make_account
 from trader.features.spot import jobs as spot_jobs
@@ -250,6 +253,30 @@ class SlowConn(Conn):
         raise TimeoutError
 
 
+@pytest.fixture(autouse=True)
+def _clean_listener_registry():
+    """다른 테스트가 남긴 리스너·스레드가 새지 않게 전역 레지스트리를 앞뒤로 비운다."""
+
+    def drain():
+        with spot_jobs._LISTENERS_LOCK:
+            listeners = list(spot_jobs._LISTENERS.values())
+            spot_jobs._LISTENERS.clear()
+        for lst in listeners:
+            lst.stop()
+
+    drain()
+    yield
+    drain()
+
+
+def _wait_threads_gone(timeout: float = 5.0) -> bool:
+    """kis-notice-* 스레드가 모두 끝날 때까지 join(timeout) 으로 기다린다(폴링·sleep 없음)."""
+    end = time.monotonic() + timeout
+    for t in [t for t in threading.enumerate() if t.name.startswith("kis-notice-")]:
+        t.join(timeout=max(0.0, end - time.monotonic()))
+    return not [t for t in threading.enumerate() if t.name.startswith("kis-notice-")]
+
+
 def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
     project, conn, settings, monkeypatch
 ):
@@ -308,7 +335,7 @@ def test_notice_body_ensures_one_listener_per_env_and_teardown_stops(
         factory.reset_clients()  # 시세 키 비교가 만든 클라이언트 캐시를 비운다
     assert spot_jobs._LISTENERS == {}
     assert socks["paper"].closed
-    assert not [t for t in threading.enumerate() if t.name.startswith("kis-notice-")]
+    assert _wait_threads_gone()
 
 
 # --- 옛 tests/test_multi_account_keys.py 에서 이식(Ruling 18) ---------------------------------

@@ -2,18 +2,25 @@
 
 데몬 `balance_refresh` interval 잡이 정규장 동안 매 틱(장 밖은 `OFF_HOURS_EVERY` 마다 — 입출금·
 이체는 장 밖에도 일어난다), 체결 동기화 큐 요청이 끝난 직후(`only_stale=False`) 부른다. 스냅샷
-기록은 판정과 같은 `executor.build_portfolio` 를 그대로 쓴다(섹터 자동 분류는 옛 동작에서 뺐다)."""
+기록은 판정과 같은 `executor.build_portfolio` 를 그대로 쓴다(섹터 자동 분류는 옛 동작에서 뺐다).
+
+`regime`(RegimePort) 이 있으면 실제 NAV 로 누적 손실 킬스위치를 관측하고(`risk.
+killswitch_drawdown_pct`), `cancel_buys`·`cancel_fn` 이 있으면(데몬 잔고 갱신, dry-run 아님·장중)
+킬스위치가 켜진 계좌의 당일 미체결 BUY 를 거둔다 — `excluded_tickers`(헤지·현금 운용 ETF)는
+남긴다(옛 `on_killswitch`). `notifier` 가 있으면 관측이 새로 켠 킬스위치를 한 번 알린다."""
 
 from __future__ import annotations
 
 import logging
 import sqlite3
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from trader.features.spot import executor
+from trader.features.spot.excluded import excluded_tickers
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.config import market_hours
 from trader.kernel.session.run_store import run_date_for
@@ -57,6 +64,10 @@ def refresh(
     state: Path | None = None,
     only_stale: bool = False,
     stale_after: timedelta = STALE_AFTER,
+    regime: Any | None = None,
+    cancel_buys: bool = False,
+    cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
+    notifier: Any | None = None,
 ) -> dict:
     """시장 하나의 계좌별 잔고를 다시 읽는다. {refreshed: [id], skipped: [id], errors: {id: 사유}}.
     계좌 하나의 실패는 그 계좌만 errors 로. 같은 시장 갱신이 이미 돌고 있으면 기다리지 않고
@@ -66,6 +77,7 @@ def refresh(
         return {"busy": True, "refreshed": [], "skipped": [], "errors": {}}
     try:
         out: dict = {"refreshed": [], "skipped": [], "errors": {}}
+        keep = excluded_tickers(settings, regime, market)
         for a in accounts:
             if market not in a.markets or a.id not in brokers:
                 continue
@@ -76,7 +88,19 @@ def refresh(
                 continue
             try:
                 executor.build_portfolio(
-                    conn, brokers[a.id], a, market, run_date_for(market, now), now=now, record=True
+                    conn,
+                    brokers[a.id],
+                    a,
+                    market,
+                    run_date_for(market, now),
+                    now=now,
+                    record=True,
+                    hedge_tickers=keep,
+                    killswitch_pct=settings.risk.killswitch_drawdown_pct,
+                    regime=regime,
+                    cancel_buys=cancel_buys,
+                    cancel_fn=cancel_fn,
+                    notifier=notifier,
                 )
                 out["refreshed"].append(a.id)
             except (KisApiError, ValueError) as e:

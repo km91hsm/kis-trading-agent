@@ -46,6 +46,7 @@
   - `calls`: `start_call`(일일 상한 검사 포함)·`finish_call`, 오늘(KST) 세션 수 집계 `sessions_today`·`calls_today`.
   - `usage`: 구독 한도(5시간·7일) 관측 두 곳(세션 stream-json 의 `rate_limit_event` → `llm_rate_limits`, 대화형 상태줄 `llm.usage_file`) 중 최신을 `latest_observation`, 사용률이 높으면 새 세션을 줄이는 `session_allowance`·`allowance`·`throttle_enabled`.
   - `agents`: 에이전트 md(YAML 프런트매터 + 본문) 로더 `load_agent`·`by_name`, `--agents` JSON `agents_json`, 오케스트레이터 프롬프트 `orchestrator_prompt`, 공통 규칙 `common_rules`. 모델은 `models` 설정이 md 기본보다 우선하고, md 의 `python -m trader tool` 은 `bundle.tool_command()` 로 치환한다.
+  - `schemas`·`debate`·`tooling`(M6 승격): 세션 공용 결정/토론 스키마, 토론 요약 `research_summary`, 도구 헬퍼(`load_turns`·`shrink`·`call_meta`·`trader_summary`). spot 과 regime 이 함께 쓴다.
   - `anonymize`: 프롬프트 직전 종목명·티커 익명화(`anonymize`·`deanonymize`, `Alias`). 문자열 값만, 단어 경계에서만 치환한다.
   - `stages`: `StageRule`(허용 단계 glob + 선행 단계 + 최소 개수) 검사 `first_rule`·`check_rule`.
   - `run_store`: 체크포인트 저장소 `state/runs/<운영일>/<시장>/<종목>/<이름>.json` — `run_date_for`·`run_dir`·`market_dir`, `checkpoint_payload`·`write_checkpoint`·`read_checkpoint`·`list_checkpoints`.
@@ -196,4 +197,4 @@
 
 ## features 층
 
-`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
+`src/trader/features/<x>/` 는 마일스톤마다 하나씩 채운다. 채워진 기능: `accounts`(M2, 계좌·모드·LIVE 확인·키, `features/accounts/README.md`), `ingest`(M3, KIS·DART·EDGAR·뉴스·커뮤니티·거시 수집과 `trader ingest collect`, `features/ingest/README.md`), `saveticker`(M3, 세이브티커 Chromium 수집기·리더·데몬 잡·Chrome 확장, `features/saveticker/README.md`·`docs/saveticker-collection.md`). 기능 목록·계층·옛 출처 표는 스펙 §2.1, 계약 필드는 §2.3, 이식 순서는 §3 을 본다. `spot`(M4, 레인: 종목 분석 세션·리스크 게이트·승인 경로, `features/spot/README.md`). `regime`(M6, 서비스: 국면·킬스위치·권리 일정 블랙아웃·시장 세션·`{market}_regime`/`ksd_events` 잡·`ports["regime"]`·`trader regime`·텔레그램 `/kill`, `features/regime/README.md`), `scan`(M6, 서비스: 테마 열기·사건 감지·`news.post_ingest` 훅·`ports["scan"]`·`trader scan`, `features/scan/README.md`). 레인(spot)은 두 기능을 `LaneContext.ports["regime"]`·`ports["scan"]` 로만 받고 import 하지 않는다. spot 에는 헤지·현금 운용·주간 리밸런스(M6)도 있다. 기능 골격과 import 규칙은 `CLAUDE.md` 를 따른다.
