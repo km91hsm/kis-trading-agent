@@ -268,6 +268,7 @@ def monitor_cmd(
             ),
             dry_run=dry_run,
             ports=b.ports,
+            close_table=ml.close_table if (ml := b.ports.get("ml")) is not None else None,
         )
         n = 0
         while True:

@@ -168,3 +168,7 @@ def test_gate_names_unique_and_known():
     assert any("게이트 중복" in m and "market" in m for m in contracts.check(dup, roots=[OK_ROOT]))
     bad = [replace(alpha, gates=(mk("nope"),)), beta]
     assert any("nope" in m for m in contracts.check(bad, roots=[OK_ROOT]))
+
+
+def test_evaluation_port_declared_in_kernel_ports():
+    from trader.kernel.execution.ports import EvaluationPort  # noqa: F401
