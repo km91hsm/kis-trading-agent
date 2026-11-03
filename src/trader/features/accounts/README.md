@@ -40,7 +40,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
 11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 `notify.messages` 에 이식하지 않았다(M4/M5/M9 가 더한다).
-12. `/status` 는 한 절이 예외를 내면 명령 전체가 실패한다(절별 격리 없음).
+12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다).
 13. `notify.enabled=false` 와 토큰 없음이 `telegram poll|loop` 에서 같은 토큰 오류 문구로 나온다(원인 구분 없음).
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.
