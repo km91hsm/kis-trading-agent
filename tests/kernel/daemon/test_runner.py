@@ -248,6 +248,23 @@ def test_daemon_start_registers_jobs_heartbeat_and_shutdown(project):
     daemon.shutdown(wait=False)  # 두 번째 호출은 무해
 
 
+def test_bootstrap_hook_runs_after_bootstrap_queue(project, monkeypatch):
+    """만료 queued 정리(`bootstrap_queue`) 뒤에 `daemon.bootstrap` 훅이 enqueue 해야 한다."""
+    from trader.kernel.daemon import queue_jobs as qj
+    from trader.kernel.registry.types import Hook
+
+    order: list[str] = []
+    monkeypatch.setattr(qj, "bootstrap_queue", lambda deps: order.append("queue"))
+    hook = Hook("daemon.bootstrap", lambda *, deps, **_: order.append("hook"))
+    d = make_deps(project, hooks={"daemon.bootstrap": (hook,)})
+    daemon = make_daemon(d, spec(id="a"))
+    try:
+        assert daemon.start(install_signals=False) is True
+    finally:
+        daemon.shutdown(wait=False)
+    assert order == ["queue", "hook"]
+
+
 def test_daemon_second_start_fails_on_lock(project):
     d = make_deps(project)
     first = make_daemon(d, spec(id="a"))
