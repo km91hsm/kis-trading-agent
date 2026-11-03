@@ -7,8 +7,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from trader.kernel.config import LlmSettings
 from trader.kernel.daemon import builtin_jobs as bj
 from trader.kernel.daemon.runner import DaemonDeps
+from trader.kernel.registry.types import Feature
 
 NOW = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
 
@@ -27,7 +29,7 @@ class Notifier:
 
 def _deps(tmp_path: Path, notifier, **kw) -> DaemonDeps:
     return DaemonDeps(
-        settings=SimpleNamespace(notify=SimpleNamespace(enabled=True)),
+        settings=SimpleNamespace(notify=SimpleNamespace(enabled=True), llm=LlmSettings()),
         schedule=None, conn_factory=lambda: sqlite3.connect(":memory:"), state=tmp_path,
         now=lambda: NOW, markets=[], gates={}, stop_event=threading.Event(), dry_run=False,
         notifier=notifier, secrets=SimpleNamespace(), **kw,
@@ -121,9 +123,9 @@ def test_telegram_body_closes_connection_and_propagates_poll_error(tmp_path, mon
     db = connect(tmp_path / "t.db")
     init_schema(db, all_migrations(discover()))
     deps2 = DaemonDeps(**{**deps.__dict__, "conn_factory": factory})
-    sched = SimpleNamespace(telegram_poll=SimpleNamespace(interval_s=30))
+    sched = SimpleNamespace(telegram_poll=SimpleNamespace(interval_s=30), ledger_backup="17:10")
     (job,) = build(
-        [bj.BUILTIN_FEATURE], schedule=sched,
+        [Feature(id="kernel_builtin", tier="service", jobs=(bj.TELEGRAM_POLL,))], schedule=sched,
         settings=deps2.settings, markets=[], ctx=deps2,
     )  # fmt: skip
     run_job(db, job, deps2, stop_event=threading.Event())

@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
 import pandas as pd
 
 from trader.features.ingest import api as ingest_api
-from trader.features.ml import features, quant_report
+from trader.features.ml import dataset, features, quant_report
 from trader.features.ml import registry as model_registry
 from trader.features.ml.settings import load_ml
 from trader.kernel.platform import paths
@@ -82,8 +83,24 @@ class MlPortImpl:
             "diff": diff,
         }
 
+    def close_table(
+        self, market: str, since: date, until: date
+    ) -> Mapping[str, Mapping[date, float | None]]:
+        """종목 → 날짜 → 종가(NaN → None). 빈 표면 `{}`."""
+        df = dataset.close_table(paths.state_dir(), market, since=since, until=until)
+        if df.empty:
+            return {}
+        return {
+            str(t): {d: (None if pd.isna(v) else float(v)) for d, v in col.items()}
+            for t, col in df.items()
+        }
+
     def snapshot(
-        self, markets: list[str], *, tickers: list[tuple[str, str | None]] | None = None
+        self,
+        markets: list[str],
+        *,
+        tickers: list[tuple[str, str | None]] | None = None,
+        extra_targets: list[tuple[str, str, str | None]] | None = None,
     ) -> int:
         port = self._ports.get("accounts")
         market_client = port.market_client() if port is not None else None
@@ -97,6 +114,7 @@ class MlPortImpl:
             universe=ingest_api.load_universe(),
             markets=markets,  # type: ignore[arg-type]
             tickers=tickers,
+            extra_targets=extra_targets,
         )
 
 

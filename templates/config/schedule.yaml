@@ -3,6 +3,7 @@ job_queue:
   interval_s: 10     # 큐 틱(job_queue·fast·reeval·info) 주기(초)
 telegram_poll:
   interval_s: 30     # 텔레그램 명령 폴링·알림 재전송 주기(초)
+ledger_backup: "17:10"   # 원장 백업(KST, 매일): 14일치 일별 + 8주치 월요일 보관
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
 kr:
@@ -37,3 +38,8 @@ theme:
 ml_train: {time: "10:00", days: sat}   # 퀀트 모델 주간 재학습(KST, 토요일)
 features_snapshot: "06:30"   # 피처 스토어 일일 스냅샷(KST, 매일): US 마감(06:00 KST) 뒤·universe_members 앞 — 완결 봉만 적재
 universe_members: "06:40"   # 시점 유니버스 기록(KST, 매일): 그날 유니버스+보유 종목을 학습의 구성원 이력으로 남긴다
+reflect: "16:30"   # 복기(KST, 평일): 만기 채점 → 복기 세션 → 메모리 정리
+daily_report: {kr: "16:20", us: {time: "16:20", tz: America/New_York}}   # 일일 리포트(시장 현지 마감 뒤, 평일)
+paper_review: {time: "09:00", days: sat}   # 모의 체결 점검(KST, 토)
+rl_train: {time: "10:30", days: sat}   # RL 사이저 주간 학습(KST, 토; ml_train 뒤)
+briefing: "07:20"   # 아침 브리핑(KST, 평일; KR 휴장일·일시정지 제외)

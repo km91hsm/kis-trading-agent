@@ -5,7 +5,8 @@ from typing import Any
 from trader.features.regime.blackout import reason as blackout_reason
 from trader.features.regime.killswitch import reason as killswitch_reason
 from trader.features.regime.market_view import load_view as view_today
-from trader.features.regime.regime import core_count, load
+from trader.features.regime.market_view import mature_views
+from trader.features.regime.regime import core_count, load, summary
 from trader.features.regime.settings import BlackoutCfg, HedgeCfg, HedgeInstrument
 from trader.features.regime.settings import hedge_tickers as _hedge_tickers
 
@@ -35,5 +36,7 @@ __all__ = [
     "hedge_tickers",
     "killswitch_reason",
     "load",
+    "mature_views",
+    "summary",
     "view_today",
 ]

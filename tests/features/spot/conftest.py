@@ -9,6 +9,7 @@ import pytest
 from tests.features.accounts.conftest import make_account  # noqa: F401
 from trader.features.accounts import api as accounts_api
 from trader.features.accounts.ports import AccountsPortImpl
+from trader.features.evaluation.ports import EvaluationPortImpl
 from trader.features.regime import ports as regime_ports
 from trader.features.scan import ports as scan_ports
 from trader.features.spot import executor
@@ -47,13 +48,16 @@ def accounts_port():
 
 @pytest.fixture
 def ports(settings, accounts_port):
-    """레인이 받는 포트 dict 모양(`Boot.ports`). scan 은 실제 `ScanPortImpl`."""
-    return {
+    """레인이 받는 포트 dict 모양(`Boot.ports`). scan·evaluation 은 실제 구현체(evaluation 은
+    `Boot.ports` 처럼 같은 dict 를 지연 참조한다)."""
+    out = {
         "accounts": accounts_port,
         "regime": regime_ports.build_port(SimpleNamespace(settings=settings)),
         "scan": scan_ports.build_port(SimpleNamespace(settings=settings)),
         "ml": None,  # 기본은 ml 포트 없음 — 필요한 테스트가 `ml_port` 를 끼운다
     }
+    out["evaluation"] = EvaluationPortImpl(settings, build_registry(discover()), out)
+    return out
 
 
 @pytest.fixture

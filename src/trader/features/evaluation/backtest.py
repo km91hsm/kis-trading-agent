@@ -1,0 +1,127 @@
+"""간이 백테스트 (스펙 §13): 컷오프 이후 결정만 집계한다 (룩어헤드 방지).
+
+만기 엔트리는 realized_return = direction_score(Ruling A3), alpha 는 종가표에 그 종목·날짜 창이
+있을 때만 realized − 벤치마크(없으면 None). 미만기 엔트리는 피처 스토어 종가로 결정일 이후
+horizon 거래일 수익을 outcomes 와 같은 규칙(BUY/ADD +, SELL/TRIM −, HOLD 0)으로 계산한다.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import date, datetime
+from pathlib import Path
+
+from trader.features.evaluation.memory import outcomes
+from trader.kernel.config import KST
+
+
+def _decided_date(iso: str, run_date: str | None = None) -> date | None:
+    """결정 행의 운영일(US 는 뉴욕 날짜) 우선, 없으면 decided_at 의 KST 날짜."""
+    try:
+        if run_date:
+            return date.fromisoformat(run_date)
+        return datetime.fromisoformat(iso).astimezone(KST).date()
+    except ValueError:
+        return None
+
+
+HOLD_BAND = 0.02  # HOLD 적중 = 가격이 밴드 안에 머묾(라벨 up/down 임계와 같은 값)
+
+
+def _hit(action: str, realized: float, price_return: float | None) -> bool:
+    if action == "HOLD":
+        return price_return is not None and abs(float(price_return)) <= HOLD_BAND
+    return realized > 0
+
+
+def simple_backtest(
+    conn: sqlite3.Connection,
+    state: Path | None,
+    *,
+    since: date,
+    market: str | None = None,
+    horizon_default: int = 5,
+) -> dict:
+    """{n, hit_rate, avg_return, avg_alpha, by_action, cutoff, decisions, skipped}."""
+    # 결정 단위 백테스트라 아침 라운드만 (재평가 엔트리는 같은 결정의 장중 판단 — L2)
+    sql = (
+        "SELECT m.*, d.date AS run_date FROM memory_entries m "
+        "LEFT JOIN decisions d ON d.id = m.decision_id WHERE m.round=0"
+    )
+    args: list = []
+    if market:
+        sql += " AND m.market=?"
+        args.append(market)
+    rows = conn.execute(sql + " ORDER BY m.decided_at, m.id", args).fetchall()
+    tables: dict = {}
+    decisions: list[dict] = []
+    skipped = 0
+    for r in rows:
+        d = _decided_date(r["decided_at"], r["run_date"])
+        if d is None or d < since:
+            continue
+        dec = json.loads(r["decision"] or "{}") or {}
+        action = str(dec.get("action") or "HOLD").upper()
+        horizon = int(r["horizon_days"] or horizon_default)
+        m = r["market"]
+        if r["direction_score"] is not None:
+            realized, source = float(r["direction_score"]), "memory"
+            price_return = r["price_return"]
+            alpha = None
+            if state is not None:
+                if m not in tables:
+                    tables[m] = outcomes.close_table(state, m, since=since)
+                res = outcomes.window_return(tables[m], r["ticker"], d, horizon)
+                if res is not None:
+                    alpha = realized - res[1]
+        else:
+            if m not in tables:
+                tables[m] = outcomes.close_table(state, m, since=since)
+            res = outcomes.window_return(tables[m], r["ticker"], d, horizon)
+            if res is None:
+                skipped += 1
+                continue
+            ret, bench = res
+            realized = ret * outcomes.SIGN.get(action, 0.0)
+            alpha, source = realized - bench, "features"
+            price_return = ret
+        decisions.append(
+            {
+                "entry_id": int(r["id"]),
+                "ticker": r["ticker"],
+                "market": r["market"],
+                "decided": d.isoformat(),
+                "action": action,
+                "realized_return": round(realized, 6),
+                "alpha": None if alpha is None else round(float(alpha), 6),
+                "price_return": None if price_return is None else round(float(price_return), 6),
+                "hit": _hit(action, realized, price_return),
+                "source": source,
+            }
+        )
+
+    def agg(items: list[dict]) -> dict:
+        n = len(items)
+        if n == 0:
+            return {"n": 0, "hit_rate": None, "avg_return": None, "avg_alpha": None}
+        alphas = [x["alpha"] for x in items if x["alpha"] is not None]
+        return {
+            "n": n,
+            "hit_rate": round(sum(1 for x in items if x["hit"]) / n, 6),
+            "avg_return": round(sum(x["realized_return"] for x in items) / n, 6),
+            "avg_alpha": round(sum(alphas) / len(alphas), 6) if alphas else None,
+        }
+
+    by_action = {
+        a: agg([x for x in decisions if x["action"] == a])
+        for a in sorted({x["action"] for x in decisions})
+    }
+    return {
+        **agg(decisions),
+        "by_action": by_action,
+        "cutoff": since.isoformat(),
+        "market": market,
+        "skipped": skipped,
+        "decisions": decisions,
+    }

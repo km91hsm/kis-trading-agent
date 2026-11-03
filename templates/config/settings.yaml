@@ -80,6 +80,7 @@ models:
   market_researcher_bear: sonnet  # 강세와 같은 모델(같은 대칭 이유)
   trader: opus
   reflector: sonnet
+  briefing: haiku
   strategist: sonnet  # 시장 세션 전략가(헤지 비중 제안). md 기본은 opus
 
 anonymize: false      # true 면 프롬프트 직전 종목명·티커 치환
@@ -143,6 +144,14 @@ theme:
   min_cluster_titles: 3     # 키워드 테마: 새 뉴스 제목 공출현 최소 건수 (≥2)
   weights: {news: 0.35, rank: 0.25, flow: 0.15, saveticker: 0.10, vol: 0.15}
 
+# 메모리 검색 (스펙 §6.5): 3층 반감기(일), 워밍업 건수, 서킷브레이커 기준
+memory:
+  half_lives: {short: 14, mid: 90, long: 365}
+  warmup: 50
+  drawdown_stop_pct: -0.10
+  vix_spike_pct: 0.30
+  top_k: 5
+
 # 장중 뉴스 발굴 (Phase 23). 뉴스 수집(30분)마다 **새 내용** 뉴스가 있으면 같은 종목도 재분석(오늘 결정이
 # 있으면 재평가 세션), 유니버스 밖은 scout 세션(discover)으로 발굴. 유사 기사(같은 사건의 다른 매체 기사)는
 # 파이썬이 걸러 세션을 띄우지 않는다. 장중 창(monitor 시간) 안에서만.
@@ -152,3 +161,9 @@ discovery:
     min_items: 1          # 종목 재분석에 필요한 새 뉴스 건수
     discover_cap: 20      # 시장별 하루 discover(scout) 세션 상한
     similarity: {jaccard: 0.6, ratio: 0.8, lookback_days: 3}   # 유사 판정: 토큰 Jaccard / 문자열 유사도 / 비교 기간
+
+# 아침 브리핑(Stock docs/06): 평일 KST 07:20 에 haiku 단발 1회 → 텔레그램 5줄(결정·주문과 무관); 시각은 schedule.yaml briefing
+briefing:
+  enabled: true
+  daily_cap: 1      # haiku 단발 하루 상한(0~5)
+  timeout_s: 120

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from trader.features.accounts.gates import GATES
-from trader.kernel.config import ConfigError, market_hours
+from trader.kernel.config import ConfigError, LlmSettings, market_hours
 from trader.kernel.config.market_hours import is_us_holiday
 from trader.kernel.daemon.gates import should_skip
 from trader.kernel.daemon.jobs import build
@@ -61,8 +61,10 @@ def make_deps(project, now: datetime, *, holidays=frozenset({KR_HOLIDAY})) -> Da
 
     window = lambda s, e: SimpleNamespace(monitor=SimpleNamespace(start=s, end=e))  # noqa: E731
     deps = DaemonDeps(
-        settings=SimpleNamespace(),
-        schedule=SimpleNamespace(kr=window("09:00", "15:30"), us=window("09:30", "16:00")),
+        settings=SimpleNamespace(llm=LlmSettings()),
+        schedule=SimpleNamespace(
+            kr=window("09:00", "15:30"), us=window("09:30", "16:00"), ledger_backup="17:10"
+        ),
         conn_factory=factory, state=project / "state", now=Clock(now), markets=["KR", "US"],
         gates={}, stop_event=threading.Event(), dry_run=False,
         ports={"accounts": SimpleNamespace(holiday_fn=lambda: holiday_fn)},

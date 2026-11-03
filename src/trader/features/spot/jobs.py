@@ -368,6 +368,7 @@ def monitor_body(ctx, job) -> dict:
             exchanges=spot_ledger.ticker_exchanges(conn, market) if market == "US" else {},
             dry_run=bool(ctx.dry_run),
             ports=ctx.ports,
+            close_table=ml.close_table if (ml := ctx.ports.get("ml")) is not None else None,
         )
         return {**monitor.monitor_once(mctx, market=market, today=today), **extra}
     finally:

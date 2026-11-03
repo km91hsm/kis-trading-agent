@@ -21,9 +21,9 @@ import math
 import pandas as pd
 
 from trader.features.scan import quant
+from trader.kernel.execution import costs as kernel_costs
 
-# spot 의 costs 는 레인 모듈이라 scan 이 못 쓴다: 같은 값(KR 왕복 30bp, US 50bp)을 둔다
-ROUND_TRIP_BP = {"KR": 30, "US": 50}
+ROUND_TRIP_BP = kernel_costs.ROUND_TRIP_BP  # KR 왕복 30bp, US 50bp (커널 정본)
 STRATEGIES = ("momentum", "screen", "universe_1n")
 
 

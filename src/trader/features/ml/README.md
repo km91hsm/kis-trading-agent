@@ -34,3 +34,5 @@
 - `peer_medians` 반환은 옛 `_peer_section` 모양(`sector, n, dates, median, mine, diff`)을 유지한다(Ruling T6-1).
 - 커널 runner 는 `daemon.bootstrap` 훅을 `bootstrap_queue`(stale·만료 정리) 뒤에 부른다(옛과 같은 정리 → enqueue 순, Ruling F2).
 - `ml_config`/`load_ml` 은 호출마다 레지스트리를 다시 만든다(성능 이슈 없음, 미최적화).
+
+- M8 이후: `close_table` 주입(`MonitorContext`·`MlPort.close_table`)이 살아 있고, `ROUND_TRIP_BP` 중복은 커널 `execution/costs.py` 로 해소됐다. RL 사이저는 evaluation `rl/` 로 옮겼다(`trader evaluation rl …`, `ml_trained` 문구는 evaluation 이 쓴다).

@@ -1,0 +1,125 @@
+from datetime import UTC, date, datetime
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from tests.features.ml.helpers import trading_days
+from tests.features.spot.helpers import ok_decision
+from trader.features.evaluation.memory import outcomes, store
+from trader.features.ml import api as ml_api
+from trader.features.ml import dataset
+from trader.features.spot.ledger import ingest_checkpoint
+from trader.kernel.execution import ledger as kledger
+
+D0 = date(2026, 9, 1)
+DAYS = trading_days(30, start=D0)
+NOW = datetime(2026, 10, 17, tzinfo=UTC)
+
+
+def _store(prices: dict[str, list[float]]):
+    rows = []
+    for t, closes in prices.items():
+        for d, c in zip(DAYS[: len(closes)], closes, strict=True):
+            rows.append({"date": d, "ticker": t, "market": "KR", "close": c, "volume": 1})
+    df = pd.DataFrame(rows)
+    for c in ml_api.FEATURE_COLUMNS:
+        if c not in df.columns:
+            df[c] = np.nan
+    ml_api.write_rows(df[ml_api.FEATURE_COLUMNS])
+
+
+def _decision(conn, i, ticker, action, decided_day: date):
+    ingest_checkpoint(
+        conn,
+        decided_day,
+        "KR",
+        ticker,
+        "30_decision",
+        {"data": ok_decision(ticker=ticker, action=action)},
+    )
+    dec_id = kledger.decision_id(conn, decided_day, "KR", ticker)
+    return store.record_decision(
+        conn,
+        decision_id=dec_id,
+        ticker=ticker,
+        market="KR",
+        account_id="paper-main",
+        decided_at=datetime(
+            decided_day.year, decided_day.month, decided_day.day, 6, tzinfo=UTC
+        ).isoformat(),
+        decision={"action": action},
+        row=None,
+        horizon_days=5,
+    )
+
+
+def test_mature_fills_scores_from_feature_store(conn, project):
+    # A: 100 → 104 (5거래일 뒤 +4%), B: 100 → 98 (−2%) → 1/N 벤치마크 +1%
+    _store({"A": [100] + [100] * 4 + [104] + [104] * 24, "B": [100] * 5 + [98] + [98] * 24})
+    eid = _decision(conn, 1, "A", "BUY", DAYS[0])
+    r = outcomes.mature(conn, state=None, today=DAYS[10])
+    assert len(r) == 1 and r[0]["entry_id"] == eid
+    e = store.get_entry(conn, eid)
+    assert abs(e["direction_score"] - 0.04) < 1e-9 and abs(e["price_return"] - 0.04) < 1e-9
+    assert r[0]["price_return"] == 0.04 and r[0]["direction_score"] == 0.04
+    table = outcomes.close_table(None, "KR")
+    ret, bench = outcomes.window_return(table, "A", DAYS[0], 5)
+    assert abs(ret - 0.04) < 1e-9 and abs(bench - 0.01) < 1e-9  # 1/N 벤치마크
+    assert e["outcome_at"] and e["tier"] == "short"
+    assert outcomes.mature(conn, state=None, today=DAYS[10]) == []  # 멱등
+
+
+def test_mature_skips_unmatured_and_without_prices(conn, project):
+    _store({"A": [100] * 30})
+    early = _decision(conn, 1, "A", "BUY", DAYS[27])  # 만기 전
+    nopx = _decision(conn, 2, "Z", "BUY", DAYS[0])  # 종가 없음
+    assert outcomes.mature(conn, state=None, today=DAYS[29]) == []
+    assert store.get_entry(conn, early)["outcome_at"] is None
+    assert store.get_entry(conn, nopx)["outcome_at"] is None
+
+
+def test_sell_and_hold_decisions(conn, project):
+    _store({"A": [100] * 5 + [90] * 25, "B": [100] * 5 + [110] * 25})
+    sell = _decision(conn, 1, "A", "SELL", DAYS[0])
+    hold = _decision(conn, 2, "B", "HOLD", DAYS[0])
+    outcomes.mature(conn, state=None, today=DAYS[10])
+    s = store.get_entry(conn, sell)
+    assert abs(s["direction_score"] - 0.10) < 1e-9  # 매도: 하락이 이익 (부호 반전)
+    h = store.get_entry(conn, hold)
+    # 미보유(모름) HOLD: 방향 점수 0, 오른 종목을 안 산 것은 손실이 아니다
+    assert h["direction_score"] == 0.0 and h["price_return"] == pytest.approx(0.10)
+
+
+def test_mature_waits_for_today(conn, project):
+    # 종가는 30일 치가 있어도 today 가 만기 전이면 채우지 않는다(백필 데이터로 미래를 보지 않음)
+    _store({"A": [100] + [100] * 4 + [104] + [104] * 24})
+    eid = _decision(conn, 1, "A", "BUY", DAYS[0])
+    assert outcomes.mature(conn, state=None, today=DAYS[2]) == []
+    assert store.get_entry(conn, eid)["outcome_at"] is None
+    assert len(outcomes.mature(conn, state=None, today=DAYS[7])) == 1
+
+
+def test_mature_reads_only_window_files(conn, project, monkeypatch):
+    """reflect 가 스토어 전체 parquet 를 읽지 않도록 미결 엔트리의 최소 결정일 이후만 읽는다."""
+    _store({"005930": [100.0 + i for i in range(30)]})
+    _decision(conn, 1, "005930", "BUY", DAYS[3])
+    seen = {}
+    real = dataset.load_all
+
+    def spy(state=None, *, market=None, since=None, until=None, columns=None):
+        seen.update(market=market, since=since, until=until, columns=columns)
+        return real(state, market=market, since=since, until=until, columns=columns)
+
+    monkeypatch.setattr(dataset, "load_all", spy)
+    outcomes.mature(conn, state=None, today=DAYS[10])
+    assert seen["market"] == "KR" and seen["until"] == DAYS[10]
+    assert seen["since"] is not None and seen["since"] <= DAYS[3]
+
+
+def test_mature_injects_clock(conn, project):
+    _store({"A": [100] * 5 + [104] * 25})
+    eid = _decision(conn, 1, "A", "BUY", DAYS[0])
+    fixed = datetime(2026, 10, 20, 3, tzinfo=UTC)
+    outcomes.mature(conn, state=None, today=DAYS[10], now=lambda: fixed)
+    assert store.get_entry(conn, eid)["outcome_at"] == fixed.isoformat()

@@ -5,13 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 
 from trader.features.spot.schemas import Decision
+from trader.kernel.execution.costs import round_trip_bp
 
-_ROUND_TRIP_BP = {"KR": 30, "US": 50}
-
-
-def round_trip_bp(market: str) -> int:
-    """시장별 왕복 비용(bp). 모르는 시장은 보수적으로 US 값."""
-    return _ROUND_TRIP_BP.get(market, _ROUND_TRIP_BP["US"])
+__all__ = ["expected_return", "expected_value", "round_trip_bp"]  # round_trip_bp: 커널 재노출
 
 
 def expected_value(decision: Decision, price: Decimal) -> float | None:

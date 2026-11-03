@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -147,7 +148,109 @@ class MlPort(Protocol):
         ...
 
     def snapshot(
-        self, markets: list[str], *, tickers: list[tuple[str, str | None]] | None = None
+        self,
+        markets: list[str],
+        *,
+        tickers: list[tuple[str, str | None]] | None = None,
+        extra_targets: list[tuple[str, str, str | None]] | None = None,
     ) -> int:
-        """피처 스냅샷을 적재하고 행 수를 돌려준다."""
+        """피처 스냅샷을 적재하고 행 수를 돌려준다. `extra_targets` 는 대상에 더한다."""
+        ...
+
+    def close_table(
+        self, market: str, since: date, until: date
+    ) -> Mapping[str, Mapping[date, float | None]]:
+        """종목 → 날짜 → 종가. 결측은 None, 자료가 없으면 빈 매핑."""
+        ...
+
+
+class EvaluationPort(Protocol):
+    """판단 기억·보정·서킷브레이커·RL 사이저 — 구현은 evaluation 기능이 맡는다."""
+
+    def memory_context(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        inputs: dict,
+        market: str,
+        asof_date: date,
+        now: datetime,
+        state: Path | None,
+    ) -> dict:
+        """유사 과거 판단 기억 블록."""
+        ...
+
+    def calibration_injected(self) -> bool:
+        """보정 리포트를 판단 입력에 주입하는지."""
+        ...
+
+    def calibration_report(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        ticker: str,
+        market: str,
+        asof_date: date,
+        state: Path | None,
+        now_iso: str,
+    ) -> dict | None:
+        """종목의 보정 리포트. 없으면 None."""
+        ...
+
+    def record_decision(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        decision: dict,
+        ticker: str,
+        market: str,
+        date: date,
+        round_no: int,
+        now: datetime,
+        state: Path | None,
+        accounts: list,
+        skipped_debate: bool | None,
+    ) -> int | None:
+        """판단을 메모리 엔트리로 기록하고 그 엔트리 id 를 돌려준다(기록하지 않으면 None).
+        섀도 장부는 건드리지 않는다."""
+        ...
+
+    def update_breaker(
+        self, conn: sqlite3.Connection, *, market: str, nav_series: list[tuple[str, Decimal]]
+    ) -> dict | None:
+        """NAV 계열로 서킷브레이커 상태를 갱신한다."""
+        ...
+
+    def rl_sizer(self, state: Path | None) -> Any | None:
+        """RL 사이저(승격본). 없으면 None."""
+        ...
+
+    def rl_propose(
+        self,
+        sizer: Any,
+        *,
+        state: Path | None,
+        ticker: str,
+        market: str,
+        decision: dict,
+        portfolio: Any,
+        nav_hist: list[tuple[str, Decimal]],
+        base: list[float] | None,
+    ) -> tuple[list[float], float, list[float]]:
+        """(관측 벡터, 제안 비중, 기준 벡터)."""
+        ...
+
+    def rl_record(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        decision_id: int,
+        account_id: str,
+        model_version: str,
+        obs: list[float],
+        llm_weight: float,
+        proposed_weight: float,
+        applied: bool,
+    ) -> int:
+        """RL 제안을 기록하고 행 id 를 돌려준다."""
         ...
