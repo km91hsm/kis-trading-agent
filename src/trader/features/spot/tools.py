@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -36,6 +36,7 @@ from trader.kernel.session.run_store import (
     list_checkpoints,
     market_dir,
     read_checkpoint,
+    run_date_for,
     run_dir,
     write_checkpoint,
 )
@@ -122,7 +123,8 @@ def _guarded(fn):
 
 @dataclass
 class ToolContext:
-    """도구 서브프로세스의 실행 컨텍스트. policy·paused·inputs 는 accounts·inputs 포트에서 온다."""
+    """도구 서브프로세스의 실행 컨텍스트. policy·paused·inputs 는 accounts·inputs 포트에서 온다.
+    `ports` 는 `Boot.ports` 그대로 — 실행 게이트·trader_context 가 `regime`·`scan` 을 본다."""
 
     settings: Any
     accounts: list
@@ -137,6 +139,7 @@ class ToolContext:
     policy: Callable[[Any, Any], tuple[str, str | None]] | None = None
     paused: Callable[[Any], bool] | None = None
     inputs: Any = None  # InputsPort 구현
+    ports: Mapping[str, Any] = field(default_factory=dict)
 
 
 def ctx_from_ports(
@@ -175,6 +178,7 @@ def ctx_from_ports(
         policy=policy,
         paused=paused,
         inputs=ports.get("inputs"),
+        ports=dict(ports),
         **extra,
     )
 
@@ -299,9 +303,47 @@ def holding_context(ctx: ToolContext, ticker: str, market: str, d: date) -> dict
     return out
 
 
+def _regime_port(ctx: ToolContext) -> Any | None:
+    """원장이 있고 헤지가 켜져 있을 때의 regime 포트(아니면 None)."""
+    port = ctx.ports.get("regime")
+    if ctx.conn is None or port is None or not port.hedge_cfg().enabled:
+        return None
+    return port
+
+
+def _market_view_context(ctx: ToolContext, market: str) -> dict | None:
+    """오늘 시장 세션의 결론 요약 (Phase 18). 없으면 None."""
+    port = _regime_port(ctx)
+    if port is None:
+        return None
+    v = port.view_today(ctx.conn, market, run_date_for(market, ctx.now()))
+    if not v:
+        return None
+    return {k: v.get(k) for k in ("stance", "hedge_weight", "leveraged", "confidence", "rationale")}
+
+
+def _regime_context(ctx: ToolContext, market: str) -> dict | None:
+    """국면(Phase 17 H): {state, count, signals, since}. 기록이 없거나 원장·포트가 없으면 None."""
+    port = _regime_port(ctx)
+    if port is None:
+        return None
+    r = port.load(ctx.conn, market)
+    if not r:
+        return None
+    sig = r.get("signals") or {}
+    return {
+        "state": r.get("state"),
+        "count": r.get("count"),
+        "signals": {k: sig.get(k) for k in ("ma_below", "momentum_weak", "vol_high")},
+        "since": r.get("since"),
+        "note": "bear: 게이트가 신규 BUY/ADD 거부·헤지 ETF 보유; neutral: 한도 축소",
+    }
+
+
 def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: dict) -> dict:
-    """트레이더 입력의 파이썬 제공분: quote·risk_limits·costs_bp·portfolio·holding.
-    (memory·calibration·quant·regime·theme 은 이연 — README 알려진 차이)"""
+    """트레이더 입력의 파이썬 제공분: quote·risk_limits·costs_bp·portfolio·holding·regime·
+    market_view(`ports["regime"]` 가 없으면 둘 다 None).
+    (memory·calibration·quant·theme 은 이연 — README 알려진 차이)"""
     quote = ((inputs.get("technical") or {}).get("quote") or {}).get("data")
     return {
         "quote": quote,
@@ -309,6 +351,8 @@ def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: 
         "costs_bp": costs.round_trip_bp(market),
         "portfolio": portfolio_context(ctx, market, d),
         "holding": holding_context(ctx, ticker, market, d),
+        "regime": _regime_context(ctx, market),
+        "market_view": _market_view_context(ctx, market),
     }
 
 
@@ -776,6 +820,7 @@ def _exec_ctx_of(ctx: ToolContext) -> executor.ExecContext:
         holiday_fn=ctx.holiday_fn,
         record_portfolio=not runner.is_fake(),
         market_client=ctx.market_client,
+        ports=ctx.ports,
     )
 
 

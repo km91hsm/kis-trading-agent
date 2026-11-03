@@ -289,7 +289,8 @@ def monitor_body(ctx, job) -> dict:
     conn = ctx.conn_factory()
     try:
         ectx = executor.exec_ctx_from(
-            ctx.settings, conn, port, ctx.notifier or NullNotifier(), ctx.now, ctx.state
+            ctx.settings, conn, port, ctx.notifier or NullNotifier(), ctx.now, ctx.state,
+            ports=ctx.ports,
         )
         if ectx.market_client is None:
             return {"skipped": "시세 클라이언트 없음"}

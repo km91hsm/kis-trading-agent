@@ -8,6 +8,7 @@
 - 국면(`regime.py`): 3지표(200일선·모멘텀·변동성) + 보조(전략가 RISK_OFF·KR 외인 수급) → `bull|neutral|bear`, bear 해제는 히스테리시스. 상태는 control `regime:<market>` 한 곳.
 - 킬스위치(`killswitch.py`): (계좌·시장) NAV 가 기준 대비 `risk.killswitch_drawdown_pct` 넘게 빠지면 control `killswitch` 를 켠다. 자동 발동은 발동 계좌만, 수동(`/kill`·CLI)은 전 계좌. 해제는 사람만(원인 메모 `MIN_NOTE` 자 이상). 기준은 `killswitch_base:<acct>:<m>`, 입출금 의심은 `killswitch_flow:<acct>:<m>`(기록만).
 - 블랙아웃(`blackout.py`): 예탁원 기준일을 control `ksd_events:KR` 에 종류별 마지막 성공분으로 합쳐 두고, `event_blackout.enabled` 면 기준일 `before_days` 전 ~ `after_days` 뒤 신규 매수 사유를 낸다(국내만, 기본 끔).
+- 포트(`ports.py`): `PORT = Port("regime", build_port)` → `RegimePortImpl`(커널 `RegimePort` 전부). 레인은 `Boot.ports["regime"]` 로 국면(헤지 꺼짐·플래그 없음 → bull)·오늘 시장 판단(`market_view:<m>` 날짜 일치)·헤지 종목/상품·비중 clamp·킬스위치 사유/관측·블랙아웃 사유를 받는다.
 - 문구(`messages.py`): `regime_change`·`market_view`·`killswitch_on`·`ksd_stale`. 코드값은 커널 `REGIME`·`STANCE` 표로 한글.
 
 ## 규칙
@@ -21,7 +22,7 @@
 
 ## 테스트
 
-`tests/features/regime/`, KIS 권리 일정 TR 파싱은 `tests/kernel/broker/test_market_ksd.py`.
+`tests/features/regime/`(포트는 `test_ports.py`, 현물 게이트 배선은 `tests/features/spot/test_executor_regime.py`), KIS 권리 일정 TR 파싱은 `tests/kernel/broker/test_market_ksd.py`.
 
 ## 알려진 차이 (옛 저장소 대비)
 

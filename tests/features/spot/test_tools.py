@@ -207,6 +207,42 @@ def test_checkpoint_read_section(ctx, project):
     assert r["data"]["risk_limits"]["max_position_pct"] == 0.25
 
 
+def test_trader_context_includes_regime_and_market_view_when_port_present(ctx, project, ports):
+    """`ports["regime"]` 가 있으면 trader_context 에 국면·오늘 시장 판단 절이 붙는다(옛
+    `_regime_context`·`_market_view_context`). 포트가 없거나 기록이 없으면 None."""
+    from trader.kernel.ledger import control
+
+    _inputs(project)
+    assert tools.trader_context(ctx, "KR", D, "005930", {})["regime"] is None
+    control.set_flag(
+        ctx.conn,
+        "regime:KR",
+        {
+            "state": "neutral",
+            "count": 1,
+            "since": "2026-10-01",
+            "signals": {"ma_below": True, "momentum_weak": False, "vol_high": False},
+        },
+    )
+    view = {
+        "date": D.isoformat(),
+        "stance": "RISK_OFF",
+        "hedge_weight": 0.1,
+        "leveraged": False,
+        "confidence": 0.8,
+        "rationale": "합성 근거",
+    }
+    control.set_flag(ctx.conn, "market_view:KR", view)
+    ctx.ports = ports
+    got = tools.trader_context(ctx, "KR", D, "005930", {})
+    assert got["regime"]["state"] == "neutral" and got["regime"]["count"] == 1
+    assert got["regime"]["signals"] == {"ma_below": True, "momentum_weak": False, "vol_high": False}
+    assert got["regime"]["since"] == "2026-10-01"
+    assert got["market_view"] == {k: view[k] for k in view if k != "date"}
+    control.set_flag(ctx.conn, "market_view:KR", {**view, "date": "2026-10-08"})  # 어제 것
+    assert tools.trader_context(ctx, "KR", D, "005930", {})["market_view"] is None
+
+
 def _big_inputs(project, ticker="005930", market="KR"):
     """실기 크기의 00_inputs: 일봉 260·분봉 120·호가 10단·뉴스 20+10·커뮤니티 50."""
     d = run_dir(D, market, ticker)
@@ -396,7 +432,7 @@ def test_bundle_trader_has_reports_summary_context_within_limit(ctx, project):
         and b["context"]["portfolio"]["paper-main"]["positions"] == []
     )
     assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < 24_000
-    assert "market_view" not in b["context"]  # 시장 세션 제안은 이연(README 알려진 차이)
+    assert b["context"]["market_view"] is None  # 오늘 시장 세션 제안 없음 (Phase 18)
     assert "note" not in b  # 실기 크기에서는 손실 축약 없이 들어가야 한다
     assert "evidence" not in b["reports"][0]  # 트레이더 묶음은 evidence 를 뺀다
     assert set(b["research_summary"]["round0"]["bull"]) < set(

@@ -50,3 +50,33 @@ def test_unexplained_nav_jump_flags_flow_suspicion_without_touching_base(conn):
     # 사람이 기준을 다시 잡으면 의심 기록도 지운다
     killswitch.release(conn, note="출금 2,500 확인 — 기준 재설정")
     assert killswitch.flow_suspicion(conn, "paper-main", "KR") is None
+
+
+def test_baseline_and_release_read_account_nav(conn):
+    """Ruling P3: 기준은 `account_nav` 의 가장 이른 양수 NAV(0 은 건너뛴다), 해제는 (계좌·시장)별
+    최신 NAV 로 기준을 다시 잡는다. 합성 값."""
+    from datetime import date
+    from decimal import Decimal as D
+
+    from trader.features.regime import killswitch
+
+    rows = [
+        ("paper-main", "2026-10-26", "KR", "0"),
+        ("paper-main", "2026-10-27", "KR", "1000"),
+        ("paper-main", "2026-10-28", "KR", "1200"),
+        ("paper-main", "2026-10-28", "US", "50"),
+    ]
+    conn.executemany(
+        "INSERT INTO account_nav(account_id, date, market, nav, cash, created_at) "
+        "VALUES (?, ?, ?, ?, '0', '2026-10-28T00:00:00+00:00')",
+        rows,
+    )
+    conn.commit()
+    assert killswitch._baseline(conn, "paper-main", "KR", D("900")) == D("1000")
+    kw = {"market": "KR", "today": date(2026, 10, 28), "limit_pct": 0.15}
+    assert killswitch.observe(conn, account_id="paper-main", nav=D("800"), **kw)  # −20%
+    killswitch.release(conn, note="합성 시험 — 기준 재설정")
+    base = killswitch.control.get_flag
+    assert D(base(conn, "killswitch_base:paper-main:KR")["nav"]) == D("1200")
+    assert D(base(conn, "killswitch_base:paper-main:US")["nav"]) == D("50")
+    assert killswitch.reason(conn, "paper-main") is None

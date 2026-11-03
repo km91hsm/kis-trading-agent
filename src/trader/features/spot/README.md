@@ -7,7 +7,7 @@
 - 원장 v6·v9 테이블(`migrations.py`/`ledger.py`): v9 `triggers`(장중 감시 트리거 — 종류·가격·처리 시각·세션 id), v6 `decisions`(날짜·시장·종목당 1행, 금액·비중은 TEXT), `decision_rounds`(라운드별 행, 0 = 최초 결정, `31_decision_r<n>` 은 M5 재평가), `analyst_reports`, `debate_turns`, `ticker_names`, `ticker_exchanges`. 체크포인트(`10_analyst_<role>`, `20_debate_r<n>_<side>`, `30_decision`)를 `ledger.ingest_checkpoint` 가 멱등 적재한다.
 - 세션: `session_kinds.py` 의 `ANALYZE`(`SessionKind`)·`AGENTS`(애널리스트 4 + bull/bear 리서처 + trader, md 는 `agents/`), `analyze.py`(입력 수집 → 세션 → 결정), `fake.py`(`FAKE_CLAUDE=1` 흉내).
 - 도구: `tool_cli.py` 의 `TOOLS`(`trader tool status|collect|checkpoint list|read|write|bundle|summarize|submit-decision`), 구현은 `tools.py`, 단계 전제조건은 `WRITE_RULES`·`SUBMIT_RULE`(`StageRule`, fnmatch glob).
-- 게이트·실행: `rules.py`(리스크 판정)·`costs.py`·`stance.py`·`stops.py`·`horizon.py`·`tradability.py`·`summary.py`(수렴 감시·합의 토론 생략), `executor.py`(`ExecContext`, 계좌별 판정 → 멱등 claim → 승인 요청 또는 `execution.core.transmit`, `ORIGINS`).
+- 게이트·실행: `rules.py`(리스크 판정)·`costs.py`·`stance.py`·`stops.py`·`horizon.py`·`tradability.py`·`summary.py`(수렴 감시·합의 토론 생략), `executor.py`(`ExecContext`, 계좌별 판정 → 멱등 claim → 승인 요청 또는 `execution.core.transmit`, `ORIGINS`), `excluded.py`(`excluded_tickers` — 헤지 ETF ∪ 현금 운용 ETF, 종목 수·섹터 계산에서 제외).
 - 운영 경로(M5): `cli.py`(`trader spot …`), `telegram.py`(`/approve`·`/reject`), `jobs.py`(데몬 잡·큐 kind·체결통보 리스너 조립), `messages.py`(`approval_line` — 종목 표기는 spot 소유).
 - 체결·잔고·대사: `fills.py`(외부 체결 행·부분/전량·만료·모호 플래그), `balance.py`(`positions_snapshot`·`account_nav` 갱신), `reconcile.py`(브로커 보유 vs 스냅샷 대사 — 스냅샷만 덧쓰고 주문은 유지, 하루 1회 알림), `notice.py`(KIS 체결통보 웹소켓 리스너 — 공시 알림이 아니다).
 - 장중 감시·재평가: `monitor_rules.py`(손절·익절·급등락·무효화·정기 순수 규칙), `monitor.py`(`monitor_once` — 손절 집행·트리거 기록·재평가 큐 등록), `resume.py`(`RESUME` 세션 종류·`31_decision_r<n>` 재평가·`stop_floor`·트리거 가격 게이트), `reprice.py`(아침 미체결 재호가, 하루 1회), `locks.py`(`lock_for(market, ticker)` 종목 락 — 재평가와 분석이 겹치지 않게; M7 `analyze_ticker` 가 공유할 예정).
@@ -53,7 +53,7 @@ CLI(`uv run trader spot --help` 로 확인):
 
 ## 규약
 
-- 레인은 `trader.kernel.*` 만 import 한다. 계좌·수집 같은 서비스 기능은 `Boot.ports`(`accounts`·`inputs`)로 주입받는다(`registry.import_violations`). 지연 import 로 다른 기능에 닿지 않고 전부 포트·커널을 경유한다.
+- 레인은 `trader.kernel.*` 만 import 한다. 계좌·수집·국면 같은 서비스 기능은 `Boot.ports`(`accounts`·`inputs`·`regime`·`scan`)로 주입받는다. `ExecContext.ports`·`ToolContext.ports` 에 `regime` 이 없으면 국면 bull·기울기 0·킬스위치/블랙아웃 없음, `scan` 이 없으면 테마 규칙 생략으로 본다(`registry.import_violations`). 지연 import 로 다른 기능에 닿지 않고 전부 포트·커널을 경유한다.
 - 모든 주문·승인은 `kernel/execution` 코어를 지난다. 계좌 모드·일시정지는 `ExecContext.policy`·`paused` 콜백(accounts 포트)으로 받는다. 알림·로그에는 계좌 id 만 쓴다. `dry_run` 은 인자가 아니라 env `TRADER_DRY_RUN` 하나로 하위 프로세스(LLM 세션)까지 전달한다.
 - 스키마 모델은 `extra="forbid"`. 가격은 양수만, `target_weight` 는 0~0.25. 쓰기 허용·전제조건은 `WRITE_RULES`(glob) + 스키마·파일명↔페이로드 일치·`debate_rounds` 상한이 강제한다.
 - 원장 쓰기는 호출마다 commit 하고 행 단위로 멱등이다(같은 단계 재적재 = 덮어쓰기, 행 id 유지). 로거는 `trader.spot`.
@@ -77,7 +77,7 @@ CLI·명령
 
 세션·컨텍스트
 - 주문 알림 제목 꼬리 표 `_STAGE_KIND`(커널 `execution.core`)는 `order_stage` 를 `_r` 로 잘라 찾는 옛 동작을 그대로 둔다. 그래서 `_r` 로 시작하는 꼬리가 있는 `52_order_reprice`·`53_order_rebalance` 는 꼬리가 비고, 실제로 꼬리가 붙는 것은 `51_order`(재평가)·`55_order_sl`(손절) 등 `_r` 가 없는 단계다(M4 의 spot 이 쓰는 것은 51·55).
-- `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding 만 싣는다. memory(M8)·calibration(M8)·quant(M7)·regime(M6)·theme(M6)·market_view(M6) 컨텍스트는 주입하지 않는다.
+- `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None). memory(M8)·calibration(M8)·quant(M7)·theme 컨텍스트는 주입하지 않는다.
 - `AnalystRole` 에서 `"quant"` 를 뺐다(`ANALYST_ROLES` 4종과 일치, quant 레인은 M7).
 - `ask_json`·`probe_usage`(`quick.py`)는 이식하지 않았다(M8). `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
 - `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
@@ -95,10 +95,10 @@ CLI·명령
 실행·승인
 - 승인 실행의 `pending → approved` 조건부 UPDATE 는 `expires_at > now` 도 요구한다 — 재판정(`recheck`) 도중 만료되면 주문 없이 `expired`(옛 저장소는 실행 시작 때만 만료를 봤다).
 - 계좌 포트는 현물 계좌만 내놓고 정책은 `account_mode`(실전 파생 항상 off)다.
-- 승인 재판정에서 killswitch·bear 재검사를 하지 않는다(M6). 승인 계좌가 설정에 없으면 `expired` 로 처리한다. (트리거 가격 재검사는 M5 에서 `resume` 이 맡는다).
+- 승인 재판정의 킬스위치·bear 거부 문구는 게이트와 같은 꼴(`킬스위치(신규 매수 중단): …`·`국면 bear: 신규 매수 중단`)이다(옛 `킬스위치 켜짐(…) — 신규 매수 중단`·`하락 국면(bear) 전환 — 신규 매수 금지`). `ports["regime"]` 가 없으면 이 둘은 보지 않는다. 승인 계좌가 설정에 없으면 `expired` 로 처리한다. (트리거 가격 재검사는 M5 에서 `resume` 이 맡는다).
 - `submit-decision` 결과 dict 에 `memory_entry_id` 가 없다(M8). `memory_entries` 단언은 삭제했다(M8).
 - `approvals.fingerprint` 는 NOT NULL 이라 NULL 지문 승인은 만들 수 없다(옛 `test_approve_legacy_null_fingerprint_passes` → `test_approval_without_fingerprint_cannot_be_created`). 옛 pending 승인의 지문 불일치는 옛 데이터를 옮기지 않으므로 해당 없음.
-- 메모리 서킷브레이커(M8)·RL 사이저(M7)·국면/전략가 기울기·킬스위치·섹터·테마·권리 일정(M6)은 아직 없다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
+- 메모리 서킷브레이커(M8)·RL 사이저(M7)·섹터 자동분류(M11)는 아직 없다. 국면·전략가 기울기·킬스위치(관측·당일 미체결 BUY 회수)·권리 일정은 `ports["regime"]`, 테마는 `ports["scan"]`(M6 Task 12 전까지 없음)로 받는다. 킬스위치 회수의 US 거래소는 옛 `universe.us` 대신 관측 표(`ledger.exchange_of`)다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
 
 M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·큐 reevaluate)
 - 미이식(범위): 킬스위치·헤지 ETF·`cash_park`·`excluded_tickers` 제외 처리(M6), 섹터 자동분류(`_classify`, M11 분류), 메모리 브레이커·메모리 항목(M8), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡은 M9. 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile` 3종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.
