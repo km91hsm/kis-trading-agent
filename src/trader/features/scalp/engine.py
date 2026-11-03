@@ -2,7 +2,7 @@
 
 틱(60초)마다: ⓪ 열린 단타의 청산 점검(`exits` — 허용 판정과 무관, bear·금지·한도는 신규 진입만
 막는다) → ① 허용 판정(설정·모의 계좌·paused·일일 손실 한도·bear 국면·전략가 RISK_OFF/
-scalp_ok=false·동시 보유) → ② 판정 회수(지난 틱에 제출한 판정자 결과) → ③ 후보(오늘 `_scan` picks
+scalp_ok=false) → ② 판정 회수(지난 틱에 제출한 판정자 결과) → ③ 후보(오늘 `_scan` picks
 + 새 뉴스 재분석 종목 + 관심종목 − 보유·헤지·오늘 이미 거래) ≤ `max_universe` → ④ 1분봉 진입 규칙
 (`signals.py`) → ⑤ 포트 `stock_exec.execute(scalp_leg=...)` 로 계좌 모드·dry_run·게이트를 그대로
 지키며 주문(실전 계좌는 `skip_accounts`). 포지션은 **계좌별 다리**(진입·청산 주문 id)로 들고,
@@ -120,10 +120,7 @@ def allowed(ctx: ScalpContext, market: str, today: date, st: dict) -> str | None
                 return "전략가 제안: 단타 금지(scalp_ok=false)"
             if view.get("stance") == "RISK_OFF":
                 return "전략가 제안 RISK_OFF"
-    n = len(st.get("open") or [])
-    if n >= cfg.max_positions:
-        return f"동시 보유 {n}/{cfg.max_positions}"
-    return None
+    return None  # 동시 보유 상한은 진입 루프가 본다(open + pending — 차단하면 판정 대기가 버려진다)
 
 
 # --- 후보 -------------------------------------------------------------------------------

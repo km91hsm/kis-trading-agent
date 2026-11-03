@@ -67,9 +67,8 @@ def test_allowed_blocks_disabled_paused_bear_and_strategist(
     assert "RISK_OFF" in engine.allowed(ctx, "KR", D, {})
     set_flag(conn, view_key, view | {"scalp_ok": False, "confidence": 0.3})
     assert engine.allowed(ctx, "KR", D, {}) is None  # 확신 미달 제안은 무시
-    # 동시 보유 상한(A7 끝): 열린 단타가 max_positions 이면 신규 진입 금지
-    full = {"open": [{"ticker": "a"}, {"ticker": "b"}]}
-    assert engine.allowed(ctx, "KR", D, full) == "동시 보유 2/2"
+    # 동시 보유 상한은 허용 판정이 아니다(진입 루프가 본다 — T5-R1)
+    assert engine.allowed(ctx, "KR", D, {"open": [{"ticker": "a"}, {"ticker": "b"}]}) is None
     # 모의 계좌가 없으면 금지
     ports["accounts"].accounts = lambda: [a for a in accounts if a.env == "real"]
     assert "모의" in engine.allowed(ctx, "KR", D, {})
@@ -190,3 +189,45 @@ def test_real_account_never_gets_scalp_legs(scalp_ctx, market, conn, project, ac
     assert read_checkpoint(d, "57_order_scalp_entry_real-1") is None
     pos = load_state(project / "state", D, "KR")["open"][0]
     assert "real-1" not in pos["legs"]
+
+
+def test_full_slots_block_entry_in_loop_not_allowed(scalp_ctx, settings, market, project):
+    """T5-R1: 슬롯(open + pending)이 차면 진입 루프만 멈춘다 — skipped 없음, 판정 대기 유지,
+    묶음 알림은 주기를 지킨다(강제 flush 없음)."""
+    from tests.features.scalp.conftest import SyncJudge
+
+    state = project / "state"
+    scan_checkpoint(project, "KR", ["005930"])
+    market.minutes["005930"] = bars(burst=True)
+
+    class Waiting(SyncJudge):
+        def poll(self, key):
+            return "pending"
+
+    cfg = settings.scalp.model_copy(update={"max_positions": 1, "judge": True})
+    ctx = scalp_ctx(settings=settings.model_copy(update={"scalp": cfg}), judge=Waiting(None))
+    pending = {
+        "000660": {
+            "signal_price": "10050", "signal_time": "102900", "reason": "r",
+            "exchange": None, "submitted_at": NOW.isoformat(),
+        }
+    }  # fmt: skip
+    st = {
+        "open": [], "closed": [], "done": [], "halted": None, "pending": pending,
+        "outbox": [{"leg": "entry", "label": "035420", "price": "10000", "reason": "r"}],
+        "digest_at": (NOW - timedelta(minutes=1)).isoformat(),
+    }  # fmt: skip
+    engine.save_state(state, D, "KR", st)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert "skipped" not in out and out["entries"] == [] and out["candidates"] == 0
+    after = load_state(state, D, "KR")
+    assert "000660" in after["pending"] and "005930" not in after["done"]
+    assert len(after["outbox"]) == 1 and ctx.notifier.msgs == []  # 주기 안 — 보류
+    assert ctx.judge.seen == []  # 새 신호를 판정에 보내지도 않는다
+    # 열린 포지션 1개(상한 1)여도 같다
+    after["pending"] = {}
+    after["open"] = [{"ticker": "000660", "status": "held", "legs": {}, "qty": {}}]
+    engine.save_state(state, D, "KR", after)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert "skipped" not in out and out["entries"] == []
+    assert ctx.notifier.msgs == []
