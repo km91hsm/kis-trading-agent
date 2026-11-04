@@ -31,7 +31,7 @@
 
 ## 공개면 (`api.py`)
 
-`HedgeCfg`·`HedgeInstrument`·`BlackoutCfg`·`load`(국면 플래그)·`core_count`·`killswitch_reason`·`blackout_reason`. 시장 세션 산출은 레인이 `ports["regime"]` 로 받는다.
+`HedgeCfg`·`HedgeInstrument`·`BlackoutCfg`·`load`(국면 플래그)·`core_count`·`killswitch_reason`·`blackout_reason`. 시장 세션 산출은 레인이 `ports["regime"]` 로 받는다. fo 레인(M10)이 쓰는 포트 메서드: `load(conn, market)`(저장된 국면 레코드 — `state`)·`view_today(conn, market, today)`(오늘 시장 뷰 — `context.market_view`)·`hedge_tickers(market)`(현물 헤지 종목 — 헤지 보유 읽기)·`killswitch_reason(conn, account_id)`(킬스위치 사유 — 게이트·엔진의 진입 회수).
 
 ## 테스트
 

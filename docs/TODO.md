@@ -110,7 +110,7 @@ SessionKind 레지스트리·FAKE·executor 코어·`features/spot` analyze 경�
   - M6: killswitch·blackout·hedge·park·regime 컨텍스트·승인 재판정의 bear/killswitch 재검사·`test_rules` 의 regime 호출자
   - (M7 회수 완료; RL 은 M8, `AnalystRole` quant 복원은 Ruling M7-K1 로 하지 않음): quant·theme
   - M8: memory·calibration·`quick.py`(`ask_json`·`probe_usage`)·`test_quick` 9건·결과 dict `memory_entry_id`·`memory_entries` 단언
-  - M10: fo 세션·`test_session_fo`·`test_schemas_fo`·`test_ticks_fo`·`test_usage_fo`
+  - M10: fo 세션·`test_session_fo`·`test_schemas_fo`·`test_ticks_fo`·`test_usage_fo` → M10 에서 해소(fo `test_session`·`test_schemas`·`test_usage_fo`·`test_ticks_fo`)
   - M11: `decision_trace`
   - M12: `trader status`·`test_status_shows_last_decisions`·`paths.agents_dir` 정리·native-host argv 우회(번들)·`test_native_origin_routes_before_cli`
   - Ruling: `trader collect`·`trader analyze` 최상위 별칭은 두지 않는다(기능 sub-app 일관: `trader spot analyze`, `trader ingest collect`)
@@ -140,7 +140,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - (M7 회수 완료): 공시/뉴스 트리거 생산(`news.post_ingest` 훅)·`analyze_ticker` kind(종목 락 `locks.lock_for` 공유)·discover·`reevaluate` 의 dry_run 담긴 요청 실행 단언·US 거래소 보강 단언
   - M8: memory(메모리 브레이커 인자·`test_resume` memory 1건)·`close` 무효화 종가표(`close_table` 콜러블 주입, Ruling 14)
   - M12: `ops_check` 잡·health(`kernel/ops`, M9 플랜 A15 에서 M12 로 옮김)
-  - M10: fo 분기·`test_balance_dispatch` 3건·`test_fills_fo`
+  - M10: fo 분기·`test_balance_dispatch` 3건·`test_fills_fo` → M10 에서 해소(fo `fills.sync`·`balance` 분기, `tests/features/fo/test_fills.py`·`test_balance.py`)
   - M11: jobs 라우터(웹 큐 API)·섹터 자동분류(`_classify`)·웹 시세 허브 `hub_blocked` 비켜서기(live_quotes yielding)
   - 커널 후보: `_close_stale_sessions` 공개 헬퍼화(spot jobs 와 runner 중복)
 
@@ -165,8 +165,8 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - (M7 회수 완료; `events check` CLI 는 훅으로 대체): discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
   - M8: `theme.mature` 데몬 호출(종가표 주입, 피처 스토어)·`metrics.decision_distribution`(헤지 결정 제외 단언은 `source` 로 대체)·`ml_trained` 메시지·`_default_sector_of` 예외 로그·`mature(close_table=None)` 테스트
   - (M9 회수 완료): `_scalp_open` → `ports["scalp"].open_tickers` 합집합 · `hedge_tick` pending 플래그 시 데몬 재시도 없음·리밸런스 잔고·시세 전부 실패에도 done 플래그·stale 예탁원 알림 = 옛 동작 보존 확인(변경 없음) · 커널 `status_message` 절별 격리 완료 · `market_view` QueueKind `trading=False` 유지(Ruling A15e, regime README 규칙 절) · `test_cli_regime` scalp 1건 → `tests/features/scalp/test_cli.py` · 큐 kind `rebalance` `RebalanceParams` 완료 · `timeout_by_kind` `market: 600` 기본값 완료(기존 settings.yaml 사용자는 템플릿 재복사 안내 유지)
-  - M10: 커널 `latest_positions` 에 asset 필터 없음 — fo 행 생기면 시장 세션 입력에 파생 포지션 섞임; spot `_latest_positions` 와 통합
-  - M10(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격
+  - M10: 커널 `latest_positions` 에 asset 필터 없음 — fo 행 생기면 시장 세션 입력에 파생 포지션 섞임; spot `_latest_positions` 와 통합 → M10 에서 해소(커널 `latest_positions(asset=)`)
+  - M10(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격 → M10 에서 해소(`kernel/session/{fake,tooling}.py`, regime·fo 가 import)
   - M11: 웹 `/api/system/theme`(옛 `test_daemon_theme::test_api_theme`)
   - M12: `trader status` 의 국면 절(옛 `test_status_regime_section`)
   - 사용자 확인: `models.market_researcher_bull|bear` 모델 키가 옛 `researcher_bull|bear` 와 분리됨(옛 설정을 따르지 않음) — 필요하면 `config/settings.yaml` 에 키 추가
@@ -218,9 +218,9 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 13 features/briefing(아침 브리핑, haiku 단발)
 - [x] Task 14 문서·템플릿·TODO·전체 재검증
 - [x] PR·CI(ubuntu+windows)·머지 (#9, main 766e131)
-- Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
+- Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10 (→ M10 에서 해소)
 - Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R2(T9-R1 뒤집음) `readiness.interval_kinds_of` 는 interval 잡 `kind` 수집(커널 잡 큐·내장 잡 포함) · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
-- 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영
+- 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영 → fo `nav_series` 는 M10 에서 해소
 
 ## M9 — features/scalp
 단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m9-scalp.md`(브랜치 `feat/m9-scalp`).
@@ -237,16 +237,34 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - Ruling(M9 플랜): A1 주문 경로는 spot 이 노출하는 `stock_exec` 포트(execute·cancel·sync_fills; 게이트 복제 기각) · A2 `scalp` origin 은 spot ORIGINS 유지 · A3 JSON 상태 파일 유지·마이그레이션 없음(legacy 테스트 1건 미이식) · A4 잡 `{market}_scalp` kind `scalp` interval `{market}.monitor.interval_s`·게이트 `none`(본문이 창·휴장·일시정지 거르고 outbox flush) · A5 판정자 `quick.ask_json` + `session_allowance(kind="scalp_judge")` · A6 후보 = `_scan` 체크포인트 + `job_requests(source=news)` + `ScanPort.watchlist` · A8 모의 전용 `skip_accounts`, `block_reason` 커널 승격 · A9 `ScalpPort.open_tickers` 로 리밸런스 제외 · A10 `SCALP_EXIT` 에 `carry_over` 추가 · A12 `event.at` 은 주입 시계 · A13 커널 `status_message` 절 격리 · A14 `_kind` 가 `_entry/_exit` 꼬리 제거 · A15 `OPEN_STATUSES` 커널, `DEAD_STATUSES` import, `timeout_by_kind` 기본 `market: 600`, `RebalanceParams`, `market_view trading=False` 유지, `ops_check`/health 는 M12 · A16 판정 컨텍스트 뉴스는 빈 목록(`InputsPort.recent` 는 M11/M12 후보)
 - Ruling(M9, 실행 중 추가): P1 `timeout_by_kind` 기본값 테스트는 `tests/kernel/config/test_llm_settings.py` · T4-R1 `judge_context.regime` 은 `ports["regime"].load` 저장 레코드를 그대로(없음 → `{state: None, count: None}`; 플랜 A5/A6 의 `state()/core_count()` 문구 대체) · T5-R1 `max_positions` 는 `allowed()` 가 아니라 진입 루프가 open+pending 으로 센다(옛 동작, 플랜 A7 정정) · T6-R1 커널 `core.cancel` 은 잔량(`qty − SUM(fills.qty)`)으로 취소, 잔량 0 이면 브로커 호출 없이 `ok False` "남은 수량 없음(전량 체결)"(spot US 취소에도 적용, KR 은 `QTY_ALL_ORD_YN=Y` 라 무영향) · T7-R1 `SCALP_TICK.gate="none"`, 본문이 `ctx.gates["monitor"]` 를 런타임에 재사용(창 밖·주말·휴장)·`accounts.paused` 직접 확인·건너뛴 모든 경로에서 outbox flush, `exchanges={}` · T8-R1 scalp CLI --market 이 KR/US 외면 exit 1(옛은 US 처리) · T8-R2 report --live US 거래소 = 판정 사건 → 원장 ticker_exchanges → NAS(옛 universe.us, 레인은 scan import 불가) · F2 scalp backtest 도 today=run_date_for 를 넘김(옛 UTC 날짜 결함 수정)
 - 이연(M9):
-  - M10: FAKE 헬퍼 `kernel.session` 승격 · 커널 `latest_positions` asset 필터
-  - M10(최종 리뷰): `skip_accounts` 에 `policy != "auto"` 추가 검토(approve 모의 계좌 승인 요청 누적, F1) · adopt SQL `origin='scalp'` 필터(F3) · `scalp_body` monitor 게이트 부재 시 fail-closed(`{"skipped": "monitor 게이트 없음"}`) · 틱 단위 브로커·시세 클라이언트 캐시(`ScalpContext`; 지금은 호출마다 `accounts_port.brokers()` 재생성) · `judge_for` 전역 단일체 생성 `threading.Lock` · spot monitor 가 단타 보유분(`open_tickers`)을 손절·트리거 대상에서 빼지 않음(검토) · 다음 플랜 Global Constraints 의 "이름 금지" 문구를 "계좌·개인·수집 원문 금지" 로 좁히기(상장사 이름 리터럴은 저장소 관례)
+  - M10 에서 해소: FAKE 헬퍼 `kernel.session` 승격 · 커널 `latest_positions` asset 필터
+  - M10 Task 1 에서 처리: F1 `skip_accounts` 의 `policy != "auto"` 추가는 **검토 완료 — 보존**(approve 모의 계좌는 사용자가 의도한 승인 모드) · F3 adopt SQL `origin='scalp'` 필터 적용 · F4 `scalp_body` monitor 게이트 부재 시 fail-closed 적용 · `judge_for` 단일체 생성 `threading.Lock` 적용(커밋 c9539d4)
+  - 이연 유지: 틱 단위 브로커·시세 클라이언트 캐시(`ScalpContext`) → M12 · spot monitor 가 단타 보유분(`open_tickers`)을 손절·트리거 대상에서 빼지 않음 → M11 검토 · 다음 플랜 Global Constraints 의 "이름 금지" 문구를 "계좌·개인·수집 원문 금지" 로 좁히기(상장사 이름 리터럴은 저장소 관례)
   - M11: 웹 `/system/scalp` 자원·SSE `scalp` 키 · `InputsPort.recent`(판정 컨텍스트 뉴스, 지금 `news=[]`)
   - M12: `ops_check`/health · `trader status` 단타 절 CLI 점검
   - 테스트 보강: US 시장 테스트(`exchange_of` 폴백·`analyze_targets` 거래소) · `StockExecPortImpl.cancel` broker None 가드 · 커널 tradability 테스트의 spot 헬퍼 import 정리 · `test_state` 종목명 리터럴 합성화
 
 ## M10 — features/fo
-파생 Lane(`LegStore`, 커널 executor 코어 위). 완료 기준: 옛 `fo/*` 계열 테스트 이식 통과.
-- [ ] 착수 전
-- [ ] 옛 tests/broker/test_fo_market.py::test_option_quote_iv_is_percent_and_reprice_converts 이식(trader.fo.pricing 의존, M1 에서 이월)
+파생 Lane(`LegStore`, 자체 실행기 — A1). 완료 기준: 옛 `fo/*` 계열 테스트 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m10-fo.md`(브랜치 `feat/m10-fo`).
+- [x] 플랜 작성(Task 1~9, Ruling A1~A22; 4683902)
+- [x] Task 1 커널·accounts·scalp 준비(`fo_accounts/fo_brokers`·파생 장 시간·`rule_hit`/FAKE 승격·`latest_positions(asset=)`; bdcd216, M9 F3/F4 c9539d4)
+- [x] Task 2 fo 뼈대(feature·settings·마이그레이션 14·schemas·types·pricing·messages·템플릿; bcb5a8f)
+- [x] Task 3 store·`LegStore`·상태기계 복구/adopt(19b256d)
+- [x] Task 4 게이트·사이징·트리거 순수 모듈(e9d9ea4)
+- [x] Task 5 다리 실행기·체결 동기화·잔고 대조(9077ff6·e5c6f5a, fix 32f151f·6d6d65a)
+- [x] Task 6 입력·아침 세션·LLM 도구·세션 종류·FAKE·에이전트(dfcb7ff, 마이그레이션 테스트 fc55bd1, 승격 fix db6f27f)
+- [x] Task 7 모니터 엔진·재평가·데몬 잡·큐 kind(3061f2e)
+- [x] Task 8 CLI·order-test·`/fo`·상태 절(a56b2db `fo_reconcile` 큐 kind·f48a7b6)
+- [x] Task 9 README·architecture·CLAUDE.md·TODO·전체 재검증(`docs(fo): README·architecture·CLAUDE.md·TODO`)
+- [x] 옛 tests/broker/test_fo_market.py::test_option_quote_iv_is_percent_and_reprice_converts 이식(`tests/features/fo/test_pricing.py`, A21)
+- [ ] PR·CI(ubuntu+windows)·머지
+- Ruling(M10 플랜): A1 fo 는 자체 실행기(커널 `transmit` 불사용, 한 트랜잭션·`FoOrderRequest`·fo 알림) · A2 `AccountsPort.fo_accounts/fo_brokers` · A3 `LegStore(IdemStore)` · A4 `fo_flags` 테이블 대신 control 플래그 7 접두 · A5 잡 3개(`gate="none"`, 본문이 파생 시계)·큐 kind 4개 · A6 세션 `fo`/`fo_resume`·`extra_cap_key=None`(fo 쪽 상한) · A7 도구 `fo`·`submit-fo-decision` · A8 판정 입력의 뉴스·거시는 M11 `InputsPort.recent`(`news_macro` 절 빈 채) · A9 커널 승격(`rule_hit`·FAKE·`tooling`·`indicators`·`get_trigger`; 사본 허용은 리뷰 후 철회) · A10 타 기능 설정·테이블은 속성 접근/raw SQL · A11 CLI 9개 · A12 `/fo`·상태 절(health `_fo` M12·웹 M11) · A13 메시지 · A14 `order_test` · A15 M9 F1 보존·F3/F4/Lock 적용 · A16 템플릿 · A17 테스트 `tests/features/fo/` · A18 주입 시계 · A19 `FoProduct` · A20 `in_entry_window`(끝 15:30 포함) · A21 IV 테스트 · A22 `nav_series(asset="fo")`
+- Ruling(M10, 실행 중 추가): `store.tx` 는 자기 중첩만 합류·암묵 tx 는 선commit · 커널 `insert_fill(commit=)` 추가 · `positions.recover` 진입부 commit 가드 · fo 상한은 원자적 예약 없음 · paused 는 halted 플래그·정산 전이도 차단(옛은 dry_run 만) · `reevaluate_request` 는 사람 요청도 게이트 · 엔진 재평가 enqueue source `fo_monitor` · `fo_session` 큐는 파생 시계 불사용 · 마스터는 CLI·데몬에서 온라인 적재(도구만 offline) · `fo_reconcile` 큐 kind 4번째 추가 · `brokers()` 반환형 list · 실전 파생 skip 결과에 `status/record_only/mode` 키
+- 이연(M10):
+  - M11: 웹 `/api/fo/*`·SSE `fo` 키 · `InputsPort.recent`(fo 판정 뉴스·거시, 엔진 `_novel_news` 의 `news_items` raw SQL 도 포트로) · spot monitor 단타 보유분 검토 · FAKE 사본 잔여(regime `_turn` ≈ `fake_turn`) · `AccountsPort` dict 가짜 포트 정리(spot/scalp/daemon 테스트의 `brokers` dict 반환) · `views.account_summary` 의존 `test_performance_fo` 2건
+  - M12: health `_fo` 4항(unknown·exit_failed critical, 정산 대기 초과, 옵션 매도 D-1 미청산, 15:45 뒤 살아 있는 파생 주문) · `kis ping` fo 잔고 줄 · 틱 단위 브로커·시세 클라이언트 캐시 · `.claude/settings.json` deny 목록(옛 `test_settings_denies_fo_session`)
+  - 보강(minor): 비공개 `jobs._fo_ctx` 를 공개 이름으로(cli 가 SimpleNamespace 로 호출) · `adopt` 에 `offline=True` 고려(네트워크 다운 시 30s 대기) · `close --confirm` 성공 경로 테스트 · `order-test`/`monitor` CLI 테스트가 배선만 확인 · `off`/`approve` 모드 정산 전이 테스트 · `test_ticks_fo` 가 `test_ticks` 중복 · spot `test_monitor_rules` 의 `rule_hit` 단언 중복 · `ports.py` `fo_accounts/fo_brokers` docstring 동일 · 커널 `monitor_rules` docstring 이 기능 이름 언급 · fo settings `_check_hm` 로컬(accounts 와 같은 정규식이면 커널 승격) · `FoExecContext.settings/accounts` Any · `positions.recover`/`store.tx` docstring 정합·합류+예외 테스트 · `LegStore.claim_reserved` raw SQL·recheck 예외 시 `sending` 잔류 · `test_transmit_reflects_leg_and_order_atomically` 가 insert_order 선행 실패만 주입 · `test_real_fo_account_records_only` 의 `mode=="off"` 미단언 · 실전 분기가 accounts 포트 없으면 KeyError(옛은 skip) · `reeval_apply` 훅 없을 때 지연 import · `tools.py` `_schema_error` 인라인 중복 · `_support._tool_ctx` 의 `_inputs` 부착 · `build_tool_app` 경유 CLI 경로 테스트 · `fills._replace_fill` 의 `fills.id` 재생성
+  - 실기 2(보유 행이 있어야 확인): `features/fo/README.md` 「실기 미확인」
 
 ## M11 — features/quotes + 웹 API 12 자원 (백엔드만)
 웹 API 12 자원·SSE 키 생성·계약 테스트. 완료 기준: 모든 자원 엔드포인트 테스트 통과, 옛 엔드포인트 대응표 100%. (M11b: 새 웹 UI 구현은 별도 브레인스토밍·플랜)

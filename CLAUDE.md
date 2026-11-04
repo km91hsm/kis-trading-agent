@@ -26,6 +26,7 @@
 | `uv run trader scan theme show [--market KR\|US --live]\|events show [--market KR\|US]` | 테마 열기·사건 감지 결과 조회 (조회만) |
 | `uv run trader scan run [--market KR\|US --asof … --dry-run]\|backtest\|universe check\|universe sectors` | 정량 필터→screener 세션 스캔(`FAKE_CLAUDE=1` 없이 금지)·후보 백테스트(조회만)·유니버스 시세 점검·섹터 제안 |
 | `uv run trader scalp backtest --ticker … [--market KR\|US --exchange … --days N]\|report [--market KR\|US --days N --live]` | 단타 1분봉 규칙 재현·실적/판정자 사후 비교 JSON (조회만, 주문 없음; 단타는 모의 전용·기본 끔) |
+| `uv run trader fo contracts\|chain\|verify --account …\|session [--dry-run --asof …]\|status\|adopt …` | 파생(선물옵션, 모의 전용·기본 끔) 계약·체인 조회·검증 플래그·아침 판정 세션(`FAKE_CLAUDE=1` 없이 금지)·상태·unknown 포지션 승계. `monitor\|close\|order-test` 는 주문이 나가므로 사용자 전용 |
 | `uv run trader ml train\|tune\|models\|promote\|demote` | 퀀트 모델 학습·튜닝 리포트·레지스트리 조회·수동 승격/해제 (`promote`·`demote` 는 사용자 전용) |
 | `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
@@ -49,7 +50,7 @@
 - **SSE 키**: `web/src/generated/sse-keys.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
 - **데몬 잡 설정**: 잡 시각은 `schedule.yaml` 의 점 경로 키(`JobSpec.schedule_key`)로 가리킨다. 시각을 코드에 박지 않는다.
 - **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (스펙 §2.3)
-- **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. (스펙 §2.1)
+- **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. 예외 하나: 파생(fo)은 다리 상태·`orders` 한 트랜잭션 때문에 자체 실행기(`features/fo/executor.py`, `LegStore`)를 쓴다. (스펙 §2.1, `features/fo/README.md` A1)
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (스펙 §2.6)
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
 - **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (피처 `latest_rows(asof)`·유니버스 PIT·라벨 엠바고)
@@ -61,6 +62,7 @@
 - `secrets/` 를 커밋하지 않는다. 읽지도 않는다(`cat` 같은 Bash 읽기 명령 포함, 다른 명령과 묶지 않는다). `config/accounts.yaml` 에는 실제 계좌번호가 있으므로 값을 출력·인용하지 않는다.
 - 계좌 모드(`control`/`account_modes`)를 임의로 변경하지 않는다. 모드 변경은 사용자가 한다.
 - `FAKE_CLAUDE=1` 없이 `uv run trader spot analyze`·`uv run trader evaluation reflect` 를 돌리지 않는다(구독 호출 발생). 사용자 요청 없이 실제 세션을 띄우지 않는다.
+- `trader fo monitor|close|order-test` 는 파생 주문이 나가므로 돌리지 않는다(사용자 전용). `FAKE_CLAUDE=1` 없이 `trader fo session` 도 돌리지 않는다(구독 호출 발생).
 - `trader saveticker run|service|install-browser` 는 사이트 로그인·Chromium 다운로드라 사용자 요청 없이 돌리지 않는다.
 - 셸 스크립트(`.sh`/`.bat`/`.ps1`)를 추가하지 않는다. 훅·설치·유틸·빌드는 전부 파이썬.
 - `state/` 파일을 직접 편집하지 않는다.
