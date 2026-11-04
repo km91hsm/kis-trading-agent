@@ -61,7 +61,7 @@
 - `fo`: 아침 판정(analyst-technical·analyst-sentiment·analyst-market → researcher-bull/bear 토론 → `fo-trader`). 스키마 `AnalystReport`·`DebateTurn`·`FoDecisionEnvelope`, `runs.kind='fo'`, throttle hard.
 - `fo_resume`: 보유 재평가(stdin 에 `position`·`trigger`). 스키마 `FoDecisionEnvelope`, `runs.kind='monitor'`(현물 `resume` 과 같은 등급), throttle soft(80% 감속에서도 보유 재평가는 통과).
 - md 는 `agents/fo-trader.md`·`agents/fo-orchestrator.md` 둘뿐. 나머지는 `session_kinds.agents_for_runner()` 가 레지스트리 `discover()` 로 이름으로 모으고, 별칭 `orchestrator` → `fo-orchestrator.md` 를 둔다(A6).
-- 상한 `fo.session_cap` 은 커널이 모르는 설정이라 `extra_cap_key=None` 이고 `session.run` 이 세션 앞에서 오늘 `runs.kind='fo'` 건수를 검사한다. 초과는 `PipelineError` 로 `session.run` 밖에 나가고 잡·큐 본문이 `skipped` 로 바꾼다.
+- 상한 `fo.session_cap` 은 커널이 모르는 설정이라 `extra_cap_key=None` 이고 `session.run` 이 세션 앞에서 오늘 `runs.kind='fo'` 건수를 검사한다. 초과는 `session.run` 이 `PipelineError` 를 잡아 `skipped` 로 돌려주고, 잡·큐·CLI 는 그 결과를 그대로 기록/출력한다.
 
 ## 도구
 
