@@ -29,16 +29,17 @@ def leg_id_of(key: str) -> int:
 
 
 class LegStore:
-    """`IdemStore` 의 fo 구현. 각 메서드는 짧은 쓰기 뒤 commit 한다(`ExecKeyStore` 와 같다)."""
+    """`IdemStore` 의 fo 구현. 각 메서드는 `store.tx` 로 쓴다 — 밖에서 부르면 짧은 쓰기 뒤 commit
+    (`ExecKeyStore` 와 같다), 이미 열린 트랜잭션 안이면 합류만 한다(실행기 `_transmit` 이 orders 행
+    INSERT 와 `bind` 를 한 트랜잭션으로 묶는다, A1)."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
     def claim(self, key: str, *, now: str) -> bool:
         """`prepared` 다리만 `sending`(sent_at=now)으로 선점한다. 이미 선점·회수됐으면 False."""
-        ok = store.claim_leg(self.conn, leg_id_of(key), sent_at=now)
-        self.conn.commit()
-        return ok
+        with store.tx(self.conn):
+            return store.claim_leg(self.conn, leg_id_of(key), sent_at=now)
 
     def claim_reserved(
         self,
@@ -58,12 +59,12 @@ class LegStore:
             return False, []
         ok, _amount = recheck([])
         if not ok:
-            self.conn.execute(
-                "UPDATE fo_order_legs SET status = 'prepared', sent_at = NULL "
-                "WHERE id = ? AND status = 'sending'",
-                (leg_id_of(key),),
-            )
-            self.conn.commit()
+            with store.tx(self.conn):
+                self.conn.execute(
+                    "UPDATE fo_order_legs SET status = 'prepared', sent_at = NULL "
+                    "WHERE id = ? AND status = 'sending'",
+                    (leg_id_of(key),),
+                )
             return False, []
         return True, []
 
@@ -72,17 +73,17 @@ class LegStore:
         at: str | None = None,
     ) -> None:  # fmt: skip
         """다리를 주문 행에 묶는다(`order_id`, 접수 시각 `at`). 승인은 없다(`approval_id` 무시)."""
-        store.set_leg(self.conn, leg_id_of(key), order_id=order_id, accepted_at=at)
-        self.conn.commit()
+        with store.tx(self.conn):
+            store.set_leg(self.conn, leg_id_of(key), order_id=order_id, accepted_at=at)
 
     def mark_sent(self, key: str, *, sent_at: str) -> None:
-        store.set_leg(self.conn, leg_id_of(key), sent_at=sent_at)
-        self.conn.commit()
+        with store.tx(self.conn):
+            store.set_leg(self.conn, leg_id_of(key), sent_at=sent_at)
 
     def release(self, key: str) -> None:
         """`prepared` 다리만 cancelled. 이미 보낸(sending 이후) 다리는 그대로(no-op)."""
-        store.cancel_prepared(self.conn, leg_id_of(key))
-        self.conn.commit()
+        with store.tx(self.conn):
+            store.cancel_prepared(self.conn, leg_id_of(key))
 
     def has_approval(self, key: str) -> bool:
         """Protocol 충족용 — fo 에는 승인이 없다."""

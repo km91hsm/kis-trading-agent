@@ -7,8 +7,8 @@
 →확정 경로(S2-5)·만료된 축소 다리 재발행(S2-4)·잔고 덮어쓰기 대신 체결 반영(S2-11·C2-1)·회수
 선반영 체결의 경제값 1회(S2-3)·빈 entering 정리(C2-2)·잠금 밖 조회(S2-12)·조회 실패는 보류(C2-5).
 
-Task 3 은 저장 계층·복구(positions), Task 4 는 게이트(rules·sizing) 건을 싣는다. 실행기(executor)
-건은 Task 5 에서 이 파일에 이어 붙인다."""
+Task 3 은 저장 계층·복구(positions), Task 4 는 게이트(rules·sizing), Task 5 는 실행기(executor) 건을
+싣는다(맨 아래 절)."""
 
 from __future__ import annotations
 
@@ -22,10 +22,42 @@ from tests.features.fo._gate import NOW as GNOW
 from tests.features.fo._gate import decision as gdecision
 from tests.features.fo._gate import leg as gleg
 from tests.features.fo._gate import quote as gquote
-from tests.features.fo._support import ACCT, NOW, TODAY, _bal, _open, _recover, _row, _state
-from trader.features.fo import positions, rules, sizing, store
+from tests.features.fo._support import (
+    ACCT,
+    NOW,
+    T0,
+    TODAY,
+    _bal,
+    _open,
+    _recover,
+    _row,
+    _state,
+    account,
+    balance,
+    decision,
+    env,
+    holding,
+    make_ctx,
+    state,
+)
+from tests.features.fo._support import _held_position as _held_ctx
+from trader.features.fo import executor, positions, rules, sizing, store
+from trader.features.fo import fills as fo_fills
 from trader.features.fo.store import ReservePlan
+from trader.kernel.broker.fake import FakeFoBroker, FakeMarket
+from trader.kernel.broker.models import FoFill, FoOrderable, FoOrderRequest
 from trader.kernel.execution import ledger
+
+MULT = 50000
+
+
+def _fill(order_no, *, side, filled, amount, cancelled=0):
+    return FoFill(
+        order_no=order_no, orgn_order_no=None, code="105W11", side=side, remaining_qty=0,
+        filled_qty=filled, rejected_qty=0, cancelled_qty=cancelled,
+        filled_amount=Decimal(amount) * MULT,  # 통화 금액(포인트 × 승수)
+        avg_price=None, filled_at=T0,
+    )  # fmt: skip
 
 
 def _held_position(conn, qty=2, *, status="held"):
@@ -77,8 +109,7 @@ def test_transition_validates_state_table(conn):
 
 
 def test_claim_leg_only_from_prepared(conn):
-    """회수가 cancelled 로 바꾼 prepared 다리는 선점되지 않는다(S2-2; 실행기 `_transmit` 쪽은
-    Task 5)."""
+    """회수가 cancelled 로 바꾼 prepared 다리는 선점되지 않고 전송하지 않는다(S2-2)."""
     pos = _held_position(conn, qty=2)
     with store.tx(conn):
         lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
@@ -86,6 +117,15 @@ def test_claim_leg_only_from_prepared(conn):
                                order_type="LIMIT")  # fmt: skip
         store.set_leg(conn, lid, status="cancelled")
     assert store.claim_leg(conn, lid) is False
+    assert store.get_leg(conn, lid).status == "cancelled"
+    ctx = make_ctx(conn)
+    req = FoOrderRequest(code="105W11", side="BUY", qty=1, order_type="LIMIT",
+                         price=Decimal("350.5"))  # fmt: skip
+    out = executor._transmit(
+        ctx, account(), leg_id=lid, position_id=pos.id, req=req, ref_price=Decimal("350.5"),
+        mode="auto", stage="s", today=TODAY, intent="RESIZE_UP", extra={},
+    )  # fmt: skip
+    assert out["status"] == "recalled" and ctx.brokers[ACCT].orders == []
     assert store.get_leg(conn, lid).status == "cancelled"
 
 
@@ -256,3 +296,166 @@ def test_stored_leverage_never_exceeds_approved_on_resize():
              port=portfolio(positions=[pos]), cfg=cfg(max_contracts=10))  # fmt: skip
     )
     assert v.legs and v.legs[0].intent == "RESIZE_DOWN" and v.leverage_used <= 0.5
+
+
+# --- 실행기(Task 5) -------------------------------------------------------------------
+
+
+def test_orderable_gets_quantized_price(conn):
+    """주문가능 조회에는 호가단위로 맞춘 가격을 보낸다(C2-8: 350.51 은 tick 0.02 밖)."""
+    seen: list = []
+    broker = FakeFoBroker(
+        account(), balance=balance(), now=lambda: T0,
+        orderable=FoOrderable(tot_qty=10, lqd_qty=0, ord_qty=10, cash=None, bass_idx=None),
+        scenario=lambda name, *a: seen.append(a) if name == "orderable" else None,
+    )  # fmt: skip
+    ctx = make_ctx(conn, broker=broker)
+    out = executor.run_leg(ctx, account(), env(decision(entry_price=350.51)))
+    assert out[0]["status"] == "accepted"
+    assert seen[0][2] != Decimal("350.51") and seen[0][2] == broker.orders[0].price
+
+
+# --- 실행기 -----------------------------------------------------------------------------
+
+
+def test_hold_tightening_stop_updates_stop_fut(conn):
+    """HOLD 로 손절선을 강화하면 선물 환산 보호선도 함께(베이시스 0.5 − 슬리피지 0.1); 시세가 없으면
+    기존 오프셋을 유지해 갱신(S2-10)."""
+    ctx = make_ctx(conn)
+    pos = _held_ctx(conn, ctx, qty=2, stop_fut=Decimal("345.4"))
+    executor.run_leg(ctx, account(), env(decision(intent="HOLD", direction="LONG", stop_pt=347.0)))
+    cur = store.get_position(conn, pos.id)
+    assert (cur.stop_pt, cur.stop_fut) == (Decimal("347.0"), Decimal("347.4"))
+    ctx2 = make_ctx(conn, market=FakeMarket(fail={"get_fo_price", "get_kospi200"}))
+    executor.run_leg(ctx2, account(), env(decision(intent="HOLD", direction="LONG", stop_pt=348.0)))
+    cur = store.get_position(conn, pos.id)
+    assert (cur.stop_pt, cur.stop_fut) == (Decimal("348.0"), Decimal("348.4"))
+    # 느슨한 손절은 둘 다 그대로
+    executor.run_leg(ctx, account(), env(decision(intent="HOLD", direction="LONG", stop_pt=340.0)))
+    cur = store.get_position(conn, pos.id)
+    assert (cur.stop_pt, cur.stop_fut) == (Decimal("348.0"), Decimal("348.4"))
+
+
+def test_resize_down_from_decision_recalls_entries_first(conn):
+    """결정의 RESIZE_DOWN 도 공통 축소 경로: 살아 있는 진입 다리 회수 → 잔고 확정 → 보유 − 목표
+    (S2-5)."""
+    ctx = make_ctx(conn, max_contracts=10)
+    broker = ctx.brokers[ACCT]
+    pos = _held_ctx(conn, ctx, qty=3, qty_target=5, leverage_used=1.0, status="resizing")
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
+                               round=0, attempt=1, qty=2, price=Decimal("350.5"),
+                               order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, lid, status="accepted", order_no="E1")
+    broker.states["E1"] = state("E1", order_qty=2, filled=0, remaining=0, cancelled=2,
+                                terminal=True, st="cancelled")  # fmt: skip
+    d = decision(intent="RESIZE", target_leverage=0.2)  # 목표 1
+    out = executor.run_leg(ctx, account(), env(d, position_id=pos.id, expected_version=pos.version))
+    assert broker.cancelled == [("E1", 0)]
+    assert out[0]["intent"] == "RESIZE_DOWN" and out[0]["status"] == "accepted", out
+    assert (broker.orders[-1].side, broker.orders[-1].qty) == ("SELL", 2)
+    cur = store.get_position(conn, pos.id)
+    assert cur.qty_target == 1 and store.get_leg(conn, lid).status == "cancelled"
+
+
+def test_expired_reduce_leg_is_reissued_next_tick(conn):
+    """만료된 CLOSE 다리가 있는 closing 포지션은 다음 틱에 잔량을 시장가로 다시 낸다(S2-4·C2-3)."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    pos = _held_ctx(conn, ctx, qty=2, code="205W11350", kind="CALL", vehicle="OPTION_BUY")
+    assert executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")["status"] == (
+        "accepted"
+    )
+    cur = store.get_position(conn, pos.id)
+    with store.tx(conn):
+        store.set_leg(conn, cur.active_reduce_leg_id, status="expired")
+    out2 = executor.continue_reduce(ctx, account(), cur)
+    assert out2["status"] == "accepted" and len(broker.orders) == 2, out2
+    assert (broker.orders[-1].order_type, broker.orders[-1].qty) == ("MARKET", 2)
+    assert store.get_position(conn, pos.id).status == "closing"
+
+
+def test_reduce_applies_fills_instead_of_overwriting_qty(conn):
+    """체결 동기화 전에 다시 만난 완전 체결 CLOSE 다리는 체결을 다리에 반영해 closed 로 가고(unknown
+    아님), 잔고 수량을 덮어쓰지 않아 뒤의 동기화가 이중 차감하지 않는다(S2-11·C2-1)."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    pos = _held_ctx(conn, ctx, qty=2, entry_premium=Decimal("350"))
+    assert executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")["status"] == (
+        "accepted"
+    )
+    cur = store.get_position(conn, pos.id)
+    leg = store.get_leg(conn, cur.active_reduce_leg_id)
+    broker.balance = balance([])
+    broker.fills[TODAY] = [_fill(leg.order_no, side="SELL", filled=2, amount="696")]  # 348 × 2
+    out2 = executor.reduce(ctx, account(), cur, intent="STOP", qty=None, reason="손절")
+    assert out2["status"] == "closed", out2
+    cur = store.get_position(conn, pos.id)
+    assert (cur.status, cur.qty_held) == ("closed", 0) and len(broker.orders) == 1
+    r = fo_fills.sync(conn, broker, account(), TODAY, cfg=ctx.settings.fo, now=lambda: T0)
+    cur = store.get_position(conn, pos.id)
+    assert cur.qty_held == 0 and cur.realized_loss == Decimal(2) * 2 * MULT  # (350 − 348) × 2
+    assert r["inserted"] + r["updated"] == 1
+
+
+def test_recall_confirmed_fill_gets_economics_once_in_sync(conn):
+    """회수 중 확정한 체결(record_fill_progress 선반영)도 동기화가 평균가·비용을 정확히 1회 적는다
+    (S2-3·R-2)."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    pos = _held_ctx(conn, ctx, qty=2, status="resizing", qty_target=4)
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
+                               round=0, attempt=1, qty=2, price=Decimal("350.5"),
+                               order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, lid, status="accepted", order_no="E1", sent_at=T0.isoformat(),
+                      accepted_at=T0.isoformat())  # fmt: skip
+    broker.states["E1"] = state("E1", order_qty=2, filled=1, remaining=0, cancelled=1,
+                                terminal=True, st="cancelled")  # fmt: skip
+    broker.balance = balance([holding(qty=3)])
+    rec = executor.recall_entries(ctx, account(), pos.id, reason="t")
+    assert rec.confirmed_filled == 1 and store.get_position(conn, pos.id).qty_held == 3
+    broker.fills[TODAY] = [_fill("E1", side="BUY", filled=1, amount="351", cancelled=1)]
+    fo_fills.sync(conn, broker, account(), TODAY, cfg=ctx.settings.fo, now=lambda: T0)
+    cur = store.get_position(conn, pos.id)
+    assert cur.qty_held == 3 and cur.entry_premium == Decimal("351") and cur.fees > 0
+    fo_fills.sync(conn, broker, account(), TODAY, cfg=ctx.settings.fo, now=lambda: T0)
+    assert store.get_position(conn, pos.id).fees == cur.fees
+
+
+def test_recall_cancel_closes_empty_entering(conn):
+    """취소로 끝난 진입 다리는 빈 entering 포지션을 닫아 자리를 비운다(C2-2)."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    executor.run_leg(ctx, account(), env())
+    pos = store.open_positions(conn, ACCT)[0]
+    broker.states["FAKE-1"] = state("FAKE-1", order_qty=4, filled=0, remaining=0, cancelled=4,
+                                    terminal=True, st="cancelled")  # fmt: skip
+    rec = executor.recall_entries(ctx, account(), pos.id, reason="t")
+    assert rec.cancelled == 1 and store.open_positions(conn, ACCT) == []
+    assert store.get_position(conn, pos.id).status == "closed"
+
+
+def test_order_state_queried_outside_write_lock(conn):
+    """continue_reduce 의 확정 조회는 쓰기 잠금 밖(S2-12)."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    pos = _held_ctx(conn, ctx, qty=2)
+    executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")
+    cur = store.get_position(conn, pos.id)
+    leg = store.get_leg(conn, cur.active_reduce_leg_id)
+    with store.tx(conn):
+        store.set_leg(conn, leg.id, status="unknown")
+    seen: list[bool] = []
+
+    def hook(name, *a):
+        if name == "get_order_state":
+            seen.append(conn.in_transaction)
+        return None
+
+    broker.scenario = hook
+    broker.states[leg.order_no] = state(leg.order_no, order_qty=2, filled=2, remaining=0,
+                                        terminal=True, st="filled")  # fmt: skip
+    broker.balance = balance([])
+    out = executor.continue_reduce(ctx, account(), cur)
+    assert seen == [False] and out["status"] == "closed", out

@@ -1,0 +1,300 @@
+"""Phase 26 단계 5 전체 교차 리뷰 B 반영(Codex 2·Claude 2 → S5-n).
+
+Task 5 는 실행기·저장·복구·규칙 건을 싣는다. 엔진·재평가 건(`test_settle_requires_fills_ok_*`·
+`test_resizing_up_position_is_stop_protected`·`test_replace_flag_*`·`test_reeval_hold_tp_*`)과
+`.claude/settings.json` 거부 목록 건(`test_settings_denies_fo_session`)은 Task 7·8 에서 더한다."""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+
+from tests.features.fo import _gate as g
+from tests.features.fo._gate import quote as fquote
+from tests.features.fo._support import (
+    ACCT,
+    T0,
+    TODAY,
+    _held_position,
+    account,
+    balance,
+    decision,
+    env,
+    holding,
+    make_ctx,
+    state,
+)
+from trader.features.fo import executor, positions, rules, sizing, store, triggers
+from trader.features.fo.types import FoLegRow
+from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.settings import HorizonProfile
+from trader.kernel.broker.fake import FakeMarket
+from trader.kernel.config import KST
+from trader.kernel.execution import ledger
+
+
+def at(h: int, m: int = 0) -> datetime:
+    """테스트 날짜 KST 시:분의 UTC 시각(옛 `test_engine.at`)."""
+    return datetime(2026, 10, 27, h, m, tzinfo=KST).astimezone(UTC)
+
+
+# --- 주문 안전 ------------------------------------------------------------------------------
+
+
+def test_transmit_reuses_order_bound_by_sync_during_send(conn):
+    """응답 대기 중 체결 동기화가 다리를 묶었으면 새 주문 행 없이, 끝난 상태도 되돌리지 않는다."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+
+    def scenario(name, *args):
+        if name == "place_order":
+            leg = store.live_legs(conn, account_id=ACCT)[0]
+            oid = ledger.insert_order(conn, decision_id=None, account_id=ACCT, ticker="105W11",
+                                    market="KR", side="BUY", qty=leg.qty, order_type="LIMIT",
+                                    price=Decimal("350.5"), status="filled", order_no="FAKE-1",
+                                    message="동기화", mode="recovered", asset="fo",
+                                    origin="fo")  # fmt: skip
+            store.set_leg(conn, leg.id, status="filled", order_id=oid, order_no="FAKE-1")
+            conn.commit()
+        return None
+
+    broker.scenario = scenario
+    executor.run_leg(ctx, account(), env(decision()))
+    n = conn.execute("SELECT COUNT(*) FROM orders WHERE account_id = ?", (ACCT,)).fetchone()[0]
+    assert n == 1
+    assert store.legs_of(conn, store.open_positions(conn, ACCT)[0].id)[0].status == "filled"
+
+
+def test_prepared_reduce_leg_is_cancelled_and_resent(conn):
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="CLOSE", round=0,
+                               attempt=1, qty=2, price=None, order_type="MARKET")  # fmt: skip
+        store.transition(conn, pos.id, expected_version=pos.version, status="closing",
+                         active_reduce_leg_id=lid)  # fmt: skip
+    out = executor.continue_reduce(ctx, account(), store.get_position(conn, pos.id))
+    assert store.get_leg(conn, lid).status == "cancelled"
+    assert out.get("status") == "accepted" and len(ctx.brokers[ACCT].orders) == 1
+
+
+def test_recover_cancels_stale_prepared_entry_only(conn):
+    with store.tx(conn):
+        pid = store.insert_position(conn, account_id=ACCT, code="105W11", kind="FUTURES",
+                                    contract_side="LONG", direction="LONG", vehicle="FUTURES",
+                                    status="entering", qty_target=2)  # fmt: skip
+        lid = store.insert_leg(conn, position_id=pid, account_id=ACCT, intent="OPEN", round=0,
+                               attempt=1, qty=2, price=Decimal("350.5"), order_type="LIMIT")
+    old = (T0 - timedelta(minutes=10)).isoformat()  # A18: 주입 시계 기준
+    conn.execute("UPDATE fo_order_legs SET created_at = ? WHERE id = ?", (old, lid))
+    conn.commit()
+    positions.recover(conn, account_id=ACCT, balance=balance(), order_state_of=lambda *a: None,
+                      fills_of=lambda d: [], today=TODAY, now=T0)  # fmt: skip
+    assert store.get_leg(conn, lid).status == "cancelled"
+    assert store.get_position(conn, pid).status == "closed"
+
+
+def test_recover_defers_inflight_sending_leg(conn):
+    with store.tx(conn):
+        pid = store.insert_position(conn, account_id=ACCT, code="105W11", kind="FUTURES",
+                                    contract_side="LONG", direction="LONG", vehicle="FUTURES",
+                                    status="entering", qty_target=2)  # fmt: skip
+        lid = store.insert_leg(conn, position_id=pid, account_id=ACCT, intent="OPEN", round=0,
+                               attempt=1, qty=2, price=None, order_type="MARKET")
+        store.set_leg(conn, lid, status="sending", sent_at=(T0 - timedelta(seconds=10)).isoformat())
+    rep = positions.recover(conn, account_id=ACCT, balance=balance(),
+                            order_state_of=lambda *a: None, fills_of=lambda d: [], today=TODAY,
+                            now=T0)  # fmt: skip
+    assert rep.deferred == [lid] and store.get_position(conn, pid).status == "entering"
+
+
+def test_yesterday_accepted_leg_not_cancelled_today_and_expires(conn):
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2, status="resizing")
+    yday = (T0 - timedelta(days=1)).isoformat()
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
+                               round=0, attempt=1, qty=1, price=Decimal("349"),
+                               order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, lid, status="accepted", order_no="0007", sent_at=yday, accepted_at=yday)
+    broker = ctx.brokers[ACCT]
+    broker.states["0007"] = state("0007", order_qty=1, filled=0, remaining=1, terminal=False)
+    rr = executor.recall_entries(ctx, account(), pos.id, reason="t")
+    assert broker.cancelled == [] and rr.pending == 0
+    assert store.get_leg(conn, lid).status == "expired"
+
+
+def test_reduce_attempts_count_today_only(conn):
+    ctx = make_ctx(conn, exit_retry_max=3)
+    pos = _held_position(conn, ctx, qty=4, qty_target=4, code="205W11350", kind="CALL",
+                         vehicle="OPTION_BUY")  # fmt: skip — 옵션 축소 1차는 지정가
+    yday = (T0 - timedelta(days=1)).isoformat()
+    with store.tx(conn):
+        for a in (1, 2, 3):
+            lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_DOWN",
+                                   round=0, attempt=a, qty=1, price=None,
+                                   order_type="MARKET")  # fmt: skip
+            store.set_leg(conn, lid, status="filled", sent_at=yday, accepted_at=yday)
+        store.transition(conn, pos.id, expected_version=store.get_position(conn, pos.id).version,
+                         qty_target=3)  # fmt: skip
+    out = executor.reduce(ctx, account(), store.get_position(conn, pos.id), intent="RESIZE_DOWN",
+                          qty=None, reason="t")  # fmt: skip
+    assert out["status"] == "accepted"
+    assert ctx.brokers[ACCT].orders[-1].order_type == "LIMIT"  # 오늘 첫 시도는 지정가
+    assert store.get_position(conn, pos.id).status != "exit_failed"
+
+
+# --- 투자 규칙 ------------------------------------------------------------------------------
+
+
+def test_resize_never_adds_contracts_to_existing_position():
+    pos = g.position(kind="CALL", vehicle="OPTION_BUY", code="205W11350", qty_held=2,
+                     qty_target=2, leverage_used=0.175, entry_premium=Decimal("5"),
+                     premium_stop=Decimal("2.5"))  # fmt: skip
+    d = decision(intent="RESIZE", vehicle="OPTION_BUY", target_leverage=0.175, order_type="MARKET",
+                 entry_price=None)  # fmt: skip
+    q = g.option_quote(price="3.00", delta=0.3)
+    v = rules.evaluate(g.gate(d, position=pos, quote=q, underlying=Decimal("345"),
+                              port=g.portfolio(positions=[pos])))  # fmt: skip
+    assert not any(leg.intent == "RESIZE_UP" for leg in v.legs)
+
+
+def test_hold_stop_typo_rejected_keeps_existing():
+    pos = g.position(stop_pt=Decimal("345"))
+    v = rules.evaluate(g.gate(decision(intent="HOLD", stop_pt=3520.0), position=pos,
+                              port=g.portfolio(positions=[pos])))  # fmt: skip
+    assert v.stop_pt == Decimal("345") and "거부" in v.note
+
+
+def test_futures_basis_missing_is_derived_not_zero():
+    q = g.quote(price="351.5", basis=None)
+    assert sizing.basis_of(q, Decimal("350")) == Decimal("1.5")
+
+
+def test_futures_entry_on_wrong_side_of_stop_rejected():
+    # 롱 지정가 344 인데 선물 손절가 345.4(345 + 베이시스 0.5 − 슬리피지 0.1) — 체결 즉시 손절
+    d = decision(entry_price=344.0)
+    v = rules.evaluate(g.gate(d))
+    assert not v.approved and any("반대편" in r for r in v.reasons)
+
+
+def test_entry_blocked_on_day_before_forced_close():
+    v = rules.evaluate(g.gate(decision(), entry_block_day=g.NOW.date()))
+    assert not v.approved and any("강제 청산 직전" in r for r in v.reasons)
+
+
+def test_gate_daily_loss_uses_today_change():
+    port = g.portfolio(realized_today=Decimal("-4000000"), pnl_today=Decimal("0"))
+    v = rules.evaluate(g.gate(decision(), port=port))
+    assert not any("당일 손실 한도 초과" in r for r in v.reasons)
+
+
+def test_position_budget_free_includes_planned():
+    pos = g.position(qty_held=2, stop_fut=Decimal("345.4"), nav_at_open=Decimal("100000000"),
+                     realized_loss=Decimal("100000"))  # fmt: skip
+    b = sizing.position_budget(pos, ref_price=Decimal("350.5"), multiplier=50000, r=0.02)
+    assert b["planned"] == Decimal("510000.0") or b["planned"] == Decimal("510000")
+    assert b["free"] == b["limit"] - b["used"] - b["planned"]
+
+
+# --- 재리뷰(S5R-1~6) --------------------------------------------------------------------------
+
+
+def test_reduce_without_snapshot_after_balance_failure_is_blocked(conn):
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    ctx.brokers[ACCT].fail = {"get_balance"}
+    out = executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")
+    assert out["status"] == "blocked" and ctx.brokers[ACCT].orders == []
+
+
+def test_transmit_keeps_terminal_status_without_order_link(conn):
+    ctx = make_ctx(conn)
+
+    def scenario(name, *args):
+        if name == "place_order":  # 응답 대기 중 복구가 order_id 없이 filled 로 확정
+            leg = store.live_legs(conn, account_id=ACCT)[0]
+            store.set_leg(conn, leg.id, status="filled", order_no="FAKE-1")
+            conn.commit()
+        return None
+
+    ctx.brokers[ACCT].scenario = scenario
+    executor.run_leg(ctx, account(), env(decision()))
+    leg = store.legs_of(conn, store.open_positions(conn, ACCT)[0].id)[0]
+    assert leg.status == "filled" and leg.order_id is not None
+
+
+def test_recover_keeps_sent_day_for_nonterminal_leg(conn):
+    yday = (T0 - timedelta(days=1)).isoformat()
+    with store.tx(conn):
+        pid = store.insert_position(conn, account_id=ACCT, code="105W11", kind="FUTURES",
+                                    contract_side="LONG", direction="LONG", vehicle="FUTURES",
+                                    status="entering", qty_target=2)  # fmt: skip
+        lid = store.insert_leg(conn, position_id=pid, account_id=ACCT, intent="OPEN", round=0,
+                               attempt=1, qty=2, price=Decimal("350.5"), order_type="LIMIT")
+        store.set_leg(conn, lid, status="unknown", order_no="0042", sent_at=yday)
+    positions.recover(conn, account_id=ACCT, balance=balance(),
+                      order_state_of=lambda no, d: state(no, order_qty=2, filled=0, remaining=2,
+                                                         terminal=False),
+                      fills_of=lambda d: [], today=TODAY, now=T0)  # fmt: skip
+    leg = store.get_leg(conn, lid)
+    assert leg.status == "accepted" and positions.leg_day(leg) == (T0 - timedelta(days=1)).date()
+
+
+def test_unstarted_session_release_not_counted_in_daily_cap(conn):
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    prof = HorizonProfile(move_pct=0.04, reeval_interval_min=15, periodic_check_min=60,
+                          news_min_novel=1, daily_reanalyze_every=1)  # fmt: skip
+    c = ctx.settings.fo.model_copy(update={"reeval": ctx.settings.fo.reeval.model_copy(
+        update={"max_per_day": 1, "interval_min": 5, "periodic_max_per_day": 4})})  # fmt: skip
+    t = triggers.check(conn, position=pos, underlying=Decimal("350"), iv=None, cfg=c,
+                       profile=prof, now=at(10, 0), today=TODAY,
+                       ref_index=Decimal("350"))  # fmt: skip
+    tid = triggers.record(conn, pos, t, now=at(10, 0))
+    spot_ledger.mark_trigger_handled(conn, tid, "보류: 일시정지", handled_at=at(10, 0).isoformat())
+    again = triggers.check(conn, position=pos, underlying=Decimal("350"), iv=None, cfg=c,
+                           profile=prof, now=at(10, 6), today=TODAY,
+                           ref_index=Decimal("350"))  # fmt: skip
+    assert again is not None  # 세션이 뜨지 않은 해제는 하루 상한(1)에 세지 않는다
+
+
+# --- PR #66 GitHub 리뷰(G5-1~3) ----------------------------------------------------------------
+
+
+def test_persisted_stop_fut_uses_same_basis_as_sizing(conn):
+    q = fquote(price="355", basis=None, underlying=None)
+    market = FakeMarket(fo_quotes={"105W11": q}, kospi200=(Decimal("350"), T0))
+    ctx = make_ctx(conn, market=market)
+    executor.run_leg(ctx, account(), env(decision(entry_price=355.0)))
+    pos = store.open_positions(conn, ACCT)[0]
+    assert pos.stop_fut == Decimal("349.9")  # 345 + (355 − 350) − 0.1
+
+
+def test_leg_day_prefers_original_send_time():
+    leg = FoLegRow(id=1, position_id=1, account_id=ACCT, intent="OPEN", round=0, attempt=1,
+                   status="accepted", order_id=None, order_no="1", qty=1, filled_qty=0,
+                   price=None, order_type="LIMIT", sent_at="2026-10-26T01:30:00+00:00",
+                   accepted_at="2026-10-27T01:30:00+00:00",
+                   created_at="2026-10-26T01:30:00+00:00")  # fmt: skip
+    assert positions.leg_day(leg) == date(2026, 10, 26)
+
+
+def test_recover_cancelled_prepared_resize_keeps_intent(conn):
+    ctx = make_ctx(conn, max_contracts=10)
+    pos = _held_position(conn, ctx, qty=3, qty_target=1)
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_DOWN",
+                               round=0, attempt=1, qty=2, price=None,
+                               order_type="MARKET")  # fmt: skip
+        store.transition(conn, pos.id, expected_version=pos.version, status="resizing",
+                         active_reduce_leg_id=lid)  # fmt: skip
+    old = (T0 - timedelta(minutes=10)).isoformat()  # A18: 주입 시계 기준
+    conn.execute("UPDATE fo_order_legs SET created_at = ? WHERE id = ?", (old, lid))
+    conn.commit()
+    positions.recover(conn, account_id=ACCT, balance=balance([holding(qty=3)]),
+                      order_state_of=lambda *a: None, fills_of=lambda d: [], today=TODAY,
+                      now=T0)  # fmt: skip
+    assert store.get_leg(conn, lid).status == "cancelled"
+    out = executor.continue_reduce(ctx, account(), store.get_position(conn, pos.id))
+    assert out["intent"] == "RESIZE_DOWN" and ctx.brokers[ACCT].orders[-1].qty == 2
