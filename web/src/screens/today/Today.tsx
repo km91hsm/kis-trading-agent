@@ -1,4 +1,4 @@
-// 「오늘」 화면 ① — 대기 승인(최상단)·레인 카드(현물·단타·파생)·그날 결정 목록, 날짜 선택.
+// 「오늘」 화면 — 대기 승인(최상단)·레인 카드(현물·단타·파생)·그날 결정 목록·주문·체결 타임라인·알림·다음 할 일, 날짜 선택.
 // 섹션 컨테이너(id = NAV 항목)는 데이터 전에 바로 그린다(메뉴의 IntersectionObserver 가 마운트 시점 DOM 만 본다).
 // 계좌 없는 레인·대기 승인 없음은 언마운트하지 않고 hidden 으로 둔다(메뉴 앵커가 계속 가리킬 수 있게).
 import { useState } from "react";
@@ -11,7 +11,10 @@ import type { UsageResp } from "../../lib/usage";
 import { ApprovalsBlock, type Approval } from "./ApprovalsBlock";
 import { DecisionsList } from "./DecisionsList";
 import { LaneCardView, type LaneFetch } from "./LaneCards";
-import { LANE_LABEL, LANES, laneCards, type Account, type Decision, type Merged, type Order } from "./today.ts";
+import { NextJobs } from "./NextJobs";
+import { NoticesFeed } from "./NoticesFeed";
+import { OrdersTimeline } from "./OrdersTimeline";
+import { LANE_LABEL, LANES, laneCards, type Account, type Daemon, type Decision, type Merged, type Notice, type Order } from "./today.ts";
 
 export function Today() {
   const [date, setDate] = useState(() => kstDate(now()));
@@ -21,6 +24,9 @@ export function Today() {
   const orders = useResource<Merged<Order>>("/orders", day, ["orders", "scalp", "fo"]);
   const accounts = useResource<Account[]>("/accounts", undefined, ["accounts"]);
   const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"]);
+  const [noticeKind, setNoticeKind] = useState<string | null>(null);
+  const notices = useResource<Notice[]>("/system/notices", noticeKind ? { limit: "50", kind: noticeKind } : { limit: "50" }, ["notices"]);
+  const daemon = useResource<Daemon>("/system/daemon", undefined, ["jobs", "runs", "daemon"]);
 
   const pending = approvals.data?.approvals ?? [];
   const cards = accounts.data
@@ -66,6 +72,21 @@ export function Today() {
         ) : (
           <DecisionsList items={decisions.data?.items ?? []} partial={!!decisions.data?.partial} date={date} />
         )}
+      </section>
+
+      <section id="orders-timeline" className="screen-section">
+        <h2>주문·체결</h2>
+        <OrdersTimeline data={orders.data} error={orders.error} />
+      </section>
+
+      <section id="notices" className="screen-section">
+        <h2>알림</h2>
+        <NoticesFeed data={notices.data} error={notices.error} kind={noticeKind} onKind={setNoticeKind} />
+      </section>
+
+      <section id="next-jobs" className="screen-section">
+        <h2>다음 할 일</h2>
+        <NextJobs data={daemon.data} error={daemon.error} />
       </section>
     </div>
   );

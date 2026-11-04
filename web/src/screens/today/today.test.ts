@@ -1,8 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { decisionHref, decisionRows, laneCards, statusLabel } from "./today.ts";
+import { decisionHref, decisionRows, laneCards, nextJobs, noticeKinds, statusLabel, timeline } from "./today.ts";
 import {
   fixtureAccount,
+  fixtureDaemon,
   fixtureFoDecision,
+  fixtureFoOrder,
+  fixtureJob,
+  fixtureNotice,
   fixtureScalpDecision,
   fixtureSpotDecision,
   fixtureSpotOrder,
@@ -84,7 +88,58 @@ describe("today 순수 함수", () => {
       "거절",
       "만료",
     ]);
+    expect(statusLabel("cancelled")).toBe("취소");
+    expect(statusLabel("failed")).toBe("실패");
     expect(statusLabel("record_only")).toBe("record_only");
     expect(statusLabel(null)).toBe("—");
+  });
+
+  test("timeline: 주문 1건 + 체결 2건 → 3줄, 시:분:초 KST", () => {
+    const order = fixtureSpotOrder({
+      qty: 10,
+      price: "70000",
+      status: "filled",
+      filled_qty: 10,
+      at: "2026-11-05T01:01:00+00:00",
+      fills: [
+        { qty: 6, price: "70100", filled_at: "2026-11-05T01:05:07+00:00" },
+        { qty: 4, price: "70200", filled_at: "2026-11-05T01:03:09+00:00" },
+      ],
+    });
+    const lines = timeline([order]);
+    expect(lines.map((l) => l.time)).toEqual(["10:01:00", "10:03:09", "10:05:07"]);
+    expect(lines.map((l) => l.text)).toEqual(["매수 005930 10주 @70,000 · 접수", "체결 4주 @70,200", "체결 6주 @70,100"]);
+    expect(lines.map((l) => l.tone)).toEqual(["muted", "ok", "ok"]);
+  });
+
+  test("timeline: 미국 주문은 달러, 취소는 fail, 파생 다리 체결은 sent_at 로 한 줄", () => {
+    const us = fixtureSpotOrder({ id: 22, market: "US", ticker: "AAPL", side: "SELL", qty: 2, price: "190.5", status: "cancelled", filled_qty: 0, fills: [], at: "2026-11-05T00:00:00+00:00" });
+    const fo = fixtureFoOrder();
+    const lines = timeline([us, fo]);
+    expect(lines.map((l) => [l.time, l.text, l.tone])).toEqual([
+      ["09:00:00", "매도 AAPL 2주 @190.50 · 취소", "fail"],
+      ["09:30:00", "매수 A0166000 2계약 @350.25 · 접수", "muted"],
+      ["09:31:00", "체결 2계약 @350.30", "ok"],
+    ]);
+  });
+
+  test("nextJobs: next_at 오름차순 3개, null 제외", () => {
+    const daemon = fixtureDaemon([
+      fixtureJob({ id: 1, kind: "analyze", next_at: "2026-11-05T03:00:00+00:00" }),
+      fixtureJob({ id: 2, kind: "fo", next_at: null }),
+      fixtureJob({ id: 3, kind: "scalp", next_at: "2026-11-05T01:30:00+00:00", last_status: "error" }),
+      fixtureJob({ id: 4, kind: "news", next_at: "2026-11-05T02:00:00+00:00" }),
+      fixtureJob({ id: 5, kind: "report", next_at: "2026-11-05T05:00:00+00:00" }),
+    ]);
+    expect(nextJobs(daemon)).toEqual([
+      { id: 3, kind: "scalp", next_at: "2026-11-05T01:30:00+00:00", text: "scalp · 10:30:00 (마지막 실패)" },
+      { id: 4, kind: "news", next_at: "2026-11-05T02:00:00+00:00", text: "news · 11:00:00" },
+      { id: 1, kind: "analyze", next_at: "2026-11-05T03:00:00+00:00", text: "analyze · 12:00:00" },
+    ]);
+  });
+
+  test("noticeKinds: 처음 본 순서대로 중복 없이", () => {
+    const notices = [fixtureNotice({ id: 3, kind: "fill" }), fixtureNotice({ id: 2, kind: "approval" }), fixtureNotice({ id: 1, kind: "fill" })];
+    expect(noticeKinds(notices)).toEqual(["fill", "approval"]);
   });
 });

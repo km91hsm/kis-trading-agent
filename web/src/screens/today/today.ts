@@ -1,6 +1,9 @@
-// 「오늘」 화면 순수 함수 — 레인 카드 집계·결정 목록 행·결정 상세 링크.
+// 「오늘」 화면 순수 함수 — 레인 카드 집계·결정 목록 행·결정 상세 링크·주문 타임라인·다음 할 일·알림 종류.
 // 상태값 정본: 주문 `kernel/execution/migrations.py`·`types.py`(OPEN_STATUSES), 파생 다리 `features/fo/types.py`(LEG_STATUSES),
 // 결정 상태 `features/spot/decisions_view.py _order_state`(pending_approval·blocked), 승인 `approvals` CHECK.
+
+import type { Tone } from "../../components/Badge";
+import { fmtMoney, fmtPt, fmtTime } from "../../lib/format";
 
 export type Lane = "spot" | "scalp" | "fo";
 export const LANES: Lane[] = ["spot", "scalp", "fo"];
@@ -23,7 +26,24 @@ export type Decision = {
   qty?: number | null;
   status?: string | null;
 };
-export type Order = { lane: string; status: string; filled_qty?: number | null };
+export type Fill = { qty: number; price: string | number | null; filled_at: string };
+export type Leg = { filled_qty?: number | null; price?: string | number | null; sent_at?: string | null; created_at?: string | null };
+export type Order = {
+  lane: string;
+  status: string;
+  filled_qty?: number | null;
+  asset?: string;
+  id?: number | string;
+  at?: string;
+  market?: string | null;
+  ticker?: string | null;
+  side?: string | null;
+  qty?: number | null;
+  price?: string | number | null;
+  order_price?: string | number | null;
+  fills?: Fill[] | null;
+  legs?: Leg[] | null;
+};
 export type Cap = { kind: string; used: number; cap: number | null };
 export type Merged<T> = { items: T[]; partial: boolean };
 
@@ -85,6 +105,8 @@ const STATUS_LABEL: Record<string, string> = {
   sent: "주문",
   filled: "체결",
   rejected: "거절",
+  cancelled: "취소",
+  failed: "실패",
   blocked: "거절",
   expired: "만료",
 };
@@ -137,4 +159,70 @@ export function decisionRows(decisions: Decision[]): DecisionRow[] {
       raw: d.status ?? null,
       href: decisionHref(d),
     }));
+}
+
+// ── 주문·체결 타임라인 ──────────────────────────────────────────────────────────
+export type TimelineLine = { at: string; time: string; text: string; tone: Tone };
+
+const FAILED = new Set(["cancelled", "failed", "rejected"]);
+const ORDER_SIDE: Record<string, string> = { BUY: "매수", SELL: "매도" };
+
+/** 주문 접수 한 줄 + 체결마다 한 줄(현물·단타는 `fills`, 파생은 체결된 다리 `sent_at ?? created_at`), 시각 오름차순. */
+export function timeline(orders: Order[]): TimelineLine[] {
+  const out: TimelineLine[] = [];
+  for (const o of orders) {
+    const fo = o.asset === "fo" || o.lane === "fo";
+    const unit = fo ? "계약" : "주";
+    const px = (v: string | number | null | undefined) => (fo ? fmtPt(v) : fmtMoney(v, o.market === "US" ? "USD" : "KRW"));
+    const at = (v: string | null | undefined) => (v ? { at: v, time: fmtTime(v) } : null);
+    const price = o.price ?? o.order_price;
+    const head = [ORDER_SIDE[(o.side ?? "").toUpperCase()] ?? o.side, o.ticker, o.qty != null ? `${o.qty}${unit}` : null]
+      .filter(Boolean)
+      .join(" ");
+    const failed = FAILED.has(o.status);
+    const placed = at(o.at);
+    if (placed)
+      out.push({
+        ...placed,
+        text: `${head}${price != null ? ` @${px(price)}` : ""} · ${failed ? statusLabel(o.status) : "접수"}`,
+        tone: failed ? "fail" : "muted",
+      });
+    for (const f of o.fills ?? []) {
+      const t = at(f.filled_at);
+      if (t) out.push({ ...t, text: `체결 ${f.qty}${unit}${f.price != null ? ` @${px(f.price)}` : ""}`, tone: "ok" });
+    }
+    for (const l of o.legs ?? []) {
+      const t = at(l.sent_at ?? l.created_at);
+      if (t && (l.filled_qty ?? 0) > 0)
+        out.push({ ...t, text: `체결 ${l.filled_qty}${unit}${l.price != null ? ` @${px(l.price)}` : ""}`, tone: "ok" });
+    }
+  }
+  return out.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+}
+
+// ── 다음 할 일(데몬 작업) ───────────────────────────────────────────────────────
+export type Job = { id: number | string; kind: string; next_at: string | null; last_status?: string | null };
+export type Daemon = { alive: boolean; jobs?: Job[] | null };
+export type NextJob = { id: number | string; kind: string; next_at: string; text: string };
+
+/** 다음 실행 시각이 있는 작업을 시각 오름차순으로 3개. 마지막 실행이 실패였으면 꼬리표. */
+export function nextJobs(daemon: Daemon): NextJob[] {
+  return (daemon.jobs ?? [])
+    .filter((j): j is Job & { next_at: string } => !!j.next_at)
+    .sort((a, b) => (Date.parse(a.next_at) || 0) - (Date.parse(b.next_at) || 0))
+    .slice(0, 3)
+    .map((j) => ({
+      id: j.id,
+      kind: j.kind,
+      next_at: j.next_at,
+      text: `${j.kind} · ${fmtTime(j.next_at)}${j.last_status === "error" || j.last_status === "failed" ? " (마지막 실패)" : ""}`,
+    }));
+}
+
+// ── 알림 ───────────────────────────────────────────────────────────────────────
+export type Notice = { id: number; at: string; kind: string; account_id: string | null; text: string; channel?: string | null; ok: boolean };
+
+/** 필터 칩 목록 — 처음 본 순서, 중복 없이. */
+export function noticeKinds(notices: Pick<Notice, "kind">[]): string[] {
+  return [...new Set(notices.map((n) => n.kind))];
 }

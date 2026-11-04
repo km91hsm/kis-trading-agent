@@ -137,3 +137,73 @@ export const merged = <T>(items: T[], partial = false) => ({ items, partial });
 export function fixtureUsageCaps(caps: UsageResp["caps_by_kind"]): UsageResp {
   return { ...fixtureUsage(), caps_by_kind: caps };
 }
+
+export function fixtureFoOrder(over: Over = {}) {
+  return {
+    asset: "fo",
+    id: 31,
+    account_id: "paper-1",
+    market: "KRX_FO",
+    ticker: "A0166000",
+    side: "BUY",
+    qty: 2,
+    price: "350.25",
+    order_type: "limit",
+    status: "filled",
+    order_no: "0101",
+    origin: "fo",
+    lane: "fo",
+    position_id: 5,
+    intent: "OPEN",
+    round: 1,
+    filled_qty: 2,
+    legs: [
+      {
+        id: 1,
+        attempt: 1,
+        status: "filled",
+        order_id: 31,
+        order_no: "0101",
+        qty: 2,
+        filled_qty: 2,
+        price: "350.30",
+        order_type: "limit",
+        sent_at: "2026-11-05T00:31:00+00:00",
+        created_at: "2026-11-05T00:30:30+00:00",
+      },
+    ],
+    at: "2026-11-05T00:30:00+00:00",
+    ...over,
+  };
+}
+
+export function fixtureNotice(over: Over = {}) {
+  return {
+    id: 1,
+    at: "2026-11-05T01:02:00+00:00",
+    kind: "approval",
+    account_id: "paper-1",
+    text: "승인 요청 — 005930 매수 3주",
+    channel: "telegram",
+    ok: true,
+    ...over,
+  };
+}
+
+export function fixtureJob(over: Over = {}) {
+  return {
+    id: 1,
+    kind: "analyze",
+    interval_s: 3600,
+    next_at: "2026-11-05T02:00:00+00:00",
+    last_start: "2026-11-05T01:00:00+00:00",
+    last_end: "2026-11-05T01:00:30+00:00",
+    last_status: "ok",
+    last_error: null,
+    ...over,
+  };
+}
+
+export function fixtureDaemon(jobs: ReturnType<typeof fixtureJob>[] = [fixtureJob()], over: Over = {}) {
+  return { alive: true, pid: 4242, heartbeat: "2026-11-05T01:00:00+00:00", jobs, ...over };
+}
