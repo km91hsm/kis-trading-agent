@@ -60,6 +60,7 @@ def _cache(deps, *, at, level="warning", items=None):
 
 def test_health_uses_daemon_cache_when_fresh(project):
     deps = ledger_deps(project)
+    _alive_lock(deps.state)
     at = NOW - timedelta(minutes=5)
     _cache(deps, at=at)
     out = make_client(deps).get("/api/system/health").json()
@@ -89,12 +90,22 @@ def test_health_live_when_cache_missing_or_stale(project):
 
 def test_health_live_param_forces_check(project):
     deps = ledger_deps(project)
-    _cache(deps, at=NOW - timedelta(minutes=5), level="ok", items=[])
+    _alive_lock(deps.state)
+    _cache(deps, at=NOW - timedelta(minutes=5), level="warning")
     c = make_client(deps)
     cached = c.get("/api/system/health").json()
-    assert cached["level"] == "ok" and cached["checked_at"] != NOW.isoformat()
+    assert cached["level"] == "warn" and cached["checked_at"] != NOW.isoformat()
     live = c.get("/api/system/health?live=1").json()
-    assert live["checked_at"] == NOW.isoformat() and live["level"] == "fail"
+    assert live["checked_at"] == NOW.isoformat() and live["level"] == "ok"
+
+
+def test_health_live_when_daemon_dead_despite_fresh_cache(project):
+    """데몬이 ok 점검 직후 죽어도 캐시를 믿지 않는다 — 잠금이 없으면 직접 판정(T2-R3)."""
+    deps = ledger_deps(project)
+    _cache(deps, at=NOW - timedelta(minutes=1), level="ok", items=[])
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["level"] == "fail" and out["checked_at"] == NOW.isoformat()
+    assert any("데몬이 꺼져 있어요" in r["text"] for r in out["reasons"])
 
 
 def test_health_live_reports_kernel_areas(project):

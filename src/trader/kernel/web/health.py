@@ -1,7 +1,8 @@
 """`/system/health` 어댑터: 판정은 `kernel/ops` 가 하고 여기서는 원천만 고른다.
 
 기본은 데몬 `ops_check` 가 적은 control `ops_result`(그 `at` 이 `CACHE_MAX_AGE_FACTOR × 간격`
-안일 때). 없거나 오래됐거나 `live` 면 이 프로세스가 직접 `check()` 를 돈다(결과는 적지 않는다).
+안이고 데몬이 살아 있으며 하트비트가 멈추지 않았을 때). 그 밖·`live` 면 이 프로세스가
+직접 `check()` 를 돈다(결과는 적지 않는다).
 응답 모양 `{level: ok|warn|fail, reasons, checked_at, version, features}` 는 그대로다."""
 
 from __future__ import annotations
@@ -41,6 +42,12 @@ def _fresh(cached: dict | None, now: datetime) -> bool:
     return 0 <= age < CACHE_MAX_AGE_FACTOR * int(OPS_CHECK.interval_s or 0)
 
 
+def _daemon_up(deps: Any, now: datetime) -> bool:
+    """캐시는 데몬이 살아 있고 하트비트가 멈추지 않았을 때만 믿는다(죽은 직후의 ok 를 내지 않게)."""
+    st = read_status(deps.state, now, [])
+    return bool(st["alive"]) and not st["stale"]
+
+
 def _ledger_failed(deps: Any, now: datetime, err: Exception, features: list[str]) -> dict:
     """원장을 못 읽으면 데몬 생존(잠금 파일)만 보고 원장 사유를 warn 으로 더한다."""
     reasons = []
@@ -63,7 +70,7 @@ def evaluate(deps: Any, *, live: bool = False) -> dict:
     try:
         with closing(deps.conn_factory()) as conn:
             cached = None if live else latest(conn)
-            if _fresh(cached, now):
+            if _fresh(cached, now) and _daemon_up(deps, now):
                 result = cached
             else:
                 ctx = build_context(
