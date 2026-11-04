@@ -16,7 +16,7 @@ function liveChip(r: Row): ReactNode {
 }
 
 function price(r: Row, fmt: (v: number | null) => string): ReactNode {
-  if (r.current_price === null) return "—";
+  if (r.current_price === null) return r.stale ? <>— {liveChip(r)}</> : "—";
   return (
     <>
       {fmt(r.current_price)} {liveChip(r)}
@@ -60,19 +60,23 @@ export function PositionsTable({
   return <Table columns={columns} rows={rows} rowKey={key} partial={partial} empty={empty} expand={expand} />;
 }
 
-const KIND: Record<string, string> = { future: "선물", call: "콜", put: "풋" };
-const DIRECTION: Record<string, string> = { long: "매수", short: "매도" };
+// 어휘 정본: `features/fo/schemas.py` — kind FUTURES|CALL|PUT, 계약 보유 방향 contract_side LONG(매수)|SHORT(매도),
+// 시장 방향 뷰 direction LONG|SHORT|FLAT. 모르는 값은 원문 그대로.
+const KIND: Record<string, string> = { FUTURES: "선물", CALL: "콜", PUT: "풋" };
+const SIDE: Record<string, string> = { LONG: "매수", SHORT: "매도" };
+const DIRECTION: Record<string, string> = { LONG: "상승", SHORT: "하락", FLAT: "중립" };
+const label = (map: Record<string, string>, v: string | null | undefined) => (v ? (map[v] ?? v) : "—");
 
 export function FoPositionsTable({ rows, partial }: { rows: Row[]; partial?: boolean }) {
   const columns: Column<Row>[] = [
-    { key: "code", label: "코드", width: "11%", long: true, render: (r) => r.ticker },
-    { key: "kind", label: "종류", width: "6%", render: (r) => KIND[r.kind ?? ""] ?? r.kind ?? "—" },
-    { key: "direction", label: "방향", width: "6%", render: (r) => DIRECTION[r.direction ?? ""] ?? r.direction ?? "—" },
+    { key: "code", label: "코드", width: "10%", long: true, render: (r) => r.ticker },
+    { key: "kind", label: "종류", width: "6%", render: (r) => label(KIND, r.kind) },
+    { key: "side", label: "보유·뷰", width: "9%", render: (r) => `${label(SIDE, r.contract_side)}·${label(DIRECTION, r.direction)}` },
     { key: "qty", label: "계약", width: "6%", align: "num", render: (r) => String(r.qty ?? "—") },
     { key: "avg", label: "평단(pt)", width: "9%", align: "num", render: (r) => fmtPt(r.avg_price) },
     { key: "price", label: "현재가(pt)", width: "12%", align: "num", render: (r) => price(r, fmtPt) },
     { key: "krw", label: "원화", width: "11%", align: "num", render: (r) => fmtKrw(r.krw_value ?? null) },
-    { key: "horizon", label: "만기/보유기한", width: "13%", render: (r) => `${r.last_trade_date ?? "—"} / ${r.horizon_until ?? "—"}` },
+    { key: "horizon", label: "만기/보유기한", width: "11%", render: (r) => `${r.last_trade_date ?? "—"} / ${r.horizon_until ?? "—"}` },
     { key: "status", label: "상태", width: "6%", align: "chip", render: (r) => <Chip>{r.status ?? "—"}</Chip> },
     { key: "stop", label: "손절", width: "10%", align: "chip", render: (r) => <Chip>{stopLabel(r.stop, "PT")}</Chip> },
     { key: "target", label: "목표", width: "10%", align: "chip", render: (r) => <Chip>{stopLabel(r.target, "PT")}</Chip> },

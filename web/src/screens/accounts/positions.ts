@@ -16,11 +16,14 @@ export type PositionRow = {
   qty: number | string | null;
   avg_price: Amount;
   last_price: Amount;
+  /** 서버 잔고 스냅샷 현재가(현물 행). 시세가 없거나 낡으면 이 값으로 평가한다. */
+  current_price?: Amount;
   stop: Level;
   target: Level;
   krw_value?: Amount;
   kind?: string | null;
   direction?: string | null;
+  contract_side?: string | null;
   status?: string | null;
   horizon_until?: string | null;
   last_trade_date?: string | null;
@@ -36,14 +39,18 @@ export function splitLanes<R extends { lane: string }>(rows: R[]): { spot: R[]; 
   };
 }
 
-/** `applyLive` + `stale`: 시세가 있는데 낡았으면(isStale) 그 시세는 쓰지 않고(live false) stale 표시. */
+/** `applyLive` + `stale`: 새 시세면 live. 시세가 없거나 낡았으면(isStale) live false 로 두고 서버 값(last_price → 스냅샷
+ *  current_price)으로 평가한다 — 둘 다 없을 때만 낡은 시세 가격을 보인다(stale 칩과 함께). */
 export function withLive<R extends PositionRow>(rows: R[], quotes: { quotes: Record<string, QuoteLike> } | null | undefined, now: number): LiveRow<R>[] {
   const all = quotes?.quotes ?? {};
   const fresh: Record<string, QuoteRow> = {};
   for (const [t, q] of Object.entries(all)) if (!isStale(q, now)) fresh[t] = q as QuoteRow;
-  return applyLive(rows, fresh).map((r) => {
+  return rows.map((r) => {
     const q = all[r.ticker];
-    return { ...r, stale: !!q && isStale(q, now) };
+    const stale = !!q && isStale(q, now);
+    const fallback = r.last_price ?? r.current_price ?? (stale ? q.price : null);
+    const [applied] = applyLive([{ ...r, last_price: fallback }], fresh);
+    return { ...applied, last_price: r.last_price, stale };
   });
 }
 
@@ -54,7 +61,7 @@ const n = (v: Amount | undefined): number | null => {
 };
 
 /** 평가 합계·손익 — 같은 통화 행만 넘긴다(첫 행 통화로 형식). 현재가가 없으면 평단으로, 단타 행은 뺀다. */
-export function sumEval(rows: (PositionRow & Partial<Pick<LiveFields, "current_price">>)[]): { eval: string; pnl: string } {
+export function sumEval(rows: PositionRow[]): { eval: string; pnl: string } {
   const held = rows.filter((r) => r.lane !== "scalp");
   const currency = held[0]?.currency === "USD" ? "USD" : "KRW";
   let total = 0;

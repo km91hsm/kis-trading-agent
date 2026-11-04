@@ -179,6 +179,39 @@ describe("계좌별 화면", () => {
     expect(pos.textContent).toContain("80,000 · 결정");
   });
 
+  test("시세가 없으면 서버 현재가로 평가·합계(칩 없음)", async () => {
+    await mount(routes());
+    const pos = section("positions")!;
+    expect(pos.textContent).toContain("71,000");
+    expect(pos.textContent).toContain("+10,000");
+    expect(pos.textContent).toContain("210.00");
+    expect(pos.textContent).toContain("평가 합계(KRW) 710,000 · 손익 +10,000");
+    expect(pos.textContent).toContain("평가 합계(USD) 420.00 · 손익 +19.00");
+    expect(pos.textContent).not.toContain("실시간");
+    expect(pos.textContent).not.toContain("지연");
+  });
+
+  test("낡은 시세(isStale) 행은 가격을 보이고 「지연」 칩", async () => {
+    const at = new Date(Date.now() - 120_000).toISOString();
+    await mount(
+      routes({
+        "GET /api/quotes": (u: URL) => ({
+          session: "closed",
+          at,
+          quotes: u.searchParams.get("market") === "KR" ? { "005930": { price: "72000", change_pct: 0.01, at, stale: false, source: "ws" } } : {},
+          source: "ws",
+          next_poll_ms: 60000,
+        }),
+      }),
+    );
+    const pos = section("positions")!;
+    expect(pos.textContent).toContain("71,000");
+    expect(pos.textContent).not.toContain("72,000");
+    expect(pos.querySelector('.chip[data-tone="muted"]')).not.toBeNull();
+    expect(pos.textContent).toContain("지연");
+    expect(pos.textContent).not.toContain("실시간");
+  });
+
   test("partial 이면 표 위 칩", async () => {
     await mount(routes({ "GET /api/accounts/paper-1/positions": fixturePositions({ partial: true }) }));
     expect(section("positions")!.textContent).toContain("일부 레인 응답 없음");
@@ -228,6 +261,10 @@ describe("계좌별 화면", () => {
     expect(fo.textContent).toContain("350.25");
     expect(fo.textContent).toContain("175,125,000");
     expect(fo.textContent).toContain("2026-11-20");
+    // 풋 매수 = 하락 뷰: 종류 PUT → 「풋」, contract_side LONG → 「매수」, direction SHORT → 「하락」
+    expect(fo.textContent).toContain("풋");
+    expect(fo.textContent).toContain("매수·하락");
+    expect(fo.textContent).not.toContain("PUT");
     expect(ff!.calls.some((c) => c.url.startsWith("/api/analytics/fo/report"))).toBe(true);
     expect(ff!.calls.some((c) => c.url.includes("/tax-lots") || c.url.startsWith("/api/positions/risk") || c.url.startsWith("/api/analytics/performance"))).toBe(false);
     expect(ff!.calls.some((c) => c.url.startsWith("/api/quotes/fo") && c.url.includes("codes=A0166000"))).toBe(true);

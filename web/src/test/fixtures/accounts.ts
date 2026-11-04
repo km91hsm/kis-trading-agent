@@ -63,6 +63,7 @@ function spotRow(over: Over = {}) {
     target: { level: "80000", source: "결정" },
     horizon: "swing",
     weight: 0.07,
+    current_price: "71000",
     ...over,
   };
 }
@@ -72,7 +73,7 @@ export function fixturePositions(over: Over = {}) {
   return {
     items: [
       spotRow(),
-      spotRow({ market: "US", ticker: "AAPL", name: "Apple", qty: 2, avg_price: "200.5", currency: "USD", stop: null, target: null }),
+      spotRow({ market: "US", ticker: "AAPL", name: "Apple", qty: 2, avg_price: "200.5", currency: "USD", current_price: "210", stop: null, target: null }),
       spotRow({
         lane: "scalp",
         ticker: "000660",
@@ -82,6 +83,7 @@ export function fixturePositions(over: Over = {}) {
         stop: { level: "148500", source: "단타 규칙" },
         target: { level: "153000", source: "단타 규칙" },
         status: "open",
+        current_price: undefined,
       }),
     ],
     partial: false,
@@ -107,10 +109,10 @@ export function fixtureFoPositions(over: Over = {}) {
         krw_value: "175125000",
         stop: { level: "345.5", source: "손절 −1.5%" },
         target: { level: "360", source: "결정" },
-        kind: "future",
-        contract_side: "long",
-        direction: "long",
-        vehicle: "mini",
+        kind: "PUT",
+        contract_side: "LONG",
+        direction: "SHORT",
+        vehicle: "OPTION_BUY",
         status: "open",
         position_id: 1,
         last_trade_date: "2026-12-10",
