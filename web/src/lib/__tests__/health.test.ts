@@ -33,7 +33,11 @@ describe("healthSummary", () => {
   });
   it("정상이면 '정상'(info 사유는 띄우지 않음), 응답 전이면 '상태 확인 중'", () => {
     expect(healthSummary(h("ok", [{ area: "control", level: "info", text: "paused" }]), null)).toBe("정상");
-    expect(healthSummary(h("ok", []), "시계 어긋남 −3초")).toBe("정상 · 시계 어긋남 −3초");
+    expect(healthSummary(h("ok", []), "시계 어긋남 -3초")).toBe("정상 · 시계 어긋남 -3초");
     expect(healthSummary(null, null)).toBe("상태 확인 중");
+  });
+  it("warn·fail 인데 사유가 없으면 단계 이름을 한국어로", () => {
+    expect(healthSummary(h("warn", []), null)).toBe("주의");
+    expect(healthSummary(h("fail", []), null)).toBe("장애");
   });
 });

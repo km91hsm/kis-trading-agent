@@ -50,15 +50,15 @@ export function usageLevel(pct: number): UsageLevel {
   return "fail";
 }
 
-/** 리셋까지 남은 시간 「30분」·「1시간 20분」·「4일」(분 올림). 지났거나 모르면 "". */
+/** 리셋까지 남은 시간 「30분」·「1시간」·「1시간 20분」·「4일」(분·일 모두 올림). 지났거나 모르면 "". */
 export function resetsIn(resetsAt: string | null | undefined, now: Date): string {
   if (!resetsAt) return "";
   const ms = new Date(resetsAt).getTime() - now.getTime();
   if (!Number.isFinite(ms) || ms <= 0) return "";
   const m = Math.ceil(ms / 60000);
   if (m < 60) return `${m}분`;
-  if (m < 48 * 60) return `${Math.floor(m / 60)}시간 ${m % 60}분`;
-  return `${Math.round(m / 1440)}일`;
+  if (m < 48 * 60) return m % 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m / 60}시간`;
+  return `${Math.ceil(m / 1440)}일`;
 }
 
 /** 상단 띠 칩 「72% · 리셋 1시간 20분」. 관측 없는 창은 0% 가 아니라 「—」(level "none"). */

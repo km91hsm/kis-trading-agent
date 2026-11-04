@@ -17,12 +17,14 @@ describe("resetsIn", () => {
   const now = new Date("2026-10-23T03:00:00Z");
   it("분·시간 분·일", () => {
     expect(resetsIn("2026-10-23T03:30:00Z", now)).toBe("30분");
+    expect(resetsIn("2026-10-23T04:00:00Z", now)).toBe("1시간");
     expect(resetsIn("2026-10-23T04:20:00Z", now)).toBe("1시간 20분");
     expect(resetsIn("2026-10-23T05:10:00Z", now)).toBe("2시간 10분");
     expect(resetsIn("2026-10-27T03:00:00Z", now)).toBe("4일");
   });
-  it("남은 1분 미만은 올림(0분으로 보이지 않게)", () => {
+  it("분·일 모두 올림(0분으로 보이지 않게)", () => {
     expect(resetsIn("2026-10-23T03:00:20Z", now)).toBe("1분");
+    expect(resetsIn("2026-10-25T04:00:00Z", now)).toBe("3일"); // 49시간 → 3일
   });
   it("지났거나 모르면 빈 문자열", () => {
     expect(resetsIn("2026-10-23T02:00:00Z", now)).toBe("");

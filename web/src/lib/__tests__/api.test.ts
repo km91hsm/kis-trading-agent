@@ -51,6 +51,33 @@ describe("getJson", () => {
     await expect(getJson("/x")).rejects.toThrow("500 Internal Server Error");
   });
 
+  it("2xx 인데 JSON 이 아니면(SPA HTML 폴백) ApiError", async () => {
+    install({ "GET /api/x": () => new Response("<!doctype html><html></html>", { status: 200 }) });
+    const err = await getJson("/x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(200);
+    expect((err as ApiError).message).toBe("응답이 JSON 이 아닙니다");
+  });
+
+  it("fetch 자체가 실패하면 ApiError(0, 서버에 연결할 수 없습니다)", async () => {
+    install({
+      "GET /api/x": () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const err = await getJson("/x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(0);
+    expect((err as ApiError).message).toBe("서버에 연결할 수 없습니다");
+  });
+
+  it("opts.signal 이 fetch 에 전달된다", async () => {
+    const f = install({ "GET /api/accounts": [] });
+    const ac = new AbortController();
+    await getJson("/accounts", undefined, { signal: ac.signal });
+    expect(f.calls[0].init?.signal).toBe(ac.signal);
+  });
+
   it("응답의 X-Server-Time 이 clock 오프셋에 반영된다", async () => {
     install({
       "GET /api/system/health": () =>
@@ -137,6 +164,20 @@ describe("onAuthError", () => {
     off();
     await postJson("/x", {}).catch(() => {});
     expect(seen).toHaveLength(3);
+  });
+
+  it("던지는 리스너가 있어도 AuthError 로 거부되고 다음 리스너가 불린다", async () => {
+    install({ "POST /api/x": () => new Response("{}", { status: 401 }) });
+    tokenStore.set("T");
+    const seen: number[] = [];
+    const off1 = onAuthError(() => {
+      throw new Error("리스너 고장");
+    });
+    const off2 = onAuthError((e) => seen.push(e.status));
+    await expect(postJson("/x", {})).rejects.toBeInstanceOf(AuthError);
+    expect(seen).toEqual([401]);
+    off1();
+    off2();
   });
 
   it("다른 오류에는 불리지 않는다", async () => {

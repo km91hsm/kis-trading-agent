@@ -9,7 +9,7 @@ export function noteServerTime(iso: string, clientNow: number = Date.now()): voi
   if (Number.isFinite(t)) offsetMs = t - clientNow;
 }
 
-/** 서버 − 클라이언트(ms). 양수면 서버가 앞선다. */
+/** 서버 - 클라이언트(ms). 양수면 서버가 앞선다. */
 export function serverOffsetMs(): number {
   return offsetMs;
 }
@@ -22,7 +22,7 @@ export function now(): Date {
 /** |offset| ≥ 1초면 「시계 어긋남 +N초」(반올림), 아니면 null. */
 export function clockSkewText(offset: number): string | null {
   if (!Number.isFinite(offset) || Math.abs(offset) < 1000) return null;
-  return `시계 어긋남 ${offset > 0 ? "+" : "−"}${Math.round(Math.abs(offset) / 1000)}초`;
+  return `시계 어긋남 ${offset > 0 ? "+" : "-"}${Math.round(Math.abs(offset) / 1000)}초`;
 }
 
 const KST = "Asia/Seoul";

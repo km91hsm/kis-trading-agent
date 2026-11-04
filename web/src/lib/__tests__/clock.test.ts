@@ -29,7 +29,7 @@ describe("clockSkewText", () => {
     expect(clockSkewText(0)).toBeNull();
     expect(clockSkewText(1000)).toBe("시계 어긋남 +1초");
     expect(clockSkewText(1500)).toBe("시계 어긋남 +2초");
-    expect(clockSkewText(-3200)).toBe("시계 어긋남 −3초");
+    expect(clockSkewText(-3200)).toBe("시계 어긋남 -3초");
   });
 });
 

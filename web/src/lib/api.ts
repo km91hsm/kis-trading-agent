@@ -51,7 +51,13 @@ export function onAuthError(cb: AuthListener): () => void {
 }
 
 function authFail(e: AuthError): never {
-  for (const cb of [...authListeners]) cb(e);
+  for (const cb of [...authListeners]) {
+    try {
+      cb(e);
+    } catch {
+      /* 리스너 오류 격리 — 요청은 AuthError 로 거부되고 다음 리스너도 불린다 */
+    }
+  }
   throw e;
 }
 
@@ -78,12 +84,23 @@ async function errorOf(res: Response): Promise<never> {
 }
 
 async function send<T>(method: string, url: string, init: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, method });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, method });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e; // 취소는 그대로
+    throw new ApiError(0, "서버에 연결할 수 없습니다");
+  }
   const serverTime = res.headers.get("X-Server-Time");
   if (serverTime) noteServerTime(serverTime);
   if (!res.ok) await errorOf(res);
   const text = await res.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(res.status, "응답이 JSON 이 아닙니다"); // 예: SPA HTML 폴백
+  }
 }
 
 async function write<T>(method: string, path: string, body: unknown, opts: WriteOpts = {}): Promise<T> {
@@ -99,8 +116,8 @@ async function write<T>(method: string, path: string, body: unknown, opts: Write
   });
 }
 
-export function getJson<T>(path: string, params?: Record<string, string>): Promise<T> {
-  return send<T>("GET", withQuery(path, params), { headers: { Accept: "application/json" } });
+export function getJson<T>(path: string, params?: Record<string, string>, opts: { signal?: AbortSignal } = {}): Promise<T> {
+  return send<T>("GET", withQuery(path, params), { headers: { Accept: "application/json" }, signal: opts.signal });
 }
 
 export function postJson<T>(path: string, body: unknown, opts?: WriteOpts): Promise<T> {
