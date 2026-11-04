@@ -59,6 +59,7 @@ def test_boot_loads_settings_and_conn(project):
             "fo",
             "ingest",
             "ml",
+            "quotes",
             "regime",
             "saveticker",
             "scalp",

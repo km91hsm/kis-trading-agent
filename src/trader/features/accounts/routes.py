@@ -1,0 +1,276 @@
+"""accounts 웹 자원. 조회는 토큰 없음, 변경은 토큰 + 같은 출처, yaml·연결 키 편집은
+이 PC 직접 접속만.
+
+`accounts_router`: `GET /accounts`, `GET /accounts/overview`,
+`PATCH /accounts/{id} {mode, confirm?}`, `POST /accounts`, `DELETE /accounts/{id}`.
+`settings_router`: `GET /settings`, `PATCH /settings/paused {value, confirm?}`,
+`GET|POST /settings/secrets`.
+계좌는 `deps.ports["accounts"]`(현물 `accounts()` + 파생 `fo_accounts()`, 없으면 계좌 없음).
+yaml·키를 바꾼 결과는 실행 중인 데몬·웹이 시작할 때 읽은 값을 쓰므로 재시작 뒤 적용된다."""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import sqlite3
+from contextlib import closing
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
+
+from trader.features.accounts import accounts_io, modes, overview, secrets_io
+from trader.features.accounts.accounts_io import AccountSpec
+from trader.features.accounts.settings import Account, Mode
+from trader.kernel.config import ConfigError
+from trader.kernel.platform import paths
+from trader.kernel.registry.types import SseKey
+from trader.kernel.web.auth import (
+    actor_of,
+    require_confirm,
+    require_direct_local,
+    require_same_origin,
+    require_token,
+)
+
+logger = logging.getLogger("trader.accounts")
+
+WRITE = [Depends(require_token), Depends(require_same_origin)]
+LOCAL_WRITE = [*WRITE, Depends(require_direct_local)]
+LIVE_REQUIRED = (
+    "LIVE 확인 필요 — 실전 auto 는 사용자가 CLI `trader accounts mode <id> auto --confirm LIVE` "
+    "로 먼저 확인해야 합니다"
+)
+
+accounts_router = APIRouter(tags=["accounts"])
+settings_router = APIRouter(tags=["settings"])
+
+
+class ModeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Mode
+    confirm: str | None = None
+
+
+class PausedBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: bool
+    confirm: str | None = None
+
+
+class SecretsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: dict[str, str] = {}
+    clear: list[str] = []
+
+
+def _accounts(deps: Any) -> list[Account]:
+    """현물 + 파생 계좌(설정 화면은 파생 계좌 모드도 바꾼다). 포트가 없으면 빈 목록."""
+    port = (deps.ports or {}).get("accounts")
+    if port is None:
+        return []
+    fo = getattr(port, "fo_accounts", None)
+    return [*port.accounts(), *(fo() if fo else [])]
+
+
+def _find(deps: Any, account_id: str) -> Account:
+    acct = next((a for a in _accounts(deps) if a.id == account_id), None)
+    if acct is None:
+        raise HTTPException(status_code=404, detail=f"알 수 없는 계좌: {account_id}")
+    return acct
+
+
+def _accounts_yaml():
+    return paths.config_dir() / "accounts.yaml"
+
+
+# --- accounts ---------------------------------------------------------------------------
+
+
+@accounts_router.get("/accounts")
+def list_accounts(request: Request) -> list[dict]:
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        return overview.account_rows(
+            conn, deps.settings, _accounts(deps), now=deps.now(), paused=modes.is_paused(conn)
+        )
+
+
+@accounts_router.get("/accounts/overview")
+def accounts_overview(request: Request) -> dict:
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        return overview.totals(
+            conn, deps.settings, _accounts(deps), now=deps.now(), paused=modes.is_paused(conn)
+        )
+
+
+@accounts_router.patch("/accounts/{account_id}", dependencies=WRITE)
+def set_mode(request: Request, account_id: str, body: ModeBody) -> dict:
+    """실전 계좌는 `confirm` 에 계좌 id. 실전 auto 는 LIVE 확인 기록이 있어야 한다(없으면 409)."""
+    deps = request.app.state.deps
+    acct = _find(deps, account_id)
+    require_confirm(body.model_dump(), acct.id, acct.env)
+    real_auto = acct.env == "real" and body.mode == "auto"
+    with closing(deps.conn_factory()) as conn:
+        if real_auto and modes.live_confirmed(conn, acct.id) is None:
+            raise HTTPException(status_code=409, detail=LIVE_REQUIRED)
+        modes.set_account_mode(
+            conn, acct, body.mode, confirm=modes.LIVE_CONFIRM if real_auto else None,
+            channel="web", actor=actor_of(request),
+        )  # fmt: skip
+        return {"account_id": acct.id, "mode": modes.get_account_mode(conn, acct)}
+
+
+@accounts_router.post("/accounts", dependencies=LOCAL_WRITE)
+def add_account(spec: AccountSpec) -> dict:
+    """config/accounts.yaml 에 계좌 한 줄(계좌번호는 자리표시자 — 실제 번호는 연결 키)."""
+    try:
+        r = accounts_io.add_account(_accounts_yaml(), spec)
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    logger.info("계좌 추가(웹): %s (%s·%s)", spec.id, spec.env, spec.asset)
+    return {**r, "restart_required": True}
+
+
+@accounts_router.delete("/accounts/{account_id}", dependencies=LOCAL_WRITE)
+def remove_account(request: Request, account_id: str) -> dict:
+    """살아 있는 주문·승인·보유가 있으면 409."""
+    try:
+        with closing(request.app.state.deps.conn_factory()) as conn:
+            r = accounts_io.remove_account(_accounts_yaml(), account_id, conn)
+    except accounts_io.AccountInUse as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    logger.info("계좌 삭제(웹): %s", account_id)
+    return {**r, "restart_required": True}
+
+
+# --- settings ---------------------------------------------------------------------------
+
+
+@settings_router.get("/settings")
+def settings_view(request: Request) -> dict:
+    """설정 요약. 토큰 없는 조회라 tailnet 사용자 이메일·호스트명은 수만 돌려준다."""
+    s = request.app.state.deps.settings
+    risk = getattr(s, "risk", None)
+    return {
+        "markets": list(s.markets),
+        "risk": risk.model_dump(mode="json") if risk is not None else None,
+        "debate_rounds": getattr(s, "debate_rounds", None),
+        "models": dict(s.models),
+        "web": {
+            "bind": s.web.bind,
+            "port": s.web.port,
+            "tailscale_hosts_count": len(s.web.tailscale_hosts),
+            "tailscale_users_count": len(s.web.tailscale_users),
+        },
+        "llm": {"budget_usd": s.llm.budget_usd, "daily_session_cap": s.llm.daily_session_cap},
+    }
+
+
+@settings_router.patch("/settings/paused", dependencies=WRITE)
+def set_paused(request: Request, body: PausedBody) -> dict:
+    """일시정지는 확인 없이, 해제는 실전 auto 계좌가 있으면 `confirm` 에 그 계좌 id 중 하나."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        if not body.value:
+            live = [
+                a.id
+                for a in _accounts(deps)
+                if a.env == "real" and modes.account_mode(conn, a)[0] == "auto"
+            ]
+            if live and body.confirm not in live:
+                raise HTTPException(
+                    status_code=400,
+                    detail="실전 auto 계좌가 있어 재개하려면 confirm 에 그 계좌 id 를 "
+                    "적어야 합니다: " + ", ".join(live),
+                )
+        modes.set_paused(conn, body.value, channel="web", actor=actor_of(request))
+        return {"ok": True, "paused": modes.is_paused(conn)}
+
+
+@settings_router.get(
+    "/settings/secrets", dependencies=[Depends(require_token), Depends(require_direct_local)]
+)
+def secrets_status(request: Request) -> dict:
+    """연결 키 '설정됨' 여부만(값은 돌려주지 않는다)."""
+    return secrets_io.status(paths.secrets_path(), _accounts(request.app.state.deps))
+
+
+@settings_router.post("/settings/secrets", dependencies=LOCAL_WRITE)
+def secrets_update(request: Request, body: SecretsBody) -> dict:
+    try:
+        r = secrets_io.update(
+            paths.secrets_path(),
+            _accounts(request.app.state.deps),
+            values=body.values,
+            clear=body.clear,
+        )
+    except ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    logger.info("연결 키 변경(웹): 설정 %s · 지움 %s", r["updated"], r["cleared"])
+    return {**r, "restart_required": bool(r["updated"] or r["cleared"])}
+
+
+ROUTERS = (accounts_router, settings_router)
+
+
+# --- SSE 지문 ---------------------------------------------------------------------------
+
+
+def _digest(rows: list[sqlite3.Row]) -> str:
+    return hashlib.sha1(repr([tuple(r) for r in rows]).encode("utf-8")).hexdigest()[:16]
+
+
+def _accounts_fp(deps: Any) -> str:
+    """계좌 모드 지문(account_modes 전 행) + paused."""
+    with closing(deps.conn_factory()) as conn:
+        rows = conn.execute(
+            "SELECT account_id, mode, live_confirmed_json, updated_at FROM account_modes "
+            "ORDER BY account_id"
+        ).fetchall()
+        return f"{_digest(rows)}|{int(modes.is_paused(conn))}"
+
+
+def _positions_fp(deps: Any) -> str:
+    """잔고 지문: 행 수·최대 id + 최근 사흘(가장 늦은 날짜 기준) 보유·NAV·현금 값 해시.
+    관측 시각(created_at)은 넣지 않는다."""
+    with closing(deps.conn_factory()) as conn:
+        head = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM positions_snapshot"
+        ).fetchone()
+        pos = conn.execute(
+            "SELECT account_id, date, market, asset, ticker, qty, avg_price, current_price, "
+            "eval_amount FROM positions_snapshot WHERE date >= "
+            "(SELECT date(MAX(date), '-3 day') FROM positions_snapshot) ORDER BY id"
+        ).fetchall()
+        nav = conn.execute(
+            "SELECT account_id, date, market, nav, cash FROM account_nav WHERE date >= "
+            "(SELECT date(MAX(date), '-3 day') FROM account_nav) ORDER BY id"
+        ).fetchall()
+    return f"{head[0]}:{head[1]}|{_digest(pos)}|{_digest(nav)}"
+
+
+def _approvals_fp(deps: Any) -> str:
+    """pending 수 + 건수·최대 id·상태별 건수(결정·만료 같은 UPDATE 도 잡는다)."""
+    with closing(deps.conn_factory()) as conn:
+        head = conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM approvals").fetchone()
+        groups = conn.execute(
+            "SELECT status, COUNT(*) FROM approvals GROUP BY status ORDER BY status"
+        ).fetchall()
+    by = dict((g[0], g[1]) for g in groups)
+    return f"{by.get('pending', 0)}|{head[0]}:{head[1]}:" + ",".join(
+        f"{k}={v}" for k, v in by.items()
+    )
+
+
+SSE_KEYS = (
+    SseKey("accounts", _accounts_fp),
+    SseKey("positions", _positions_fp),
+    SseKey("approvals", _approvals_fp),
+)

@@ -11,7 +11,7 @@ def test_gen_writes_then_check_passes(project):
     r = CliRunner().invoke(app, ["dev", "gen-sse-keys"])
     assert r.exit_code == 0, r.output
     target = project / REL
-    assert target.read_text(encoding="utf-8") == gen.sse_keys_ts([])
+    assert target.read_text(encoding="utf-8") == gen.sse_keys_ts(discover())  # 기능 키 포함
     assert b"\r\n" not in target.read_bytes()
     assert CliRunner().invoke(app, ["dev", "gen-sse-keys", "--check"]).exit_code == 0
 

@@ -13,7 +13,7 @@ def test_feature_declaration():
     assert all(not c.untrusted_ok for c in FEATURE.telegram_commands)
     assert [s.title for s in FEATURE.status_sections] == ["계좌"]
     assert FEATURE.control_namespaces == ("paused",)
-    assert FEATURE.cli is not None and FEATURE.routes == ()  # 웹 자원은 M11
+    assert FEATURE.cli is not None and len(FEATURE.routes) == 2  # accounts·settings 라우터
 
 
 def test_discovered_and_contracts_pass():
