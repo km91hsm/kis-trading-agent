@@ -1,0 +1,170 @@
+// 「데이터」 화면 순수 함수 — 뉴스 행(종목 이름 칩·촉매·테마·「판정에 쓰임」), 테마 행, 지표 표(옛 `pages/features.ts` 의
+// sortRows·fmt·KEY_COLUMNS 이식), 차트 체결 표식·손절/목표선. 색은 CSS 변수 이름(--up 등)으로 두고 화면이 풀어 쓴다.
+// 응답 정본: ingest/routes.py·news_store.py, scan/routes.py·theme.py, ml/routes.py, quotes/charts.py, spot/routes.py.
+import type { ChartLine, ChartMarker } from "../../components/Chart";
+
+// ── 뉴스 ─────────────────────────────────────────────────────────────────────
+export type NewsItem = {
+  id: number;
+  market: string;
+  source: string;
+  query?: string | null;
+  title: string;
+  url: string | null;
+  published_at: string | null;
+  received_at: string;
+  summary?: string | null;
+  tickers: string[];
+  lang?: string | null;
+};
+export type NewsResp = { market: string; hours: number; total: number; asof: string | null; items: NewsItem[] };
+export type NewsLabels = Record<string, { catalyst: boolean; themes: string[] }>;
+/** news_id → 그 뉴스를 쓴 현물 판정 id 들. */
+export type NewsRefs = Record<string, number[]>;
+/** "<시장>:<종목>" → 이름(모르는 종목은 키 없음). */
+export type Names = Record<string, string>;
+
+export type NewsRow = {
+  id: number;
+  title: string;
+  url: string | null;
+  source: string;
+  at: string;
+  tickers: { ticker: string; name: string }[];
+  chips: string[];
+  decisionId: number | null;
+};
+
+export const USED_CHIP = "판정에 쓰임";
+
+export function newsRows(news: NewsItem[], labels: NewsLabels, refs: NewsRefs, names: Names): NewsRow[] {
+  return news.map((n) => {
+    const label = labels[String(n.id)];
+    const ref = refs[String(n.id)] ?? [];
+    const chips: string[] = [];
+    if (label?.catalyst) chips.push("촉매");
+    chips.push(...(label?.themes ?? []));
+    if (ref.length) chips.push(USED_CHIP);
+    return {
+      id: n.id,
+      title: n.title,
+      url: n.url,
+      source: n.source,
+      at: n.published_at ?? n.received_at,
+      tickers: n.tickers.map((t) => ({ ticker: t, name: names[`${n.market}:${t}`] ?? t })),
+      chips,
+      decisionId: ref[0] ?? null,
+    };
+  });
+}
+
+// ── 테마 ─────────────────────────────────────────────────────────────────────
+export type ThemesResp = {
+  market: string;
+  date: string;
+  observed_at: string | null;
+  top_n: number;
+  themes: {
+    theme: string;
+    score: number;
+    components?: unknown;
+    tickers: { ticker: string; name: string | null; why: string[] }[];
+    members: string[];
+    catalyst_ok: boolean;
+    catalyst_ids?: number[];
+  }[];
+};
+export type ThemeRow = { theme: string; score: number; tickers: { ticker: string; name: string; why: string[] }[]; members: number; catalystOk: boolean };
+
+export function themeRows(themes: ThemesResp): ThemeRow[] {
+  return themes.themes.map((t) => ({
+    theme: t.theme,
+    score: t.score,
+    tickers: t.tickers.map((x) => ({ ticker: x.ticker, name: x.name ?? x.ticker, why: x.why ?? [] })),
+    members: t.members.length,
+    catalystOk: t.catalyst_ok,
+  }));
+}
+
+// ── 지표 (옛 pages/features.ts 이식) ─────────────────────────────────────────
+export type Cell = string | number | boolean | null;
+export type FeatureRow = Record<string, Cell>;
+export type LatestResp = { market: string; asof: string | null; columns: string[]; rows: FeatureRow[] };
+export type HistoryResp = { ticker: string; market: string; rows: FeatureRow[] };
+export type SortDir = "asc" | "desc";
+
+/** 최신 표에 보여 줄 열(전부 보이면 너무 넓다). 이력 표는 같은 열을 날짜와 함께 쓴다. */
+export const KEY_COLUMNS = [
+  "ticker",
+  "sector",
+  "close",
+  "roc_10",
+  "high_52w_pos",
+  "op_margin",
+  "roe",
+  "debt_ratio",
+  "op_margin_vs_sector",
+  "roe_vs_sector",
+  "debt_ratio_vs_sector",
+  "flow_foreign_20d",
+  "news_count",
+];
+
+/** key 열로 정렬한 새 배열. null 은 방향과 무관하게 항상 마지막(결측이 '최대' 로 보이지 않게). */
+export function sortRows<T extends FeatureRow>(rows: T[], key: string, dir: SortDir): T[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const x = a[key];
+    const y = b[key];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    if (typeof x === "number" && typeof y === "number") return (x - y) * sign;
+    return String(x).localeCompare(String(y)) * sign;
+  });
+}
+
+/** 숫자는 소수 4자리(정수는 그대로), null 은 "—"(이 프로젝트 표기), 그 밖은 문자열. */
+export function fmt(v: Cell | undefined): string {
+  if (v == null) return "—";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
+  return String(v);
+}
+
+function pick(row: FeatureRow, cols: string[]): FeatureRow {
+  const out: FeatureRow = {};
+  for (const c of cols) out[c] = row[c] ?? null;
+  return out;
+}
+
+/** 최신 지표 행을 KEY_COLUMNS 만 남겨 정렬한다(sortKey 가 null 이면 응답 순서). */
+export function featureRows(latest: LatestResp, sortKey: string | null, dir: SortDir): FeatureRow[] {
+  const rows = latest.rows.map((r) => pick(r, KEY_COLUMNS));
+  return sortKey ? sortRows(rows, sortKey, dir) : rows;
+}
+
+// ── 차트 ─────────────────────────────────────────────────────────────────────
+/** `/charts` markers 한 항목(체결). side 는 buy|sell(대소문자 무관). */
+export type FillMarker = { time: string; kind?: string; side: string; text: string };
+
+/** 체결 표식 — 매수 --up(적)·매도 --down(청). color 는 CSS 변수 이름(화면이 값으로 푼다). */
+export function chartMarkers(markers: FillMarker[]): ChartMarker[] {
+  return markers.map((mk) => ({ time: mk.time, text: mk.text, color: mk.side.toLowerCase() === "buy" ? "--up" : "--down" }));
+}
+
+type Level = { level: string | number | null; source?: string } | null;
+export type LevelRow = { ticker: string; stop: Level; target: Level };
+
+/** 그 종목 보유 행의 손절(--fail)·목표(--ok) 가격선, 최대 2개(값 없는 쪽은 건너뜀). */
+export function chartLines(positions: LevelRow[], ticker: string): ChartLine[] {
+  const p = positions.find((r) => r.ticker === ticker);
+  if (!p) return [];
+  const out: ChartLine[] = [];
+  const add = (lv: Level, label: string, color: string) => {
+    const n = lv?.level === null || lv?.level === undefined || lv.level === "" ? NaN : Number(lv.level);
+    if (Number.isFinite(n)) out.push({ price: n, label, color });
+  };
+  add(p.stop, "손절", "--fail");
+  add(p.target, "목표", "--ok");
+  return out;
+}

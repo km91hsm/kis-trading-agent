@@ -1,8 +1,10 @@
 // lightweight-charts(5.x) 래퍼 — 선 시리즈 + 표식(markers) + 가격선(lines). 폭은 ResizeObserver 로 맞추고
 // 언마운트 때 chart.remove(). 차트는 한 번만 만들고 props 변화는 setData·setMarkers·가격선 재생성으로 반영한다.
 // `extra` 는 비교용 선 시리즈(성과 화면 벤치마크) — 배열이 바뀌면 옛 시리즈를 떼고 다시 붙인다(메모해서 넘길 것).
+// `candles` 를 주면 본 시리즈가 선 대신 캔들(상승 --up·하락 --down)이 된다 — 종류는 마운트 때 정해진다.
 import { useEffect, useRef } from "react";
 import {
+  CandlestickSeries,
   LineSeries,
   createChart,
   createSeriesMarkers,
@@ -17,9 +19,11 @@ export type ChartPoint = { time: string; value: number };
 export type ChartMarker = { time: string; text: string; color: string };
 export type ChartLine = { price: number; label: string; color: string };
 export type ChartExtra = { label: string; data: ChartPoint[] };
+export type ChartCandle = { time: string; open: number; high: number; low: number; close: number };
 
 export type ChartProps = {
-  series: ChartPoint[];
+  series?: ChartPoint[];
+  candles?: ChartCandle[];
   markers?: ChartMarker[];
   lines?: ChartLine[];
   extra?: ChartExtra[];
@@ -33,10 +37,11 @@ function cssVar(name: string): string | undefined {
   return v || undefined;
 }
 
-export function Chart({ series, markers, lines, extra, height = 240 }: ChartProps) {
+export function Chart({ series, candles, markers, lines, extra, height = 240 }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const lineRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const lineRef = useRef<ISeriesApi<"Line"> | ISeriesApi<"Candlestick"> | null>(null);
+  const candleMode = useRef(candles !== undefined);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 
   useEffect(() => {
@@ -48,7 +53,13 @@ export function Chart({ series, markers, lines, extra, height = 240 }: ChartProp
       grid: { vertLines: { color: cssVar("--line") }, horzLines: { color: cssVar("--line") } },
     });
     chartRef.current = chart;
-    lineRef.current = chart.addSeries(LineSeries, { color: cssVar("--accent"), lineWidth: 2 });
+    if (candleMode.current) {
+      const up = cssVar("--up");
+      const down = cssVar("--down");
+      lineRef.current = chart.addSeries(CandlestickSeries, { upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false });
+    } else {
+      lineRef.current = chart.addSeries(LineSeries, { color: cssVar("--accent"), lineWidth: 2 });
+    }
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
       if (w) chart.applyOptions({ width: Math.floor(w) });
@@ -69,9 +80,12 @@ export function Chart({ series, markers, lines, extra, height = 240 }: ChartProp
   }, [height]);
 
   useEffect(() => {
-    lineRef.current?.setData(series.map((p) => ({ time: p.time as Time, value: p.value })));
+    const s = lineRef.current;
+    if (!s) return;
+    if (candleMode.current) (s as ISeriesApi<"Candlestick">).setData((candles ?? []).map((c) => ({ ...c, time: c.time as Time })));
+    else (s as ISeriesApi<"Line">).setData((series ?? []).map((p) => ({ time: p.time as Time, value: p.value })));
     chartRef.current?.timeScale().fitContent();
-  }, [series]);
+  }, [series, candles]);
 
   useEffect(() => {
     const s = lineRef.current;

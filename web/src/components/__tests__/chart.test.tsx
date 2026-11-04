@@ -17,12 +17,14 @@ const m = vi.hoisted(() => {
     createChart: vi.fn(() => chart),
     createSeriesMarkers: vi.fn(() => markersApi),
     LineSeries: { type: "Line" },
+    CandlestickSeries: { type: "Candlestick" },
   };
 });
 vi.mock("lightweight-charts", () => ({
   createChart: m.createChart,
   createSeriesMarkers: m.createSeriesMarkers,
   LineSeries: m.LineSeries,
+  CandlestickSeries: m.CandlestickSeries,
 }));
 
 import { Chart } from "../Chart";
@@ -95,5 +97,21 @@ describe("Chart", () => {
     expect(m.series.setData).toHaveBeenCalledWith([{ time: "2026-11-05", value: 1.01 }]);
     r.rerender(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={[]} />);
     expect(m.chart.removeSeries).toHaveBeenCalledTimes(1);
+  });
+
+  test("candles 를 주면 CandlestickSeries 로 그리고 표식·가격선은 그 시리즈에", () => {
+    const candles = [{ time: "2026-11-05", open: 100, high: 110, low: 95, close: 105 }];
+    render(
+      <Chart
+        candles={candles}
+        markers={[{ time: "2026-11-05", text: "매수", color: "red" }]}
+        lines={[{ price: 99, label: "손절", color: "blue" }]}
+      />,
+    );
+    expect(m.chart.addSeries).toHaveBeenCalledTimes(1);
+    expect((m.chart.addSeries.mock.calls[0] as unknown[])[0]).toBe(m.CandlestickSeries);
+    expect(m.series.setData).toHaveBeenLastCalledWith(candles);
+    expect((m.createSeriesMarkers.mock.calls[0] as unknown[])[0]).toBe(m.series);
+    expect(m.series.createPriceLine).toHaveBeenCalledWith(expect.objectContaining({ price: 99, title: "손절" }));
   });
 });

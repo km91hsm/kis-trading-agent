@@ -5,6 +5,7 @@ import { Empty } from "../components/Empty";
 import { NAV } from "../generated/nav";
 import { Account } from "../screens/accounts/Account.tsx";
 import { Accounts } from "../screens/accounts/Accounts.tsx";
+import { Data } from "../screens/data/Data.tsx";
 import { Decision } from "../screens/decision/Decision.tsx";
 import { Performance } from "../screens/performance/Performance.tsx";
 import { Today } from "../screens/today/Today.tsx";
@@ -31,7 +32,7 @@ export const ROUTES: { path: string; element: ReactElement }[] = [
   { path: NAV.accounts.path, element: <Accounts /> },
   { path: `${NAV.accounts.path}/:id`, element: <Account /> },
   { path: NAV.performance.path, element: <Performance /> },
-  { path: NAV.data.path, element: <Placeholder screen="data" /> },
+  { path: NAV.data.path, element: <Data /> },
   { path: NAV.system.path, element: <Placeholder screen="system" /> },
   { path: "/decisions/:asset/:id", element: <Decision /> },
 ];

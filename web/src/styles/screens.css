@@ -291,3 +291,29 @@
 .perf-note { color: var(--fg-muted); font-size: var(--text-sm); margin: var(--space-2) 0; }
 .perf-dist { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .perf-sub { margin: var(--space-3) 0 var(--space-2); }
+
+/* 데이터 화면 */
+.data-muted { color: var(--fg-muted); font-size: var(--text-sm); }
+.data-error { color: var(--fail); font-size: var(--text-sm); margin-top: var(--space-1); }
+.data-hits { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.data-hits .btn { min-height: var(--touch); }
+.data-hits .btn[aria-pressed="true"] { border-color: var(--accent); }
+.data-book { max-width: 28rem; font-variant-numeric: tabular-nums; }
+.data-book tr[data-side="ask"] td:nth-child(2) { color: var(--down); }
+.data-book tr[data-side="bid"] td:nth-child(2) { color: var(--up); }
+.data-manual { display: grid; gap: var(--space-2); max-width: 40rem; margin-bottom: var(--space-2); }
+.data-manual textarea,
+.data-manual input { font: inherit; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); }
+.data-manual .btn { justify-self: start; min-height: var(--touch); }
+.data-manual-list { font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.data-themes { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+.data-theme-tickers li + li { margin-top: var(--space-1); }
+.data-watchlist { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.data-chip-x { margin-left: var(--space-1); border: 0; background: none; color: inherit; cursor: pointer; min-width: var(--space-6); }
+.data-feature-table { table-layout: auto; min-width: 64rem; }
+.data-feature-row { cursor: pointer; }
+.data-feature-row[aria-selected="true"] > td { background: var(--bg-sunken); }
+.data-feature-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.data-sort { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.data-history { margin-top: var(--space-3); }
+.data-jobs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
