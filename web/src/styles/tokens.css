@@ -1,0 +1,82 @@
+/* 디자인 토큰 — hex 는 이 파일에만 적고 컴포넌트는 변수만 쓴다(web/DESIGN.md).
+   글자색 대비는 두 테마 모두 --bg·--bg-elev 위 4.5:1 이상(값은 DESIGN.md 표).
+   등락은 한국 관례: 상승 --up(적), 하락 --down(청). 실전 표식은 --live(주황). */
+
+:root {
+  color-scheme: light;
+  --bg: #F8FAFC;
+  --bg-elev: #FFFFFF;
+  --bg-sunken: #F1F5F9;
+  --fg: #0F172A;
+  --fg-muted: #475569;
+  --line: #CBD5E1;
+  --accent: #1D4ED8;
+  --accent-fg: #FFFFFF;
+  --focus: #1D4ED8;
+  --ok: #166534;
+  --ok-bg: #E8F8EE;
+  --warn: #92400E;
+  --warn-bg: #FEF3C7;
+  --fail: #B91C1C;
+  --fail-bg: #FEE2E2;
+  --up: #C62828;
+  --down: #1D4ED8;
+  --live: #C2410C;
+  --live-bg: #FFF4EC;
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+
+  --radius: 6px;
+  --font: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --touch: 44px;
+  --motion: 150ms;
+  --z-sticky: 10;
+  --z-overlay: 100;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0B1120;
+  --bg-elev: #111827;
+  --bg-sunken: #070B16;
+  --fg: #F1F5F9;
+  --fg-muted: #94A3B8;
+  --line: #334155;
+  --accent: #60A5FA;
+  --accent-fg: #0B1120;
+  --focus: #60A5FA;
+  --ok: #4ADE80;
+  --ok-bg: #052E16;
+  --warn: #FACC15;
+  --warn-bg: #422006;
+  --fail: #F87171;
+  --fail-bg: #450A0A;
+  --up: #FF6B6B;
+  --down: #60A5FA;
+  --live: #FB923C;
+  --live-bg: #431407;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius: 6px;
+  --font: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --z-sticky: 10;
+}
