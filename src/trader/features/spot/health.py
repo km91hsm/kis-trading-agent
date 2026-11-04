@@ -68,6 +68,8 @@ def _holiday_fn(ctx: OpsContext, market: str) -> Callable[[date], bool] | None:
     if make is None:
         return None
     fn = make()
+    if fn is None:  # 커널 Protocol 이 None 을 허용 — reconcile_skipped_today 폴백
+        return None
     return lambda d: bool(fn(market, d))
 
 

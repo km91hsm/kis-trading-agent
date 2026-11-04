@@ -103,3 +103,18 @@ def test_reconcile_skipped_today_suppresses_watch(conn, project):
     assert health.reconcile_skipped_today(state, "KR", day, lambda d: d == day)
     holiday = lambda m, d: m == "KR" and d == day  # noqa: E731
     assert health.check(ctx(conn, project, acct("paper-main"), holiday=holiday)) == []
+
+
+def test_holiday_fn_returning_none_falls_back(conn, project):
+    """커널 AccountsPort.holiday_fn() 은 None 을 돌려줄 수 있다 — 영역이 예외로 끝나지 않고
+    폴백한다."""
+    set_flag(conn, "fill_ambiguous:KR:2026-10-23", {"candidates": 2})
+    port = Accounts(acct("paper-main"))
+    port.holiday_fn = lambda: None
+    c = OpsContext(conn=conn, settings=None, state=project / "state", now=NOW,
+                   ports={"accounts": port}, jobs=[], features=[])  # fmt: skip
+    keys = {(i.key, i.level) for i in health.check(c)}
+    assert keys == {
+        ("spot.fill_ambiguous.KR", "warning"),
+        ("spot.reconcile.paper-main.KR", "watch"),
+    }
