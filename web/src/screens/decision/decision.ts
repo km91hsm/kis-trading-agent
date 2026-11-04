@@ -48,7 +48,7 @@ export const actionLabel = (a: string | null | undefined) => (a ? (ACTION_LABEL[
 
 const lines = (s: string | null | undefined) => (s ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
 
-/** 결정 → 제목 「종목 행동」(fo 는 intent·direction·vehicle)·칩(날짜·시장·확신·출처·상태)·근거 줄. */
+/** 결정 → 제목 `종목 행동`(fo 는 intent·direction·vehicle)·칩(날짜·시장·확신·출처·상태)·근거 줄. */
 export function decisionHeader(d: SpotDecision | FoDecision): { title: string; chips: string[]; summaryLines: string[] } {
   const fo = d.asset === "fo";
   const body = fo
@@ -56,7 +56,7 @@ export function decisionHeader(d: SpotDecision | FoDecision): { title: string; c
     : `${(d as SpotDecision).ticker} ${actionLabel((d as SpotDecision).action)}`;
   const conf = typeof d.confidence === "number" ? `확신 ${Math.round(d.confidence * 100)}%` : null;
   const chips = [d.date, fo ? null : (d as SpotDecision).market, conf, fo ? null : (d as SpotDecision).source, d.status];
-  return { title: `「${body}」`, chips: chips.filter((c): c is string => !!c), summaryLines: lines(d.rationale) };
+  return { title: body, chips: chips.filter((c): c is string => !!c), summaryLines: lines(d.rationale) };
 }
 
 export type RoundRow = { round: number; action: string; stop_loss: string; source: string; at: string };

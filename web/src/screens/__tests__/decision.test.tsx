@@ -57,13 +57,13 @@ const section = (id: string) => document.getElementById(id) as HTMLElement | nul
 describe("결정 상세 순수 함수", () => {
   test("decisionHeader — spot 제목·칩·근거 줄", () => {
     const h = decisionHeader(fixtureSpotDecisionRow());
-    expect(h.title).toBe("「005930 매수」");
+    expect(h.title).toBe("005930 매수");
     expect(h.chips).toEqual(["2026-11-05", "KR", "확신 72%", "session"]);
     expect(h.summaryLines).toEqual(["실적 상향 기대", "외국인 순매수 지속"]);
   });
   test("decisionHeader — fo 는 intent·direction·vehicle", () => {
     const h = decisionHeader(fixtureFoDecisionRow());
-    expect(h.title).toBe("「ENTER LONG FUTURES」");
+    expect(h.title).toBe("ENTER LONG FUTURES");
     expect(h.chips).toContain("filled");
     expect(h.summaryLines).toHaveLength(2);
   });
@@ -77,7 +77,7 @@ describe("결정 상세 순수 함수", () => {
 describe("결정 상세 화면", () => {
   test("spot 상세는 라운드 2개·토론 턴 3개를 그린다", async () => {
     await mount(spotRoutes, "/decisions/spot/7");
-    expect(document.body.textContent).toContain("「005930 매수」");
+    expect(document.body.textContent).toContain("005930 매수");
     expect(section("rounds")!.querySelectorAll("li.round-row")).toHaveLength(2);
     expect(section("debate")!.querySelectorAll("li.debate-turn")).toHaveLength(3);
     expect(section("rationale")!.textContent).toContain("외국인 순매수 지속");
@@ -108,9 +108,15 @@ describe("결정 상세 화면", () => {
     expect(section("checkpoints")!.querySelector("pre")!.textContent).toContain('"action": "BUY"');
   });
 
+  test("에이전트 보고·토론 턴이 비면 절을 숨긴다", async () => {
+    await mount({ ...spotRoutes, "GET /api/decisions/spot/7/trace": fixtureSpotTrace({ analysts: [], debate: [] }) }, "/decisions/spot/7");
+    expect(section("analysts")!.hidden).toBe(true);
+    expect(section("debate")!.hidden).toBe(true);
+  });
+
   test("fo 상세는 라운드·토론·결과 절이 없다", async () => {
     await mount(foRoutes, "/decisions/fo/3");
-    expect(document.body.textContent).toContain("「ENTER LONG FUTURES」");
+    expect(document.body.textContent).toContain("ENTER LONG FUTURES");
     expect(section("rounds")).toBeNull();
     expect(section("debate")).toBeNull();
     expect(section("outcomes")).toBeNull();

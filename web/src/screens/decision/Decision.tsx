@@ -165,22 +165,18 @@ export function Decision() {
         </section>
       ) : null}
 
-      <section id="analysts" className="screen-section">
+      <section id="analysts" className="screen-section" hidden={!!t && !t.analysts.length}>
         <h2>에이전트 보고</h2>
         {t ? (
-          t.analysts.length ? (
-            <ul className="decision-lines">
-              {t.analysts.map((a) => (
-                <li key={a.role}>
-                  <strong>{a.label}</strong> {SIGNAL[a.signal ?? ""] ?? a.signal ?? "—"} · 확신 {pct(a.confidence)}
-                  {a.summary ? <p className="analyst-summary">{a.summary}</p> : null}
-                  {a.evidence.length ? <ul className="analyst-evidence">{a.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty title="에이전트 보고 없음" />
-          )
+          <ul className="decision-lines">
+            {t.analysts.map((a) => (
+              <li key={a.role}>
+                <strong>{a.label}</strong> {SIGNAL[a.signal ?? ""] ?? a.signal ?? "—"} · 확신 {pct(a.confidence)}
+                {a.summary ? <p className="analyst-summary">{a.summary}</p> : null}
+                {a.evidence.length ? <ul className="analyst-evidence">{a.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul> : null}
+              </li>
+            ))}
+          </ul>
         ) : (
           <Pending res={rawTrace} what="추적" />
         )}
