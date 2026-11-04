@@ -267,3 +267,83 @@ def test_untrusted_callback_rejected(ctx_with_callback_feature, fake_receiver, s
     ((cid, text),) = fake_receiver.answers
     assert cid == "c4" and "TELEGRAM_ALLOWED_USERS" in text
     assert control.get_flag(ctx.conn, commands.OFFSET_FLAG) == 5
+
+
+def test_send_message_rejects_callback_data_over_64_bytes(fake_http, tmp_path):
+    """T4-R1: 64바이트를 넘는 callback_data 는 보내기·보관 전에 ValueError(outbox 를 막지 않게)."""
+    from trader.kernel.notify.telegram import NullNotifier
+
+    rows: list[dict] = []
+    box = tmp_path / "ob.jsonl"
+    n = TelegramNotifier("T", "123", http=fake_http.client, outbox=box, record=rows.append)
+    data = "apv:" + "가" * 20 + "x"  # 4 + 60 + 1 = 65바이트
+    assert len(data.encode("utf-8")) == 65
+    with pytest.raises(ValueError, match="64바이트"):
+        n.send_message(Message("승인 요청", buttons=[[("승인", data)]]))
+    assert fake_http.calls == [] and not box.exists() and rows == []
+    with pytest.raises(ValueError, match="64바이트"):
+        NullNotifier().send_message(Message("승인 요청", buttons=[[("승인", data)]]))
+    ok = "apv:" + "가" * 20  # 정확히 64바이트는 통과
+    assert n.send_message(Message("승인 요청", buttons=[[("승인", ok)]])) is True
+
+
+def test_callback_handler_non_str_reply_counts_as_failure(conn, fake_receiver):
+    feat = Feature(
+        id="demo", tier="service", telegram_callbacks=(TelegramCallback("apv", lambda c, d: None),)
+    )
+    ctx = _ctx(conn, [feat])
+    fake_receiver.updates = [_cb(1, "apv:1:yes")]
+    r = commands.poll_once(ctx, fake_receiver)
+    assert fake_receiver.answers == [("c1", "처리 실패(잘못된 응답)")]
+    assert fake_receiver.edits == [] and r["failed"] == 1
+    assert control.get_flag(ctx.conn, commands.OFFSET_FLAG) == 2
+
+
+def test_callback_echo_failure_does_not_stop_offset(conn, fake_receiver):
+    feat = Feature(
+        id="demo", tier="service", telegram_callbacks=(TelegramCallback("apv", lambda c, d: "ok"),)
+    )
+    ctx = _ctx(conn, [feat])
+
+    def bad_echo(s):
+        if s.startswith("버튼"):
+            raise OSError("stdout closed")
+
+    ctx.echo = bad_echo
+    fake_receiver.updates = [_cb(1, "apv:1"), _cb(2, "apv:2")]
+    commands.poll_once(ctx, fake_receiver)
+    assert [a[0] for a in fake_receiver.answers] == ["c1", "c2"]
+    assert control.get_flag(ctx.conn, commands.OFFSET_FLAG) == 3
+
+
+def test_group_callback_from_unlisted_user_rejected_end_to_end(
+    fake_http, ctx_with_callback_feature, seen
+):
+    """M4: 슈퍼그룹 + 허용 목록 {"7"} 에서 8 이 누른 버튼 → poll 이 trusted=False, 핸들러 미호출."""
+    fake_http.bodies["getUpdates"] = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 20,
+                "callback_query": {
+                    "id": "c20",
+                    "from": {"id": 8},
+                    "data": "apv:1:yes",
+                    "message": {
+                        "message_id": 7,
+                        "chat": {"id": -100, "type": "supergroup"},
+                        "text": "[승인 요청]",
+                    },
+                },
+            }
+        ],
+    }
+    r = TelegramReceiver("T", "-100", http=fake_http.client, allowed_users={"7"})
+    ctx = ctx_with_callback_feature
+    commands.poll_once(ctx, r)
+    assert seen == []
+    answers = fake_http.posts("answerCallbackQuery")
+    assert len(answers) == 1 and answers[0]["callback_query_id"] == "c20"
+    assert "TELEGRAM_ALLOWED_USERS" in answers[0]["text"]
+    assert fake_http.posts("editMessageText") == []
+    assert control.get_flag(ctx.conn, commands.OFFSET_FLAG) == 21

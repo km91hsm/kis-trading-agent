@@ -24,6 +24,7 @@ OFFSET_FLAG = "telegram_offset"
 HELP_FLAG = "telegram_help_at"  # 마지막 도움말 발송 시각(폴링 사이에도 유지)
 HELP_EVERY_S = 60
 NO_HANDLER = "처리할 수 없는 버튼"
+BAD_REPLY = "처리 실패(잘못된 응답)"
 UNTRUSTED_TAIL = "1:1 채팅 또는 허용 사용자(TELEGRAM_ALLOWED_USERS)만 쓸 수 있어요"
 STATUS = "status"  # 커널 내장 명령 — 기능이 같은 이름을 등록할 수 없다
 RUN = "run"  # 커널 내장 명령 — 큐에 작업 요청을 넣는다
@@ -138,6 +139,10 @@ def _handle_callback(ctx: CommandContext, receiver: Any, u: Any) -> bool:
             receiver.answer_callback(u.callback_id, NO_HANDLER)
             return True
         reply = handler(replace(ctx, actor=_actor(u)), u.data)
+        if not isinstance(reply, str):
+            logger.error("텔레그램 버튼 핸들러가 문자열이 아닌 응답: %s", u.data)
+            receiver.answer_callback(u.callback_id, BAD_REPLY)
+            return False
     except Exception as e:  # noqa: BLE001 - 콜백 하나의 실패가 폴링 루프·오프셋을 막지 않는다
         logger.exception("텔레그램 버튼 처리 실패: %s", u.data)
         try:
@@ -149,9 +154,9 @@ def _handle_callback(ctx: CommandContext, receiver: Any, u: Any) -> bool:
         receiver.answer_callback(u.callback_id, reply[:200])
         if u.message_id is not None:
             receiver.edit_message(u.chat_id, u.message_id, f"{u.message_text}\n\n{reply}")
-    except Exception:  # noqa: BLE001 - 핸들러는 이미 실행됐다: 응답 실패는 기록만
+        ctx.echo(f"버튼 {u.data}")
+    except Exception:  # noqa: BLE001 - 핸들러는 이미 실행됐다: 응답·출력 실패는 기록만
         logger.exception("텔레그램 버튼 응답 실패: %s", u.data)
-    ctx.echo(f"버튼 {u.data}")
     return True
 
 

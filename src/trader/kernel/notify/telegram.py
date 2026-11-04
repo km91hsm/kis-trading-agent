@@ -51,11 +51,26 @@ class NullNotifier:
     """설정이 없을 때 쓰는 빈 알림기. 항상 성공으로 돌려준다."""
 
     def send_message(self, msg: Message) -> bool:
+        _check_buttons(msg.buttons)
         return self.send(msg.text)
 
     def send(self, text: str, *, escape: bool = True) -> bool:
         logger.debug("알림 생략(텔레그램 미설정): %s", text[:80])
         return True
+
+
+CALLBACK_DATA_MAX = 64  # 텔레그램 callback_data 한도(UTF-8 바이트). 넘으면 BUTTON_DATA_INVALID
+
+
+def _check_buttons(buttons: list[list[tuple[str, str]]] | None) -> None:
+    """callback_data 가 한도를 넘으면 ValueError. 보내기·보관 전에 호출부에서 실패시킨다 —
+    거부될 메시지가 outbox 에 남아 뒤 알림의 재전송을 막지 않게(T4-R1)."""
+    for row in buttons or []:
+        for _label, data in row:
+            if len(data.encode("utf-8")) > CALLBACK_DATA_MAX:
+                raise ValueError(
+                    f"텔레그램 버튼 데이터는 {CALLBACK_DATA_MAX}바이트 이하여야 합니다: {data!r}"
+                )
 
 
 def _markup(buttons: list[list[tuple[str, str]]] | None) -> dict | None:
@@ -137,7 +152,9 @@ class TelegramNotifier:
         return self._deliver(Message(text), escape=escape)
 
     def send_message(self, msg: Message) -> bool:
-        """종류·계좌를 붙여 보내고 기록한다. buttons 는 첫 청크의 인라인 키보드로 붙인다."""
+        """종류·계좌를 붙여 보내고 기록한다. buttons 는 첫 청크의 인라인 키보드로 붙인다.
+        callback_data 가 64바이트를 넘으면 아무것도 보내지 않고 ValueError."""
+        _check_buttons(msg.buttons)
         return self._deliver(msg, escape=True)
 
     def _deliver(self, msg: Message, *, escape: bool) -> bool:
