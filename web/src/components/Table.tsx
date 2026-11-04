@@ -4,9 +4,10 @@ import { Fragment, useState, type ReactNode } from "react";
 import { useWide } from "../lib/viewport";
 import { Chip } from "./Chip";
 import { Empty } from "./Empty";
-import { RowCard, cellOf, fullTextOf } from "./RowCard";
+import { RowCard, cellOf, fullTextOf, oneLong } from "./RowCard";
 import { Tooltip } from "./Tooltip";
 
+/** 표 열. 표당 long 은 하나 — 여럿이면 첫 번째만 long(말줄임·제목 줄)으로, 나머지는 text 로 그린다. */
 export type Column<T> = {
   key: string;
   label: string;
@@ -33,7 +34,8 @@ function cellClass<T>(col: Column<T>, first: boolean): string {
   return cls.join(" ");
 }
 
-export function Table<T>({ columns, rows, rowKey, expand, empty, partial, csvHref }: TableProps<T>) {
+export function Table<T>({ columns: given, rows, rowKey, expand, empty, partial, csvHref }: TableProps<T>) {
+  const columns = oneLong(given);
   const wide = useWide();
   const [openKeys, setOpenKeys] = useState<Set<string | number>>(() => new Set());
   const toggle = (k: string | number) =>

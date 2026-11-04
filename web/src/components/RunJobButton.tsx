@@ -29,6 +29,8 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
       ? realAccounts
       : [];
   const real = options.length > 0;
+  // 실전 대상이 정해져 있으면 그 id 를 미리 고르고, 아니면 사용자가 직접 골라야 확인이 켜진다.
+  const preset = targetAccountId && real ? targetAccountId : "";
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,13 +45,14 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
   }, []);
 
   const start = () => {
-    setChoice(options[0] ?? "");
+    setChoice(preset);
     setError(null);
     setOpen(true);
   };
 
   const run = async () => {
-    const confirm = choice || options[0];
+    const confirm = choice;
+    if (real && !confirm) return;
     setOpen(false);
     setBusy(true);
     setError(null);
@@ -85,6 +88,11 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
               <p>실전 계좌로 실행합니다. 계좌를 확인하세요.</p>
               <label htmlFor={selectId}>실전 계좌</label>
               <select id={selectId} value={choice} onChange={(e) => setChoice(e.target.value)}>
+                {preset ? null : (
+                  <option value="" disabled>
+                    계좌 선택
+                  </option>
+                )}
                 {options.map((a) => (
                   <option key={a} value={a}>
                     {a}
@@ -96,6 +104,7 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
             <p>잡을 대기열에 넣습니다.</p>
           )
         }
+        confirmDisabled={real && !choice}
         onConfirm={() => void run()}
         onClose={() => setOpen(false)}
       />

@@ -10,6 +10,8 @@ export type ConfirmProps = {
   title: string;
   body: ReactNode;
   live?: { accountId: string };
+  /** 호출자 쪽 조건(예: 계좌 선택 전)으로 확인 버튼을 끈다. */
+  confirmDisabled?: boolean;
   onConfirm(confirm?: string): void;
   onClose(): void;
 };
@@ -18,12 +20,12 @@ export function Confirm(props: ConfirmProps) {
   return props.open ? createPortal(<ConfirmDialog {...props} />, document.body) : null;
 }
 
-function ConfirmDialog({ title, body, live, onConfirm, onClose }: ConfirmProps) {
+function ConfirmDialog({ title, body, live, confirmDisabled, onConfirm, onClose }: ConfirmProps) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const inputId = useId();
   const [typed, setTyped] = useState("");
-  const ready = !live || typed === live.accountId;
+  const ready = !confirmDisabled && (!live || typed === live.accountId);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 

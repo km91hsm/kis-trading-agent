@@ -15,8 +15,14 @@ export function fullTextOf<T>(col: Column<T>, row: T): string | undefined {
   return typeof v === "string" || typeof v === "number" ? String(v) : undefined;
 }
 
+/** 표당 long 은 하나 — 첫 long 열만 남기고 나머지 long 표시는 떼어 낸다. */
+export function oneLong<T>(columns: Column<T>[]): Column<T>[] {
+  const first = columns.findIndex((c) => c.long);
+  return columns.map((c, i) => (c.long && i !== first ? { ...c, long: false } : c));
+}
+
 export function RowCard<T>({
-  columns,
+  columns: given,
   row,
   expanded,
   open = false,
@@ -28,6 +34,7 @@ export function RowCard<T>({
   open?: boolean;
   onToggle?: () => void;
 }) {
+  const columns = oneLong(given);
   const meta = columns.filter((c) => c.align === "chip");
   const long = columns.find((c) => c.long && c.align !== "chip");
   const rest = columns.filter((c) => c !== long && c.align !== "chip");

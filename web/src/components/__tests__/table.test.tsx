@@ -77,6 +77,19 @@ describe("Table", () => {
     expect(a.hasAttribute("download")).toBe(true);
   });
 
+  test("long 열이 둘이면 첫 번째만 long(말줄임), 나머지는 text", () => {
+    setWidth(1280);
+    const cols: Column<Row>[] = [...columns, { key: "id", label: "id", width: "6rem", long: true }];
+    const { container } = render(<Table columns={cols} rows={rows} rowKey={(r) => r.id} />);
+    const tds = container.querySelectorAll("tbody tr:first-child td");
+    expect(tds[3].classList.contains("cell-long")).toBe(true);
+    expect(tds[4].classList.contains("cell-long")).toBe(false);
+    expect(tds[4].querySelector(".cell-ellipsis")).toBeNull();
+    setWidth(600);
+    expect(container.querySelector(".row-card-title")!.textContent).toContain("아주 긴 메모");
+    expect(container.querySelector(".row-card-chips")!.textContent).toContain("id a");
+  });
+
   test("rows 가 비면 empty 문구", () => {
     setWidth(1280);
     const { container } = render(<Table columns={columns} rows={[]} rowKey={(r) => r.id} empty="주문이 없습니다" />);
