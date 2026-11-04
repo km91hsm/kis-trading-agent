@@ -1,4 +1,5 @@
-"""scalp 웹 조회: `/accounts/{id}/positions` 단타 조각과 SSE `scalp`. 상태 파일
+"""scalp 웹 조회: `/accounts/{id}/positions` 단타 조각·`GET /system/scalp?market=`(옛
+`system.scalp_status`)·SSE `scalp`. 상태 파일
 (`state/scalp/<운영일>/<시장>.json`)만 읽는다(브로커·주문 없음).
 
 단타는 모의 전용이라 모의 현물 계좌(`ports["accounts"].accounts()` 중 env paper)이면서 오늘 상태
@@ -11,7 +12,10 @@ from contextlib import closing
 from decimal import Decimal
 from typing import Any
 
+from fastapi import APIRouter, HTTPException, Request
+
 from trader.features.scalp.engine import pos_cfg
+from trader.features.scalp.judge import judge_summary
 from trader.features.scalp.state import load_state, state_dir
 from trader.kernel.ledger import names
 from trader.kernel.registry.types import ResourcePart, SseKey
@@ -62,6 +66,40 @@ def scalp_rows(deps: Any, q: dict[str, str]) -> list[dict]:
 
 
 RESOURCES = (ResourcePart("/accounts/{account_id}/positions", scalp_rows),)
+
+system_scalp_router = APIRouter(prefix="/system", tags=["system"])
+
+
+@system_scalp_router.get("/scalp")
+def scalp_status(request: Request, market: str | None = None) -> dict:
+    """단타 상태: 설정·시장별 오늘 진입/청산·중단 사유·판정 대기·판정자 사후 비교
+    (분봉 조회 없음)."""
+    deps = request.app.state.deps
+    cfg = deps.settings.scalp
+    if market is not None and market not in deps.settings.markets:
+        raise HTTPException(status_code=400, detail=f"운영하지 않는 시장: {market}")
+    by = {}
+    for m in [market] if market else list(deps.settings.markets):
+        d = run_date_for(m, deps.now())
+        st = load_state(deps.state, d, m)
+        by[m] = {
+            "date": d.isoformat(),
+            "open": st.get("open") or [],
+            "closed": st.get("closed") or [],
+            "halted": st.get("halted"),
+            "pending": sorted((st.get("pending") or {}).keys()),
+            "judge": judge_summary(deps.state, market=m, days=[d], cfg=cfg),
+        }
+    return {
+        "enabled": cfg.enabled,
+        "judge": cfg.judge,
+        "max_weight_pct": cfg.max_weight_pct,
+        "max_positions": cfg.max_positions,
+        "markets": by,
+    }
+
+
+ROUTERS = (system_scalp_router,)
 
 
 def _scalp_fp(deps: Any) -> dict[str, str]:

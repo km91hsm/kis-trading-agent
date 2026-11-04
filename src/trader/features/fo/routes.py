@@ -2,7 +2,8 @@
 `fo_decisions`·`fo_nav_snapshot`·`fo_positions_snapshot`)과 체크포인트만 읽는다.
 
 `fo_router`: `GET /fo/legs?account_id=&date=`·`GET /fo/summary`·`GET /fo/today?date=`(옛
-`web/routers/fo.py` 조회 이식 — `account`·`scorecard`·`report` 는 Task 11 `analytics/fo/*`).
+`web/routers/fo.py` 조회 이식 — `scorecard`·`report` 는 `analytics_routes.py`, `account` 는
+`system_routes.py` 의 `/system/fo`).
 `decisions_router`: `GET /decisions/fo/{id}`(결정 + 봉투 다리)·`/decisions/fo/{id}/trace`(fo
 체크포인트). `RESOURCES`: `/accounts/{id}/positions` 파생 조각(`fo_rows`, 파생 계좌만),
 `/decisions`(`fo_decisions`)·`/orders`(`fo_order_legs` 를 (포지션·의도·라운드)로 묶은 행 +

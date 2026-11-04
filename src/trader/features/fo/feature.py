@@ -2,8 +2,10 @@
 데몬 잡 3개(`kr_fo_session`·`kr_fo_monitor`·`kr_fo_reconcile`)·큐 kind 4개(A5).
 
 CLI(`trader fo …`)·텔레그램 `/fo`·상태 절 「파생(선물옵션)」(Task 8)·웹 조회(`routes.py`: 라우터·
-positions 조각·SSE `fo`·nav, M11)."""
+positions 조각·SSE `fo`·nav, `analytics_routes.py` `/analytics/fo/*`, `system_routes.py`
+`/system/fo`, M11)."""
 
+from trader.features.fo.analytics_routes import analytics_fo_router
 from trader.features.fo.cli import fo_app
 from trader.features.fo.jobs import JOBS, QUEUE_KINDS
 from trader.features.fo.migrations import MIGRATIONS
@@ -11,6 +13,7 @@ from trader.features.fo.routes import RESOURCES, ROUTERS, SSE_KEYS
 from trader.features.fo.session_kinds import AGENTS, FO, FO_RESUME
 from trader.features.fo.settings import SECTIONS
 from trader.features.fo.status import STATUS_SECTION
+from trader.features.fo.system_routes import system_fo_router
 from trader.features.fo.telegram import FO_CMD
 from trader.features.fo.tools import (
     FO_SUBMIT_RULE,
@@ -35,7 +38,9 @@ FEATURE = Feature(
     id="fo", tier="lane", sections=SECTIONS, migrations=MIGRATIONS,
     control_namespaces=CONTROL_NAMESPACES, session_kinds=(FO, FO_RESUME), agents=AGENTS,
     tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS, cli=fo_app, telegram_commands=(FO_CMD,),
-    status_sections=(STATUS_SECTION,), routes=ROUTERS, resources=RESOURCES, sse_keys=SSE_KEYS,
+    status_sections=(STATUS_SECTION,),
+    routes=(*ROUTERS, analytics_fo_router, system_fo_router), resources=RESOURCES,
+    sse_keys=SSE_KEYS,
     nav=(NavItem("accounts", "fo-positions", "파생 보유", 20),
          NavItem("today", "fo-lane", "파생", 30)),
 )  # fmt: skip

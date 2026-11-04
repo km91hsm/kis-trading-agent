@@ -37,6 +37,7 @@
 
 - `RESOURCES`: `/accounts/{id}/positions` 단타 조각 — 모의 현물 계좌이면서 오늘 상태 파일 다리에 든 계좌만. stop/target = 체결 평단(없으면 신호가) × (1 ∓ `stop_pct`/`take_profit_pct`, `engine.pos_cfg` 덮어쓰기 반영), 출처 "단타 규칙". 설정에 단타 계좌 목록은 없다(모의 계좌 전체가 대상).
 - SSE `scalp`: 시장별 오늘 상태 파일 mtime + 보유 수. nav `today/scalp-lane`.
+- `GET /system/scalp?market=`(옛 `system.scalp_status`): 설정(enabled·judge·max_weight_pct·max_positions) + 시장별 오늘 open/closed/halted/pending·판정자 사후 비교(`judge_summary`, 분봉 조회 없음). 운영하지 않는 시장은 400.
 
 ## 알려진 차이 (옛 저장소 대비)
 
