@@ -7,6 +7,7 @@
 - 수집기: `news`(구글 RSS·네이버), `macro`(FRED·ECOS), `dart`·`edgar`, `community`·`youtube`·`telegram_channel`·`naver_blog`, `manual_inputs`, `disclosures`(공시 중요도), `indicators`(기술 지표 — 본문은 커널 `broker/indicators.py` 로 승격돼 있고 이 모듈은 재노출한다. ML·spot·fo 가 같은 계산을 공유한다). `inputs.build_inputs` 가 절(technical·fundamental·news_macro·sentiment)을 스레드풀로 모아 `00_inputs` 를 만들고 `collect_and_save` 가 저장한다. 세이브티커 jsonl 은 `saveticker_ingest` 가 뉴스 저장소로 옮긴다.
 - 데몬 잡 `news_collect`(`job.py`, `schedule.yaml news_collect.interval_s` 기본 1800, heavy 밖): 시장별 질의 묶음(`news.market_queries`)을 돌려 적재 → 세이브티커 폴더 적재 → `store_retention_days`(14) 지난 행 prune → `news.post_ingest` 훅. 시장·세이브티커 실패는 그 항목만 `{"error": ...}` 로 남기고 잡은 계속하며, 훅 실패도 잡을 실패시키지 않는다(`out["hooks"]`).
 - CLI: `trader ingest collect ...`(`cli.py`). `universe check|sectors` CLI 는 M7.
+- 웹 자원(`routes.py`): `GET /news?market=&hours=48&limit=100[&ticker=]` → `{market, hours, total, asof, items}`(`news_store.recent` 행 그대로, `tickers[]` 포함, `url_hash` 없음 — 촉매·테마 라벨은 scan `GET /news/labels`), `GET /news/events?market=&hours=72` → `{market, hours, asof, disclosures}`(공시 행 + `severity`; 거시 지표는 원장에 없어 내지 않는다), `GET /news/manual?market=`·`POST /news/manual {market, text, url?}`(토큰 + 같은 출처, 첫 줄 제목·나머지 메모 → `manual_inputs.append_market`, 검증 오류 400). SSE 키 `news`(`news_items` 건수·최대 id). 메뉴 `data/news "뉴스·이벤트"`.
 
 ## 공개면 (`api.py`)
 
@@ -35,7 +36,7 @@
 4. `channels.naver_blog` 기본 `[]`(옛 `["ranto28"]`). 사용자 확인 TODO.
 5. CLI `trader collect` → `trader ingest collect`. 시세 클라이언트 없이 돈다(계좌 조립은 accounts, M4 레인이 주입).
 6. `fundamental.peer` 는 `InputDeps.peer_fn` 이 없으면 `no sector peers` 로 건너뛴다(M7).
-7. `news_collect` 는 수집·적재·prune·`news.post_ingest` 훅만 한다. `_news_trigger`·`_disclosure_trigger`·`_events_check`·`discover` 큐·`ticker_names` 캐시는 M7, `_vix` 는 M6, 웹 `/api/news`·수동 입력 라우트는 M11, health `disclosure` 는 M12.
+7. `news_collect` 는 수집·적재·prune·`news.post_ingest` 훅만 한다. `_news_trigger`·`_disclosure_trigger`·`_events_check`·`discover` 큐·`ticker_names` 캐시는 M7, `_vix` 는 M6, 웹 `/api/news`·수동 입력 라우트는 M11(`routes.py`), health `disclosure` 는 M12.
 8. `universe.yaml`·`sectors.yaml` 모델은 ingest 소유(PIT 기록·`universe check|sectors` CLI 는 M7).
 9. `_row/_jsonable/_matches/_iso_to_utc/_kst_to_iso` 는 공개 이름으로 바꾸고 옛 이름 별칭을 둔다.
 10. `USER_AGENT` 브랜딩을 바꿨다.

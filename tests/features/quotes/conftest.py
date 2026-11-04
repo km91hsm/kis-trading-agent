@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from trader.features.quotes import routes
+from trader.features.quotes import charts, routes
 from trader.features.quotes.hub import QuoteHub
 
 NOW = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)  # 화 10:00 KST
@@ -137,7 +137,9 @@ class FakeMarket:
 
 @pytest.fixture(autouse=True)
 def _reset_runtime():
-    """모듈 전역 런타임·REST 캐시가 테스트 사이에 새지 않게 앞뒤로 비운다(허브는 멈춘다)."""
+    """모듈 전역 런타임·REST·차트 캐시가 테스트 사이에 새지 않게 앞뒤로 비운다(허브는 멈춘다)."""
     routes.reset()
+    charts.reset()
     yield
     routes.reset()
+    charts.reset()
