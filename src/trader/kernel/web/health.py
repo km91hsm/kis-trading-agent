@@ -1,15 +1,17 @@
 """시스템 헬스 판정(순수 함수): `evaluate(deps) -> {level, reasons, checked_at, version, features}`.
 
 fail = 데몬 하트비트가 살아 있지 않음, warn = 같은 `runs.kind` 가 최근 24시간에 연속 3회 오류 ·
-오늘 세션이 일일 상한의 90% 이상 · 하트비트 멈춤, info = control `ws_session_busy:*` 플래그.
+오늘 세션이 일일 상한의 90% 이상 · 하트비트 멈춤, info = control `ws_session_busy:*` 플래그
+(until 이 미래일 때만).
 M12 가 `kernel/ops` 로 바꿔도 응답 모양은 그대로 둔다."""
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from contextlib import closing
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from typing import Any
 
@@ -77,11 +79,30 @@ def _sessions(conn: sqlite3.Connection, settings: Any, now) -> list[dict]:
     return []
 
 
-def _busy_flags(conn: sqlite3.Connection) -> list[dict]:
+def _busy_until(raw: str | None) -> datetime | None:
+    """플래그 값 `{"until": UTC ISO}` 의 until. 없거나 깨졌으면 None."""
+    try:
+        value = json.loads(raw) if raw else None
+        until = value.get("until") if isinstance(value, dict) else None
+        dt = datetime.fromisoformat(str(until)) if until else None
+    except (TypeError, ValueError):
+        return None
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _busy_flags(conn: sqlite3.Connection, now: datetime) -> list[dict]:
+    """`ws_session_busy:<env>` 중 until 이 아직 미래인 것만(허브 `session_busy` 와 같은 판정)."""
     rows = conn.execute(
-        "SELECT key FROM control WHERE key LIKE ? ORDER BY key", (BUSY_PREFIX + "%",)
+        "SELECT key, value FROM control WHERE key LIKE ? ORDER BY key", (BUSY_PREFIX + "%",)
     ).fetchall()
-    return [_reason("control", "info", r["key"]) for r in rows]
+    out = []
+    for r in rows:
+        until = _busy_until(r["value"])
+        if until is not None and until > now:
+            out.append(_reason("control", "info", r["key"]))
+    return out
 
 
 def evaluate(deps: Any) -> dict:
@@ -92,7 +113,7 @@ def evaluate(deps: Any) -> dict:
         with closing(deps.conn_factory()) as conn:
             reasons += _error_streaks(conn, now)
             reasons += _sessions(conn, deps.settings, now)
-            reasons += _busy_flags(conn)
+            reasons += _busy_flags(conn, now)
     except sqlite3.Error as e:
         logger.warning("헬스 원장 조회 실패: %s", e)
         reasons.append(_reason("ledger", "warn", f"원장 조회 실패: {e}"))

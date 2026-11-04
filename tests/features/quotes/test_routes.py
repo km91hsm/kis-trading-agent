@@ -310,3 +310,24 @@ def test_runtime_without_real_key_has_no_market(project):
 def test_fx_unknown_pair_400(project, pair):
     c, _ = _client(project, OPEN)
     assert c.get("/api/quotes/fx", params={"pair": pair}).status_code == 400
+
+
+def test_runtime_build_failure_is_isolated(project, monkeypatch):
+    """시세 클라이언트·허브 조립 예외는 시세 없음(`Runtime(None, None)`)으로 격리 — 500 이 아니라
+    스냅샷 값(M3)."""
+    creds = type("C", (), {"app_key": "synthetic-key", "app_secret": "synthetic-secret"})()
+    monkeypatch.setattr(
+        quotes_mod, "load_secrets", lambda: type("S", (), {"kis_creds": lambda self, env: creds})()
+    )
+
+    def boom(*a, **kw):
+        raise RuntimeError("조립 실패")
+
+    monkeypatch.setattr(quotes_mod.factory, "build_market", boom)
+    c = web_client(project, [FEATURE], now=OPEN)
+    _snap(project).close()
+    r = c.get("/api/quotes", params={"market": "KR", "tickers": "005930"})
+    assert r.status_code == 200
+    assert r.json()["quotes"]["005930"]["source"] == "snapshot"
+    rt = quotes_mod.runtime_for(c.app.state.deps)
+    assert rt.market is None and rt.hub is None

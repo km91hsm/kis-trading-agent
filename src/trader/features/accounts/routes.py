@@ -21,8 +21,10 @@ from pydantic import BaseModel, ConfigDict
 
 from trader.features.accounts import accounts_io, modes, overview, secrets_io
 from trader.features.accounts.accounts_io import AccountSpec
-from trader.features.accounts.settings import Account, Mode
+from trader.features.accounts.settings import Account, Mode, load_accounts
 from trader.kernel.config import ConfigError
+from trader.kernel.config.secrets import Secrets
+from trader.kernel.ledger import control
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import SseKey
 from trader.kernel.web.auth import (
@@ -87,6 +89,26 @@ def _accounts_yaml():
     return paths.config_dir() / "accounts.yaml"
 
 
+def _summary(acct: Any) -> dict:
+    """조작 이력용 계좌 요약(env·asset·markets·mode) — 계좌번호·키 이름은 넣지 않는다."""
+    return {
+        "env": acct.env,
+        "asset": acct.asset,
+        "markets": list(acct.markets),
+        "mode": acct.mode,
+    }
+
+
+def _log(request: Request, key: str, old: Any, new: Any) -> None:
+    """웹 조작 이력(control_log, 스펙 §5). PATCH 모드·일시정지와 같은 channel·actor."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        control.log_change(
+            conn, channel="web", actor=actor_of(request), key=key, old=old, new=new,
+            at=deps.now().isoformat(),
+        )  # fmt: skip
+
+
 # --- accounts ---------------------------------------------------------------------------
 
 
@@ -128,26 +150,34 @@ def set_mode(request: Request, account_id: str, body: ModeBody) -> dict:
 
 
 @accounts_router.post("/accounts", dependencies=LOCAL_WRITE)
-def add_account(spec: AccountSpec) -> dict:
+def add_account(request: Request, spec: AccountSpec) -> dict:
     """config/accounts.yaml 에 계좌 한 줄(계좌번호는 자리표시자 — 실제 번호는 연결 키)."""
     try:
         r = accounts_io.add_account(_accounts_yaml(), spec)
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # 이력은 실제로 적힌 줄(실전은 mode off, 파생은 KR 만 — `accounts_io` 규칙)을 다시 읽어 요약한다
+    written = load_accounts(_accounts_yaml(), secrets=Secrets())
+    _log(request, f"account:{spec.id}", None,
+         _summary(next((a for a in written if a.id == spec.id), spec)))  # fmt: skip
     logger.info("계좌 추가(웹): %s (%s·%s)", spec.id, spec.env, spec.asset)
     return {**r, "restart_required": True}
 
 
 @accounts_router.delete("/accounts/{account_id}", dependencies=LOCAL_WRITE)
 def remove_account(request: Request, account_id: str) -> dict:
-    """살아 있는 주문·승인·보유가 있으면 409."""
+    """살아 있는 주문·승인·보유가 있으면 409. 이력 old 는 실행 중 계좌 목록의 요약(재시작 전에
+    추가한 계좌면 목록에 없어 None)."""
+    deps = request.app.state.deps
+    before = next((a for a in _accounts(deps) if a.id == account_id), None)
     try:
-        with closing(request.app.state.deps.conn_factory()) as conn:
+        with closing(deps.conn_factory()) as conn:
             r = accounts_io.remove_account(_accounts_yaml(), account_id, conn)
     except accounts_io.AccountInUse as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    _log(request, f"account:{account_id}", None if before is None else _summary(before), None)
     logger.info("계좌 삭제(웹): %s", account_id)
     return {**r, "restart_required": True}
 
@@ -215,6 +245,8 @@ def secrets_update(request: Request, body: SecretsBody) -> dict:
         )
     except ConfigError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if r["updated"] or r["cleared"]:  # 키 이름 목록만 — 값은 절대 기록하지 않는다
+        _log(request, "secrets:env", None, {"updated": r["updated"], "cleared": r["cleared"]})
     logger.info("연결 키 변경(웹): 설정 %s · 지움 %s", r["updated"], r["cleared"])
     return {**r, "restart_required": bool(r["updated"] or r["cleared"])}
 

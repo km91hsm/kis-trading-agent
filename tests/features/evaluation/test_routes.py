@@ -89,6 +89,26 @@ def _fresh_cache():
     analytics_view._CACHE.clear()
 
 
+def test_cached_report_is_lru_bounded(monkeypatch):
+    """리포트 캐시는 `CACHE_MAX` 개까지 — 가장 오래 안 쓴 키부터 버린다(M6)."""
+    built = []
+    monkeypatch.setattr(analytics_view, "CACHE_MAX", 3)
+    monkeypatch.setattr(analytics_view, "_version", lambda *a, **kw: ("v",))
+
+    def report(conn, state, account_id, market, *, days, asset):
+        built.append(days)
+        return {"days": days}
+
+    monkeypatch.setattr(analytics_view.performance, "report", report)
+    for days in (1, 2, 3):
+        analytics_view.cached_report(None, None, "paper-main", "KR", days)
+    analytics_view.cached_report(None, None, "paper-main", "KR", 1)  # 1 을 최근으로
+    analytics_view.cached_report(None, None, "paper-main", "KR", 4)  # 2 가 밀려난다
+    assert len(analytics_view._CACHE) == 3
+    assert {k[2] for k in analytics_view._CACHE} == {1, 3, 4}
+    assert built == [1, 2, 3, 4]
+
+
 def _nav(conn, account_id, d, nav, market="KR"):
     kledger.snapshot_positions(
         conn, account_id=account_id, d=d, market=market, nav=Decimal(nav), cash=Decimal(1),

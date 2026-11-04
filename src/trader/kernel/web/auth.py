@@ -31,8 +31,9 @@ def is_direct_local(request: Request) -> bool:
 
 
 def _proxied(request: Request) -> bool:
-    """프록시 흔적: 알려진 헤더 또는 이름이 `x-forwarded-` 로 시작하는 헤더(값이 비어도)."""
-    return any(request.headers.get(h) for h in PROXY_HEADERS) or any(
+    """프록시 흔적: 알려진 헤더 또는 이름이 `x-forwarded-` 로 시작하는 헤더(둘 다 값이 비어도
+    존재만으로)."""
+    return any(h in request.headers for h in PROXY_HEADERS) or any(
         k.lower().startswith("x-forwarded-") for k in request.headers
     )
 

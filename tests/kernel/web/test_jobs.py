@@ -184,6 +184,33 @@ def test_trading_kind_without_account_id_needs_a_real_account_confirm(project, m
     assert no_port.post("/api/jobs", json={**body, "confirm": "x"}, headers=AUTH).status_code == 400
 
 
+class _WithFo:
+    def accounts(self):
+        return [SimpleNamespace(id="paper-1", env="paper")]
+
+    def fo_accounts(self):
+        return [
+            SimpleNamespace(id="fo-paper", env="paper"),
+            SimpleNamespace(id="fo-real", env="real"),
+        ]
+
+
+def test_trading_kind_resolves_fo_account_env(project, monkeypatch):
+    """`account_env` 는 파생 계좌(`fo_accounts()`)도 본다(M7): 모의 파생은 confirm 없이, 실전 파생은
+    confirm 필요. 대상 없는 trading kind 도 실전 파생 계좌를 실전으로 센다."""
+    _alive(monkeypatch, True)
+    client, _ = _client(project, ports={"accounts": _WithFo()})
+    paper = {"kind": "fx_order", "params": {"account_id": "fo-paper"}}
+    assert client.post("/api/jobs", json=paper, headers=AUTH).status_code == 200
+    real = {"kind": "fx_order", "params": {"account_id": "fo-real"}}
+    assert client.post("/api/jobs", json=real, headers=AUTH).status_code == 400
+    confirmed = client.post("/api/jobs", json={**real, "confirm": "fo-real"}, headers=AUTH)
+    assert confirmed.status_code == 200
+    assert client.post("/api/jobs", json={"kind": "fx_all"}, headers=AUTH).status_code == 400
+    ok = client.post("/api/jobs", json={"kind": "fx_all", "confirm": "fo-real"}, headers=AUTH)
+    assert ok.status_code == 200
+
+
 def test_get_jobs_lists_kind_registry_and_schedule_table(project):
     client, _ = _client(project)
     r = client.get("/api/jobs").json()
@@ -206,3 +233,42 @@ def test_get_jobs_lists_kind_registry_and_schedule_table(project):
         "next_at": None,
     }
     assert "us_fx_scan" in ids and ids["usage_probe"]["interval_s"] == 1800
+
+
+def _control_log(deps) -> list[tuple]:
+    conn = deps.conn_factory()
+    try:
+        return [
+            tuple(r)
+            for r in conn.execute(
+                "SELECT channel, actor, key, old, new FROM control_log ORDER BY id"
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def test_post_and_cancel_job_leave_control_log(project, monkeypatch):
+    """조작 이력(스펙 §5): 요청은 `job:<kind>` new={request_id, params}, 취소는
+    queued → cancelled."""
+    import json
+
+    client, deps = _client(project)
+    _alive(monkeypatch, True)
+    r = client.post("/api/jobs", json={"kind": "fx_scan", "params": {"market": "KR"}}, headers=AUTH)
+    rid = r.json()["id"]
+    rows = _control_log(deps)
+    assert len(rows) == 1
+    channel, actor, key, old, new = rows[0]
+    assert (channel, key, old) == ("web", "job:fx_scan", None)
+    assert actor and "secret" not in actor  # 토큰 지문만
+    assert json.loads(new) == {"request_id": rid, "params": {"market": "KR"}}
+    assert client.delete(f"/api/jobs/{rid}", headers=AUTH).status_code == 204
+    rows = _control_log(deps)
+    assert len(rows) == 2
+    assert rows[1][2:] == ("job:fx_scan", json.dumps("queued"), json.dumps("cancelled"))
+    # 거부된 요청·실패한 취소는 남기지 않는다
+    client.post("/api/jobs", json={"kind": "nope"}, headers=AUTH)
+    assert client.delete(f"/api/jobs/{rid}", headers=AUTH).status_code == 409
+    assert len(_control_log(deps)) == 2
+    assert "secret" not in repr(_control_log(deps))

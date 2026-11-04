@@ -129,3 +129,52 @@ class _NullHttp:
 
     def __exit__(self, *a):
         return False
+
+
+def test_fx_failure_is_negative_cached_for_short_ttl(project, monkeypatch):
+    """원천이 연달아 실패하면 `fail_at` 이후 `FAIL_TTL_S` 동안 다시 부르지 않는다(I3)."""
+    calls = {"macro": 0}
+
+    def boom():
+        calls["macro"] += 1
+        raise RuntimeError("FRED 오류")
+
+    monkeypatch.setattr(fx, "kis_fx", None)
+    monkeypatch.setattr(fx, "macro_usdkrw", boom)
+    conn = _conn(project)
+    assert fx.rate(conn, "USDKRW", now=NOW) is None
+    assert fx.rate(conn, "USDKRW", now=NOW + timedelta(seconds=30)) is None
+    assert calls["macro"] == 1
+    assert control.get_flag(conn, "fx_cache:USDKRW")["fail_at"] == NOW.isoformat()
+    # TTL 이 지나면 다시 묻는다
+    fx.rate(conn, "USDKRW", now=NOW + timedelta(seconds=fx.FAIL_TTL_S + 1))
+    assert calls["macro"] == 2
+    conn.close()
+
+
+def test_fx_failure_serves_previous_day_as_stale(project, monkeypatch):
+    """실패 시 이전 날짜 캐시가 있으면 `stale: true` 로 준다. 없으면 None(라우트 404)."""
+    box = {"macro": {"rate": "1388.5", "as_of": "2026-10-08"}}
+    calls = {"macro": 0}
+
+    def macro():
+        calls["macro"] += 1
+        if box["macro"] is None:
+            raise RuntimeError("FRED 오류")
+        return box["macro"]
+
+    monkeypatch.setattr(fx, "kis_fx", None)
+    monkeypatch.setattr(fx, "macro_usdkrw", macro)
+    conn = _conn(project)
+    fx.rate(conn, "USDKRW", now=NOW)
+    box["macro"] = None
+    nxt = NOW + timedelta(days=1)
+    want = {"pair": "USDKRW", "rate": "1388.5", "as_of": "2026-10-08", "source": "macro",
+            "stale": True}  # fmt: skip
+    assert fx.rate(conn, "USDKRW", now=nxt) == want
+    assert fx.rate(conn, "USDKRW", now=nxt + timedelta(seconds=10)) == want
+    assert calls["macro"] == 2
+    conn.close()
+    c = web_client(project, [FEATURE], now=nxt)
+    r = c.get("/api/quotes/fx")
+    assert r.status_code == 200 and r.json()["stale"] is True

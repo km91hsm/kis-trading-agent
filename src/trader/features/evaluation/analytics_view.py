@@ -2,7 +2,7 @@
 
 - `cached_report`: 계좌·시장 성과 리포트 캐시(옛 `routers/performance.cached_report`). 리포트는 피처
   종가를 읽어 수백 ms 라 SSE 갱신마다 다시 만들지 않는다 — 입력 버전(스냅샷·NAV·체결·주문 수와
-  피처 디렉터리 mtime)이 같고 `CACHE_TTL_S` 안이면 그대로.
+  피처 디렉터리 mtime)이 같고 `CACHE_TTL_S` 안이면 그대로. `CACHE_MAX` 개까지(LRU).
 - `compare_rows`: 계좌·시장마다 `metrics_of`(NAV 이력 없으면 `metrics: None`). 레인은 asset fo → fo,
   그 외 spot(단타는 여기서 구분할 수 없다).
 - `shadow_summary`·`calibration_runs`·`memory_recent`·`memory_search`."""
@@ -13,6 +13,7 @@ import json
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,10 +23,11 @@ from trader.features.evaluation.memory import store
 from trader.features.ml import api as ml_api
 
 CACHE_TTL_S = 300.0
+CACHE_MAX = 64  # 리포트 캐시 상한(LRU) — 계좌·시장·days 조합이 프로세스 수명 동안 늘지 않게
 CURRENCY = {"KR": "KRW", "US": "USD"}
 SHADOW_BASELINES = ("candidates_1n", "quant_topn", "index_hold", "index_trend")
-# (account, market, days) → (version, saved_at, report)
-_CACHE: dict[tuple[str, str, int], tuple[tuple, float, dict]] = {}
+# (account, market, days) → (version, saved_at, report). 최근에 쓴 키가 끝(LRU)
+_CACHE: OrderedDict[tuple[str, str, int], tuple[tuple, float, dict]] = OrderedDict()
 _LOCK = threading.Lock()
 
 
@@ -76,11 +78,15 @@ def cached_report(
     with _LOCK:
         hit = _CACHE.get(key)
         if hit is not None and hit[0] == version and now - hit[1] < CACHE_TTL_S:
+            _CACHE.move_to_end(key)
             return hit[2]
     report = performance.report(conn, state, account_id, market, days=days, asset=asset)
     # 리포트가 피처 디렉터리를 만들 수 있어(mtime 변화) 만든 **뒤**의 버전을 기억한다
     with _LOCK:
         _CACHE[key] = (_version(conn, account_id, market, state, asset), now, report)
+        _CACHE.move_to_end(key)
+        while len(_CACHE) > CACHE_MAX:
+            _CACHE.popitem(last=False)
     return report
 
 

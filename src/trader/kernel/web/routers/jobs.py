@@ -1,4 +1,4 @@
-"""jobs: 잡 큐 자원. 조회는 토큰 없음, 요청·취소는 토큰 + 같은 출처.
+"""jobs: 잡 큐 자원. 조회는 토큰 없음, 요청·취소는 토큰 + 같은 출처(조작 이력 `job:<kind>`).
 
 kind 표는 발견된 기능 + 커널 잡(`catalog.with_kernel`)의 `QueueKind` 다(데몬·CLI 와 같은 목록).
 실행 주체는 데몬의 큐 틱뿐이라 데몬이 살아 있지 않으면 요청을 받지 않는다(409).
@@ -20,7 +20,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
 from trader.kernel.daemon.heartbeat import read_status
-from trader.kernel.web.auth import require_confirm, require_same_origin, require_token
+from trader.kernel.web.auth import (
+    actor_of,
+    require_confirm,
+    require_same_origin,
+    require_token,
+)
 
 DAEMON_DOWN = "데몬이 꺼져 있어요 — 요청은 데몬이 실행해요 (uv run trader daemon)"
 CANCEL_ONLY_QUEUED = "대기 중인 요청만 취소할 수 있어요"
@@ -45,13 +50,19 @@ def daemon_alive(deps: Any) -> bool:
     return bool(read_status(deps.state, deps.now(), [])["alive"])
 
 
+def _all_accounts(port: Any) -> list[Any]:
+    """현물 `accounts()` + 파생 `fo_accounts()`(있으면)."""
+    fo = getattr(port, "fo_accounts", None)
+    return [*port.accounts(), *(fo() if callable(fo) else [])]
+
+
 def account_env(deps: Any, account_id: str) -> str:
-    """`ports["accounts"]`(커널 Protocol `AccountsPort`)에서 계좌 env. 포트가 없거나 모르는
-    계좌면 'real' — 실전으로 보고 confirm 을 요구한다(fail-safe)."""
+    """`ports["accounts"]`(커널 Protocol `AccountsPort`, 현물 + 파생)에서 계좌 env. 포트가 없거나
+    모르는 계좌면 'real' — 실전으로 보고 confirm 을 요구한다(fail-safe)."""
     port = (deps.ports or {}).get("accounts")
     if port is None:
         return "real"
-    for acct in port.accounts():
+    for acct in _all_accounts(port):
         if getattr(acct, "id", None) == account_id:
             return str(getattr(acct, "env", None) or "real")
     return "real"
@@ -63,7 +74,7 @@ def require_confirm_any_real(deps: Any, body: dict) -> None:
     if port is None:
         raise HTTPException(status_code=400, detail="계좌 정보가 없어 실전 확인을 할 수 없습니다")
     real = {
-        str(a.id) for a in port.accounts() if str(getattr(a, "env", None) or "real") != "paper"
+        str(a.id) for a in _all_accounts(port) if str(getattr(a, "env", None) or "real") != "paper"
     }
     if real and body.get("confirm") not in real:
         detail = "실전 계좌가 포함된 작업은 confirm 에 실전 계좌 id 를 적어야 합니다"
@@ -173,6 +184,10 @@ def request_job(request: Request, body: JobBody) -> dict:
             rid = jobq.enqueue(conn, table, body.kind, params, source="web", now=deps.now())
         except jobq.DuplicateRequest as e:
             raise HTTPException(status_code=409, detail=str(e)) from e
+        jobq.log_request(
+            conn, kind=body.kind, req_id=rid, params=params, channel="web",
+            actor=actor_of(request), now=deps.now(),
+        )  # fmt: skip
     return {
         "id": rid,
         "kind": body.kind,
@@ -188,4 +203,5 @@ def cancel_job(request: Request, req_id: int) -> Response:
     with closing(deps.conn_factory()) as conn:
         if not jobq.cancel(conn, req_id, now=deps.now()):
             raise HTTPException(status_code=409, detail=CANCEL_ONLY_QUEUED)
+        jobq.log_cancel(conn, req_id, channel="web", actor=actor_of(request), now=deps.now())
     return Response(status_code=204)

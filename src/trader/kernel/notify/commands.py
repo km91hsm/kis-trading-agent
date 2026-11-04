@@ -96,6 +96,10 @@ def run_message(ctx: CommandContext, arg: str | None) -> str:
         rid = jobq.enqueue(ctx.conn, kinds, kind, params, source="telegram", now=ctx.now())
     except ValueError as e:  # 알 수 없는 작업·파라미터 오류·중복(DuplicateRequest)
         return f"거부: {e}"
+    jobq.log_request(
+        ctx.conn, kind=kind, req_id=rid, params=jobq.validate(kinds, kind, params),
+        channel="telegram", actor=ctx.actor, now=ctx.now(),
+    )  # fmt: skip
     return messages.event(f"요청 #{rid}", f"{jobq.label(kinds, kind)} — 데몬이 순서대로 실행해요")
 
 
@@ -207,7 +211,7 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             if name == STATUS:
                 reply = status_message(ctx)
             elif name == RUN:
-                reply = run_message(ctx, arg)
+                reply = run_message(replace(ctx, actor=_actor(u)), arg)
             else:
                 reply = cmd.handler(replace(ctx, actor=_actor(u)), arg)
             ctx.notifier.send(reply)

@@ -143,6 +143,14 @@ def fo_rows(deps: Any, q: dict[str, str]) -> list[dict]:
 # --- decisions·orders 조각 ----------------------------------------------------------------
 
 
+def _parse_date(value: str) -> date:
+    """조회 `date`(YYYY-MM-DD). 형식이 틀리면 400(500 이 아니라)."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"date 형식 오류(YYYY-MM-DD): {value!r}") from e
+
+
 def _day(deps: Any, q: dict[str, str]) -> date | None:
     """조회 거래일(KST). `market` 이 KR 이 아니거나 `account_id` 가 파생 계좌가 아니면(현물·모르는
     계좌) None — 파생은 KR·파생 계좌만(`fo_rows` 와 같은 규칙)."""
@@ -150,7 +158,7 @@ def _day(deps: Any, q: dict[str, str]) -> date | None:
         return None
     if q.get("account_id") and q["account_id"] not in {a.id for a in _fo_accounts(deps)}:
         return None
-    return date.fromisoformat(q["date"]) if q.get("date") else _today(deps)
+    return _parse_date(q["date"]) if q.get("date") else _today(deps)
 
 
 def _decision_status(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
@@ -346,7 +354,7 @@ def _checks(mdir: Any, stages: list[str], account_id: str | None = None) -> dict
 def today_view(request: Request, date_: str | None = Query(None, alias="date")) -> dict:
     """오늘(또는 date) 아침 결정·재평가 라운드·계좌별 보류/일일 손실·게이트·주문 체크포인트."""
     deps = request.app.state.deps
-    d = date.fromisoformat(date_) if date_ else _today(deps)
+    d = _parse_date(date_) if date_ else _today(deps)
     with closing(deps.conn_factory()) as conn:
         rows = conn.execute(
             "SELECT * FROM fo_decisions WHERE date = ? ORDER BY round, id", (d.isoformat(),)
@@ -377,7 +385,7 @@ def legs(
     """그날(KST) 만든 주문 다리 + 아직 살아 있는 다리."""
     deps = request.app.state.deps
     acct = _fo_account(deps, account_id)
-    d = date.fromisoformat(date_) if date_ else _today(deps)
+    d = _parse_date(date_) if date_ else _today(deps)
     lo, hi = ledger.day_bounds(d, MARKET)
     with closing(deps.conn_factory()) as conn:
         rows = conn.execute(

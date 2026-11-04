@@ -56,7 +56,7 @@ def test_health_levels(project):
     for i in range(3):
         _run(conn, "fx_scan", "error", NOW - timedelta(hours=3 - i))
     _run(conn, "fx_other", "error", NOW - timedelta(hours=30))  # 24h 밖
-    set_flag(conn, "ws_session_busy:KR", True)
+    set_flag(conn, "ws_session_busy:KR", {"until": (NOW + timedelta(seconds=60)).isoformat()})
     conn.close()
     out = make_client(deps).get("/api/system/health").json()
     assert out["level"] == "warn"
@@ -67,6 +67,24 @@ def test_health_levels(project):
     _run(conn, "fx_scan", "ok", NOW - timedelta(minutes=5))  # 마지막이 성공이면 경고 없음
     conn.close()
     assert health.evaluate(deps)["level"] == "ok"
+
+
+def test_health_busy_flag_only_while_until_in_future(project):
+    """`ws_session_busy:<env>` 는 until > now 일 때만 info(M5) — 지난 until·깨진 값은 사유 아님."""
+    deps = ledger_deps(project)
+    _alive_lock(deps.state)
+    conn = deps.conn_factory()
+    set_flag(conn, "ws_session_busy:real", {"until": (NOW - timedelta(seconds=1)).isoformat()})
+    set_flag(conn, "ws_session_busy:paper", {"until": "not-a-time"})
+    set_flag(conn, "ws_session_busy:x", True)
+    conn.close()
+    busy = [r for r in health.evaluate(deps)["reasons"] if r["area"] == "control"]
+    assert busy == []
+    conn = deps.conn_factory()
+    set_flag(conn, "ws_session_busy:real", {"until": (NOW + timedelta(seconds=90)).isoformat()})
+    conn.close()
+    busy = [r for r in health.evaluate(deps)["reasons"] if r["area"] == "control"]
+    assert busy == [{"area": "control", "level": "info", "text": "ws_session_busy:real"}]
 
 
 def test_health_warns_when_daily_sessions_near_cap(project):

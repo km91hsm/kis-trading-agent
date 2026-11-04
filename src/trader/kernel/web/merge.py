@@ -1,7 +1,8 @@
 """조회 자원 합치기: 여러 기능의 같은 경로 `ResourcePart` 를 `GET` 하나로 마운트한다.
 
 응답은 `{"items": [...], "partial": bool}`. 조각 하나가 실패하거나 목록이 아닌 값을 내도 나머지는
-돌려주고 `partial=True` 로 표시한다. `items` 는 `at` 시각 역순(ISO8601 로 비교 — 날짜만이면 그날
+돌려주고 `partial=True` 로 표시한다(CSV 는 `X-Partial: 1` 헤더). 조각이 낸 `HTTPException` 은
+요청 오류라 삼키지 않고 그대로 돌려준다. `items` 는 `at` 시각 역순(ISO8601 로 비교 — 날짜만이면 그날
 00:00 UTC, 오프셋 없으면 UTC; 없거나 못 읽는 항목은 끝). `?format=csv` 면 같은 items 를 CSV 로."""
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 from trader.kernel.registry.types import Feature, ResourcePart
 from trader.kernel.web.csv import csv_response
@@ -50,6 +51,8 @@ def _handler(path: str, parts: list[ResourcePart]):
         for part in parts:
             try:
                 got = part.fn(deps, dict(q))
+            except HTTPException:  # 조각이 정한 요청 오류(잘못된 값 400 등)는 그대로 돌려준다
+                raise
             except Exception:
                 logger.warning("merge 조각 실패: %s", path, exc_info=True)
                 partial = True
@@ -62,7 +65,11 @@ def _handler(path: str, parts: list[ResourcePart]):
         items.sort(key=_sort_key, reverse=True)
         if q.get("format") == "csv":
             # 조각마다 열이 달라(현물·파생) 첫 행이 아니라 모든 행의 키 합집합(처음 나온 순)
-            return csv_response(items, filename, list(dict.fromkeys(k for r in items for k in r)))
+            cols = list(dict.fromkeys(k for r in items for k in r))
+            resp = csv_response(items, filename, cols)
+            if partial:  # CSV 본문에는 partial 을 실을 수 없어 헤더로
+                resp.headers["X-Partial"] = "1"
+            return resp
         return {"items": items, "partial": partial}
 
     return merged

@@ -341,6 +341,38 @@ def test_remove_blocked_by_live_order_is_409(project, web_client, ledger):
     assert r.status_code == 409 and "주문" in r.json()["detail"]
 
 
+def _control_log(project) -> list[tuple]:
+    c = db.connect(project / "state" / "trader.db")
+    try:
+        return [tuple(r) for r in c.execute("SELECT channel, key, old, new FROM control_log")]
+    finally:
+        c.close()
+
+
+def test_add_and_remove_leave_control_log_without_secrets(project, web_client):
+    """조작 이력(스펙 §5): `account:<id>` 에 env·asset·markets·mode 요약만(계좌번호·키 없음)."""
+    import json
+
+    _yml(project)
+    c = _local(web_client)
+    body = {"id": "real-2", "env": "real", "asset": "stock", "markets": ["KR"]}
+    assert c.post("/api/accounts", headers=LOCAL_AUTH, json=body).status_code == 200
+    rows = _control_log(project)
+    assert len(rows) == 1 and rows[0][:3] == ("web", "account:real-2", None)
+    summary = json.loads(rows[0][3])  # 실제로 적힌 값 — 실전 새 계좌는 규칙상 mode off
+    assert summary == {"env": "real", "asset": "stock", "markets": ["KR"], "mode": "off"}
+    assert c.delete("/api/accounts/real-main", headers=LOCAL_AUTH).status_code == 200
+    rows = _control_log(project)
+    assert len(rows) == 2 and rows[1][1] == "account:real-main" and rows[1][3] is None
+    assert json.loads(rows[1][2]) == {
+        "env": "real", "asset": "stock", "markets": ["KR"], "mode": "off"
+    }
+    assert "00000000" not in repr(rows) and "cano" not in repr(rows)
+    # 실패한 추가는 남기지 않는다
+    c.post("/api/accounts", headers=LOCAL_AUTH, json={"id": "paper-main", "env": "paper"})
+    assert len(_control_log(project)) == 2
+
+
 # --- GET /settings ----------------------------------------------------------------------
 
 
@@ -436,6 +468,23 @@ def test_update_writes_backup_and_clears(project, secrets_client):
     text = _env(project).read_text(encoding="utf-8")
     assert "# 메모" in text and "KIS_HTS_ID=newid" in text and "TELEGRAM_CHAT_ID" not in text
     assert (project / "secrets" / body["backup"]).read_text(encoding="utf-8").count("old") == 1
+
+
+def test_secrets_update_logs_key_names_only(project, secrets_client):
+    """연결 키 변경은 `secrets:env` 에 이름 목록만 — 값은 절대 기록하지 않는다."""
+    import json
+
+    _env(project).write_text("KIS_HTS_ID=old\nTELEGRAM_CHAT_ID=1\n", encoding="utf-8")
+    r = secrets_client.post(
+        "/api/settings/secrets",
+        headers=LOCAL_AUTH,
+        json={"values": {"KIS_HTS_ID": "synthval9"}, "clear": ["TELEGRAM_CHAT_ID"]},
+    )
+    assert r.status_code == 200, r.text
+    rows = _control_log(project)
+    assert len(rows) == 1 and rows[0][:3] == ("web", "secrets:env", None)
+    assert json.loads(rows[0][3]) == {"updated": ["KIS_HTS_ID"], "cleared": ["TELEGRAM_CHAT_ID"]}
+    assert "synthval9" not in repr(rows) and "old" not in repr(rows)
 
 
 def test_update_rejects_unknown_names_and_multiline(project, secrets_client):

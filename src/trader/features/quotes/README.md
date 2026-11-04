@@ -8,7 +8,7 @@
 
 ## 공개면 (`api.py`)
 
-- `fx_rate(settings, conn, pair="USDKRW") -> dict | None` — `{pair, rate: str(Decimal), as_of, source: "kis"|"macro"}`, 원천이 없거나 모르는 쌍이면 None.
+- `fx_rate(settings, conn, pair="USDKRW") -> dict | None` — `{pair, rate: str(Decimal), as_of, source: "kis"|"macro"}`, 원천이 없거나 모르는 쌍이면 None. 원천이 모두 실패하면 `fail_at` 을 남기고 `fx.FAIL_TTL_S`(300초) 동안 다시 묻지 않으며, 그동안·실패 때 이전 날짜 값이 있으면 `stale: true` 를 붙여 준다.
 
 ## 웹 자원 (`routes.py`, 토큰 없음)
 

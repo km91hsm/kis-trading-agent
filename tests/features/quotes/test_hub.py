@@ -368,3 +368,24 @@ def test_session_busy_reads_control_flag_until(tmp_path):
     now[0] = NOW
     assert busy() is False
     conn.close()
+
+
+def test_handle_error_drops_with_backoff(monkeypatch):
+    """프레임 처리(`_handle`) 예외는 스레드를 죽이지 않고 연결을 놓고 백오프한다(M4)."""
+
+    def bad_frame(raw):
+        raise ValueError("깨진 프레임")
+
+    c1, c2 = FakeConn(), FakeConn()
+    hub, clock, made, _ = make_hub(conns=[c1, c2])
+    hub.request(["005930"])
+    hub.step()
+    monkeypatch.setattr(hub_mod.kis_ws, "parse_frame", bad_frame)
+    c1.inbox.append("0|H0STCNT0|001|synthetic")
+    assert hub.step() is False
+    assert c1.closed
+    hub.step()
+    assert len(made) == 1  # 백오프 중 — 바로 재접속하지 않는다
+    clock[0] = 1.0
+    hub.step()
+    assert len(made) == 2

@@ -75,12 +75,16 @@ def _build_runtime(deps: Any) -> Runtime:
     if not creds.app_key or not creds.app_secret:
         logger.info("시세 클라이언트 없음: 공용 실전 키(KIS_REAL_*)가 설정되지 않았습니다")
         return Runtime(None, None)
-    market = factory.build_market(creds)
-    hub = None
-    if deps.settings.quotes.realtime_ws:
-        hub = QuoteHub.for_market(
-            market, now=deps.now, busy=session_busy(deps.conn_factory, deps.now)
-        )
+    try:
+        market = factory.build_market(creds)
+        hub = None
+        if deps.settings.quotes.realtime_ws:
+            hub = QuoteHub.for_market(
+                market, now=deps.now, busy=session_busy(deps.conn_factory, deps.now)
+            )
+    except Exception as e:  # noqa: BLE001 — 조립 실패는 시세 없음으로(요청이 500 이 되지 않게)
+        logger.warning("시세 클라이언트·허브 생략: 조립 실패 (%s)", type(e).__name__)
+        return Runtime(None, None)
     return Runtime(market, hub)
 
 

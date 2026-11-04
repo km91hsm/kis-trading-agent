@@ -125,6 +125,16 @@ def test_fo_legs_requires_account_id(client):
     assert client.get("/api/fo/legs", params={"account_id": "paper-main"}).status_code == 400
 
 
+def test_fo_bad_date_is_400_not_500(client):
+    """잘못된 `date` 는 400(M2) — 단독 라우트와 합친 자원 조각 모두."""
+    bad = {"date": "2026-13-40"}
+    assert client.get("/api/fo/today", params=bad).status_code == 400
+    r = client.get("/api/fo/legs", params={"account_id": ACCT, **bad})
+    assert r.status_code == 400 and "date" in r.json()["detail"]
+    assert client.get("/api/decisions", params=bad).status_code == 400
+    assert client.get("/api/orders", params=bad).status_code == 400
+
+
 def test_fo_today_and_legs_shapes(project, client, ledger):
     pos = _position(ledger)
     with store.tx(ledger):

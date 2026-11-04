@@ -286,31 +286,35 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 10 커널 SSE probe·usage-throttle + names·charts·features·news·settings 자원(d13cf8f·6ba3457, fix 11eb3d9)
 - [x] Task 11 analytics·system 기능 절 자원(ff13701·4368f81·620c20c, fix 2ea864f)
 - [x] Task 12 대응표 100% 검사(`tests/kernel/web/test_endpoint_map.py`)·프록시 헤더 루프백 차단·웹 포트 필터·trading kind confirm·문서(8dfdda8, 문서 커밋은 이 줄을 담은 커밋)
-- [ ] 최종 리뷰·fix wave
+- [x] 최종 리뷰·fix wave(I1 조작 이력 `job:`·`account:`·`secrets:env`·텔레그램 `/run` · I2 웹 accounts 포트 `ReadOnlyAccounts` · I3 환율 음성 캐시·stale · M1–M7·M9(텔레그램)·M10 — 이 줄을 담은 커밋)
 - [ ] PR·CI(ubuntu+windows)·머지
 - Ruling(M11 사전 점검): R1 `POST /system/usage/ensure-fresh` 는 같은 출처만(토큰 없음, 큐에 probe 만) · R2 Task 6 이 `features/quotes` 최소 골격 선행 · R3 「오늘」 하위 메뉴 승인·현물·단타·파생 · R4 `/quotes/us` 없음(`/quotes?market=US`) · R5 커널 SSE probe 레지스트리 `KERNEL_PROBES`
-- Ruling(M11 실행 중): T2-R1 마이그레이션 15 는 커널 `web` 소유 · T2-R2 값이 같으면 `control_log` 행 없음 · T2-R3 outbox 재전송 성공은 새 notices 행 · T2-R4 텔레그램 변경은 channel `telegram` · T3-R1 `WebDeps.ports`, 모르는 계좌는 실전 취급 · T3-R2 `usage_probe` 큐 kind + kind 목록 커널 단일화 · T3-R3 웹 포트에서 집행 포트 제외 · T3-R4 계좌 없는 trading kind 는 실전 계좌 confirm · T4-R1 callback_data 64바이트 초과는 ValueError · T5-R1/R2 아래 이연 · T6-R1 웹은 LIVE 확인을 주지 않음(CLI 전용) · T6-R2 통합 현황은 `account_nav` 만(파생 NAV 는 `/fo/summary`) · T7-R1 단타 행은 현물 행과 별도 · T7-R2 `settings.scalp.accounts` 없음 · T8-R1 단타 결정 행 합성(id `scalp-<order_id>`) · T8-R2 `discovery_line` 없음 · T9-R1 quotes 는 시크릿으로 자체 시세 클라이언트 · T9-R2/R5 환율 KIS 주입점 + FRED + 하루 캐시 · T9-R3/R4 `ws_session_busy:<env>` 세션 양보(90초 자기 만료) · T10-R1 `/news/events` 는 공시만 · T10-R2 웹 `/names` 는 `ticker_names` 에 쓰지 않음 · T10-R3 `CONTROL_CURSOR_LIKE` 의 기능 접두 · T11-R1 `/system/fo` 는 파생 계좌 전체 · T11-R2 saveticker 재시작 = control 플래그 + 데몬 소비 · T11-R4 nav id `performance-overview` · T11-R5 비교 행 (계좌, 시장) · T11-R6 memory `q` = 종목 · T12-R1 자원 별칭표(첫 세그먼트 → 자원)
+- Ruling(M11 실행 중): T2-R1 마이그레이션 15 는 커널 `web` 소유 · T2-R2 값이 같으면 `control_log` 행 없음 · T2-R3 outbox 재전송 성공은 새 notices 행 · T2-R4 텔레그램 변경은 channel `telegram` · T3-R1 `WebDeps.ports`, 모르는 계좌는 실전 취급 · T3-R2 `usage_probe` 큐 kind + kind 목록 커널 단일화 · T3-R3 웹 포트에서 집행 포트 제외 · T3-R4 계좌 없는 trading kind 는 실전 계좌 confirm · T4-R1 callback_data 64바이트 초과는 ValueError · T5-R1(텔레그램은 fix wave, 웹 거부 알림은 M12)/R2(M12) 이연 · T6-R1 웹은 LIVE 확인을 주지 않음(CLI 전용) · T6-R2 통합 현황은 `account_nav` 만(파생 NAV 는 `/fo/summary`) · T7-R1 단타 행은 현물 행과 별도 · T7-R2 `settings.scalp.accounts` 없음 · T8-R1 단타 결정 행 합성(id `scalp-<order_id>`) · T8-R2 `discovery_line` 없음 · T9-R1 quotes 는 시크릿으로 자체 시세 클라이언트 · T9-R2/R5 환율 KIS 주입점 + FRED + 하루 캐시 · T9-R3/R4 `ws_session_busy:<env>` 세션 양보(90초 자기 만료) · T10-R1 `/news/events` 는 공시만 · T10-R2 웹 `/names` 는 `ticker_names` 에 쓰지 않음 · T10-R3 `CONTROL_CURSOR_LIKE` 의 기능 접두 · T11-R1 `/system/fo` 는 파생 계좌 전체 · T11-R2 saveticker 재시작 = control 플래그 + 데몬 소비 · T11-R4 nav id `performance-overview` · T11-R5 비교 행 (계좌, 시장) · T11-R6 memory `q` = 종목 · T12-R1 자원 별칭표(첫 세그먼트 → 자원)
 - 해소된 이연(M0 리뷰·M2): Host userinfo 거부 · `/api` catch-all 전 메서드 + 베어 `/api` · `dist` 존재 지연 검사 · 비루프백 바인드 경고·`extra_hosts`(`tailscale_hosts`) 연결 · `/api/accounts`·연결 키 라우트(`/settings/secrets`)
-- 이연(최종 fix wave 후보):
-  - T5-R1 decide-reject(웹·텔레그램)도 「[거부]」 알림 · T5-R2 approve 의 `DuplicateRequest` 는 기존 request_id 로 202
+- 최종 fix wave 에서 해소: T5-R1 텔레그램 거부 「[거부]」 알림 · T6 `POST/DELETE /accounts`·`POST /settings/secrets` control_log · T7 fo `date` 파싱 500 · T8 조각 `date` 400(merge 가 HTTPException 재발생)·CSV `X-Partial` · T9 환율 음성 캐시·stale·`build_market` 예외 폴백·허브 `_drop(backoff=True)`·health `ws_session_busy` until · T11 성과 캐시 상한(모듈 LRU 64) · 프록시 헤더 존재만으로 차단 · `account_env` 파생 계좌
+- 이연(최종 리뷰 뒤 남은 것 — M12 이연은 아래 「이연(M12)」):
   - T1: `app.py` 의 `auth._host_of` 비공개 import · nav 화면 KeyError 를 계약 검사로 · `build_web_deps` 3필드 테스트
   - T2: 상태 변경과 `log_change` 의 분리 커밋 · notices 는 데몬 notifier 만 기록(CLI·fo 도구 경로·NullNotifier 미기록)
   - T3: `read_status` 입력 두 번 조립 · `_enabled` 의 AttributeError 삼킴 · `interval_s` 는 schedule.yaml 이 아니라 JobSpec · `caps_by_kind` getattr 500 가능 · ensure-fresh 가 enqueue 전에 60초 도장
   - T5: 선점이 TTL 까지 남음(approve_execute 실패·만료 시) · 해제 감사 기록 없음 · decide 의 `_take_pending` 재구현 · spot routes 가 커널 `routers.jobs` 내부(`daemon_alive`·`DAEMON_DOWN`) import · 모의 승인 `ask` 의 "실전" 문구 · CLI `approvals approve` 가 decide 우회
-  - T6: `POST/DELETE /accounts`·`POST /settings/secrets` 가 `control_log` 에 없음 · overview `day_pnl` 부분 합 표시 · `_positions_fp` 사흘 행 스캔
-  - T7: 단타 행 `entry_price` 없으면 조각 전체 partial · fo "만기 D-n" 음수 · fo `date` 파싱 500 · positions_view 의 `spot.executor.sector_of_for` 대신 `ports["scan"]`
-  - T8: 조각의 잘못된 `date` 가 400 이 아니라 200 partial · CSV partial 표시 없음·중첩값 repr · `NEWS_REF` fullmatch · 결정 N+1 · `decisions_view.py` 분할
-  - T9: 환율 음성 캐시·날 넘김 stale 제공 · `build_market` 예외 폴백 · 허브 파싱 예외 `_drop(backoff=True)` · health 가 `ws_session_busy` until 확인 · `ws_session_busy` 네임스페이스 선언 · fo 시장 시간 09:00~15:30 vs 파생 08:45~15:45
+  - T6: overview `day_pnl` 부분 합 표시 · `_positions_fp` 사흘 행 스캔
+  - T7: 단타 행 `entry_price` 없으면 조각 전체 partial · fo "만기 D-n" 음수 · positions_view 의 `spot.executor.sector_of_for` 대신 `ports["scan"]`
+  - T8: CSV 중첩값 repr · `NEWS_REF` fullmatch · 결정 N+1 · `decisions_view.py` 분할
+  - T9: `ws_session_busy` 네임스페이스 선언 · fo 시장 시간 09:00~15:30 vs 파생 08:45~15:45
   - T10: scan `_ids` 유니코드 숫자 500 · charts `json_valid` 가드·레인 필터 · `re.match`+`$` → fullmatch · `market` 파라미터 관례·`_market` 헬퍼 중복 · `_TICKER_RE` 3벌·비공개 import · `ManualBody.text` max_length · `CONTROL_CURSOR_LIKE` 를 `Feature` 선언으로(T10-R3) · ml `active` 의 시장 선호
-  - T11: 성과 캐시 모듈 전역·무한 성장 → deps 단위 LRU · fo `_flags` LIKE `_`·int 변환 500 · memory 응답 모양 차이·자기 자신 최상위 · analytics 422/400 혼재 · 재시작 응답에 「수집 꺼짐」 안내
+  - T11: 성과 캐시를 모듈 전역 → deps 단위로(상한은 fix wave 에서 LRU 64) · fo `_flags` LIKE `_`·int 변환 500 · memory 응답 모양 차이·자기 자신 최상위 · analytics 422/400 혼재 · 재시작 응답에 「수집 꺼짐」 안내
   - T12: 계좌 없는 trading kind(`discover`·`fo_session`)는 실전 현물 계좌가 있으면 모의 파생 세션도 실전 confirm 을 요구한다(fail-safe 방향) — 대상 레인별로 좁힐지 결정
   - 웹 테스트 공백(경로 탈출·same-origin 포트·SSE `_SHARED`) · `gen-sse-keys`/`gen-nav` 대상 경로·`web_dist()` 를 소스 트리 기준으로(지금은 `project_root()` — scratch `TRADER_HOME` 에서 `--check` 하려면 생성 파일 복사 필요) · `_hostname`/`_host_of` 정리
 - 이연(M11b, 프런트): 새 UI 전체(설계 §9) · `RunJobButton` · 단타 행은 「단타」 절에 따로 · 결정 화면은 SSE `decisions`+`fo`+`orders` 구독 · 단타 결정 행은 상세 링크 없음 · `/settings/secrets` 는 토큰을 붙여 부름 · `discovery_line` 은 `/news/themes` 로 조립 · 파생 보유 부가 필드 필요 여부
-- 이연(M12): `kernel/ops` 판정으로 `/system/health` 교체 · 운영 이상 텔레그램 발송·쿨다운 · `tailscale_hosts/users/public_base` 실제 값 설정(「사용자 확인 대기」) · 텔레그램 버튼 실기 확인 · `ensure_web_token` 연결 · KIS 환율 TR 연결(`fx.kis_fx`) · 거시 관측 저장소(`/news/events` 거시) · `settings.scalp.accounts` 계좌 키 · 아래 「M11 에서 옮긴 비웹 이연」
+- 이연(M12): `kernel/ops` 판정으로 `/system/health` 교체 · 운영 이상 텔레그램 발송·쿨다운 · `tailscale_hosts/users/public_base` 실제 값 설정(「사용자 확인 대기」) · 텔레그램 버튼 실기 확인 · `ensure_web_token` 연결 · KIS 환율 TR 연결(`fx.kis_fx`) · 거시 관측 저장소(`/news/events` 거시) · `settings.scalp.accounts` 계좌 키 · M12 절 「M11 최종 리뷰에서 옮긴 이연」 · 아래 「M11 에서 옮긴 비웹 이연」
 
 ## M12 — kernel/ops + 번들 + 전환
 health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체.
 - [ ] 착수 전
+- M11 최종 리뷰에서 옮긴 이연(코드 미수정):
+  - M8: `DELETE /jobs/{id}` 로 대기 중인 `approve_execute` 를 취소해도 승인 선점이 TTL 까지 남음 → spot `approvals.release` 훅 또는 409
+  - T5-R2: approve 의 `DuplicateRequest` → 202 기존 request_id 경로가 사실상 도달 불가(정리 또는 제거)
+  - 웹 거부 알림: 스펙 §8.10(e) '웹이 보내는 알림은 없다'와 충돌 → 큐 kind 또는 데몬 watcher 로(텔레그램 거부 알림은 fix wave 에서 구현, T5-R1)
 - M11 에서 옮긴 비웹 이연: 섹터 자동분류 `_classify`·`auto_classify` 호출자(M5·M7) · `_close_stale` 커널 헬퍼 통합(M7) · `metrics.pending_approvals/account_stance/stance_by_market`(M8) · spot monitor 의 단타 보유분 제외 검토(M9·M10) · `InputsPort.recent`(scalp·fo 판정 뉴스·거시, fo `_novel_news` raw SQL) · FAKE 사본 잔여(regime `_turn`) · `AccountsPort` dict 가짜 포트 정리 · `views.account_summary` 의존 `test_performance_fo` 2건 · 커널 승격 후보 `reeval.handled_marker`·`_wrap_section`·`_boot_notifier`·`_check_hm`(M10)
 - 이연(M0 리뷰):
   - `Lock` 주입 clock

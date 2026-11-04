@@ -22,7 +22,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import approvals, decisions_view, positions_view
+from trader.features.spot import approvals, decisions_view, positions_view, risk_view
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
 from trader.kernel.registry.types import ResourcePart, SseKey
@@ -121,7 +121,7 @@ def positions_risk(
     if m not in acct.markets:
         raise HTTPException(status_code=400, detail=f"계좌 {acct.id} 에 없는 시장: {m}")
     with closing(deps.conn_factory()) as conn:
-        card = positions_view.risk_card(
+        card = risk_view.risk_card(
             conn, (deps.ports or {}).get("ml"), account_id=acct.id, market=m,
             today=run_date_for(m, deps.now()),
         )  # fmt: skip

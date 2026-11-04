@@ -260,7 +260,13 @@ class QuoteHub:
             self._drop(backoff=True)
             return False
         # 정상 응답을 받은 뒤에야 백오프를 푼다(접속 직후 끊김·접속키 거절 반복이면 간격이 는다)
-        if self._handle(raw if isinstance(raw, str) else raw.decode("utf-8", "replace")):
+        try:
+            ok = self._handle(raw if isinstance(raw, str) else raw.decode("utf-8", "replace"))
+        except Exception as e:  # noqa: BLE001 — 깨진 프레임·응답 실패: 연결을 놓고 백오프 뒤 다시
+            logger.warning("실시간 시세 프레임 처리 실패: %s", type(e).__name__)
+            self._drop(backoff=True)
+            return False
+        if ok:
             self._attempt = 0
         return True
 

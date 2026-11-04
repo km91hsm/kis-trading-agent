@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from trader.kernel.ledger.control import log_change
 from trader.kernel.registry.types import QueueKind
 
 Kinds = dict[str, QueueKind]
@@ -174,6 +175,51 @@ def cancel(conn: sqlite3.Connection, req_id: int, *, now: datetime | None = None
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+# 조작 이력에 남기지 않는 파라미터 이름 조각(소문자 비교). 큐 kind 파라미터는 시장·종목·계좌 id 라
+# 지금은 걸리는 것이 없지만, 비밀이 섞인 kind 가 생겨도 이력에 값이 남지 않게 한다.
+SENSITIVE_PARAM_MARKS = ("secret", "token", "password", "passwd", "app_key", "appkey")
+
+
+def public_params(params: dict | None) -> dict:
+    """조작 이력용 파라미터 사본: 이름에 `SENSITIVE_PARAM_MARKS` 가 들어간 필드는 뺀다."""
+    return {
+        k: v
+        for k, v in (params or {}).items()
+        if not any(m in str(k).lower() for m in SENSITIVE_PARAM_MARKS)
+    }
+
+
+def log_request(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    req_id: int,
+    params: dict | None,
+    channel: str,
+    actor: str | None,
+    now: datetime,
+) -> int:
+    """수동 작업 요청의 조작 이력(control_log `job:<kind>`, new = {request_id, 민감 아닌
+    params})."""
+    new = {"request_id": req_id, "params": public_params(params)}
+    return log_change(
+        conn, channel=channel, actor=actor, key=f"job:{kind}", old=None, new=new, at=_iso(now)
+    )
+
+
+def log_cancel(
+    conn: sqlite3.Connection, req_id: int, *, channel: str, actor: str | None, now: datetime
+) -> int | None:
+    """취소한 요청의 조작 이력(`job:<kind>` queued → cancelled). 요청이 없으면 None."""
+    row = conn.execute("SELECT kind FROM job_requests WHERE id=?", (req_id,)).fetchone()
+    if row is None:
+        return None
+    return log_change(
+        conn, channel=channel, actor=actor, key=f"job:{row[0]}", old="queued", new="cancelled",
+        at=_iso(now),
+    )  # fmt: skip
 
 
 def mark_stale_running(conn: sqlite3.Connection, *, now: datetime, reason: str) -> int:

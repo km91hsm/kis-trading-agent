@@ -1,4 +1,5 @@
 # tests/kernel/notify/test_commands.py
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -198,6 +199,11 @@ def test_telegram_run_enqueues_when_daemon_alive(project):
     finally:
         lock.release()
     assert conn.execute("SELECT COUNT(*) FROM job_requests").fetchone()[0] == 1
+    # 조작 이력(스펙 §5): 받아들인 요청 1건만 `job:<kind>` 로, channel telegram
+    logs = conn.execute("SELECT channel, actor, key, old, new FROM control_log").fetchall()
+    assert [(r[0], r[1], r[2], r[3]) for r in logs] == [("telegram", "1", "job:reconcile", None)]
+    rid = conn.execute("SELECT id FROM job_requests").fetchone()[0]
+    assert json.loads(logs[0][4]) == {"request_id": rid, "params": {"market": "KR"}}
 
 
 def test_run_untrusted_refused_and_not_registrable(conn):

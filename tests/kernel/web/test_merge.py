@@ -92,3 +92,26 @@ def test_merge_format_csv_returns_csv(project):
     assert 'filename="orders.csv"' in r.headers["content-disposition"]
     assert r.text.lstrip("﻿").splitlines() == ["id,at,x", "1,2026-11-04T01:00:00+00:00,"]
     assert client.get("/api/orders").json()["items"] == rows
+
+
+def test_merge_reraises_part_http_exception(project):
+    """조각이 낸 HTTPException(예: 잘못된 date 400)은 삼키지 않고 그대로 돌려준다(M2)."""
+    from fastapi import HTTPException
+
+    def bad(d, q):
+        raise HTTPException(status_code=400, detail="date 형식 오류")
+
+    a = Feature(id="a", tier="service", resources=(ResourcePart("/x", lambda d, q: [{"id": 1}]),))
+    b = Feature(id="b", tier="lane", resources=(ResourcePart("/x", bad),))
+    r = make_client(make_deps(project, features=[a, b])).get("/api/x")
+    assert r.status_code == 400 and r.json()["detail"] == "date 형식 오류"
+
+
+def test_merge_csv_marks_partial_with_header(project):
+    """CSV 는 본문에 partial 을 실을 수 없어 `X-Partial: 1` 헤더로 알린다(M2)."""
+    ok = Feature(id="a", tier="service", resources=(ResourcePart("/x", lambda d, q: [{"id": 1}]),))
+    boom = Feature(id="b", tier="lane", resources=(ResourcePart("/x", lambda d, q: 1 / 0),))
+    full = make_client(make_deps(project, features=[ok])).get("/api/x?format=csv")
+    assert full.status_code == 200 and "x-partial" not in full.headers
+    part = make_client(make_deps(project, features=[ok, boom])).get("/api/x?format=csv")
+    assert part.status_code == 200 and part.headers["x-partial"] == "1"

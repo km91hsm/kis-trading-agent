@@ -89,9 +89,31 @@ def _executes(port: object) -> bool:
     return False
 
 
+# 웹 라우트가 accounts 포트에서 쓰는 조회 메서드(계좌 목록·일시정지·정책). brokers·fo_brokers
+# (주문 경로)·market_client·holiday_fn 은 웹에 넘기지 않는다 — 시세는 quotes 가 따로 만든다
+# (M11 최종 리뷰 I2).
+READ_ONLY_ACCOUNTS = ("accounts", "fo_accounts", "paused", "policy")
+
+
+class ReadOnlyAccounts:
+    """accounts 포트의 웹용 읽기 전용 보기: `READ_ONLY_ACCOUNTS` 중 원 포트에 있는 것만
+    위임한다(없는 메서드는 래퍼에도 없어 라우트의 `getattr(port, "fo_accounts", None)` 분기가
+    그대로 산다)."""
+
+    def __init__(self, port: object) -> None:
+        for name in READ_ONLY_ACCOUNTS:
+            fn = getattr(port, name, None)
+            if callable(fn):
+                setattr(self, name, fn)
+
+
 def web_ports(ports: dict) -> dict:
-    """부트가 조립한 포트 중 주문 집행 포트를 뺀 사본(웹 프로세스 분리)."""
-    return {n: p for n, p in ports.items() if n not in EXECUTION_PORTS and not _executes(p)}
+    """부트가 조립한 포트 중 주문 집행 포트를 뺀 사본(웹 프로세스 분리). accounts 포트는
+    `ReadOnlyAccounts` 로 감싼다."""
+    out = {n: p for n, p in ports.items() if n not in EXECUTION_PORTS and not _executes(p)}
+    if "accounts" in out:
+        out["accounts"] = ReadOnlyAccounts(out["accounts"])
+    return out
 
 
 def build_web_deps(boot_: Boot) -> WebDeps:

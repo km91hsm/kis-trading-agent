@@ -59,6 +59,13 @@ def test_direct_local_rejects_forwarded(deps):
         assert c.post("/api/t/local", headers={h: "1.2.3.4"}).status_code == 403, h
 
 
+def test_direct_local_rejects_known_proxy_headers_even_when_empty(deps):
+    """알려진 프록시 헤더는 값이 비어도 존재만으로 프록시 경유로 본다(M1)."""
+    c = _client(deps, client=LOCAL)
+    for h in ("x-forwarded-for", "tailscale-user-login", "forwarded", "x-real-ip"):
+        assert c.post("/api/t/local", headers={h: ""}).status_code == 403, h
+
+
 def test_direct_local_rejects_any_x_forwarded_header(deps):
     """프록시가 붙이는 `x-forwarded-*` 는 무엇이든 루프백 판정을 끈다(Host·Proto·Port 포함)."""
     c = _client(deps, client=LOCAL)
