@@ -158,6 +158,12 @@ class ToolCommand:
 
 @dataclass(frozen=True)
 class HealthArea:
+    """운영 점검 영역 하나. check: `(kernel.ops.OpsContext) -> list[kernel.ops.Item]`.
+
+    기능 영역은 기능당 하나, key = feature id(계약 검사가 중복·불일치를 막는다). 커널 내장 영역은
+    `jobs`·`llm`·`orders`. 항목 key 는 `"{key}.{세부}"` — 접두가 없으면 러너가 붙이고 경고 로그를
+    남긴다. check 가 예외를 던지면 러너가 그 영역만 `"{key}.error"` warning 1건으로 바꾼다."""
+
     key: str
     check: Callable[..., Any]
 
