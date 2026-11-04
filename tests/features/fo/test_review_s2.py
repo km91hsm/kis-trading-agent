@@ -164,6 +164,26 @@ def test_recover_releases_lock_between_broker_queries(conn):
     assert flags == [False, False] and rep.legs_fixed == 2
 
 
+def test_recover_commits_open_transaction_before_broker_queries(conn):
+    """호출자가 암묵 트랜잭션을 연 채로 불러도(`store.tx` 는 합류만 한다) 복구가 먼저 commit 해
+    브로커 조회가 쓰기 잠금 밖에서 돈다(S2-12 회귀 방지)."""
+    pos, leg = _open(conn)
+    with store.tx(conn):
+        store.set_leg(conn, leg.id, status="unknown", order_no="A1")
+    conn.execute("UPDATE fo_positions SET note = 'x' WHERE id = ?", (pos.id,))  # 암묵 BEGIN
+    assert conn.in_transaction
+    flags: list[bool] = []
+
+    def order_state_of(no, d):
+        flags.append(conn.in_transaction)
+        return _state(no, order_qty=2, filled=2)
+
+    positions.recover(conn, account_id=ACCT, balance=_bal(_row(qty=2)),
+                      order_state_of=order_state_of, fills_of=lambda d: [], today=TODAY,
+                      now=NOW)  # fmt: skip
+    assert flags == [False]
+
+
 # --- 게이트 -----------------------------------------------------------------------------
 
 

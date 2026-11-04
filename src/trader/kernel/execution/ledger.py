@@ -162,14 +162,17 @@ def insert_fill(
     price: Decimal,
     filled_at: str,
     order_no: str | None,
+    commit: bool = True,
 ) -> int | None:
-    """체결 1건 적재. 같은 (주문, 시각, 수량, 가격) 은 무시하고 None (재동기화 멱등)."""
+    """체결 1건 적재. 같은 (주문, 시각, 수량, 가격) 은 무시하고 None (재동기화 멱등).
+    `commit=False` 는 호출자가 연 트랜잭션 안에서 쓴다(`insert_order` 와 같다)."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO fills(order_id, account_id, qty, price, filled_at, order_no, "
         "ticker, side, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (order_id, account_id, qty, str(price), filled_at, order_no, ticker, side, market),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return int(cur.lastrowid) if cur.rowcount == 1 else None
 
 
