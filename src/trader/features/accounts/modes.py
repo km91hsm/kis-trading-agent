@@ -63,7 +63,9 @@ def set_account_mode(
     channel: str = "cli",
     actor: str | None = None,
 ) -> None:
-    """검증을 전부 마친 뒤 한 문장으로 쓴다. 같은 값이면 updated_at 이 바뀌지 않는다."""
+    """검증을 전부 마친 뒤 한 문장으로 쓴다. 같은 값이면 updated_at 이 바뀌지 않는다.
+
+    실전 auto 의 LIVE 확인 기록(`live_confirmed_json`)은 confirm·at·channel·actor(누가 줬는지)."""
     if mode not in get_args(Mode):
         raise ValueError(f"알 수 없는 모드: {mode}")
     if account.env == "real" and mode == "auto" and confirm != LIVE_CONFIRM:
@@ -72,7 +74,7 @@ def set_account_mode(
         )
     old = get_account_mode(conn, account)
     confirmed = (
-        json.dumps({"confirm": confirm, "at": now_iso()})
+        json.dumps({"confirm": confirm, "at": now_iso(), "channel": channel, "actor": actor})
         if account.env == "real" and mode == "auto"
         else None
     )

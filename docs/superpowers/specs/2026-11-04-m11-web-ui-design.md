@@ -105,7 +105,7 @@
 
 ### 6.2 계좌·보유 `/accounts` (1급)
 - **통합**(기본): 맨 위 합계 두 숫자(원화 계좌 합계 / 달러 계좌 합계: NAV·당일 손익), 참고 줄 "적용 환율 USD/KRW ○○○(○월 ○일 종가) → 환산 합계 ○○○". 아래 계좌 카드(이름·레인·모의/실전·모드·일시정지 여부·NAV·당일 손익·보유 수·대기 승인 수). 전역 일시정지 토글은 여기 상단.
-- **계좌별 `/accounts/{id}`**: NAV 추이 차트(`account_nav` 또는 `fo_nav_snapshot`), 보유 목록(종목·수량·평단·현재가·평가손익·**손절가·목표가(출처 라벨)**; 현물은 lot 펼침, 파생은 포지션 상태·다리·만기), 오늘 주문·체결, 리스크 한도 대비 사용량(`positions/risk`), 모드 전환(auto/approve/off; 실전 auto 는 LIVE 확인 필요 안내)·계좌 일시정지.
+- **계좌별 `/accounts/{id}`**: NAV 추이 차트(`account_nav` 또는 `fo_nav_snapshot`), 보유 목록(종목·수량·평단·현재가·평가손익·**손절가·목표가(출처 라벨)**; 현물은 lot 펼침, 파생은 포지션 상태·다리·만기), 오늘 주문·체결, 리스크 한도 대비 사용량(`positions/risk`), 모드 전환(auto/approve/off; 실전 auto 는 확인 대화상자의 계좌 이름 재입력이 곧 LIVE 확인 — 서버가 본문 `confirm`=계좌 id 를 받아 LIVE 확인 기록을 channel `web`·actor 와 함께 남긴다)·계좌 일시정지.
 - 손절·목표 출처: 현물 = spot `monitor_rules.effective_stop`(결정 `stop_loss` / 보유 최고 바닥 / 기본 비율) 과 결정 `take_profit`; 단타 = scalp exits 규칙의 손절·목표; 파생 = fo triggers 의 손절·만기 청산 조건. 모두 "대략" 이며 각 값에 `source` 를 붙여 화면이 라벨로 보인다(예: "결정", "추적", "기본 −7%").
 
 ### 6.3 성과 `/performance`

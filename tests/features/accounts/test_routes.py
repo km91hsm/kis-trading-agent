@@ -6,6 +6,7 @@ Host·IPv6·ensure-fresh 는 커널 `tests/kernel/web`, ensure_web_token·동시
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -214,12 +215,10 @@ def test_web_mode_real_auto_requires_confirm(web_client, ledger, accounts):
     r = web_client.patch(url, json={"mode": "auto"}, headers=AUTH)
     assert r.status_code == 400 and "confirm" in r.json()["detail"]
     assert _rows(web_client)["real-main"]["mode"] == "off"
-    r = web_client.patch(url, json={"mode": "auto", "confirm": "real-main"}, headers=AUTH)
-    assert r.status_code == 409 and "LIVE 확인 필요" in r.json()["detail"]
-    assert _rows(web_client)["real-main"]["mode"] == "off"
-    # LIVE 확인은 사용자 CLI(`accounts mode … --confirm LIVE`)가 남긴다 — scratch 원장에서 흉내
     r = web_client.patch(url, json={"mode": "auto", "confirm": "paper-main"}, headers=AUTH)
     assert r.status_code == 400  # 다른 계좌 id 는 확인이 아니다
+    assert _rows(web_client)["real-main"]["mode"] == "off"
+    # 이미 있는 LIVE 확인(CLI `accounts mode … --confirm LIVE`) — scratch 원장에서 흉내
     modes.set_account_mode(ledger, accounts[1], "auto", confirm=modes.LIVE_CONFIRM)
     ledger.execute(  # 사용자가 예전에 남긴 확인(시각이 지금과 달라야 덮어쓰기가 드러난다)
         "UPDATE account_modes SET live_confirmed_json='{\"confirm\": \"LIVE\", "
@@ -241,6 +240,27 @@ def test_web_mode_real_auto_requires_confirm(web_client, ledger, accounts):
     assert web_client.patch(
         "/api/accounts/paper-main", json={"mode": "fast"}, headers=AUTH
     ).status_code == 422  # fmt: skip
+
+
+def test_web_mode_real_auto_grants_live_confirmation(web_client, ledger):
+    """실전 auto 는 본문 confirm 에 계좌 id 를 다시 적으면 웹이 LIVE 확인을 남긴다(T6-R1 변경)."""
+    assert modes.live_confirmed(ledger, "real-main") is None
+    r = web_client.patch(
+        "/api/accounts/real-main", json={"mode": "auto", "confirm": "real-main"}, headers=AUTH
+    )
+    assert r.status_code == 200 and r.json() == {"account_id": "real-main", "mode": "auto"}
+    rec = modes.live_confirmed(ledger, "real-main")
+    assert rec is not None and rec["confirm"] == modes.LIVE_CONFIRM and rec["at"]
+    assert rec["channel"] == "web" and rec["actor"]
+    row = _rows(web_client)["real-main"]
+    assert row["mode"] == "auto" and row["mode_note"] is None
+    log = ledger.execute(
+        "SELECT channel, actor, old, new FROM control_log "
+        "WHERE key='account_mode:real-main' ORDER BY id"
+    ).fetchall()
+    assert len(log) == 1
+    assert log[0]["channel"] == "web" and log[0]["actor"] == rec["actor"]
+    assert json.loads(log[0]["old"]) == "off" and json.loads(log[0]["new"]) == "auto"
 
 
 def test_web_mode_paper_approve(web_client, ledger):

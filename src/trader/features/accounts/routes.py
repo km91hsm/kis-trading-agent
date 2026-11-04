@@ -39,11 +39,6 @@ logger = logging.getLogger("trader.accounts")
 
 WRITE = [Depends(require_token), Depends(require_same_origin)]
 LOCAL_WRITE = [*WRITE, Depends(require_direct_local)]
-LIVE_REQUIRED = (
-    "LIVE 확인 필요 — 실전 auto 는 사용자가 CLI `trader accounts mode <id> auto --confirm LIVE` "
-    "로 먼저 확인해야 합니다"
-)
-
 accounts_router = APIRouter(tags=["accounts"])
 settings_router = APIRouter(tags=["settings"])
 
@@ -132,20 +127,22 @@ def accounts_overview(request: Request) -> dict:
 
 @accounts_router.patch("/accounts/{account_id}", dependencies=WRITE)
 def set_mode(request: Request, account_id: str, body: ModeBody) -> dict:
-    """실전 계좌는 `confirm` 에 계좌 id. 실전 auto 는 LIVE 확인 기록이 있어야 한다(없으면 409).
+    """실전 계좌는 `confirm` 에 계좌 id. 실전 auto 는 그 재입력을 LIVE 확인으로 삼아 기록을
+    남긴다(channel "web"·actor, 사용자 결정 T6-R1 변경).
 
-    웹은 LIVE 확인을 만들거나 갱신하지 않는다: 기록은 auto 일 때만 남으므로(다른 모드를 쓰면
-    지워진다) 기록이 있는 실전 auto 요청은 이미 auto 인 계좌의 재확인 — 쓰지 않고 현재 값을
+    이미 LIVE 확인 기록이 있으면 다시 쓰지 않는다: 기록은 auto 일 때만 남으므로(다른 모드를 쓰면
+    지워진다) 그 요청은 이미 auto 인 계좌의 재확인 — 처음 준 시각·주체를 지키고 현재 값을
     돌려준다."""
     deps = request.app.state.deps
     acct = _find(deps, account_id)
     require_confirm(body.model_dump(), acct.id, acct.env)
     with closing(deps.conn_factory()) as conn:
-        if acct.env == "real" and body.mode == "auto":
-            if modes.live_confirmed(conn, acct.id) is None:
-                raise HTTPException(status_code=409, detail=LIVE_REQUIRED)
-        else:
-            modes.set_account_mode(conn, acct, body.mode, channel="web", actor=actor_of(request))
+        live = acct.env == "real" and body.mode == "auto"
+        if not (live and modes.live_confirmed(conn, acct.id) is not None):
+            modes.set_account_mode(
+                conn, acct, body.mode, confirm=modes.LIVE_CONFIRM if live else None,
+                channel="web", actor=actor_of(request),
+            )  # fmt: skip
         return {"account_id": acct.id, "mode": modes.get_account_mode(conn, acct)}
 
 

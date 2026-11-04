@@ -31,7 +31,8 @@ def test_real_auto_requires_confirm(conn):
     assert conn.execute("SELECT COUNT(*) FROM account_modes").fetchone()[0] == 0
     modes.set_account_mode(conn, acc, "auto", confirm="LIVE")
     assert modes.get_account_mode(conn, acc) == "auto"
-    assert modes.live_confirmed(conn, "real-main")["confirm"] == "LIVE"
+    rec = modes.live_confirmed(conn, "real-main")
+    assert rec["confirm"] == "LIVE" and rec["channel"] == "cli" and rec["actor"] is None
     modes.set_account_mode(conn, acc, "off")
     assert modes.live_confirmed(conn, "real-main") is None  # 내리면 확인 기록 삭제
 
