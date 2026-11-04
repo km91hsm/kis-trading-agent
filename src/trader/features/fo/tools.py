@@ -8,8 +8,9 @@
 M10(A7): 옛 `orchestrator/tools.py` 의 fo 구간을 옮겼다. 도구 컨텍스트는 `FoToolContext`(옛 공용
 `ToolContext` 의 fo 관련 필드만)이고 `tool_ctx(boot)` 가 포트로 조립한다(fo 계좌·브로커는
 `ports["accounts"].fo_accounts()/fo_brokers()`, 마스터는 오프라인 캐시). 토론 턴 읽기는 커널
-`tooling.load_turns`, 묶음 줄이기는 `tooling.shrink`, 트레이더 요약은 `tooling.trader_summary` 를
-쓰고 `_summarize_turns` 는 spot·regime 소유라 fo 사본을 둔다. 주문은 `executor.run_leg` 로만.
+`tooling.load_turns`, 묶음 줄이기는 `tooling.shrink`, 트레이더 요약은 `tooling.trader_summary`,
+검증·요약은 `tooling.validate_payload`·`summarize_turns`(regime 과 공용)를 쓴다. 주문은
+`executor.run_leg` 로만.
 출력은 stdout JSON 1줄(커널 `run_tool`), dry_run 은 env `TRADER_DRY_RUN` 으로만 정한다.
 """
 
@@ -46,7 +47,7 @@ from trader.kernel.ledger import control
 from trader.kernel.notify.telegram import Notifier, NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import debate, tooling
+from trader.kernel.session import tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -187,37 +188,6 @@ def _fo_reports(d: Path) -> list[dict]:
 
 def _fo_turns(d: Path) -> dict[int, dict[str, DebateTurn]]:
     return tooling.load_turns(d, _FO_DEBATE_RE)
-
-
-def _schema_error(model: type, e: ValidationError) -> dict:
-    msgs = "; ".join(f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors())
-    return {"ok": False, "error": f"스키마 검증 실패({model.__name__}): {msgs}"}
-
-
-def _validate_payload(model: type, payload: dict) -> tuple[Any, dict | None]:
-    """pydantic 검증(HTML 엔티티 되돌림 포함). 실패면 (None, {"ok": False, "error"})."""
-    try:
-        return model.model_validate(tooling.unescape(payload)), None  # type: ignore[attr-defined]
-    except ValidationError as e:
-        return None, _schema_error(model, e)
-
-
-def _summarize_turns(d: Path, out_stage: str, pattern: re.Pattern[str]) -> dict:
-    """토론 턴 → 연구 요약(수렴 감시 포함) 체크포인트(옛 `tools._summarize_turns` 사본 — spot·
-    regime 소유라 fo 가 import 하지 못한다)."""
-    turns = tooling.load_turns(d, pattern)
-    if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
-        return {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
-    final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
-    try:
-        summ = debate.research_summary(turns[0], turns[final_round], rounds=final_round)
-    except ValueError as e:
-        return {"ok": False, "error": str(e)}
-    path = write_checkpoint(d, out_stage, _wrap(summ, None))
-    return {
-        "ok": True, "path": str(path), "rounds": final_round,
-        "sycophantic": summ["sycophantic"], "preferred": summ["preferred"],
-    }  # fmt: skip
 
 
 def _fo_live_request(d: Path, account_id: str, position_id: int) -> tuple[int, dict] | None:
@@ -418,7 +388,7 @@ def fo_write(
             "ok": False,
             "error": f"쓸 수 없는 단계: {stage} (허용: {', '.join(_FO_WRITABLE)})",
         }
-    v, err = _validate_payload(model, payload)
+    v, err = tooling.validate_payload(model, payload)
     if err:
         return err
     if ma and v.role != ma.group(1):
@@ -454,7 +424,7 @@ def fo_write(
 
 def fo_summarize(ctx: FoToolContext, *, date: date) -> dict:
     """`_fo_debate_*` 를 모아 `_fo_summary`(수렴 감시 포함)를 만든다."""
-    return _summarize_turns(_fo_dir(ctx, date), FO_SUMMARY, _FO_DEBATE_RE)
+    return tooling.summarize_turns(_fo_dir(ctx, date), FO_SUMMARY, _FO_DEBATE_RE)
 
 
 def fo_reeval_request(
@@ -623,13 +593,9 @@ def submit_fo_decision(
         missing.append(f"{FO_SUMMARY} 없음")
     if missing:
         return {"ok": False, "error": "전제조건 미충족: " + ", ".join(missing)}
-    try:
-        env = FoDecisionEnvelope.model_validate(tooling.unescape(payload))
-    except ValidationError as e:
-        msgs = "; ".join(
-            f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
-        )
-        return {"ok": False, "error": f"스키마 검증 실패(FoDecisionEnvelope): {msgs}"}
+    env, err = tooling.validate_payload(FoDecisionEnvelope, payload)
+    if err:
+        return err
     meta = inputs.get("meta") or {}
     pos = None
     if round_n == 0:

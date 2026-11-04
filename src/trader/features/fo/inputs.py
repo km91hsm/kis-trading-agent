@@ -11,8 +11,8 @@ M10(A8): 옛 `_news_macro` 는 시장 세션 입력(지금 regime 소유)을 그
 import 할 수 없어 `news_macro` 절은 `error="M11: InputsPort.recent"` 로 비우고 시장 뷰만
 `ports["regime"].view_today` 로 `context.market_view` 에 넣는다. 현물 헤지 보유는
 `ports["regime"].hedge_tickers("KR")` ∩ `ports["accounts"].brokers()` 의 KR 보유. 절 래퍼
-(`_run_section`·`_skipped_section`)·`_jsonable`·지표(`fo/indicators.py`)는 ingest 소유라
-fo 사본이다.
+(`_run_section`·`_skipped_section`)·`_jsonable` 은 ingest 소유라 fo 사본이고, 지표는 커널
+`broker.indicators` 다.
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from trader.features.fo import indicators, rules, store
+from trader.features.fo import rules, store
 from trader.features.fo.executor import VEHICLES, verified_key
 from trader.features.fo.types import FoExecContext
-from trader.kernel.broker import fo_master
+from trader.kernel.broker import fo_master, indicators
 from trader.kernel.broker.fo import CONTRACT_VERSION
 from trader.kernel.broker.models import drop_incomplete_tail
 from trader.kernel.config import KST
@@ -216,8 +216,8 @@ def _sentiment(ctx: FoExecContext, quote: dict | None, chain: list[dict], *, now
 
 def _spot_hedge_held(ctx: FoExecContext, errors: dict[str, str]) -> list[str]:
     """현물 계좌의 헤지 ETF 보유(KR): regime 포트의 헤지 티커 ∩ accounts 포트 현물 브로커의 보유.
-    fo 브로커에는 ETF 잔고가 없다(S3 P1). `brokers()` 는 리스트(현 `AccountsPortImpl`)·dict
-    (Protocol) 둘 다 받는다. 실패는 `errors["context.spot_exposure.<계좌>"]`."""
+    fo 브로커에는 ETF 잔고가 없다(S3 P1). `brokers()` 는 리스트(`AccountsPort` Protocol·구현 모두).
+    실패는 `errors["context.spot_exposure.<계좌>"]`."""
     regime, acc = ctx.ports.get("regime"), ctx.ports.get("accounts")
     if regime is None or acc is None:
         return []
@@ -227,11 +227,10 @@ def _spot_hedge_held(ctx: FoExecContext, errors: dict[str, str]) -> list[str]:
     except Exception as e:  # noqa: BLE001 — 헤지 보유는 부가 정보
         errors["context.spot_exposure"] = f"{type(e).__name__}: {e}"
         return []
-    brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw or []}
     held: list[str] = []
-    for aid, b in brokers.items():
-        markets = getattr(getattr(b, "account", None), "markets", None) or [MARKET]
-        if MARKET not in markets:
+    for b in raw or []:
+        aid = b.account.id
+        if MARKET not in (b.account.markets or [MARKET]):
             continue
         try:
             for p in b.get_positions(MARKET):

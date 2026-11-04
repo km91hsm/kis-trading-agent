@@ -11,41 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from trader.kernel.session.fake import ensure_ok, fake_call
+from trader.kernel.session.fake import ensure_ok, fake_call, fake_report, fake_turn
 from trader.kernel.session.run_store import market_dir, read_checkpoint
-
-
-def fake_report(ticker: str, asof: str, role: str) -> dict:
-    return {
-        "ticker": ticker,
-        "asof": asof,
-        "role": role,
-        "summary": f"FAKE {role} 리포트",
-        "bullets": ["FAKE 근거"],
-        "signal": "NEUTRAL",
-        "score": 0.0,
-        "confidence": 0.5,
-        "horizon": "short",
-        "key_risks": [],
-        "counter_evidence": [],
-        "evidence": [{"claim": "FAKE", "source_id": f"{role}"}],
-        "data_gaps": ["FAKE 모드"],
-    }
-
-
-def fake_turn(side: str, round_no: int) -> dict:
-    bull = side == "bull"
-    return {
-        "side": side,
-        "round": round_no,
-        "stance": "BULLISH" if bull else "BEARISH",
-        "valuation_view": "UNDERVALUED" if bull else "OVERVALUED",
-        "arguments": [f"FAKE {side} 논거"],
-        "rebuttals": [f"FAKE 반박 r{round_no}"] if round_no > 0 else [],
-        "timing": {"action": "WAIT", "condition": None, "price_zone": None},
-        "conviction": 0.7 if bull else 0.6,
-        "what_would_change_my_mind": ["FAKE"],
-    }
 
 
 def run_fake_fo(lane_ctx: Any, spec: Any) -> list[str]:

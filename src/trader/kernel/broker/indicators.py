@@ -1,6 +1,7 @@
-"""기술 지표 (pandas) — `features/ingest/indicators.py` 의 fo 사본(M10 Task 6 장부: 레인 fo 는
-ingest 를 import 할 수 없고 커널에 지표 모듈이 없다). 워밍업 구간은 NaN, latest() 는 NaN 을
-None 으로 바꾼다.
+"""기술 지표 (pandas). 워밍업 구간은 NaN, latest() 는 NaN 을 None 으로 바꾼다.
+
+커널 공용(ingest·ml·fo) — M10 Task 6 에서 `features/ingest/indicators.py` 를 옮겼다
+(ingest 는 재노출).
 
 비율은 전부 소수(0.05 = 5%). 입력 캔들은 날짜 오름차순이어야 한다.
 """

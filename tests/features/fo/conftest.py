@@ -136,7 +136,7 @@ def ports(settings, fo_account, stock_account, fake_fo_broker, fake_market):
         fo_accounts=lambda: [fo_account],
         fo_brokers=lambda: {fo_account.id: fake_fo_broker()},
         accounts=lambda: [stock_account],
-        brokers=lambda: {},
+        brokers=lambda: [],
         market_client=lambda: market,
         policy=accounts_api.account_mode,
         paused=accounts_api.is_paused,

@@ -133,7 +133,7 @@ def test_context_has_regime_view_verified(conn):
 
 def test_spot_hedge_held_from_ports(conn):
     """현물 헤지 보유 = regime 포트 `hedge_tickers("KR")` ∩ accounts 포트 `brokers()` 의 KR 보유.
-    `brokers()` 는 리스트(현 구현)·dict(Protocol) 둘 다 받는다. fo 브로커는 읽지 않는다."""
+    `brokers()` 는 리스트(Protocol·구현 모두). fo 브로커는 읽지 않는다."""
     ctx = _ctx(conn)
     held = SimpleNamespace(ticker="114800", qty=3)
     other = SimpleNamespace(ticker="005930", qty=1)
@@ -151,9 +151,6 @@ def test_spot_hedge_held_from_ports(conn):
     ctx.ports = ports
     inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
     assert inp["context"]["data"]["spot_exposure"]["hedge_held"] == ["114800"]
-    ports["accounts"].brokers = lambda: {"paper-main": spot}
-    inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
-    assert inp["context"]["data"]["spot_exposure"]["hedge_held"] == ["114800"]
     # 호출자가 넘긴 값이 우선
     inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts, spot_hedge_held=["x"])
     assert inp["context"]["data"]["spot_exposure"]["hedge_held"] == ["x"]
@@ -161,6 +158,6 @@ def test_spot_hedge_held_from_ports(conn):
 
 def test_spot_hedge_held_empty_without_ports(conn):
     ctx = _ctx(conn)
-    ctx.ports = ports_for(ctx.settings, ctx.accounts)  # brokers() → {} (현물 브로커 없음)
+    ctx.ports = ports_for(ctx.settings, ctx.accounts)  # brokers() → [] (현물 브로커 없음)
     inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
     assert inp["context"]["data"]["spot_exposure"]["hedge_held"] == []
