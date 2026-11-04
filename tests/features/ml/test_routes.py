@@ -149,3 +149,7 @@ def test_nav_item_and_no_sse_keys():
         ("data", "features", "지표·모델", 30)
     ]
     assert FEATURE.sse_keys == ()
+
+
+def test_model_version_trailing_newline_rejected(project):
+    assert _client(project).get("/api/ml/models/20990101_000000%0A").status_code == 400

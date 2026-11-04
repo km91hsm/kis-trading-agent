@@ -98,7 +98,7 @@ def history(
 ) -> dict:
     deps = request.app.state.deps
     m = _market(market)
-    if not _TICKER_RE.match(ticker):
+    if not _TICKER_RE.fullmatch(ticker):
         raise HTTPException(status_code=400, detail=f"ticker 형식 오류: {ticker!r}")
     known = _universe_tickers(m)
     if known is not None and ticker not in known:
@@ -127,7 +127,7 @@ def models(request: Request) -> dict:
 
 @ml_router.get("/models/{version}")
 def model_detail(request: Request, version: str) -> dict:
-    if not _VERSION_RE.match(version):
+    if not _VERSION_RE.fullmatch(version):
         raise HTTPException(status_code=400, detail="버전 형식 오류")
     for m in ml.list_models("quant", request.app.state.deps.state):
         if m.get("version") == version:

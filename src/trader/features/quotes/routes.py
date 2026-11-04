@@ -196,7 +196,7 @@ def _parse(market: str, tickers: str) -> list[tuple[str, str | None]]:
         if not raw:
             continue
         t, _, ex = raw.partition(":")
-        if not _TICKER_RE.match(t):
+        if not _TICKER_RE.fullmatch(t):
             raise HTTPException(status_code=400, detail=f"ticker 형식 오류: {t!r}")
         if ex and (market != "US" or ex not in US_EXCHANGES):
             raise HTTPException(status_code=400, detail=f"거래소 {ex} 는 US 의 NAS|NYS|AMS 만")
@@ -314,7 +314,7 @@ def _book_val(b: Any) -> dict:
 def book(request: Request, ticker: str) -> dict:
     """국내 종목 호가 10단(차트 화면). 허브(임차 10초) 먼저, 없으면 REST. 표시 전용."""
     deps = request.app.state.deps
-    if not _TICKER_RE.match(ticker):
+    if not _TICKER_RE.fullmatch(ticker):
         raise HTTPException(status_code=400, detail=f"ticker 형식 오류: {ticker!r}")
     now = deps.now()
     is_open = market_hours.is_open("KR", now)
@@ -362,7 +362,7 @@ def fo(request: Request, codes: str = "") -> dict:
     for raw in (x.strip().upper() for x in codes.split(",")):
         if not raw:
             continue
-        kind = fo_codes.kind_of(raw, product) if _FO_CODE_RE.match(raw) else None
+        kind = fo_codes.kind_of(raw, product) if _FO_CODE_RE.fullmatch(raw) else None
         if kind is None:
             detail = f"{product.name} 종목코드가 아닙니다: {raw}"
             raise HTTPException(status_code=400, detail=detail)

@@ -97,3 +97,19 @@ def test_notices_probe_tracks_max_id(project):
 def test_kernel_probe_without_ledger_falls_back_to_empty(project):
     snap = sse.snapshot(make_deps(project))  # 마이그레이션 없는 원장(표 없음)
     assert all(snap[k] == "" for k in sse.KERNEL_PROBES)
+
+
+def test_control_probe_sees_value_change_within_same_second(project, monkeypatch):
+    """updated_at 은 1초 해상도라 같은 초 안의 두 번째 변경도 값으로 잡아야 한다(paused 토글)."""
+    from trader.kernel.ledger import control
+
+    monkeypatch.setattr(control, "now_iso", lambda: "2026-11-02T01:02:03+00:00")
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    try:
+        control.set_flag(conn, "paused", True)
+        s1 = sse.KERNEL_PROBES["control"](deps)
+        control.set_flag(conn, "paused", False)  # 같은 updated_at, 같은 건수
+        assert sse.KERNEL_PROBES["control"](deps) != s1
+    finally:
+        conn.close()

@@ -64,7 +64,7 @@ def _validate(request: Request, ticker: str, market: str, exchange: str | None):
     """market → 티커 형식 → US 거래소 → 시세 클라이언트. US 거래소가 없으면 유니버스(없으면 NAS)."""
     if market not in ("KR", "US"):
         raise HTTPException(status_code=400, detail="market 은 KR|US")
-    if not _TICKER_RE.match(ticker):
+    if not _TICKER_RE.fullmatch(ticker):
         raise HTTPException(status_code=400, detail=f"ticker 형식 오류: {ticker!r}")
     if market == "US":
         if exchange is None:

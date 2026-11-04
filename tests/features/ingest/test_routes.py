@@ -130,3 +130,8 @@ def test_nav_item():
     assert [(n.screen, n.id, n.label, n.order) for n in FEATURE.nav] == [
         ("data", "news", "뉴스·이벤트", 10)
     ]
+
+
+def test_manual_text_length_capped(project):
+    body = {"market": "KR", "text": "가" * 4001}
+    assert _client(project).post("/api/news/manual", json=body, headers=AUTH).status_code == 422

@@ -126,3 +126,7 @@ def test_nav_item():
     assert [(n.screen, n.id, n.label, n.order) for n in FEATURE.nav] == [
         ("data", "themes", "테마·감시목록", 20)
     ]
+
+
+def test_labels_rejects_unicode_digits(project):
+    assert _client(project).get("/api/news/labels", params={"ids": "١٢"}).status_code == 400

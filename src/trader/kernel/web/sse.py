@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -61,9 +62,17 @@ def _usage_fp(deps: WebDeps) -> str:
 
 
 def _control_fp(deps: WebDeps) -> str:
-    """control 플래그 건수·마지막 갱신 시각(커서류 제외). 같은 값 다시 쓰기는 `set_flag` 가
-    updated_at 을 바꾸지 않으므로 지문도 그대로다."""
-    return _q(deps, f"SELECT COUNT(*), MAX(updated_at) FROM control WHERE {_CONTROL_WHERE}")
+    """control 플래그 (키, 값) 전체의 해시(커서류 제외). updated_at 은 1초 해상도라 같은 초 안의
+    두 번째 변경을 놓치므로 값 자체를 본다 — 같은 값 다시 쓰기는 그대로 지문이 같다."""
+    with closing(deps.conn_factory()) as conn:
+        try:
+            rows = conn.execute(
+                f"SELECT key, value FROM control WHERE {_CONTROL_WHERE} ORDER BY key"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return ""
+    body = "\x1e".join(f"{r[0]}\x1f{r[1]}" for r in rows)
+    return f"{len(rows)}:{hashlib.sha1(body.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _jobs_fp(deps: WebDeps) -> str:

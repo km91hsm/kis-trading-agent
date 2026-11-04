@@ -39,7 +39,7 @@ def _ids(raw: str) -> list[int]:
     for x in (s.strip() for s in raw.split(",")):
         if not x:
             continue
-        if not x.isdigit():
+        if not (x.isascii() and x.isdigit()):
             raise HTTPException(status_code=400, detail=f"id 형식 오류: {x!r}")
         out.append(int(x))
     if len(out) > MAX_LABEL_IDS:

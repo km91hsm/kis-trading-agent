@@ -165,7 +165,7 @@
 - 규약:
   - 인증: 토큰 / 직접 로컬 / same-origin 의 3등급을 라우트 의존성으로 건다.
   - 기능 라우터는 `feature.routes` 만 마운트한다. 기능이 없으면 `/api/system/health`·`/api/events` 만 있다.
-  - SSE 스냅샷은 레지스트리의 `SseKey` 로 조립하고 커널 키 `daemon` 의 지문은 `{alive, minute}`(노이즈 키). 나머지 커널 키는 `sse.KERNEL_PROBES`(`usage`·`control`(`CONTROL_CURSOR_LIKE` 커서·TTL 플래그 제외)·`jobs`·`runs`·`notices`)이고 `KERNEL_SSE_KEYS = ("daemon", *KERNEL_PROBES)`, 노이즈는 `KERNEL_NOISY_KEYS = ("daemon",)` 뿐이다. 감속 토글 `PATCH /settings/usage-throttle` 은 커널 `system.settings_router`.
+  - SSE 스냅샷은 레지스트리의 `SseKey` 로 조립하고 커널 키 `daemon` 의 지문은 `{alive, minute}`(노이즈 키). 나머지 커널 키는 `sse.KERNEL_PROBES`(`usage`·`control`(커서·TTL 플래그 `CONTROL_CURSOR_LIKE` 를 뺀 (키, 값) 해시)·`jobs`·`runs`·`notices`)이고 `KERNEL_SSE_KEYS = ("daemon", *KERNEL_PROBES)`, 노이즈는 `KERNEL_NOISY_KEYS = ("daemon",)` 뿐이다. 감속 토글 `PATCH /settings/usage-throttle` 은 커널 `system.settings_router`.
   - `web/src/generated/sse-keys.ts` 는 `gen` 이 만든다. 최신 여부는 `dev gen-sse-keys --check` 로 검사한다.
 - 테스트: `tests/kernel/web/` (+ `web/` vitest)
 

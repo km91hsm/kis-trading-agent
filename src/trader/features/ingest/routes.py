@@ -16,7 +16,7 @@ from datetime import UTC, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from trader.features.ingest import manual_inputs, news_store
 from trader.kernel.registry.types import SseKey
@@ -86,7 +86,7 @@ class ManualBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     market: Literal["KR", "US"]
-    text: str
+    text: str = Field(max_length=4000)
     url: str = ""
 
 

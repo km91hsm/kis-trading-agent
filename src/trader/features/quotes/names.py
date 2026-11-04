@@ -53,7 +53,7 @@ def ticker_names(
             for t in (x.strip() for x in tickers.split(",")):
                 if not t:
                     continue
-                if not _TICKER_RE.match(t):
+                if not _TICKER_RE.fullmatch(t):
                     raise HTTPException(status_code=400, detail=f"ticker 형식 오류: {t!r}")
                 keys.append((market, t))
             ledger = _ledger_names(conn, market)
