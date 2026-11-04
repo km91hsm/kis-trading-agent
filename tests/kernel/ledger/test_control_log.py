@@ -55,3 +55,15 @@ def test_defaults_log_as_cli(conn):
     modes.set_paused(conn, True)
     row = conn.execute("SELECT channel, actor FROM control_log").fetchone()
     assert (row["channel"], row["actor"]) == ("cli", None)
+
+
+def test_same_value_writes_no_control_log_row(conn):
+    acc = make_account("paper-main", "paper", "auto")
+    modes.set_paused(conn, True)
+    modes.set_account_mode(conn, acc, "off")
+    watchlist.set_watchlist(conn, ["005930"])
+    n = conn.execute("SELECT COUNT(*) FROM control_log").fetchone()[0]
+    modes.set_paused(conn, True)
+    modes.set_account_mode(conn, acc, "off")
+    watchlist.set_watchlist(conn, ["005930"])
+    assert conn.execute("SELECT COUNT(*) FROM control_log").fetchone()[0] == n == 3

@@ -68,3 +68,33 @@ def test_notify_send_helper_falls_back_to_plain_send():
     fake = Fake()
     assert notify.send(fake, Message("x", buttons=[[("승인", "a:1")]])) is True
     assert fake.sent == ["x"]
+
+
+@respx.mock
+def test_http_failure_keeps_send_true_but_records_not_ok(project, tmp_path):
+    from trader.kernel.notify.telegram import TelegramNotifier
+
+    respx.post(API).mock(return_value=httpx.Response(500))
+    seen: list[dict] = []
+    n = TelegramNotifier("T", "1", outbox=tmp_path / "ob.jsonl", record=seen.append)
+    assert n.send("보관됨") is True  # outbox 에 보관 → True
+    assert len(seen) == 1 and seen[0]["ok"] is False
+
+
+@respx.mock
+def test_flush_outbox_records_late_delivery(project, tmp_path):
+    from trader.kernel.notify.telegram import TelegramNotifier
+
+    respx.post(API).mock(return_value=httpx.Response(500))
+    seen: list[dict] = []
+    n = TelegramNotifier("T", "1", outbox=tmp_path / "ob.jsonl", record=seen.append)
+    n.send_message(Message("늦은 체결", kind="fill", account_id="paper-main"))
+    assert [r["ok"] for r in seen] == [False]
+    n.flush_outbox()  # 여전히 500 → 기록 없음
+    assert len(seen) == 1
+    respx.post(API).mock(return_value=httpx.Response(200, json={"ok": True}))
+    assert n.flush_outbox()["sent"] == 1
+    assert [r["ok"] for r in seen] == [False, True]
+    assert (seen[1]["kind"], seen[1]["account_id"], seen[1]["text"]) == (
+        "fill", "paper-main", "늦은 체결",
+    )

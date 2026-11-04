@@ -43,6 +43,8 @@ def test_telegram_watch_add_remove_list(conn):
     commands.poll_once(ctx, Recv(["/watch remove 000660", "/watch list"]))
     assert get_watchlist(conn) == ["AAPL"]
     assert "AAPL" in sent.msgs[-1]
+    rows = conn.execute("SELECT channel, actor FROM control_log WHERE key='watchlist'").fetchall()
+    assert len(rows) == 3 and {(r["channel"], r["actor"]) for r in rows} == {("telegram", "1")}
     commands.poll_once(ctx, Recv(["/watch add bad/ticker"]))
     assert get_watchlist(conn) == ["AAPL"]
     # 새 단언: 사용법·기본 list

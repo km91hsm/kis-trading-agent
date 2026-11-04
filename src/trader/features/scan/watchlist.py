@@ -63,7 +63,13 @@ def set_watchlist(
     return out
 
 
-def remove_watch(conn: sqlite3.Connection, ticker: str) -> list[str]:
+def remove_watch(
+    conn: sqlite3.Connection,
+    ticker: str,
+    *,
+    channel: str = "cli",
+    actor: str | None = None,
+) -> list[str]:
     """접두사 유무와 무관하게 같은 종목을 제거한다 (`000660` 으로 `KR:000660` 도 지움)."""
     u = str(ticker).strip().upper()
     _, want = split_market(u)
@@ -74,4 +80,4 @@ def remove_watch(conn: sqlite3.Connection, ticker: str) -> list[str]:
         if t == want and (market is None or m == market):
             continue
         keep.append(item)
-    return set_watchlist(conn, keep)
+    return set_watchlist(conn, keep, channel=channel, actor=actor)

@@ -141,7 +141,7 @@ class TelegramNotifier:
         for i, chunk in enumerate(chunks):
             if not self._post(chunk):
                 delivered = False
-                result = self._queue(chunks[i:])
+                result = self._queue(chunks[i:], msg)
                 break
         self._emit(msg, delivered)
         return result
@@ -164,7 +164,7 @@ class TelegramNotifier:
         except Exception as e:  # noqa: BLE001 — 기록이 발신을 깨면 안 된다
             logger.warning("알림 기록 실패: %s", type(e).__name__)
 
-    def _queue(self, chunks: list[str]) -> bool:
+    def _queue(self, chunks: list[str], msg: Message | None = None) -> bool:
         """보관 성공이면 True."""
         if self._outbox is None:
             return False
@@ -177,8 +177,16 @@ class TelegramNotifier:
             with locked(self._outbox.with_name(self._outbox.name + ".lock"), timeout=30.0):
                 with self._outbox.open("a", encoding="utf-8") as f:
                     at = datetime.now(UTC).isoformat()
-                    for c in chunks:
+                    for n, c in enumerate(chunks):
                         row = {"id": uuid.uuid4().hex, "at": at, "chunk": c}
+                        if msg is not None:
+                            # 기록은 메시지당 1건: 첫 청크만 원문(text)을 달고 나머지는 기록 생략
+                            row["kind"] = msg.kind
+                            row["account_id"] = msg.account_id
+                            if n == 0:
+                                row["text"] = msg.text
+                            else:
+                                row["no_record"] = True
                         f.write(json.dumps(row, ensure_ascii=False) + "\n")
         except (OSError, TimeoutError) as e:
             logger.warning("알림 보관 실패: %s", type(e).__name__)
@@ -224,6 +232,16 @@ class TelegramNotifier:
             if not self._post(str(it.get("chunk") or "")):
                 break
             sent_ids.add(key)
+            # 늦게라도 나간 알림은 새 기록으로 남긴다(원래 ok=False 행은 그대로 — 이력)
+            if not it.get("no_record"):
+                self._emit(
+                    Message(
+                        str(it.get("text") or it.get("chunk") or ""),
+                        kind=str(it.get("kind") or "info"),
+                        account_id=it.get("account_id"),
+                    ),
+                    True,
+                )
         gone = sent_ids | stale_ids
         with locked(lock, timeout=30.0):  # 그사이 새로 보관된 항목은 그대로 둔다
             keep = [k for k in self._read_outbox() if str(k.get("id") or k.get("at")) not in gone]

@@ -20,7 +20,9 @@ def test_spot_is_lane_with_v6():
         "spot",
     ]  # accounts 와 같은 기능 이름 규약
     assert [k.retry_guard for k in FEATURE.session_kinds] == [True, False]  # analyze 만 차단
-    assert [m.version for m in all_migrations([FEATURE])][-1] == 9
+    # 마지막 spot 소유는 9, 뒤의 커널 모듈(web=15)이 전체 끝
+    assert [m.version for m in FEATURE.migrations][-1] == 9
+    assert [m.version for m in all_migrations([FEATURE])][-1] == 15
 
 
 def test_spot_declares_scan_analyze_job_queue_kinds_and_schedule():

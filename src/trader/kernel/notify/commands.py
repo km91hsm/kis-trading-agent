@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ class CommandContext:
     features: list[Feature]
     echo: Callable[[str], None] = lambda s: None
     ports: dict[str, Any] = field(default_factory=dict)  # 기능이 내놓은 포트(이름 → 구현)
+    actor: str | None = None  # 명령을 보낸 사람(제어 변경 기록용; poll_once 가 업데이트마다 채운다)
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
@@ -150,7 +151,8 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             elif name == RUN:
                 reply = run_message(ctx, arg)
             else:
-                reply = cmd.handler(ctx, arg)
+                actor = str(getattr(u, "sender_id", "") or getattr(u, "chat_id", "") or "") or None
+                reply = cmd.handler(replace(ctx, actor=actor), arg)
             ctx.notifier.send(reply)
             ctx.echo(f"{name} {arg or ''}".strip())
         except Exception as e:  # noqa: BLE001 - 명령 하나의 실패가 나머지·오프셋을 막지 않는다
