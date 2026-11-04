@@ -2,5 +2,31 @@
 
 ## 책임
 
-- 시세·환율 공개면(tier=service). 지금은 스텁이다: `api.fx_rate(settings, conn, pair="USDKRW") -> dict | None` 가 늘 None 을 돌려준다(M11 Task 9 가 원천·캐시와 웹 자원을 채운다).
-- quotes 는 accounts 를 import 하지 않는다(accounts 통합 현황이 `quotes.api.fx_rate` 를 쓰므로 순환 방지).
+- 화면 시세(tier=service, 조회 전용 — 웹 프로세스는 주문을 내지 않는다): 국내 실시간 허브(`hub.QuoteHub`, KIS 웹소켓 하나), `/quotes*` 웹 자원(`routes.py`), 환율 원천·하루 캐시(`fx.py`).
+- 시세 클라이언트는 시크릿의 공용 실전 키(`load_secrets().kis_creds(env="real")` → `kernel.broker.factory.build_market`)로 직접 만든다. 공용 실전 키가 없으면 시세 클라이언트·허브 없이 빈 값·스냅샷만 돌려준다. 런타임(시세 클라이언트 + 허브)은 원장 위치(`WebDeps.state`)마다 프로세스에 한 번(`routes.runtime_for`, 테스트는 `routes.install/reset`).
+- quotes 는 accounts 를 import 하지 않는다(accounts 통합 현황이 `quotes.api.fx_rate` 를 쓰므로 순환 방지). 다른 기능은 `ingest.api`(FRED)만 쓴다.
+
+## 공개면 (`api.py`)
+
+- `fx_rate(settings, conn, pair="USDKRW") -> dict | None` — `{pair, rate: str(Decimal), as_of, source: "kis"|"macro"}`, 원천이 없거나 모르는 쌍이면 None.
+
+## 웹 자원 (`routes.py`, 토큰 없음)
+
+- `GET /quotes?market=KR|US&tickers=a,b[:NAS|NYS|AMS]`(≤20) → `{session, at, quotes: {ticker: {price, change_pct, at, stale, source: "ws"|"rest"|"snapshot"}}, source: "ws"|"rest", stream, hub_yield, next_poll_ms}`. 국내 정규장은 허브 틱 먼저, 틱 없는 종목만 REST(5초 TTL 캐시, 종목별 락으로 동시 미스도 KIS 1회), 장 밖·조회 실패는 마지막 캐시(stale) 또는 최신 현물 보유 스냅샷 현재가(`source: "snapshot"`).
+- `GET /quotes/indices` → `{session, at, indices: {KOSPI|KOSDAQ: …}, next_poll_ms}`(허브 먼저, 없는 지수는 REST `get_index_kr`).
+- `GET /quotes/book?ticker=` → `{session, ticker, book, next_poll_ms}`(허브 호가 10단 임차 10초, 없으면 REST `get_orderbook_kr`, 장 밖 null).
+- `GET /quotes/fo?codes=` → `{session, at, quotes: {code: {kind, price, change_pct, bid, ask, at, stale, source}}, kospi200, next_poll_ms}` — REST 만, 종류는 `settings.fo.product_cfg()` 접두(`kernel.broker.fo_codes.kind_of`), 모르는 코드 400.
+- `GET /quotes/fx?pair=USDKRW` → `fx_rate` 결과, 원천이 없으면 404, 모르는 쌍 400.
+- `next_poll_ms`: 국내 정규장 1000 · 미국 정규장 `settings.quotes.us_poll_ms`(5000) · 파생 정규장 `settings.quotes.fo_poll_ms`(2000) · 장외 60000. SSE 키 없음. 메뉴 `data/quotes "시세·차트"`.
+
+## 규약
+
+- **허브**: 41칸 중 `max_tickers`(40) = 지수 2 + 호가 1 + 체결가 37(최근 요청 순), 임차 `lease_s` 30초(호가 `book_lease_s` 10초), `idle_s` 60초 무요청·장 밖이면 스레드 종료(스레드 하나 `kis-ws-quotes`, 연결은 그 스레드만). 접속 실패·끊김·접속키 거절은 지수 백오프(최대 30초), 거절 종목은 10분 제외, 10초 넘은 틱은 REST 로 보완. 표시 전용 — 신호·주문·게이트는 읽지 않는다.
+- **세션 양보**: KIS 는 앱키당 웹소켓 세션 하나. 데몬의 체결통보 리스너(`spot.notice`)가 시세와 같은 실전 앱키 세션을 쥐면 control `ws_session_busy:real` = `{"until": UTC ISO}`(지금+90초, 60초마다 갱신, 놓을 때 삭제)를 쓰고, 허브 `busy()`(`hub.session_busy`, 원장 2초 캐시)는 until 이 미래인 동안 붙지 않는다(`status()["yield_reason"] = "ws_session_busy"`, 다른 연결이 쥐면 `appkey_in_use`).
+- **환율**(`fx.py`): KIS → 거시(FRED `DEXKOUS`, `FRED_API_KEY` 없으면 원천 없음) → None. KIS 원천은 주입점 `fx.kis_fx`(기본 None)만 있다 — KIS 단순 환율 TR 을 확인하지 못해 후속 작업으로 둔다. 결과는 control `fx_cache:<pair>`(`control_namespaces=("fx_cache",)`)에 KST 날짜와 함께 저장해 하루 1회만 원천을 부른다(실패는 캐시하지 않음).
+- 설정: `settings.yaml` `quotes: {realtime_ws: true, us_poll_ms: 5000, fo_poll_ms: 2000}`(`settings.QuotesSettings`). `realtime_ws: false` 면 국내도 REST 폴링만.
+- 허브는 데몬 스레드라 웹 앱 종료 때 따로 내리지 않는다(유휴 60초면 스스로 끝난다).
+
+## 테스트
+
+`tests/features/quotes/`: `test_hub.py`(옛 허브 18건 + 세션 양보 2건, 가짜 연결·시계), `test_routes.py`(옛 자원 13건 + poll·파생·키 없음), `test_fx.py`(kis→macro→404·하루 캐시·FRED). 네트워크 없음.

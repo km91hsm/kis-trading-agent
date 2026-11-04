@@ -390,3 +390,66 @@ def test_one_notice_listener_per_hts_id_prefers_non_market_key(project, conn, se
         assert only_shared[0].shares_market_session is True
     finally:
         factory.reset_clients()
+
+
+def test_session_busy_flag_lifecycle(tmp_path):
+    """시세 허브와 앱키 세션을 나눠 쓰는 리스너는 붙는 순간 control `ws_session_busy:<env>` 에
+    until(지금+90초, UTC ISO)을 쓰고, 60초마다 갱신하고, 놓을 때 지운다
+    (허브는 until 로 양보 판단)."""
+    from datetime import timedelta
+
+    from trader.kernel.ledger import control
+    from trader.kernel.registry.contracts import all_migrations
+
+    path = tmp_path / "t.db"
+    conn = db.connect(path)
+    db.init_schema(conn, all_migrations(discover()))
+    t0 = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
+    clock, now = [0.0], [t0]
+    c1, c2 = Conn(), Conn()
+    conns = [c1, c2]
+    lst = NoticeListener(
+        env="real",
+        hts_id="myhts",
+        approval=lambda: "ak",
+        invalidate=lambda: None,
+        on_notice=lambda env: True,
+        connect=lambda url: conns.pop(0),
+        clock=lambda: clock[0],
+        conn_factory=lambda: db.connect(path),
+        now=lambda: now[0],
+    )
+    key = "ws_session_busy:real"
+    assert control.get_flag(conn, key) is None
+    lst.step()  # 접속
+    assert control.get_flag(conn, key) == {"until": (t0 + timedelta(seconds=90)).isoformat()}
+    clock[0], now[0] = 30.0, t0 + timedelta(seconds=30)
+    lst.step()  # 60초 전이라 그대로
+    assert control.get_flag(conn, key)["until"] == (t0 + timedelta(seconds=90)).isoformat()
+    clock[0], now[0] = 61.0, t0 + timedelta(seconds=61)
+    lst.step()
+    assert control.get_flag(conn, key)["until"] == (t0 + timedelta(seconds=151)).isoformat()
+    # 일시 끊김(앱키 사용 중 등)은 플래그를 남긴다 — 허브가 비켜선 채로 리스너가 다시 붙는다
+    in_use = {"rt_cd": "1", "msg1": "ALREADY IN USE appkey"}
+    c1.inbox.append(json.dumps({"header": {"tr_id": "H0STCNI0"}, "body": in_use}))
+    lst.step()
+    assert c1.closed and control.get_flag(conn, key) is not None
+    lst.stop()
+    assert control.get_flag(conn, key) is None
+    # 시세 허브와 다른 앱키(shares_market_session False)면 쓰지 않는다
+    other = NoticeListener(
+        env="real",
+        hts_id="myhts",
+        approval=lambda: "ak",
+        invalidate=lambda: None,
+        on_notice=lambda env: True,
+        connect=lambda url: c2,
+        clock=lambda: clock[0],
+        conn_factory=lambda: db.connect(path),
+        now=lambda: now[0],
+    )
+    other.shares_market_session = False
+    other.step()
+    assert control.get_flag(conn, key) is None
+    other.stop()
+    conn.close()

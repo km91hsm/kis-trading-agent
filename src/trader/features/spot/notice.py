@@ -8,22 +8,28 @@ H0GSCNI0/9, 키 = HTS ID)를 구독하고, 통보 프레임이 오면 **본문�
 HTS ID 가 없거나 KIS 가 거절하면 그 env 는 멈추고(다시 붙어도 같다) 정기 동기화만 쓴다. 접속
 실패는 지수 백오프, 접속키 거절은 새 키로 다시.
 
-**앱키당 세션 하나**(KIS): 실전 env 는 시세 허브(`web/live_quotes`)와 같은 실전 앱키라 둘이 동시에
-붙지 못한다. 그래서 실전 리스너는 `enabled`(실전 계좌가 실제로 주문을 낼 수 있을 때)일 때만 붙고,
-같은 프로세스의 허브는 `holds_session()` 동안 비켜선다(화면은 REST 폴링). 다른 프로세스가 쥐고
-있으면('ALREADY IN USE appkey') 백오프 뒤 다시 — 붙는 순간 보충 동기화가 빈 구간을 채운다.
+**앱키당 세션 하나**(KIS): 실전 env 는 시세 허브(`features/quotes/hub`)와 같은 실전 앱키라 둘이
+동시에 붙지 못한다. 그래서 실전 리스너는 `enabled`(실전 계좌가 실제로 주문을 낼 수 있을 때)일 때만
+붙고, 허브(웹 프로세스)는 리스너가 세션을 쥔 동안 비켜선다(화면은 REST 폴링). 프로세스를 넘는
+신호는 control 플래그 `ws_session_busy:<env>` = `{"until": 지금+90초 UTC ISO}` 하나다 — 붙을 때
+쓰고, 60초마다 갱신하고, 놓을 때 지운다(리스너가 죽으면 until 이 지나 저절로 풀린다).
+다른 프로세스가 쥐고 있으면('ALREADY IN USE appkey') 백오프 뒤 다시 — 붙는 순간 보충 동기화가
+빈 구간을 채운다.
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from trader.kernel.broker import ws as kis_ws
 from trader.kernel.broker.tr_ids import WS_URL
+from trader.kernel.ledger.control import delete_flag, set_flag
 
 logger = logging.getLogger("trader.spot")
 
@@ -31,6 +37,9 @@ RECV_TIMEOUT_S = 1.0
 MAX_BACKOFF_S = 60.0
 DEBOUNCE_S = 5.0  # 통보가 몰리면(분할 체결) 이 간격에 한 번만 동기화를 당긴다
 ENABLED_TTL_S = 30.0  # enabled() 는 원장을 읽을 수 있어 이 간격으로만 다시 묻는다
+BUSY_FLAG = "ws_session_busy:"  # + env. 시세 허브가 until 로 양보를 판단한다
+BUSY_TTL_S = 90.0
+BUSY_REFRESH_S = 60.0
 
 
 def _default_connect(url: str) -> Any:
@@ -51,6 +60,8 @@ class NoticeListener:
         connect: Callable[[str], Any] | None = None,
         clock: Callable[[], float] = time.monotonic,
         enabled: Callable[[], bool] = lambda: True,
+        conn_factory: Callable[[], sqlite3.Connection] | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.env = env
         self._hts = hts_id
@@ -74,6 +85,9 @@ class NoticeListener:
         self.shares_market_session = env == "real"
         self._enabled = False
         self._enabled_at = -1e9
+        self._conn_factory = conn_factory
+        self._now = now
+        self._busy_at: float | None = None  # 마지막 ws_session_busy 쓰기(clock), None 이면 안 씀
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -155,6 +169,8 @@ class NoticeListener:
         if self._conn is None and not self._open():
             self._flush()
             return False
+        if self._busy_at is not None and self._clock() - self._busy_at >= BUSY_REFRESH_S:
+            self._mark_session(True)
         try:
             raw = self._conn.recv(timeout=RECV_TIMEOUT_S)
             raw = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
@@ -228,15 +244,40 @@ class NoticeListener:
             return False
         self._conn = conn
         logger.info("체결통보 구독 (%s)", self.env)
+        if self.shares_market_session:
+            self._mark_session(True)
         return True
 
+    def _mark_session(self, held: bool) -> None:
+        """control `ws_session_busy:<env>` 쓰기(held)·지우기. 원장이 없거나 실패해도
+        리스너는 계속 돈다."""
+        if self._conn_factory is None:
+            return
+        try:
+            conn = self._conn_factory()
+            try:
+                if held:
+                    until = self._now().astimezone(UTC) + timedelta(seconds=BUSY_TTL_S)
+                    set_flag(conn, BUSY_FLAG + self.env, {"until": until.isoformat()})
+                else:
+                    delete_flag(conn, BUSY_FLAG + self.env)
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001 — 플래그 실패가 체결통보를 막지 않는다
+            logger.warning("ws_session_busy 플래그 기록 실패 (%s)", self.env, exc_info=True)
+        self._busy_at = self._clock() if held else None
+
     def _drop(self, *, backoff: bool) -> None:
-        self._close()
+        # 일시 끊김(백오프 뒤 재접속)은 ws_session_busy 를 남긴다 — 'ALREADY IN USE' 로 떨어졌을
+        # 때 지우면 허브가 곧바로 세션을 다시 잡아 리스너가 영영 붙지 못한다(until 이 지나면 풀린다)
+        self._close(release=False)
         if backoff:
             self._attempt += 1
             self._retry_at = self._clock() + min(2 ** (self._attempt - 1), MAX_BACKOFF_S)
 
-    def _close(self) -> None:
+    def _close(self, *, release: bool = True) -> None:
+        if release and self._busy_at is not None:
+            self._mark_session(False)
         conn, self._conn = self._conn, None
         if conn is not None:
             try:

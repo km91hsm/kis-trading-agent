@@ -720,6 +720,7 @@ def notice_listeners(ctx, skip: frozenset[str] = frozenset()) -> list[notice.Not
             invalidate=auth.invalidate_approval,
             on_notice=notice_handler(ctx),
             enabled=_notice_enabled(ctx, port, env, members),
+            conn_factory=ctx.conn_factory,
         )
         lst.shares_market_session = shares
         out.append(lst)

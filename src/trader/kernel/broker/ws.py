@@ -5,7 +5,7 @@
 메시지를 돌려받지 못하면 연결을 끊는다.** 체결이 몰리면 한 프레임에 여러 건(세 번째 칸이 건수)이
 이어 붙어 온다 — 첫 건만 읽으면 나머지를 잃는다. 한 연결의 구독은 41칸까지(KIS 제한).
 신호·주문은 이 값을 읽지 않는다(시세 조회·재시세는 REST 그대로). 연결·구독 관리는
-`web/live_quotes.QuoteHub`.
+`features/quotes/hub.QuoteHub`.
 """
 
 from __future__ import annotations
@@ -27,6 +27,13 @@ TRADE_FIELD_COUNT = 46
 # 앞쪽 칸 이름(공식 샘플 순서): 종목·체결시각·현재가·전일대비부호·전일대비·등락률
 TRADE_FIELDS = ("ticker", "time", "price", "sign", "change", "change_pct")
 _DOWN = {"4", "5"}  # 전일대비부호 4(하한)·5(하락)
+
+
+def connect(url: str) -> Any:
+    """동기 웹소켓 연결 하나(접속 10초·종료 2초·프레임 1MiB 제한). 호출부가 닫는다."""
+    from websockets.sync.client import connect as _connect
+
+    return _connect(url, open_timeout=10, close_timeout=2, max_size=2**20)
 
 
 def subscribe_message(

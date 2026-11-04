@@ -241,3 +241,9 @@ fo:
   products:
     mini:    {futures_prefix: ["A05", "105"], call_prefix: ["B05", "205"], put_prefix: ["C05", "305"], multiplier: 50000,  futures_tick: "0.02", option_ticks: [["3", "0.01"], ["10", "0.02"], ["inf", "0.05"]], name: 미니코스피200}
     regular: {futures_prefix: ["A01", "101"], call_prefix: ["B01", "201"], put_prefix: ["C01", "301"], multiplier: 250000, futures_tick: "0.05", option_ticks: [["10", "0.01"], ["inf", "0.05"]], name: 코스피200}
+
+# 화면 시세(quotes): 국내 정규장 실시간 허브(KIS 웹소켓, 체결통보가 세션을 쓰면 REST 로 양보)와 REST 폴링 주기
+quotes:
+  realtime_ws: true
+  us_poll_ms: 5000         # 미국 정규장 화면 폴링(ms)
+  fo_poll_ms: 2000         # 파생 정규장 화면 폴링(ms)
