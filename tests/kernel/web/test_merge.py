@@ -57,3 +57,38 @@ def test_merge_passes_query_and_path_params(project):
     assert r == {"items": [{"account_id": "acc1"}, {"account_id": "acc1"}], "partial": False}
     assert seen == [{"market": "KR", "account_id": "acc1"}] * 2
     assert len([rt for rt in client.app.routes if getattr(rt, "path", "") == "/api" + path]) == 1
+
+
+def test_merge_sort_is_iso_aware_with_dates_and_none(project):
+    """`at` 은 문자열이 아니라 시각으로 비교한다: 오프셋이 다른 ISO·날짜만(그날 00:00 UTC)·naive
+    (UTC 로 간주)·None(끝)."""
+    rows = [
+        {"id": "kst", "at": "2026-11-04T08:00:00+09:00"},  # 2026-11-03T23:00Z
+        {"id": "utc", "at": "2026-11-03T23:30:00+00:00"},
+        {"id": "date", "at": "2026-11-04"},  # 2026-11-04T00:00Z
+        {"id": "naive", "at": "2026-11-03T23:10:00"},
+        {"id": "none", "at": None},
+    ]
+    a = Feature(id="a", tier="service", resources=(ResourcePart("/x", lambda d, q: rows),))
+    r = make_client(make_deps(project, features=[a])).get("/api/x").json()
+    assert [x["id"] for x in r["items"]] == ["date", "utc", "naive", "kst", "none"]
+
+
+def test_merge_non_list_part_is_skipped_as_partial(project, caplog):
+    a = Feature(id="a", tier="service", resources=(ResourcePart("/x", lambda d, q: {"id": 1}),))
+    b = Feature(id="b", tier="lane", resources=(ResourcePart("/x", lambda d, q: [{"id": 2}]),))
+    with caplog.at_level(logging.WARNING, logger="trader.web"):
+        r = make_client(make_deps(project, features=[a, b])).get("/api/x").json()
+    assert r == {"items": [{"id": 2}], "partial": True}
+    assert any("/x" in rec.getMessage() for rec in caplog.records)
+
+
+def test_merge_format_csv_returns_csv(project):
+    rows = [{"id": 1, "at": "2026-11-04T01:00:00+00:00", "x": None}]
+    a = Feature(id="a", tier="service", resources=(ResourcePart("/orders", lambda d, q: rows),))
+    client = make_client(make_deps(project, features=[a]))
+    r = client.get("/api/orders?format=csv")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert 'filename="orders.csv"' in r.headers["content-disposition"]
+    assert r.text.lstrip("﻿").splitlines() == ["id,at,x", "1,2026-11-04T01:00:00+00:00,"]
+    assert client.get("/api/orders").json()["items"] == rows
