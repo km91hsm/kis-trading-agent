@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from trader.kernel.registry.types import Feature
-from trader.kernel.web.sse import KERNEL_SSE_KEYS
+from trader.kernel.web.sse import KERNEL_NOISY_KEYS, KERNEL_SSE_KEYS
 
 REL_PATH = Path("web/src/generated/sse-keys.ts")
 REL_NAV_PATH = Path("web/src/generated/nav.ts")
@@ -28,7 +28,7 @@ def _ts_list(keys: list[str]) -> str:
 def sse_keys_ts(features: list[Feature]) -> str:
     """커널 키 + 기능 `sse_keys` 로 `sse-keys.ts` 본문을 만든다 (끝에 개행 한 줄)."""
     keys = list(KERNEL_SSE_KEYS)
-    noisy = list(KERNEL_SSE_KEYS)  # 데몬 하트비트는 잦게 바뀌는 키라 전역 갱신에서 뺀다
+    noisy = list(KERNEL_NOISY_KEYS)  # 데몬 하트비트는 잦게 바뀌는 키라 전역 갱신에서 뺀다
     for f in features:
         for k in f.sse_keys:
             keys.append(k.key)

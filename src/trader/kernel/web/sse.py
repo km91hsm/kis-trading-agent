@@ -1,16 +1,18 @@
 """SSE `/api/events`: 지문 스냅샷이 바뀔 때만 `change`, 주기적으로 서버 시각을 담은 ping.
 
-스냅샷 = 커널 키 `daemon` + 모든 `feature.sse_keys` 의 `probe(deps)`. 비동기 제너레이터라
-스레드 풀을 점유하지 않는다(스냅샷 계산만 run_in_threadpool).
+스냅샷 = 커널 키(`daemon` + `KERNEL_PROBES`) + 모든 `feature.sse_keys` 의 `probe(deps)`.
+비동기 제너레이터라 스레드 풀을 점유하지 않는다(스냅샷 계산만 run_in_threadpool).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import closing
 from typing import Any
 
 import anyio
@@ -23,8 +25,6 @@ from trader.kernel.web.deps import WebDeps
 
 logger = logging.getLogger("trader.web")
 router = APIRouter(tags=["events"])
-
-KERNEL_SSE_KEYS = ("daemon",)
 
 _SHARED: dict[str, Any] = {"deps": None, "at": 0.0, "snap": None}
 _SHARED_LOCK = threading.Lock()
@@ -40,15 +40,85 @@ def _daemon_fp(deps: WebDeps) -> dict:
         return {"alive": False, "minute": ""}
 
 
+def _q(deps: WebDeps, sql: str) -> str:
+    """지문용 한 줄 집계(행 하나의 값들을 ':' 로 잇는다). 표가 없으면(옛·빈 원장) 빈 문자열."""
+    with closing(deps.conn_factory()) as conn:
+        try:
+            row = conn.execute(sql).fetchone()
+        except sqlite3.OperationalError:
+            return ""
+    return ":".join("" if v is None else str(v) for v in tuple(row))
+
+
+# 화면이 읽지 않는 내부 커서·TTL 플래그(매 수집·60초마다 값이 바뀐다) — control 지문에서 뺀다
+CONTROL_CURSOR_LIKE = ("telegram_offset", "news_trigger_at:%", "ws_session_busy:%")
+_CONTROL_WHERE = " AND ".join(f"key NOT LIKE {p!r}" for p in CONTROL_CURSOR_LIKE)
+
+
+def _usage_fp(deps: WebDeps) -> str:
+    """구독 사용률 관측(세션 rate_limit_event·usage_probe) 건수·최대 id."""
+    return _q(deps, "SELECT COUNT(*), MAX(id) FROM llm_rate_limits")
+
+
+def _control_fp(deps: WebDeps) -> str:
+    """control 플래그 건수·마지막 갱신 시각(커서류 제외). 같은 값 다시 쓰기는 `set_flag` 가
+    updated_at 을 바꾸지 않으므로 지문도 그대로다."""
+    return _q(deps, f"SELECT COUNT(*), MAX(updated_at) FROM control WHERE {_CONTROL_WHERE}")
+
+
+def _jobs_fp(deps: WebDeps) -> str:
+    """작업 대기열 최대 id + 대기·실행 중 건수(progress 는 1초마다 바뀌어 넣지 않는다)."""
+    return _q(
+        deps,
+        "SELECT COALESCE(MAX(id), 0), "
+        "(SELECT COUNT(*) FROM job_requests WHERE status IN ('queued','running')) "
+        "FROM job_requests",
+    )
+
+
+def _runs_fp(deps: WebDeps) -> str:
+    """runs 건수·최대 id + 상태별 건수(새 행 없이 running → ok 로 바뀌어도 잡는다)."""
+    head = _q(deps, "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM runs")
+    groups = _q(
+        deps,
+        "SELECT GROUP_CONCAT(s || '=' || n, ',') FROM "
+        "(SELECT status AS s, COUNT(*) AS n FROM runs GROUP BY status ORDER BY status)",
+    )
+    return f"{head}:{groups}" if head else ""
+
+
+def _notices_fp(deps: WebDeps) -> str:
+    """보낸 알림 최대 id."""
+    return _q(deps, "SELECT COALESCE(MAX(id), 0) FROM notices")
+
+
+# 커널 소유 SSE 키 → probe. `daemon` 은 하트비트 파일이라 따로 둔다(잦게 바뀌는 유일한 커널 키)
+KERNEL_PROBES: dict[str, Callable[[WebDeps], object]] = {
+    "usage": _usage_fp,
+    "control": _control_fp,
+    "jobs": _jobs_fp,
+    "runs": _runs_fp,
+    "notices": _notices_fp,
+}
+KERNEL_SSE_KEYS = ("daemon", *KERNEL_PROBES)
+KERNEL_NOISY_KEYS = ("daemon",)
+
+
+def _probe(snap: dict[str, Any], key: str, probe: Callable[[WebDeps], object], deps) -> None:
+    try:
+        snap[key] = probe(deps)
+    except Exception:
+        logger.warning("SSE probe 실패: %s", key, exc_info=True)
+        snap[key] = ""
+
+
 def snapshot(deps: WebDeps) -> dict:
     snap: dict[str, Any] = {"daemon": _daemon_fp(deps)}
+    for key, probe in KERNEL_PROBES.items():
+        _probe(snap, key, probe, deps)
     for feature in deps.features:
         for key in feature.sse_keys:
-            try:
-                snap[key.key] = key.probe(deps)
-            except Exception:
-                logger.warning("SSE probe 실패: %s", key.key, exc_info=True)
-                snap[key.key] = ""
+            _probe(snap, key.key, key.probe, deps)
     return snap
 
 

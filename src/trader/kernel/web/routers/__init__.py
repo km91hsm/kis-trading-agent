@@ -4,4 +4,4 @@ from __future__ import annotations
 
 from trader.kernel.web.routers import jobs, runs, system
 
-KERNEL_ROUTERS = (system.router, jobs.router, runs.router)
+KERNEL_ROUTERS = (system.router, system.settings_router, jobs.router, runs.router)

@@ -269,3 +269,30 @@ def test_csv_response_nested_values_are_json():
 
     r = csv_response([{"a": [{"q": 1}], "b": {"k": "값"}}], "t.csv")
     assert r.body.decode("utf-8").lstrip("﻿").splitlines()[1] == '"[{""q"": 1}]","{""k"": ""값""}"'
+
+
+def test_usage_throttle_toggle_api(project):
+    """설정 화면: 사용량 감속 켜기·끄기(토큰 + 같은 출처), control 이력에 web 으로 남고
+    /api/system/usage 가 실효 값과 출처를 보인다. null 이면 화면 설정을 지우고 yaml 값으로."""
+    from tests.kernel.web.conftest import AUTH
+
+    deps = ledger_deps(project)
+    c = make_client(deps)
+    url = "/api/settings/usage-throttle"
+    assert c.patch(url, json={"enabled": False}).status_code == 401
+    assert c.patch(url, json={"enabled": False}, headers={"Authorization": "Bearer secret"}
+                   ).status_code == 403  # fmt: skip
+    assert c.patch(url, json={"enabled": "x"}, headers=AUTH).status_code == 422
+    assert c.patch(url, json={"enabled": False, "x": 1}, headers=AUTH).status_code == 422
+    r = c.patch(url, json={"enabled": False}, headers=AUTH)
+    assert r.status_code == 200 and r.json() == {"enabled": False, "source": "control"}
+    t = c.get("/api/system/usage").json()["throttle"]
+    assert t["enabled"] is False and t["source"] == "control"
+    log = c.get("/api/system/control-log").json()
+    assert [(x["channel"], x["key"], x["old"], x["new"]) for x in log] == [
+        ("web", usage.THROTTLE_FLAG, None, False)
+    ]
+    assert log[0]["actor"] and log[0]["actor"] != "secret"  # 토큰 지문, 토큰 자체가 아님
+    r = c.patch(url, json={"enabled": None}, headers=AUTH)
+    assert r.json() == {"enabled": True, "source": "yaml"}
+    assert len(c.get("/api/system/control-log").json()) == 2

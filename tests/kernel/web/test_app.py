@@ -76,8 +76,10 @@ def test_gen_sse_keys_format():
     from tests.kernel.web.conftest import fixture_feature
 
     out = gen.sse_keys_ts([fixture_feature()])
-    assert 'export const SSE_KEYS = ["daemon", "fixture_count"] as const;' in out
+    kernel = '"daemon", "usage", "control", "jobs", "runs", "notices"'
+    assert f"export const SSE_KEYS = [{kernel}, \"fixture_count\"] as const;" in out
     assert "export type SseKey = (typeof SSE_KEYS)[number];" in out
+    # 커널 키 중 잦게 바뀌는 것은 daemon 하나뿐
     assert 'export const NOISY_KEYS: SseKey[] = ["daemon", "fixture_count"];' in out
     assert out.endswith("\n")
 

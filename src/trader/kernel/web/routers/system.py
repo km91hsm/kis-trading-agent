@@ -1,4 +1,7 @@
-"""system: 헬스·상태·데몬·Claude 사용량·토큰 받기·알림 기록·제어 변경 이력 (커널 자원)."""
+"""system: 헬스·상태·데몬·Claude 사용량·토큰 받기·알림 기록·제어 변경 이력 (커널 자원).
+
+`settings_router`: `PATCH /settings/usage-throttle {enabled}` — 감속 켜기·끄기
+(커널이 usage 를 소유한다)."""
 
 from __future__ import annotations
 
@@ -10,18 +13,27 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict
 
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.heartbeat import read_status
+from trader.kernel.ledger.control import delete_flag, get_flag, log_change, set_flag
 from trader.kernel.notify import commands
 from trader.kernel.notify.commands import CommandContext
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.session import calls, usage
 from trader.kernel.web import health
-from trader.kernel.web.auth import require_direct_local, require_same_origin
+from trader.kernel.web.auth import (
+    actor_of,
+    require_direct_local,
+    require_same_origin,
+    require_token,
+)
 from trader.kernel.web.routers import jobs
 
 router = APIRouter(prefix="/system", tags=["system"])
+settings_router = APIRouter(tags=["settings"])
+WRITE = [Depends(require_token), Depends(require_same_origin)]
 
 USAGE_NOTE = (
     "세션마다 claude 가 알려 준 구독 사용률(또는 대화형 상태줄 관측) 중 최신값. "
@@ -189,3 +201,29 @@ def control_log(request: Request, limit: int = Query(100, ge=1, le=500)) -> list
             "SELECT * FROM control_log ORDER BY at DESC, id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [{**dict(r), "old": _json(r["old"]), "new": _json(r["new"])} for r in rows]
+
+
+class ThrottleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None  # None 이면 화면 설정을 지우고 yaml 값으로
+
+
+@settings_router.patch("/settings/usage-throttle", dependencies=WRITE)
+def usage_throttle(request: Request, body: ThrottleBody) -> dict:
+    """Claude 구독 사용률 감속 켜기·끄기(설정 화면). 끄면 사용률과 무관하게 세션을 띄운다 — 하루
+    세션 상한(`llm.daily_session_cap`)은 그대로. 바뀌면 control 이력에 `web` 으로 남긴다."""
+    deps = _deps(request)
+    with closing(deps.conn_factory()) as conn:
+        old = get_flag(conn, usage.THROTTLE_FLAG)
+        if body.enabled is None:
+            delete_flag(conn, usage.THROTTLE_FLAG)
+        else:
+            set_flag(conn, usage.THROTTLE_FLAG, body.enabled)
+        if old != body.enabled:
+            log_change(
+                conn, channel="web", actor=actor_of(request), key=usage.THROTTLE_FLAG,
+                old=old, new=body.enabled, at=deps.now().isoformat(),
+            )  # fmt: skip
+        enabled, source = usage.throttle_enabled(conn, deps.settings)
+    return {"enabled": enabled, "source": source}
