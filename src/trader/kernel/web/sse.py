@@ -1,4 +1,4 @@
-"""SSE `/api/events`: 지문 스냅샷이 바뀔 때만 `change`, 주기적으로 ping.
+"""SSE `/api/events`: 지문 스냅샷이 바뀔 때만 `change`, 주기적으로 서버 시각을 담은 ping.
 
 스냅샷 = 커널 키 `daemon` + 모든 `feature.sse_keys` 의 `probe(deps)`. 비동기 제너레이터라
 스레드 풀을 점유하지 않는다(스냅샷 계산만 run_in_threadpool).
@@ -65,7 +65,7 @@ def _shared_snapshot(deps: WebDeps, share_s: float) -> dict:
 async def stream(
     deps: WebDeps,
     *,
-    poll_s: float = 2.0,
+    poll_s: float = 1.5,
     share_s: float = 1.5,
     ping_s: float = 15,
     once: bool = False,
@@ -82,7 +82,8 @@ async def stream(
                 return
         elif time.monotonic() - last_sent >= ping_s:
             last_sent = time.monotonic()
-            yield ": ping\n\n"
+            stamp = json.dumps({"server_time": deps.now().isoformat()})
+            yield f": ping {stamp}\n\n"
         await anyio.sleep(poll_s)
 
 

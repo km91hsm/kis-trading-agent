@@ -63,6 +63,12 @@ event_blackout:
 web:
   bind: 127.0.0.1
   port: 8787
+  # tailscale serve 로 폰에서 열 때의 Host 이름(예: ["pc.tailnet.ts.net"]). 비면 루프백만 허용
+  tailscale_hosts: []
+  # 허용할 Tailscale 로그인(예: ["me@example.com"]). 비면 tailnet Host 만으로 허용
+  tailscale_users: []
+  # 폰에서 여는 외부 주소(예: "https://pc.tailnet.ts.net"). 알림 링크에 쓴다
+  public_base: null
 
 notify:
   enabled: true

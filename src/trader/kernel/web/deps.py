@@ -22,5 +22,10 @@ class WebDeps:
     token: str | None
     dist: Path
     now: Callable[[], datetime]
+    # 루프백 밖에서 허용할 Host (settings.web.tailscale_hosts)
     extra_hosts: tuple[str, ...] = ()
+    # 비루프백 Host 요청에 요구할 `Tailscale-User-Login` 허용 목록. 비면 Host 만 검사한다
+    tailscale_users: tuple[str, ...] = ()
+    # 외부(폰)에서 여는 주소(예: https://pc.tailnet.ts.net). 알림 링크 등에 쓴다
+    public_base: str | None = None
     features: list[Feature] = ()  # type: ignore[assignment]

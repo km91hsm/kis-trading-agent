@@ -34,10 +34,10 @@ def fixture_feature(value=lambda: 1) -> Feature:
     )
 
 
-@pytest.fixture
-def deps(project: Path) -> WebDeps:
+def make_deps(project: Path, **overrides) -> WebDeps:
+    """기본 WebDeps 위에 `extra_hosts`·`tailscale_users`·`features`·`token` 등을 덮어쓴다."""
     db = project / "state" / "ledger.db"
-    return WebDeps(
+    base = WebDeps(
         settings=SimpleNamespace(),
         conn_factory=lambda: connect(db),
         state=project / "state",
@@ -45,6 +45,12 @@ def deps(project: Path) -> WebDeps:
         dist=project / "dist",
         now=lambda: NOW,
     )
+    return replace(base, **overrides)
+
+
+@pytest.fixture
+def deps(project: Path) -> WebDeps:
+    return make_deps(project)
 
 
 @pytest.fixture

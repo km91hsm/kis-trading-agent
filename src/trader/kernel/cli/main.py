@@ -25,7 +25,7 @@ from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover, hooks
 from trader.kernel.registry.types import Feature
-from trader.kernel.web.app import create_app
+from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
 from trader.kernel.web.deps import WebDeps
 
 logger = logging.getLogger("trader.cli")
@@ -79,6 +79,9 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         token=load_secrets().WEB_TOKEN,
         dist=paths.web_dist(),
         now=lambda: datetime.now(UTC),
+        extra_hosts=tuple(boot_.settings.web.tailscale_hosts),
+        tailscale_users=tuple(boot_.settings.web.tailscale_users),
+        public_base=boot_.settings.web.public_base,
         features=boot_.features,
     )
 
@@ -113,6 +116,8 @@ def web(
     b = boot(settings=True, conn=True, log_name="web")
     host = host or b.settings.web.bind
     port = port or b.settings.web.port
+    if host not in LOOPBACK_HOSTS:
+        logger.warning("웹 서버를 루프백 밖(%s)에 바인드합니다 — tailscale serve 를 쓰세요", host)
     try:
         uvicorn.run(create_app(build_web_deps(b)), host=host, port=port, log_config=None)
     finally:

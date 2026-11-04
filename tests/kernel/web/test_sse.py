@@ -63,7 +63,7 @@ def test_stream_emits_change_only_when_snapshot_changes(deps):
             await agen.aclose()
 
     ev = asyncio.run(run())
-    kinds = [e.split("\n")[0] for e in ev]
+    kinds = [e.split("\n")[0].split(" {")[0] for e in ev]
     assert kinds == ["event: change", ": ping", ": ping", "event: change", ": ping"]
     assert _data(ev[0])["k"] == 1 and _data(ev[3])["k"] == 2
 
@@ -104,3 +104,18 @@ def test_events_endpoint_once(deps_with_feature):
     assert r.headers["content-type"].startswith("text/event-stream")
     assert r.text.count("event: change") == 1
     assert _data(r.text)["fixture_count"] == 1
+
+
+def test_ping_carries_server_time(deps):
+    async def run():
+        agen = sse.stream(deps, ping_s=0, poll_s=0, share_s=0)
+        try:
+            return [await agen.__anext__() for _ in range(2)]
+        finally:
+            await agen.aclose()
+
+    ev = asyncio.run(run())
+    assert ev[1].startswith(': ping {"server_time": ')
+    body = json.loads(ev[1][len(": ping ") :].strip())
+    assert body == {"server_time": "2026-11-02T01:02:03+00:00"}
+    assert ev[1].endswith("\n\n")

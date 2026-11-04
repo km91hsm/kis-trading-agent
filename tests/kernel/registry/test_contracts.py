@@ -178,3 +178,20 @@ def test_evaluation_port_declared_in_kernel_ports():
         "update_breaker", "rl_sizer", "rl_propose", "rl_record",
     }  # fmt: skip
     assert all(callable(getattr(EvaluationPort, m, None)) for m in methods)
+
+
+def test_duplicate_nav_ids_and_callback_prefixes_reported():
+    from trader.kernel.registry.types import NavItem, TelegramCallback
+
+    alpha, beta = _ok()
+    nav = NavItem(screen="today", id="fo-lane", label="파생", order=30)
+    cb = TelegramCallback(prefix="ap:", handler=lambda ctx, data: "ok")
+    msgs = contracts.check(
+        [
+            replace(alpha, nav=(nav,), telegram_callbacks=(cb,)),
+            replace(beta, nav=(nav,), telegram_callbacks=(cb,)),
+        ],
+        roots=[OK_ROOT],
+    )
+    assert "nav id 중복: fo-lane" in msgs
+    assert "텔레그램 콜백 prefix 중복: ap:" in msgs

@@ -82,3 +82,34 @@ def test_gen_sse_keys_format():
 def test_gen_sse_keys_matches_committed_file():
     committed = (REPO / "web/src/generated/sse-keys.ts").read_text(encoding="utf-8")
     assert committed == gen.sse_keys_ts(discover())
+
+
+def test_server_time_header_on_every_response(client):
+    for path in ("/api/system/health", "/api/nothing", "/"):
+        r = client.get(path)
+        stamp = r.headers["x-server-time"]
+        assert stamp.endswith("+00:00") or stamp.endswith("Z"), path
+    gated = client.get("/api/system/health", headers={"Host": "evil.example"})
+    assert gated.status_code == 403 and gated.headers["x-server-time"].endswith("+00:00")
+
+
+def test_bare_api_and_all_methods_are_json_404(client):
+    bare = client.get("/api")
+    assert bare.status_code == 404 and bare.json()["detail"].startswith("없는 API")
+    for method in ("GET", "POST", "PATCH", "DELETE", "PUT"):
+        r = client.request(method, "/api/x")
+        assert r.status_code == 404, method
+        assert r.json()["detail"].startswith("없는 API"), method
+
+
+def test_dist_checked_per_request(deps):
+    c = make_client(deps)
+    assert "npm run build" in c.get("/").text
+    deps.dist.mkdir(parents=True)
+    (deps.dist / "index.html").write_text("<html>INDEX</html>", encoding="utf-8")
+    assert "INDEX" in c.get("/").text
+
+
+def test_gen_nav_matches_committed_file():
+    committed = (REPO / gen.REL_NAV_PATH).read_text(encoding="utf-8")
+    assert committed == gen.nav_ts(discover())

@@ -1,13 +1,24 @@
-"""SSE 키 목록의 TypeScript 파일 생성 — 프런트가 키를 손으로 적다 어긋나지 않게 한다."""
+"""SSE 키·메뉴(nav)의 TypeScript 파일 생성 — 프런트가 손으로 적다 어긋나지 않게 한다."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from trader.kernel.registry.types import Feature
 from trader.kernel.web.sse import KERNEL_SSE_KEYS
 
 REL_PATH = Path("web/src/generated/sse-keys.ts")
+REL_NAV_PATH = Path("web/src/generated/nav.ts")
+
+# 커널 고정 화면 (id, 라벨, 경로). 기능은 NavItem 으로 이 아래 하위 목차만 보탠다
+SCREENS = (
+    ("today", "오늘", "/"),
+    ("accounts", "계좌·보유", "/accounts"),
+    ("performance", "성과", "/performance"),
+    ("data", "데이터", "/data"),
+    ("system", "시스템", "/system"),
+)
 
 
 def _ts_list(keys: list[str]) -> str:
@@ -28,6 +39,33 @@ def sse_keys_ts(features: list[Feature]) -> str:
         f"export const SSE_KEYS = {_ts_list(keys)} as const;\n"
         "export type SseKey = (typeof SSE_KEYS)[number];\n"
         f"export const NOISY_KEYS: SseKey[] = {_ts_list(noisy)};\n"
+    )
+
+
+def _json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def nav_ts(features: list[Feature]) -> str:
+    """커널 고정 5 화면 + 기능 `nav` 로 `nav.ts` 본문을 만든다 (끝에 개행 한 줄).
+
+    항목은 (screen, order, id) 순. 알 수 없는 screen 은 KeyError 로 생성이 실패한다."""
+    rank = {sid: i for i, (sid, _, _) in enumerate(SCREENS)}
+    items = sorted(
+        (n for f in features for n in f.nav), key=lambda n: (rank[n.screen], n.order, n.id)
+    )
+    lines = []
+    for sid, label, path in SCREENS:
+        mine = [
+            {"screen": n.screen, "id": n.id, "label": n.label, "order": n.order}
+            for n in items
+            if n.screen == sid
+        ]
+        head = f'{_json(sid)}:{{"label":{_json(label)},"path":{_json(path)},"items":'
+        lines.append(f"  {head}[{','.join(_json(m) for m in mine)}]}}")
+    return (
+        "// 자동 생성 파일 — 수정 금지. `uv run trader dev gen-nav` 로 다시 만든다.\n"
+        "export const NAV = {\n" + ",\n".join(lines) + "\n} as const;\n"
     )
 
 

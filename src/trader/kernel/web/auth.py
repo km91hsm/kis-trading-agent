@@ -57,3 +57,11 @@ def require_token(request: Request) -> None:
         raise HTTPException(
             status_code=401, detail="토큰이 필요합니다 (Authorization: Bearer <WEB_TOKEN>)"
         )
+
+
+def require_confirm(body: dict, account_id: str, env: str) -> None:
+    """실전(env != paper) 계좌 동작은 본문 `confirm` 에 계좌 id 를 그대로 적어야 한다."""
+    if env != "paper" and body.get("confirm") != account_id:
+        raise HTTPException(
+            status_code=400, detail="실전 계좌 동작은 confirm 에 계좌 id 를 적어야 합니다"
+        )

@@ -58,6 +58,8 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         ("에이전트 이름", [a.name for f in features for a in f.agents]),
         ("포트", [p.name for f in features for p in f.ports]),
         ("게이트", [g.name for f in features for g in f.gates]),
+        ("nav id", [n.id for f in features for n in f.nav]),
+        ("텔레그램 콜백 prefix", [c.prefix for f in features for c in f.telegram_callbacks]),
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
     msgs += [
