@@ -110,18 +110,20 @@ def accounts_overview(request: Request) -> dict:
 
 @accounts_router.patch("/accounts/{account_id}", dependencies=WRITE)
 def set_mode(request: Request, account_id: str, body: ModeBody) -> dict:
-    """실전 계좌는 `confirm` 에 계좌 id. 실전 auto 는 LIVE 확인 기록이 있어야 한다(없으면 409)."""
+    """실전 계좌는 `confirm` 에 계좌 id. 실전 auto 는 LIVE 확인 기록이 있어야 한다(없으면 409).
+
+    웹은 LIVE 확인을 만들거나 갱신하지 않는다: 기록은 auto 일 때만 남으므로(다른 모드를 쓰면
+    지워진다) 기록이 있는 실전 auto 요청은 이미 auto 인 계좌의 재확인 — 쓰지 않고 현재 값을
+    돌려준다."""
     deps = request.app.state.deps
     acct = _find(deps, account_id)
     require_confirm(body.model_dump(), acct.id, acct.env)
-    real_auto = acct.env == "real" and body.mode == "auto"
     with closing(deps.conn_factory()) as conn:
-        if real_auto and modes.live_confirmed(conn, acct.id) is None:
-            raise HTTPException(status_code=409, detail=LIVE_REQUIRED)
-        modes.set_account_mode(
-            conn, acct, body.mode, confirm=modes.LIVE_CONFIRM if real_auto else None,
-            channel="web", actor=actor_of(request),
-        )  # fmt: skip
+        if acct.env == "real" and body.mode == "auto":
+            if modes.live_confirmed(conn, acct.id) is None:
+                raise HTTPException(status_code=409, detail=LIVE_REQUIRED)
+        else:
+            modes.set_account_mode(conn, acct, body.mode, channel="web", actor=actor_of(request))
         return {"account_id": acct.id, "mode": modes.get_account_mode(conn, acct)}
 
 

@@ -218,10 +218,23 @@ def test_web_mode_real_auto_requires_confirm(web_client, ledger, accounts):
     assert r.status_code == 409 and "LIVE 확인 필요" in r.json()["detail"]
     assert _rows(web_client)["real-main"]["mode"] == "off"
     # LIVE 확인은 사용자 CLI(`accounts mode … --confirm LIVE`)가 남긴다 — scratch 원장에서 흉내
+    r = web_client.patch(url, json={"mode": "auto", "confirm": "paper-main"}, headers=AUTH)
+    assert r.status_code == 400  # 다른 계좌 id 는 확인이 아니다
     modes.set_account_mode(ledger, accounts[1], "auto", confirm=modes.LIVE_CONFIRM)
+    ledger.execute(  # 사용자가 예전에 남긴 확인(시각이 지금과 달라야 덮어쓰기가 드러난다)
+        "UPDATE account_modes SET live_confirmed_json='{\"confirm\": \"LIVE\", "
+        "\"at\": \"2026-01-01T00:00:00+00:00\"}', updated_at='2026-01-01T00:00:00+00:00' "
+        "WHERE account_id='real-main'"
+    )
+    ledger.commit()
+    sql = "SELECT live_confirmed_json, updated_at FROM account_modes WHERE account_id='real-main'"
+    before = tuple(ledger.execute(sql).fetchone())
+    n_log = ledger.execute("SELECT COUNT(*) FROM control_log").fetchone()[0]
     r = web_client.patch(url, json={"mode": "auto", "confirm": "real-main"}, headers=AUTH)
-    assert r.status_code == 200 and r.json()["mode"] == "auto"
-    assert modes.live_confirmed(ledger, "real-main") is not None
+    assert r.status_code == 200 and r.json() == {"account_id": "real-main", "mode": "auto"}
+    # 웹은 LIVE 확인을 다시 쓰지 않는다(T6-R1): 행·변경 이력 그대로
+    assert tuple(ledger.execute(sql).fetchone()) == before
+    assert ledger.execute("SELECT COUNT(*) FROM control_log").fetchone()[0] == n_log
     assert web_client.patch(
         "/api/accounts/ghost", json={"mode": "off"}, headers=AUTH
     ).status_code == 404  # fmt: skip
