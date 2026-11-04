@@ -1,0 +1,197 @@
+import { act } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { Accounts } from "../accounts/Accounts.tsx";
+import { tokenStore } from "../../lib/api";
+import { clearResourceCache } from "../../lib/cache";
+import { setEventsClient, type EventsClient } from "../../lib/sse";
+import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
+import { flush, render } from "../../test/render";
+import { fixtureAccounts, fixtureOverview } from "../../test/fixtures/accounts";
+
+let ff: FakeFetch | null = null;
+const stub: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
+
+beforeEach(() => {
+  clearResourceCache();
+  tokenStore.set("tok");
+  setEventsClient(stub);
+});
+afterEach(() => {
+  ff?.restore();
+  ff = null;
+});
+
+type Routes = Parameters<typeof installFakeFetch>[0];
+function routes(over: Routes = {}): Routes {
+  return {
+    "GET /api/accounts/overview": fixtureOverview(),
+    "GET /api/accounts": fixtureAccounts(),
+    ...over,
+  };
+}
+const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+async function mount(r: Routes) {
+  ff = installFakeFetch(r);
+  const out = render(
+    <MemoryRouter>
+      <Accounts />
+    </MemoryRouter>,
+  );
+  await flush();
+  return out;
+}
+const section = (id: string) => document.getElementById(id) as HTMLElement;
+function button(root: ParentNode, text: string) {
+  return Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.trim() === text) as HTMLButtonElement;
+}
+function type(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+const patches = () => ff!.calls.filter((c) => c.init?.method === "PATCH");
+const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
+const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement;
+
+describe("계좌·보유 통합 화면", () => {
+  test("섹션 컨테이너는 데이터 전에 있고, 합계·환율 줄을 그린다", async () => {
+    ff = installFakeFetch(routes());
+    render(
+      <MemoryRouter>
+        <Accounts />
+      </MemoryRouter>,
+    );
+    expect(section("overview")).not.toBeNull();
+    expect(section("fo-positions")).not.toBeNull();
+    await flush();
+    const ov = section("overview");
+    expect(ov.textContent).toContain("13,000,000");
+    expect(ov.textContent).toContain("+75,000");
+    expect(ov.textContent).toContain("2,500.50");
+    expect(ov.textContent).toContain("적용 환율 USD/KRW 1,385.50 (11월 4일 종가) → 환산 합계 16,464,443");
+  });
+
+  test("fx 가 없으면 「환율 없음」", async () => {
+    await mount(routes({ "GET /api/accounts/overview": fixtureOverview({ fx: null }) }));
+    const ov = section("overview");
+    expect(ov.textContent).toContain("환율 없음");
+    expect(ov.textContent).not.toContain("환산 합계");
+  });
+
+  test("전역 재개 버튼: 실전 auto 가 있으면 재입력 대화상자 → PATCH /settings/paused {value:false, confirm:'real-1'}; 일시정지는 확인 없이 {value:true}", async () => {
+    let paused = true;
+    let overviewGets = 0;
+    let accountGets = 0;
+    await mount(
+      routes({
+        "GET /api/accounts/overview": () => {
+          overviewGets += 1;
+          return fixtureOverview({ paused });
+        },
+        "GET /api/accounts": () => {
+          accountGets += 1;
+          return fixtureAccounts().map((a) => ({ ...a, paused })); // 전역 paused 는 /accounts 행마다 실린다
+        },
+        "PATCH /api/settings/paused": (_u: URL, init?: RequestInit) => {
+          paused = JSON.parse(String(init!.body)).value;
+          return { paused };
+        },
+      }),
+    );
+    const ov = section("overview");
+    act(() => button(ov, "재개").click());
+    expect(button(dialog(), "확인").disabled).toBe(true);
+    type(dialog().querySelector("input") as HTMLInputElement, "real-1");
+    act(() => button(dialog(), "확인").click());
+    await flush();
+    expect(patches()).toHaveLength(1);
+    expect(patches()[0].url).toBe("/api/settings/paused");
+    expect(bodyOf(patches()[0])).toEqual({ value: false, confirm: "real-1" });
+    expect(overviewGets).toBe(2);
+    expect(accountGets).toBe(2);
+    expect(dialog()).toBeNull();
+
+    act(() => button(ov, "일시정지").click());
+    expect(dialog().querySelector("input")).toBeNull();
+    act(() => button(dialog(), "확인").click());
+    await flush();
+    expect(patches()).toHaveLength(2);
+    expect(bodyOf(patches()[1])).toEqual({ value: true });
+    expect(button(ov, "재개")).toBeTruthy();
+  });
+
+  test("모의만이면 재개는 confirm 없이 {value:false}; 400 이면 버튼 아래 한 줄 오류", async () => {
+    await mount(
+      routes({
+        "GET /api/accounts/overview": fixtureOverview({ paused: true }),
+        "GET /api/accounts": fixtureAccounts()
+          .filter((a) => a.env === "paper")
+          .map((a) => ({ ...a, paused: true })),
+        "PATCH /api/settings/paused": () => json({ detail: "확인이 필요합니다" }, 400),
+      }),
+    );
+    const ov = section("overview");
+    act(() => button(ov, "재개").click());
+    expect(dialog().querySelector("input")).toBeNull();
+    act(() => button(dialog(), "확인").click());
+    await flush();
+    expect(bodyOf(patches()[0])).toEqual({ value: false });
+    expect(ov.querySelector('[role="alert"]')!.textContent).toContain("확인이 필요합니다");
+  });
+
+  test("계좌 카드가 /accounts/{id} 로 연결된다", async () => {
+    const { container } = await mount(routes());
+    const hrefs = Array.from(container.querySelectorAll("a.account-card")).map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/accounts/paper-1", "/accounts/real-1"]);
+    const real = container.querySelector('a[href="/accounts/real-1"]') as HTMLElement;
+    expect(real.textContent).toContain("실전");
+    expect(real.textContent).toContain("자동");
+    expect(real.textContent).toContain("-45,000");
+    expect(real.querySelector('.chip[data-tone="warn"]')!.textContent).toContain("2");
+  });
+
+  test("파생 계좌는 #fo-positions 카드 묶음 — 모의 칩·모드·NAV/현금·「계좌별 화면 ›」 링크", async () => {
+    await mount(routes());
+    const fo = section("fo-positions");
+    expect(fo.hidden).toBe(false);
+    expect(section("overview").querySelector('a[href="/accounts/paper-fo"]')).toBeNull();
+    const link = fo.querySelector('a[href="/accounts/paper-fo"]') as HTMLElement;
+    expect(link.textContent).toBe("계좌별 화면 ›");
+    expect(fo.textContent).toContain("paper-fo");
+    expect(fo.textContent).toContain("모의");
+    expect(fo.textContent).toContain("모드 끔");
+    expect(fo.textContent).toContain("50,000,000");
+    expect(fo.textContent).toContain("현금");
+  });
+
+  test("파생 계좌가 없으면 #fo-positions 는 hidden", async () => {
+    await mount(routes({ "GET /api/accounts": fixtureAccounts().filter((a) => a.lane !== "fo") }));
+    expect(section("fo-positions").hidden).toBe(true);
+  });
+
+  test("합계 조회가 500 이어도 전역 「일시정지」는 보이고 PATCH {value:true}", async () => {
+    await mount(
+      routes({
+        "GET /api/accounts/overview": () => json({ detail: "fx broken" }, 500),
+        "PATCH /api/settings/paused": { paused: true },
+      }),
+    );
+    const ov = section("overview");
+    expect(ov.textContent).toContain("합계를 불러오지 못했습니다");
+    act(() => button(ov, "일시정지").click());
+    act(() => button(dialog(), "확인").click());
+    await flush();
+    expect(bodyOf(patches()[0])).toEqual({ value: true });
+  });
+
+  test("계좌 조회가 실패하면 Empty 로 오류를 보인다", async () => {
+    await mount(routes({ "GET /api/accounts": () => json({ detail: "db locked" }, 500) }));
+    const ov = section("overview");
+    expect(ov.textContent).toContain("계좌를 불러오지 못했습니다");
+    expect(ov.textContent).toContain("db locked");
+  });
+});

@@ -1,0 +1,12 @@
+{
+  "name": "kis-trading-agent",
+  "short_name": "trader",
+  "display": "standalone",
+  "start_url": "/",
+  "lang": "ko",
+  "theme_color": "#F8FAFC",
+  "background_color": "#F8FAFC",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

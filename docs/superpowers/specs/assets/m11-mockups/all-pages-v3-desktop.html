@@ -1,0 +1,428 @@
+<meta charset="utf-8">
+<style>
+  html,body{background:#0b0e12;color:#e6e9ef;margin:0;padding:24px} /* 목업은 다크 전용: 원래 브레인스토밍 페이지의 어두운 바탕 위에 그렸다 */
+  .mk { font-family: Pretendard, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color:#e6e9ef; font-size:13px }
+  .mk h2 { font-size:15px; font-weight:600; margin:28px 0 10px; color:#c3cad6 }
+  .mk h2 small { font-weight:400; color:#8b95a5; font-size:12px; margin-left:8px }
+  .toc { font-size:13px; color:#9aa4b2; margin:0 0 6px; line-height:1.8 } .toc b { color:#e6e9ef }
+  .pc { width:1280px; background:#0f1217; border:1px solid #2a3140; border-radius:14px; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.45); display:grid; grid-template-columns:200px 1fr; }
+  .side { background:#0b0e12; border-right:1px solid #1f2632; padding:16px 12px; display:flex; flex-direction:column; gap:4px }
+  .side .logo { font-weight:700; font-size:15px; margin:0 6px 16px }
+  .side a { display:block; padding:9px 10px; border-radius:9px; font-size:13px; color:#9aa4b2 }
+  .side a.on { background:#161b23; color:#e6e9ef; font-weight:600 }
+  .side .s { display:block; font-size:12px; color:#8b95a5; padding:5px 10px 5px 26px; border-radius:7px; margin:0 }
+  .side .s.on { color:#e6e9ef; background:#141922; font-weight:600 }
+  .side .s.back { color:#6fb1ff; padding-left:14px }
+  .side .foot { margin-top:auto; font-size:12px; color:#8b95a5; padding:8px 10px; line-height:1.7 }
+  .main { padding:14px 18px 18px; min-width:0 }
+  .band { display:flex; align-items:center; justify-content:space-between; font-size:13px; padding:8px 12px; border-radius:10px; background:#161b23; margin-bottom:14px; white-space:nowrap }
+  .ok { color:#5fd38a } .warn { color:#f2c14e } .bad { color:#ff7a7a }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle } .dot.ok{background:#5fd38a} .dot.warn{background:#f2c14e}
+  .clock { font-variant-numeric: tabular-nums; font-weight:600; font-size:15px }
+  .muted { color:#8b95a5 } .tiny { font-size:12px } .num { font-variant-numeric: tabular-nums }
+  .up { color:#ff7a7a } .dn { color:#6fb1ff }
+  .chip { display:inline-block; font-size:11px; line-height:16px; padding:1px 8px; border-radius:999px; background:#232a36; color:#c3cad6; margin-right:4px; white-space:nowrap; vertical-align:middle }
+  .chip.t { background:#243b5a; color:#a9cdfc } .chip.cat { background:#4a3a1f; color:#ffd58a } .chip.th { background:#2b2446; color:#cbb8ff } .chip.used { background:#1f3b2e; color:#9be3b8 }
+  .chip.paper { background:#1f3b2e; color:#9be3b8 } .chip.real { background:#4a2323; color:#ffb4b4 } .chip.mode { background:#243b5a; color:#a9cdfc }
+  .chip.u-ok { background:#1f3b2e; color:#9be3b8 } .chip.u-warn { background:#4a3a1f; color:#ffd58a }
+  .tabs { display:flex; gap:6px; margin-bottom:12px } .tabs span { padding:6px 12px; border-radius:9px; font-size:13px; background:#161b23; color:#9aa4b2 } .tabs span.on { color:#e6e9ef; font-weight:600; border:1px solid #2a3140 }
+  .grid { display:grid; gap:12px } .g3 { grid-template-columns:1fr 1fr 1fr } .g4 { grid-template-columns:1fr 1fr 1fr 1fr } .g2 { grid-template-columns:1fr 1fr }
+  .card { background:#161b23; border:1px solid #232a36; border-radius:14px; padding:14px; min-width:0; margin-bottom:12px }
+  .card h3 { margin:0 0 10px; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center; white-space:nowrap } .card h3 .muted { font-weight:400 }
+  .btn { display:inline-block; padding:6px 12px; border-radius:9px; font-size:12px; font-weight:600; border:1px solid #2a3140; background:#1b2230; margin-left:6px; white-space:nowrap }
+  .btn.y { background:#1f5d3a; border-color:#2b7a4e } .btn.n { background:#5a2b2b; border-color:#7a3a3a } .btn.big { padding:9px 22px; font-size:13px }
+  /* 표 규칙: 고정 레이아웃 + colgroup 폭, 숫자·칩·짧은 글은 nowrap, 긴 글 1열만 한 줄 말줄임 */
+  table { width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed }
+  th { text-align:left; color:#8b95a5; font-weight:500; font-size:12px; padding:6px 8px; border-bottom:1px solid #232a36; white-space:nowrap }
+  td { padding:8px 8px; border-bottom:1px solid #1c222c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric: tabular-nums; vertical-align:middle }
+  td.r, th.r { text-align:right } td.txt { color:#e6e9ef } td.txt .muted { margin-left:6px }
+  tr.sel td { background:#1b2230 }
+  td .btn { padding:3px 10px; margin:0 0 0 4px }
+  .kpi { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; margin:2px 0 } .kpi small { font-size:12px; font-weight:400; color:#8b95a5; margin-left:4px }
+  .kv { display:flex; justify-content:space-between; gap:12px; font-size:13px; padding:4px 0; white-space:nowrap } .kv .k { color:#8b95a5 } .kv .v { overflow:hidden; text-overflow:ellipsis }
+  .meter { margin:10px 0 } .meter .l { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; white-space:nowrap }
+  .meter .bar { height:8px; background:#232a36; border-radius:4px; overflow:hidden } .meter .bar i { display:block; height:100% }
+  .ok-f { background:#5fd38a } .warn-f { background:#f2c14e } .bad-f { background:#ff7a7a }
+  .apv { border:1px solid #6b5a1f; background:#1a1810; border-radius:14px; padding:12px 14px; margin-bottom:12px; display:grid; grid-template-columns: 300px 1fr 190px; gap:16px; align-items:center }
+  .apv .who { white-space:nowrap } .apv .who b { font-size:14px } .apv .why { font-size:13px; line-height:1.5; color:#d7dce4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden }
+  .apv .act { text-align:right; white-space:nowrap }
+  .range { display:inline-block; width:124px; height:6px; background:#232a36; border-radius:3px; position:relative; vertical-align:middle }
+  .range i { position:absolute; top:-3px; width:2px; height:12px } .range i.s{background:#ff7a7a} .range i.n{background:#e6e9ef; width:3px} .range i.t{background:#5fd38a}
+  .spark { height:120px; border-radius:10px; background:linear-gradient(180deg,#1b2230,#161b23); position:relative; overflow:hidden }
+  .spark:after { content:""; position:absolute; left:0; right:0; bottom:24px; height:2px; background:linear-gradient(90deg,#6fb1ff,#5fd38a,#f2c14e); transform:rotate(-4deg); transform-origin:left }
+  .tl { border-left:2px solid #2a3140; margin-left:8px; padding-left:14px } .tl div { padding:4px 0; white-space:nowrap } .tl .t { color:#8b95a5; font-variant-numeric:tabular-nums; margin-right:8px }
+  .strip { display:flex; gap:8px; flex-wrap:nowrap; overflow:hidden; align-items:center; margin-bottom:12px; white-space:nowrap } .strip .lbl { color:#8b95a5; font-size:12px; margin-right:4px }
+  .filters { display:flex; gap:8px; align-items:center; white-space:nowrap; font-size:12px; color:#9aa4b2; margin-bottom:10px } .filters span.f { padding:4px 10px; border-radius:8px; background:#1b2230; border:1px solid #2a3140; color:#c3cad6 }
+  .note { font-size:12px; color:#9aa4b2; margin:10px 0 0; line-height:1.6; max-width:1280px }
+  .phones { display:flex; gap:24px } .phone { width:390px; background:#0f1217; border:1px solid #2a3140; border-radius:28px; padding:14px; box-shadow:0 20px 50px rgba(0,0,0,.45) }
+  .phone .band { margin-bottom:10px; font-size:12px } .phone .card { padding:12px } .phone .btm { display:flex; justify-content:space-around; font-size:12px; color:#8b95a5; padding:10px 0 2px; border-top:1px solid #1f2632; margin-top:4px } .phone .btm b { color:#e6e9ef }
+  .nrow { padding:8px 0; border-bottom:1px solid #1c222c } .nrow .h { display:flex; justify-content:space-between; white-space:nowrap; font-size:12px; color:#8b95a5 } .nrow .ttl { margin:3px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#e6e9ef }
+</style>
+
+<div class="mk">
+  <p class="toc"><b>v3 목업 — 왼쪽 메뉴의 하위 목차를 줄마다 하나씩(2단 메뉴), PC 본문 탭은 제거.</b> 순서: ① 오늘 · ② 계좌·보유 · ③ 성과 · ④ 데이터 › 뉴스 · ⑤ 시스템 › Claude 사용량 · ⑥ 결정 상세 · ⑦ 주문·체결 목록 · ⑧ 잡·실행 기록 · ⑨ 휴대폰(뉴스·결정 상세). 숫자는 가짜 예시.</p>
+  <p class="toc">고친 규칙: 표는 항상 본문 전체 폭(약 1,040px)을 쓰고 옆에 다른 카드를 두지 않는다 · 숫자·칩·짧은 글 열은 줄바꿈 금지, 단위는 머리글로 · 긴 글(제목·근거)은 표당 1열만 두고 한 줄 말줄임(마우스 올리면 전문) · 열 폭은 고정 · 왼쪽 메뉴 하단 사용량 칩 제거, 상단 띠 칩에 5시간·7일 모두 리셋 남은 시간 표기.</p>
+
+  <!-- ① 오늘 -->
+  <h2>① 오늘<small>승인 카드 한 줄 · 결정 표 전체 폭 · 주문·알림은 아래 2열 카드</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a class="on">오늘</a><a class="s">승인</a><a class="s">현물</a><a class="s">단타</a><a class="s">파생</a>
+      <a>계좌·보유</a><a>성과</a><a>데이터</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 원장 1초 전 · 시세 WS · 현금 12초 전</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="muted tiny">2026-11-04(화)</span> <span class="clock">14:27:38</span> <span class="muted tiny">KST · KR 정규장 · US 개장 23:30</span></span>
+      </div>
+
+      <div class="apv">
+        <div class="who"><span class="chip paper">모의</span><b>삼성전자</b> <span class="muted">005930 · paper-main</span><br><span class="num"><b>매수 12주</b> · 1,017,600원</span> <span class="muted tiny">· 만료 14:45:00</span></div>
+        <div class="why">반도체 수출 지표 반등·외국인 3일 순매수. 20일선 지지, 손절 −5%·목표 +9%. bear: 환율 변동성 → 비중 1.5% 제한. 리스크 체크 통과(섹터 9% / 일손실 −0.3%).</div>
+        <div class="act"><span class="btn big y">승인</span><span class="btn big n">거절</span><br><span class="muted tiny">전체 근거 → 결정 상세</span></div>
+      </div>
+
+      <div class="grid g3" style="margin-bottom:12px">
+        <div class="card" style="margin:0"><h3>현물 <span class="muted">세션 1/1 · KR·US</span></h3><div class="kpi">3<small>결정</small></div><div class="muted tiny">매수 2 · 보류 1 · 체결 1 · 승인 대기 1</div></div>
+        <div class="card" style="margin:0"><h3>단타 <span class="muted">틱 60초 · 정상</span></h3><div class="kpi">7<small>체결</small></div><div class="muted tiny">보유 2 · 미체결 1 · 당일 <span class="up">+0.9%</span></div></div>
+        <div class="card" style="margin:0"><h3>파생 <span class="muted">세션 1/3 · 재평가 대기</span></h3><div class="kpi">1<small>포지션</small></div><div class="muted tiny">K200 C365 ×2 · 3.21pt <span class="up">+1.9%</span> · 손절 −12%</div></div>
+      </div>
+
+      <div class="card">
+        <h3>오늘 결정 <span class="muted">11월 4일 ▾ · 레인 전체 ▾ · 계좌 전체 ▾ <span class="btn">CSV</span></span></h3>
+        <table>
+          <colgroup><col style="width:72px"><col style="width:56px"><col style="width:100px"><col style="width:140px"><col style="width:60px"><col style="width:60px"><col style="width:104px"><col><col style="width:90px"></colgroup>
+          <tr><th>시각</th><th>레인</th><th>계좌</th><th>종목</th><th>판정</th><th class="r">수량</th><th class="r">금액(원)</th><th>근거 요약</th><th>상태</th></tr>
+          <tr><td>09:03:50</td><td>현물</td><td>paper-main</td><td>삼성전자 <span class="muted tiny">005930</span></td><td>매수</td><td class="r">12</td><td class="r">1,017,600</td><td class="txt">반도체 수출 반등·외국인 순매수, 20일선 지지, 손절 −5% 목표 +9%</td><td class="warn">승인 대기</td></tr>
+          <tr><td>09:03:48</td><td>현물</td><td>paper-main</td><td>SK하이닉스 <span class="muted tiny">000660</span></td><td>매수</td><td class="r">3</td><td class="r">561,900</td><td class="txt">HBM 수요 가이던스 상향, 거래량 2.1배, 섹터 비중 9% 이내</td><td>체결</td></tr>
+          <tr><td>09:03:45</td><td>현물</td><td>paper-main</td><td>NAVER <span class="muted tiny">035420</span></td><td class="muted">보류</td><td class="r muted">—</td><td class="r muted">—</td><td class="txt muted">촉매 없음 · 20일선 아래 · bear 우세 → 관망</td><td class="muted">—</td></tr>
+          <tr><td>08:20:11</td><td>파생</td><td>paper-fo</td><td>K200 C365 <span class="muted tiny">11월물</span></td><td>진입</td><td class="r">2</td><td class="r">1,605,000</td><td class="txt">KOSPI200 갭 상승 후 되돌림 지지, IV 낮음, 만기 9일</td><td>체결</td></tr>
+          <tr><td>08:19:02</td><td>현물</td><td>paper-us</td><td>NVDA</td><td>매수</td><td class="r">4</td><td class="r">$7,480</td><td class="txt">실적 발표 후 갭 유지, 프리마켓 거래량 상위, 손절 −6%</td><td class="muted">US 개장 대기</td></tr>
+        </table>
+      </div>
+
+      <div class="grid g2">
+        <div class="card" style="margin:0"><h3>주문·체결 <span class="muted">오늘 3건 · 전체 보기 →</span></h3>
+          <div class="tl"><div><span class="t">14:21:07</span>SK하이닉스 매수 3주 체결 187,300</div><div><span class="t">13:58:40</span>단타 LG에너지 매도 5주 <span class="up">+1.8%</span></div><div><span class="t">09:04:12</span>K200 C365 매수 2계약 3.15pt</div></div></div>
+        <div class="card" style="margin:0"><h3>알림 <span class="muted">전체 ▾</span></h3>
+          <div class="tl"><div><span class="t">14:21</span>체결 · SK하이닉스 3주</div><div><span class="t">08:35</span>아침 리뷰 · 현물 KR 완료</div><div><span class="t">08:20</span>파생 세션 · 진입 결정 1</div><div><span class="t">07:58</span>운영 · 데몬 시작 v0.2.0</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 계좌·보유 -->
+  <h2>② 계좌·보유<small>합계 카드 → 계좌 표(전체 폭) → 선택 계좌 상세(아래로 펼침, 보유 표도 전체 폭)</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a>오늘</a><a class="on">계좌·보유</a><a class="s on">통합</a><a class="s">paper-main</a><a class="s">paper-scalp</a><a class="s">paper-fo</a><a class="s">paper-us</a><a class="s">real-main</a>
+      <a>성과</a><a>데이터</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot warn"></span><span class="warn">주의</span> <span class="muted tiny">· 미국 시세 REST 5초 · 현금 41초 전 · 세션 상한 90%</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">23:41:05</span> <span class="muted tiny">KST · US 정규장(09:41 ET) · KR 휴장</span></span>
+      </div>
+      <div class="grid g3" style="margin-bottom:12px">
+        <div class="card" style="margin:0"><h3>원화 계좌 합계 <span class="muted">4계좌</span></h3><div class="kpi">48,215,300<small>원</small></div><div class="up">+312,400 (+0.65%)</div></div>
+        <div class="card" style="margin:0"><h3>달러 계좌 합계 <span class="muted">1계좌</span></h3><div class="kpi">$12,480.22</div><div class="dn">−$84.10 (−0.67%)</div></div>
+        <div class="card" style="margin:0"><h3>참고 <span class="muted">합계 계산에 쓰지 않음</span></h3><div class="kv"><span class="k">적용 환율 USD/KRW</span><span class="v">1,392.5 <span class="muted tiny">(11월 3일 종가)</span></span></div><div class="kv"><span class="k">환산 합계</span><span class="v">65,593,000원</span></div><div class="kv"><span class="k">전역 일시정지</span><span class="v"><span class="chip">꺼짐</span></span></div></div>
+      </div>
+      <div class="card">
+        <h3>계좌 <span class="muted">행을 고르면 아래에 상세가 펼쳐집니다</span></h3>
+        <table>
+          <colgroup><col style="width:140px"><col style="width:96px"><col style="width:80px"><col style="width:120px"><col style="width:76px"><col style="width:120px"><col style="width:56px"><col style="width:56px"><col style="width:80px"><col style="width:90px"><col></colgroup>
+          <tr><th>계좌</th><th>레인</th><th>모드</th><th class="r">NAV</th><th class="r">당일</th><th class="r">현금</th><th class="r">보유</th><th class="r">승인</th><th>세션</th><th>시세</th><th>최근 갱신</th></tr>
+          <tr class="sel"><td><span class="chip paper">모의</span>paper-main</td><td>현물 KR·US</td><td><span class="chip mode">auto</span></td><td class="r">31,402,100</td><td class="r up">+0.9%</td><td class="r">8,120,400</td><td class="r">6</td><td class="r">1</td><td>1/1</td><td>WS 1초</td><td class="muted">12초 전</td></tr>
+          <tr><td><span class="chip paper">모의</span>paper-scalp</td><td>단타 KR</td><td><span class="chip mode">auto</span></td><td class="r">9,813,200</td><td class="r dn">−0.2%</td><td class="r">4,010,000</td><td class="r">2</td><td class="r">0</td><td>틱 60초</td><td>WS 1초</td><td class="muted">3초 전</td></tr>
+          <tr><td><span class="chip paper">모의</span>paper-fo</td><td>파생</td><td><span class="chip mode">auto</span></td><td class="r">7,000,000</td><td class="r up">+1.4%</td><td class="r">5,390,000</td><td class="r">1</td><td class="r">0</td><td>1/3</td><td>REST 2초</td><td class="muted">2초 전</td></tr>
+          <tr><td><span class="chip paper">모의</span>paper-us</td><td>현물 US</td><td><span class="chip mode">approve</span></td><td class="r">$12,480.22</td><td class="r dn">−0.67%</td><td class="r">$3,102.10</td><td class="r">3</td><td class="r">0</td><td>—</td><td>REST 5초</td><td class="muted">5초 전</td></tr>
+          <tr><td><span class="chip real">실전</span>real-main</td><td>현물 KR</td><td><span class="chip">off</span></td><td class="r muted">조회만</td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr>
+        </table>
+      </div>
+      <div class="card" style="margin:0">
+        <h3><span>paper-main <span class="chip paper">모의</span><span class="chip mode">auto</span> <span class="muted tiny">NAV 31,402,100원 · 현금 8,120,400원 (12초 전) · 리스크 종목 1.5% / 섹터 9% / 일손실 −0.3%</span></span><span><span class="btn">모드 변경</span><span class="btn">계좌 일시정지</span><span class="btn">lot 보기</span><span class="btn">접기 ▴</span></span></h3>
+        <div class="grid g4" style="margin-bottom:12px">
+          <div class="spark" style="grid-column:1/3"></div>
+          <div><div class="kv"><span class="k">NAV 30일</span><span class="v up">+4.2%</span></div><div class="kv"><span class="k">최대 낙폭</span><span class="v">−2.1%</span></div><div class="kv"><span class="k">현금 비중</span><span class="v">25.9%</span></div></div>
+          <div><div class="kv"><span class="k">오늘 결정</span><span class="v">3</span></div><div class="kv"><span class="k">승인 대기</span><span class="v warn">1</span></div><div class="kv"><span class="k">마지막 세션</span><span class="v">09:03 (38초)</span></div></div>
+        </div>
+        <table>
+          <colgroup><col style="width:150px"><col style="width:56px"><col style="width:96px"><col style="width:96px"><col style="width:80px"><col style="width:96px"><col style="width:140px"><col style="width:96px"><col style="width:100px"><col></colgroup>
+          <tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">손익</th><th class="r">손절</th><th>손절 · 현재 · 목표</th><th class="r">목표</th><th>출처</th><th>비고</th></tr>
+          <tr><td>삼성전자 <span class="muted tiny">005930</span></td><td class="r">12</td><td class="r">83,050</td><td class="r up">84,800</td><td class="r up">+2.1%</td><td class="r">78,900</td><td><span class="range"><i class="s" style="left:8%"></i><i class="n" style="left:46%"></i><i class="t" style="left:92%"></i></span></td><td class="r">90,500</td><td>결정 · 결정</td><td class="muted">승인 대기 1</td></tr>
+          <tr><td>SK하이닉스 <span class="muted tiny">000660</span></td><td class="r">3</td><td class="r">187,300</td><td class="r dn">185,900</td><td class="r dn">−0.7%</td><td class="r">174,200</td><td><span class="range"><i class="s" style="left:8%"></i><i class="n" style="left:38%"></i></span></td><td class="r muted">—</td><td>기본 −7% · —</td><td class="muted">오늘 체결</td></tr>
+          <tr><td>현대차 <span class="muted tiny">005380</span></td><td class="r">5</td><td class="r">229,000</td><td class="r up">243,500</td><td class="r up">+6.3%</td><td class="r">236,000</td><td><span class="range"><i class="s" style="left:30%"></i><i class="n" style="left:62%"></i><i class="t" style="left:92%"></i></span></td><td class="r">252,000</td><td>추적 · 결정</td><td class="muted">추적 손절 상향</td></tr>
+          <tr><td>KODEX 200 <span class="chip">헤지</span></td><td class="r">40</td><td class="r">37,960</td><td class="r up">38,120</td><td class="r up">+0.4%</td><td class="r muted">—</td><td class="muted">—</td><td class="r muted">—</td><td class="muted">헤지</td><td class="muted">베타 헤지 포지션</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 성과 -->
+  <h2>③ 성과<small>기간 선택 → 지표 카드 4 → 자산 곡선 → 일별 표(전체 폭) · 레인·계좌 비교는 탭</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a>오늘</a><a>계좌·보유</a><a class="on">성과</a><a class="s on">요약</a><a class="s">레인 비교</a><a class="s">섀도</a><a class="s">보정</a><a class="s">RL</a><a>데이터</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 성과 집계 09:10 (오늘 마감 전까지 전일 기준)</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST</span></span>
+      </div>
+      <div class="filters"><span class="f">기간 30일 ▾</span><span class="f">계좌 전체 ▾</span><span class="f">레인 전체 ▾</span><span class="f">통화 원화 ▾</span><span class="muted">10/05 – 11/04</span></div>
+      <div class="grid g4" style="margin-bottom:12px">
+        <div class="card" style="margin:0"><h3>누적 수익 <span class="muted">30일</span></h3><div class="kpi up">+4.2%</div><div class="muted tiny">+1,942,000원 · 벤치마크 KOSPI +2.8%</div></div>
+        <div class="card" style="margin:0"><h3>승률 <span class="muted">청산 23건</span></h3><div class="kpi">61%</div><div class="muted tiny">평균 이익 +3.4% · 평균 손실 −2.1%</div></div>
+        <div class="card" style="margin:0"><h3>최대 낙폭</h3><div class="kpi dn">−2.1%</div><div class="muted tiny">10/18 → 10/21 · 회복 3일</div></div>
+        <div class="card" style="margin:0"><h3>세션 비용 <span class="muted">30일</span></h3><div class="kpi">$118.40</div><div class="muted tiny">세션 162 · 결정당 $0.73</div></div>
+      </div>
+      <div class="card"><h3>자산 곡선 <span class="muted">계좌 합계(원화) · 벤치마크 점선 · 결정 마커 ○</span></h3><div class="spark" style="height:200px"></div></div>
+      <div class="card" style="margin:0">
+        <h3>일별 <span class="muted">최근 10일 <span class="btn">CSV</span></span></h3>
+        <table>
+          <colgroup><col style="width:110px"><col style="width:130px"><col style="width:90px"><col style="width:64px"><col style="width:64px"><col style="width:64px"><col style="width:90px"><col style="width:90px"><col style="width:90px"><col></colgroup>
+          <tr><th>날짜</th><th class="r">NAV(원)</th><th class="r">일손익</th><th class="r">결정</th><th class="r">체결</th><th class="r">청산</th><th class="r">실현</th><th class="r">세션</th><th class="r">비용</th><th>메모</th></tr>
+          <tr><td>11/03(월)</td><td class="r">47,902,900</td><td class="r up">+0.8%</td><td class="r">4</td><td class="r">3</td><td class="r">1</td><td class="r up">+96,000</td><td class="r">6</td><td class="r">$4.10</td><td class="txt muted">현대차 추적 손절 상향</td></tr>
+          <tr><td>10/31(금)</td><td class="r">47,522,100</td><td class="r dn">−0.3%</td><td class="r">2</td><td class="r">1</td><td class="r">1</td><td class="r dn">−41,000</td><td class="r">5</td><td class="r">$3.80</td><td class="txt muted">NAVER 손절 청산</td></tr>
+          <tr><td>10/30(목)</td><td class="r">47,665,000</td><td class="r up">+1.1%</td><td class="r">5</td><td class="r">4</td><td class="r">0</td><td class="r muted">—</td><td class="r">7</td><td class="r">$5.20</td><td class="txt muted">반도체 테마 진입 2</td></tr>
+          <tr><td>10/29(수)</td><td class="r">47,146,300</td><td class="r up">+0.2%</td><td class="r">1</td><td class="r">0</td><td class="r">0</td><td class="r muted">—</td><td class="r">4</td><td class="r">$2.90</td><td class="txt muted">관망</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 데이터 › 뉴스 -->
+  <h2>④ 데이터 › 뉴스<small>테마·이벤트는 표 위 한 줄 칩으로 · 뉴스 표 전체 폭 · 소스 배지, 질의는 툴팁 · 제목만 말줄임 · 라벨 열 넘치면 +N</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a>오늘</a><a>계좌·보유</a><a>성과</a><a class="on">데이터</a><a class="s on">뉴스</a><a class="s">이벤트</a><a class="s">테마</a><a class="s">지표·모델</a><a class="s">유니버스</a><a class="s">차트</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 뉴스 수집 14:00 (27분 전) · 다음 14:30</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST · KR 정규장</span></span>
+      </div>
+      <div class="strip"><span class="lbl">오늘 테마</span><span class="chip th">AI 메모리 0.82</span><span class="chip th">2차전지 0.41</span><span class="chip th">방산 0.37</span><span class="lbl" style="margin-left:14px">이번 주 이벤트</span><span class="chip">11/05 FOMC</span><span class="chip t">11/06 삼성전자 배당 기준일</span><span class="chip">11/07 미 고용지표</span><span class="chip">11/13 옵션 만기</span><span class="muted tiny" style="margin-left:auto">테마·이벤트 탭에서 전체 →</span></div>
+      <div class="card" style="margin:0">
+        <h3><span>KR 시장 뉴스 <span class="muted tiny">최근 48시간 · 100건</span></span><span class="filters" style="margin:0"><span class="f">시장 KR ▾</span><span class="f">종목 태그만 ☐</span><span class="f">촉매만 ☐</span><span class="f">판정에 쓰임만 ☐</span><span class="btn">지금 수집</span><span class="btn">읽은 기사 붙여 넣기</span></span></h3>
+        <table>
+          <colgroup><col style="width:64px"><col style="width:120px"><col><col style="width:300px"></colgroup>
+          <tr><th>시각</th><th>소스</th><th>제목 <span class="muted">(마우스 올리면 전문·질의)</span></th><th>라벨</th></tr>
+          <tr><td>14:02</td><td><span class="chip">연합인포맥스</span></td><td class="txt">10월 반도체 수출 40% 증가, 메모리 가격 반등세 — 삼성전자·SK하이닉스 4분기 실적 기대</td><td><span class="chip t">삼성전자</span><span class="chip t">SK하이닉스</span><span class="chip th">AI 메모리</span><span class="chip used">판정</span></td></tr>
+          <tr><td>13:40</td><td><span class="chip">DART</span></td><td class="txt">현대차, 3분기 잠정 영업이익 3.2조 — 컨센서스 상회</td><td><span class="chip t">현대차</span><span class="chip cat">촉매</span></td></tr>
+          <tr><td>13:12</td><td><span class="chip">Google News</span></td><td class="txt">외국인 3일 연속 순매수… 코스피 2,600 회복</td><td><span class="chip">시장</span></td></tr>
+          <tr><td>12:48</td><td><span class="chip">네이버 블로그</span></td><td class="txt">2차전지 재고 사이클 바닥론, 11월 체크포인트 — 양극재 가동률과 리튬 가격</td><td><span class="chip t">LG에너지솔루션</span><span class="chip th">2차전지</span></td></tr>
+          <tr><td>11:05</td><td><span class="chip">Google News</span></td><td class="txt">원/달러 1,390원대… 수출주 환차익 기대</td><td><span class="chip">거시</span></td></tr>
+          <tr><td>10:20</td><td><span class="chip">연합인포맥스</span></td><td class="txt">한미반도체, HBM 장비 수주 잔고 사상 최대 — 올해 매출 가이던스 상향</td><td><span class="chip t">한미반도체</span><span class="chip t">SK하이닉스</span><span class="chip th">AI 메모리</span><span class="chip cat">촉매</span><span class="chip">+2</span></td></tr>
+          <tr><td>09:30</td><td><span class="chip">수동 입력</span></td><td class="txt">삼성전자 HBM4 공급 계약 보도 (붙여 넣음)</td><td><span class="chip t">삼성전자</span><span class="chip cat">촉매</span><span class="chip used">판정</span></td></tr>
+        </table>
+        <p class="tiny muted" style="margin:10px 0 0">행을 누르면 아래로 펼쳐져 전문·질의·수집 시각·원문 링크·어느 결정에 쓰였는지가 보입니다. 종목 칩 → 차트, 테마 칩 → 테마 탭.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ 시스템 -->
+  <h2>⑤ 시스템 › Claude 사용량<small>왼쪽 메뉴 하단 칩 제거 · 5시간 창에도 리셋 남은 시간 · 세션 표 전체 폭</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a>오늘</a><a>계좌·보유</a><a>성과</a><a>데이터</a><a class="on">시스템</a><a class="s on">사용량</a><a class="s">상태</a><a class="s">데몬·잡</a><a class="s">실행 기록</a><a class="s">설정</a><a class="s">키·토큰</a><a class="s">조작 이력</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>쓰기 토큰 저장됨</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 사용량 관측 3분 전(session)</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST</span></span>
+      </div>
+      <div class="grid g2" style="margin-bottom:12px">
+        <div class="card" style="margin:0">
+          <h3>구독 사용률 <span class="muted">관측 14:24 (3분 전) · 출처 session <span class="btn">지금 확인</span></span></h3>
+          <div class="meter"><div class="l"><span>5시간 창</span><span>42% <span class="muted">· 1시간 32분 뒤 리셋 (16:00)</span></span></div><div class="bar"><i class="ok-f" style="width:42%"></i></div></div>
+          <div class="meter"><div class="l"><span>7일 창</span><span>78% <span class="muted">· 3일 6시간 뒤 리셋 (11/07 21:00)</span></span></div><div class="bar"><i class="warn-f" style="width:78%"></i></div></div>
+          <div class="meter"><div class="l"><span>지출 한도</span><span>31% <span class="muted">· 월 기준</span></span></div><div class="bar"><i class="ok-f" style="width:31%"></i></div></div>
+          <p class="tiny muted" style="margin:8px 0 0">남은 시간은 서버 시계로 초 단위 갱신. 정확한 값은 claude 의 /usage.</p>
+        </div>
+        <div class="card" style="margin:0">
+          <h3>감속 <span class="muted">출처 control</span></h3>
+          <div class="kv"><span class="k">상태</span><span class="v">ok <span class="muted tiny">(soft 80% · hard 95%)</span></span></div>
+          <div class="kv"><span class="k">새 세션</span><span class="v">허용</span></div>
+          <div class="kv"><span class="k">보유 재평가</span><span class="v">허용</span></div>
+          <div class="kv"><span class="k">감속 켬</span><span class="v"><span class="chip u-ok">켜짐</span><span class="btn">끄기</span></span></div>
+          <div class="kv"><span class="k">오늘 상한</span><span class="v">현물 analyze 1/2 · resume 4/20 · 파생 1/3</span></div>
+          <p class="tiny muted" style="margin:8px 0 0">7일 창이 soft 를 넘으면 새 세션을 줄이고 보유 재평가만 통과, hard 를 넘으면 전부 멈춥니다.</p>
+        </div>
+      </div>
+      <div class="card" style="margin:0">
+        <h3>이 저장소 세션 <span class="muted">원장 runs·calls · 최근 호출 → 실행 기록 탭</span></h3>
+        <table>
+          <colgroup><col style="width:120px"><col style="width:90px"><col style="width:100px"><col style="width:90px"><col style="width:110px"><col style="width:110px"><col></colgroup>
+          <tr><th>창</th><th class="r">세션</th><th class="r">비용</th><th class="r">오류</th><th class="r">평균 길이</th><th class="r">토큰</th><th>가장 많이 쓴 종류</th></tr>
+          <tr><td>5시간</td><td class="r">3</td><td class="r">$1.84</td><td class="r">0</td><td class="r">38초</td><td class="r">31.2k</td><td class="txt muted">analyst-technical 2 · resume 1</td></tr>
+          <tr><td>7일</td><td class="r">41</td><td class="r">$27.10</td><td class="r">2</td><td class="r">41초</td><td class="r">412k</td><td class="txt muted">analyst-technical 18 · resume 14 · fo_session 6 · reflect 3</td></tr>
+          <tr><td>30일</td><td class="r">162</td><td class="r">$118.40</td><td class="r">5</td><td class="r">40초</td><td class="r">1.6M</td><td class="txt muted">analyst-technical 71 · resume 58 · fo_session 22 · reflect 11</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ 결정 상세 -->
+  <h2>⑥ 상세 — 결정<small>/decisions/spot/{id} · 머리 → 근거 전문 → 단계 체크포인트 → 참고 뉴스 → 주문·결과</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a class="on">오늘</a><a class="s back">‹ 오늘 결정으로</a><a class="s">승인</a><a class="s on">현물</a><a class="s">단타</a><a class="s">파생</a><a>계좌·보유</a><a>성과</a><a>데이터</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 결정 d-20261104-0903-samsung · 현물 · paper-main</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST</span></span>
+      </div>
+      <div class="card">
+        <h3><span><span class="chip paper">모의</span><b style="font-size:16px">삼성전자</b> <span class="muted">005930 · 매수 12주 · 1,017,600원 · 09:03:50</span></span><span><span class="warn">승인 대기 · 만료 14:45:00</span> <span class="btn big y">승인</span><span class="btn big n">거절</span></span></h3>
+        <div class="grid g4">
+          <div><div class="kv"><span class="k">진입가</span><span class="v">84,800</span></div><div class="kv"><span class="k">손절</span><span class="v">78,900 (−7.0%)</span></div><div class="kv"><span class="k">목표</span><span class="v">90,500 (+6.7%)</span></div></div>
+          <div><div class="kv"><span class="k">비중</span><span class="v">3.2% → 1.5% 제한</span></div><div class="kv"><span class="k">섹터</span><span class="v">반도체 9%/10%</span></div><div class="kv"><span class="k">일손실</span><span class="v">−0.3%/−2%</span></div></div>
+          <div><div class="kv"><span class="k">신뢰도</span><span class="v">0.71</span></div><div class="kv"><span class="k">레짐</span><span class="v">bull-weak</span></div><div class="kv"><span class="k">모델</span><span class="v">lgbm-2026-10-28</span></div></div>
+          <div><div class="kv"><span class="k">세션</span><span class="v">run 8812 · 38초</span></div><div class="kv"><span class="k">비용</span><span class="v">$0.41 · 12.3k tok</span></div><div class="kv"><span class="k">리스크 체크</span><span class="v ok">통과 5/5</span></div></div>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-bottom:12px">
+        <div class="card" style="margin:0"><h3>근거 전문</h3>
+          <p style="margin:0; line-height:1.6; font-size:13px; white-space:normal">반도체 수출 지표가 10월 +40%로 반등했고 외국인이 3일 연속 순매수 중이다. 가격은 20일선 위에서 지지를 확인했고 거래량은 20일 평균의 1.8배. bear 시각: 원/달러 변동성이 커 외국인 수급이 되돌릴 수 있어 비중을 1.5%로 제한하고 손절 −7%를 둔다. 목표는 직전 고점 90,500.</p></div>
+        <div class="card" style="margin:0"><h3>단계 체크포인트 <span class="muted">각 단계 클릭 → 입력·출력 원문</span></h3>
+          <div class="tl"><div><span class="t">09:03:12</span>스캔 통과 · 촉매 2 · 테마 AI 메모리 0.82</div><div><span class="t">09:03:20</span>기술 분석 · 추세 ↑ · 지지 82,900</div><div><span class="t">09:03:31</span>bull/bear 토론 · bear 비중 제한 채택</div><div><span class="t">09:03:44</span>리스크 체크 5/5 통과</div><div><span class="t">09:03:50</span>승인 요청 · 텔레그램 발송</div></div></div>
+      </div>
+      <div class="card" style="margin:0">
+        <h3>참고한 뉴스 <span class="muted">2건</span></h3>
+        <table>
+          <colgroup><col style="width:64px"><col style="width:120px"><col><col style="width:260px"></colgroup>
+          <tr><th>시각</th><th>소스</th><th>제목</th><th>라벨</th></tr>
+          <tr><td>14:02</td><td><span class="chip">연합인포맥스</span></td><td class="txt">10월 반도체 수출 40% 증가, 메모리 가격 반등세</td><td><span class="chip t">삼성전자</span><span class="chip th">AI 메모리</span><span class="chip used">판정</span></td></tr>
+          <tr><td>09:30</td><td><span class="chip">수동 입력</span></td><td class="txt">삼성전자 HBM4 공급 계약 보도</td><td><span class="chip t">삼성전자</span><span class="chip cat">촉매</span><span class="chip used">판정</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑦ 주문·체결 목록 -->
+  <h2>⑦ 상세 목록 — 주문·체결<small>/orders · 필터 한 줄 · 전체 폭 표 · CSV</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a class="on">오늘</a><a class="s back">‹ 오늘로</a><a class="s">승인</a><a class="s">현물</a><a class="s">단타</a><a class="s">파생</a><a class="s on">주문·체결</a><a>계좌·보유</a><a>성과</a><a>데이터</a><a>시스템</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>세션 현물 1/1 · 파생 1/3</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 원장 1초 전</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST</span></span>
+      </div>
+      <div class="card" style="margin:0">
+        <h3><span>주문·체결 <span class="muted tiny">11월 4일 · 9건</span></span><span class="filters" style="margin:0"><span class="f">날짜 11/04 ▾</span><span class="f">레인 전체 ▾</span><span class="f">계좌 전체 ▾</span><span class="f">상태 전체 ▾</span><span class="btn">CSV</span></span></h3>
+        <table>
+          <colgroup><col style="width:76px"><col style="width:52px"><col style="width:104px"><col style="width:150px"><col style="width:52px"><col style="width:56px"><col style="width:90px"><col style="width:90px"><col style="width:110px"><col style="width:84px"><col></colgroup>
+          <tr><th>시각</th><th>레인</th><th>계좌</th><th>종목</th><th>구분</th><th class="r">수량</th><th class="r">주문가</th><th class="r">체결가</th><th class="r">금액(원)</th><th>상태</th><th>결정 / 사유</th></tr>
+          <tr><td>14:21:07</td><td>현물</td><td>paper-main</td><td>SK하이닉스 <span class="muted tiny">000660</span></td><td>매수</td><td class="r">3</td><td class="r">187,500</td><td class="r">187,300</td><td class="r">561,900</td><td class="ok">체결</td><td class="txt muted">d-0903-skhynix · 지정가 체결</td></tr>
+          <tr><td>13:58:40</td><td>단타</td><td>paper-scalp</td><td>LG에너지솔루션</td><td>매도</td><td class="r">5</td><td class="r">시장가</td><td class="r">402,000</td><td class="r">2,010,000</td><td class="ok">체결</td><td class="txt muted">목표 도달 +1.8%</td></tr>
+          <tr><td>13:40:02</td><td>단타</td><td>paper-scalp</td><td>에코프로</td><td>매수</td><td class="r">10</td><td class="r">98,100</td><td class="r muted">—</td><td class="r">981,000</td><td class="warn">미체결</td><td class="txt muted">틱 60초 · 3회 재시도 후 취소 예정</td></tr>
+          <tr><td>09:04:12</td><td>파생</td><td>paper-fo</td><td>K200 C365 <span class="muted tiny">11월물</span></td><td>매수</td><td class="r">2</td><td class="r">3.15pt</td><td class="r">3.15pt</td><td class="r">1,575,000</td><td class="ok">체결</td><td class="txt muted">d-0820-k200 · 진입</td></tr>
+          <tr><td>09:03:52</td><td>현물</td><td>paper-main</td><td>삼성전자 <span class="muted tiny">005930</span></td><td>매수</td><td class="r">12</td><td class="r">84,800</td><td class="r muted">—</td><td class="r">1,017,600</td><td class="warn">승인 대기</td><td class="txt muted">d-0903-samsung · 만료 14:45</td></tr>
+          <tr><td>08:31:00</td><td>현물</td><td>paper-main</td><td>NAVER <span class="muted tiny">035420</span></td><td>매도</td><td class="r">4</td><td class="r">시장가</td><td class="r">198,400</td><td class="r">793,600</td><td class="ok">체결</td><td class="txt muted">손절 −5% 도달 · 모니터 규칙</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑧ 잡·실행 기록 -->
+  <h2>⑧ 상세 목록 — 시스템 › 데몬·잡 / 실행 기록<small>큐 표 + 예정 표 위아래로 · 실행 기록은 run 한 줄 → 펼치면 call 목록</small></h2>
+  <div class="pc">
+    <div class="side">
+      <div class="logo">trader</div>
+      <a>오늘</a><a>계좌·보유</a><a>성과</a><a>데이터</a><a class="on">시스템</a><a class="s">사용량</a><a class="s">상태</a><a class="s on">데몬·잡</a><a class="s">실행 기록</a><a class="s">설정</a><a class="s">키·토큰</a><a class="s">조작 이력</a>
+      <div class="foot">데몬 정상 · v0.2.0<br>쓰기 토큰 저장됨</div>
+    </div>
+    <div class="main">
+      <div class="band">
+        <span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted tiny">· 데몬 pid 48112 · 가동 6시간 29분 · 마지막 틱 1초 전</span></span>
+        <span><span class="chip u-ok">Claude 5h 42% · 1시간 32분 뒤 리셋</span><span class="chip u-warn">7d 78% · 3일 뒤 리셋</span> &nbsp; <span class="clock">14:27:38</span> <span class="muted tiny">KST</span></span>
+      </div>
+      <div class="card">
+        <h3><span>큐 <span class="muted tiny">대기 2 · 실행 중 1</span></span><span><span class="btn">잡 넣기 ▾</span></span></h3>
+        <table>
+          <colgroup><col style="width:80px"><col style="width:200px"><col style="width:64px"><col style="width:90px"><col style="width:110px"><col style="width:110px"><col><col style="width:110px"></colgroup>
+          <tr><th>시각</th><th>종류</th><th class="r">우선</th><th>레인</th><th>출처</th><th>상태</th><th>매개변수</th><th></th></tr>
+          <tr><td>14:27:10</td><td>kr_monitor_tick</td><td class="r">0</td><td>fast</td><td>스케줄</td><td class="ok">실행 중 28초</td><td class="txt muted">account=paper-main</td><td class="r"><span class="btn">로그</span></td></tr>
+          <tr><td>14:25:00</td><td>news_ingest</td><td class="r">5</td><td>slow</td><td>스케줄</td><td class="muted">대기</td><td class="txt muted">market=KR hours=2</td><td class="r"><span class="btn">취소</span></td></tr>
+          <tr><td>14:22:41</td><td>approve_execute</td><td class="r">0</td><td>fast</td><td>웹 · ohs</td><td class="muted">대기(승인 후)</td><td class="txt muted">approval_id=apv-9f21 actor=web:ohs</td><td class="r"><span class="btn">취소</span></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>예정 <span class="muted">오늘 남은 일정 · 스케줄 설정 → 설정 탭</span></h3>
+        <table>
+          <colgroup><col style="width:80px"><col style="width:200px"><col style="width:90px"><col style="width:120px"><col><col style="width:110px"></colgroup>
+          <tr><th>시각</th><th>종류</th><th>레인</th><th>조건</th><th>설명</th><th></th></tr>
+          <tr><td>15:20:00</td><td>kr_close_review</td><td>slow</td><td>KR 개장일</td><td class="txt muted">현물 마감 정리 · 보유 재평가 · 저녁 리뷰 발송</td><td class="r"><span class="btn">지금 실행</span></td></tr>
+          <tr><td>15:35:00</td><td>kr_fo_session</td><td>slow</td><td>파생 세션 &lt; 3</td><td class="txt muted">파생 만기 점검 · 포지션 재평가</td><td class="r"><span class="btn">지금 실행</span></td></tr>
+          <tr><td>23:30:00</td><td>us_scan_analyze</td><td>slow</td><td>US 개장일</td><td class="txt muted">미국 아침 세션 · 스캔 → 분석 → 결정</td><td class="r"><span class="btn">지금 실행</span></td></tr>
+        </table>
+      </div>
+      <div class="card" style="margin:0">
+        <h3><span>실행 기록 <span class="muted tiny">최근 run · 행을 펼치면 call 목록</span></span><span class="filters" style="margin:0"><span class="f">날짜 11/04 ▾</span><span class="f">종류 전체 ▾</span><span class="f">실패만 ☐</span><span class="btn">CSV</span></span></h3>
+        <table>
+          <colgroup><col style="width:92px"><col style="width:200px"><col style="width:110px"><col style="width:80px"><col style="width:90px"><col style="width:90px"><col style="width:90px"><col></colgroup>
+          <tr><th>시각</th><th>종류</th><th>계좌</th><th class="r">길이</th><th class="r">호출</th><th class="r">토큰</th><th class="r">비용</th><th>결과</th></tr>
+          <tr class="sel"><td>09:03:12</td><td>kr_scan_analyze ▾</td><td>paper-main</td><td class="r">38초</td><td class="r">4</td><td class="r">12.3k</td><td class="r">$0.41</td><td class="txt ok">결정 3 · 승인 요청 1</td></tr>
+          <tr><td class="muted">↳ 09:03:20</td><td class="muted">analyst-technical</td><td class="muted">opus</td><td class="r muted">9초</td><td class="r muted">1</td><td class="r muted">4.1k</td><td class="r muted">$0.14</td><td class="txt muted">추세 ↑ · 지지 82,900</td></tr>
+          <tr><td class="muted">↳ 09:03:31</td><td class="muted">debate</td><td class="muted">opus</td><td class="r muted">11초</td><td class="r muted">1</td><td class="r muted">5.2k</td><td class="r muted">$0.18</td><td class="txt muted">bear 비중 제한 채택</td></tr>
+          <tr><td>08:20:02</td><td>kr_fo_session ▸</td><td>paper-fo</td><td class="r">41초</td><td class="r">3</td><td class="r">9.8k</td><td class="r">$0.33</td><td class="txt ok">진입 1</td></tr>
+          <tr><td>08:00:00</td><td>morning_review ▸</td><td>—</td><td class="r">22초</td><td class="r">2</td><td class="r">6.0k</td><td class="r">$0.20</td><td class="txt ok">텔레그램 발송</td></tr>
+          <tr><td>07:30:15</td><td>news_ingest ▸</td><td>—</td><td class="r">6초</td><td class="r">0</td><td class="r muted">—</td><td class="r muted">—</td><td class="txt bad">실패 · naver_blog 429 → 10분 뒤 재시도</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑨ 휴대폰 -->
+  <h2>⑨ 휴대폰(390px) — 뉴스 목록 · 결정 상세<small>표 대신 행 카드: 1줄 메타 · 1줄 제목 말줄임 · 1줄 칩</small></h2>
+  <div class="phones">
+    <div class="phone">
+      <div class="band"><span><span class="dot ok"></span><span class="ok">정상</span> <span class="muted">· 수집 27분 전</span></span><span><span class="chip u-ok">5h 42% · 1h32m</span><span class="clock" style="font-size:13px">14:27:38</span></span></div>
+      <div class="tabs" style="margin-bottom:8px"><span class="on">뉴스</span><span>이벤트</span><span>테마</span><span>차트</span></div>
+      <div class="strip" style="margin-bottom:8px"><span class="chip th">AI 메모리 0.82</span><span class="chip th">2차전지 0.41</span><span class="chip th">방산 0.37</span></div>
+      <div class="card" style="margin:0">
+        <div class="filters" style="margin-bottom:4px"><span class="f">KR ▾</span><span class="f">촉매만 ☐</span><span class="btn">지금 수집</span></div>
+        <div class="nrow"><div class="h"><span>14:02 · 연합인포맥스</span><span class="chip used" style="margin:0">판정</span></div><div class="ttl">10월 반도체 수출 40% 증가, 메모리 가격 반등세 — 삼성전자·SK하이닉스</div><div><span class="chip t">삼성전자</span><span class="chip t">SK하이닉스</span><span class="chip th">AI 메모리</span></div></div>
+        <div class="nrow"><div class="h"><span>13:40 · DART</span><span class="chip cat" style="margin:0">촉매</span></div><div class="ttl">현대차, 3분기 잠정 영업이익 3.2조 — 컨센서스 상회</div><div><span class="chip t">현대차</span></div></div>
+        <div class="nrow"><div class="h"><span>13:12 · Google News</span><span></span></div><div class="ttl">외국인 3일 연속 순매수… 코스피 2,600 회복</div><div><span class="chip">시장</span></div></div>
+        <div class="nrow"><div class="h"><span>12:48 · 네이버 블로그</span><span></span></div><div class="ttl">2차전지 재고 사이클 바닥론, 11월 체크포인트</div><div><span class="chip t">LG에너지솔루션</span><span class="chip th">2차전지</span></div></div>
+        <div class="nrow" style="border:0"><div class="h"><span>09:30 · 수동 입력</span><span class="chip used" style="margin:0">판정</span></div><div class="ttl">삼성전자 HBM4 공급 계약 보도</div><div><span class="chip t">삼성전자</span><span class="chip cat">촉매</span></div></div>
+      </div>
+      <div class="btm"><span>오늘</span><span>계좌</span><span>성과</span><b>데이터</b><span>시스템</span></div>
+    </div>
+    <div class="phone">
+      <div class="band"><span>‹ 오늘</span><span><span class="chip u-ok">5h 42% · 1h32m</span><span class="clock" style="font-size:13px">14:27:38</span></span></div>
+      <div class="card" style="border-color:#6b5a1f; background:#1a1810">
+        <div class="kv"><span><span class="chip paper">모의</span><b style="font-size:15px">삼성전자</b> <span class="muted">005930</span></span><span class="warn">만료 14:45</span></div>
+        <div class="kv"><span class="k">paper-main</span><span class="v"><b>매수 12주</b> · 1,017,600원</span></div>
+        <div class="kv"><span class="k">진입 / 손절 / 목표</span><span class="v">84,800 / 78,900 / 90,500</span></div>
+        <div class="kv"><span class="k">비중 · 섹터 · 일손실</span><span class="v">1.5% · 9% · −0.3%</span></div>
+        <div style="display:flex; gap:8px; margin-top:8px"><span class="btn big y" style="flex:1; text-align:center; margin:0">승인</span><span class="btn big n" style="flex:1; text-align:center; margin:0">거절</span></div>
+      </div>
+      <div class="card"><h3>근거 전문</h3><p style="margin:0; line-height:1.55; white-space:normal">반도체 수출 지표가 10월 +40%로 반등했고 외국인이 3일 연속 순매수 중. 20일선 지지, 거래량 1.8배. bear: 원/달러 변동성 → 비중 1.5% 제한, 손절 −7%. 목표는 직전 고점 90,500.</p></div>
+      <div class="card"><h3>체크포인트</h3><div class="tl"><div><span class="t">09:03:12</span>스캔 통과 · 촉매 2</div><div><span class="t">09:03:20</span>기술 분석 · 추세 ↑</div><div><span class="t">09:03:31</span>토론 · bear 제한 채택</div><div><span class="t">09:03:44</span>리스크 5/5 통과</div><div><span class="t">09:03:50</span>승인 요청 발송</div></div></div>
+      <div class="card" style="margin:0"><h3>참고한 뉴스 <span class="muted">2</span></h3><div class="nrow"><div class="h"><span>14:02 · 연합인포맥스</span></div><div class="ttl">10월 반도체 수출 40% 증가, 메모리 가격 반등세</div></div><div class="nrow" style="border:0"><div class="h"><span>09:30 · 수동 입력</span></div><div class="ttl">삼성전자 HBM4 공급 계약 보도</div></div></div>
+      <div class="btm"><b>오늘</b><span>계좌</span><span>성과</span><span>데이터</span><span>시스템</span></div>
+    </div>
+  </div>
+
+  <p class="note">1024~1279px 창에서는 왼쪽 메뉴가 아이콘(56px)으로 접혀 표 폭을 지키고, 그래도 좁으면 표는 첫 열을 고정한 채 가로로 스크롤합니다(열은 숨기지 않음). 1024px 미만은 휴대폰 배치(행 카드)로 바뀝니다. 모든 표의 열 폭은 고정이라 데이터가 바뀌어도 흔들리지 않고, 말줄임된 글은 마우스를 올리면 전문이 뜹니다.</p>
+</div>
