@@ -4,9 +4,8 @@ import { Chip } from "../../components/Chip";
 import { DatePicker } from "../../components/DatePicker";
 import { Table, type Column } from "../../components/Table";
 import { csvUrl } from "../../lib/api";
-import { now } from "../../lib/clock";
-import { fmtTime, kstDate } from "../../lib/format";
-import { useResource } from "../../lib/hooks";
+import { fmtTime } from "../../lib/format";
+import { useKstDate, useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 import { callRows, runRows, type CallRow, type CallsResp, type JobsResp, type Run, type RunRow } from "./system.ts";
 
@@ -23,7 +22,10 @@ const CALL_COLUMNS: Column<CallRow>[] = [
 ];
 
 export function Runs() {
-  const [date, setDate] = useState(() => kstDate(now()));
+  const today = useKstDate();
+  const [picked, setPicked] = useState<string | null>(null);
+  const date = picked ?? today;
+  const setDate = (v: string) => setPicked(v === today ? null : v);
   const [kind, setKind] = useState("");
   const [run, setRun] = useState<number | null>(null);
   const params = useMemo(() => ({ date, limit: "100", ...(kind ? { kind } : {}) }), [date, kind]);

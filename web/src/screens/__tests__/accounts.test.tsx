@@ -67,7 +67,6 @@ describe("계좌·보유 통합 화면", () => {
     );
     expect(section("overview")).not.toBeNull();
     expect(section("fo-positions")).not.toBeNull();
-    expect(section("fo-positions").hidden).toBe(true);
     await flush();
     const ov = section("overview");
     expect(ov.textContent).toContain("13,000,000");
@@ -95,7 +94,7 @@ describe("계좌·보유 통합 화면", () => {
         },
         "GET /api/accounts": () => {
           accountGets += 1;
-          return fixtureAccounts();
+          return fixtureAccounts().map((a) => ({ ...a, paused })); // 전역 paused 는 /accounts 행마다 실린다
         },
         "PATCH /api/settings/paused": (_u: URL, init?: RequestInit) => {
           paused = JSON.parse(String(init!.body)).value;
@@ -129,7 +128,9 @@ describe("계좌·보유 통합 화면", () => {
     await mount(
       routes({
         "GET /api/accounts/overview": fixtureOverview({ paused: true }),
-        "GET /api/accounts": fixtureAccounts().filter((a) => a.env === "paper"),
+        "GET /api/accounts": fixtureAccounts()
+          .filter((a) => a.env === "paper")
+          .map((a) => ({ ...a, paused: true })),
         "PATCH /api/settings/paused": () => json({ detail: "확인이 필요합니다" }, 400),
       }),
     );
@@ -145,14 +146,46 @@ describe("계좌·보유 통합 화면", () => {
   test("계좌 카드가 /accounts/{id} 로 연결된다", async () => {
     const { container } = await mount(routes());
     const hrefs = Array.from(container.querySelectorAll("a.account-card")).map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/accounts/paper-1", "/accounts/real-1", "/accounts/paper-fo"]);
+    expect(hrefs).toEqual(["/accounts/paper-1", "/accounts/real-1"]);
     const real = container.querySelector('a[href="/accounts/real-1"]') as HTMLElement;
     expect(real.textContent).toContain("실전");
     expect(real.textContent).toContain("자동");
     expect(real.textContent).toContain("-45,000");
     expect(real.querySelector('.chip[data-tone="warn"]')!.textContent).toContain("2");
-    const fo = container.querySelector('a[href="/accounts/paper-fo"]') as HTMLElement;
-    expect(fo.textContent).toContain("파생");
+  });
+
+  test("파생 계좌는 #fo-positions 카드 묶음 — 모의 칩·모드·NAV/현금·「계좌별 화면 ›」 링크", async () => {
+    await mount(routes());
+    const fo = section("fo-positions");
+    expect(fo.hidden).toBe(false);
+    expect(section("overview").querySelector('a[href="/accounts/paper-fo"]')).toBeNull();
+    const link = fo.querySelector('a[href="/accounts/paper-fo"]') as HTMLElement;
+    expect(link.textContent).toBe("계좌별 화면 ›");
+    expect(fo.textContent).toContain("paper-fo");
+    expect(fo.textContent).toContain("모의");
+    expect(fo.textContent).toContain("모드 끔");
+    expect(fo.textContent).toContain("50,000,000");
+    expect(fo.textContent).toContain("현금");
+  });
+
+  test("파생 계좌가 없으면 #fo-positions 는 hidden", async () => {
+    await mount(routes({ "GET /api/accounts": fixtureAccounts().filter((a) => a.lane !== "fo") }));
+    expect(section("fo-positions").hidden).toBe(true);
+  });
+
+  test("합계 조회가 500 이어도 전역 「일시정지」는 보이고 PATCH {value:true}", async () => {
+    await mount(
+      routes({
+        "GET /api/accounts/overview": () => json({ detail: "fx broken" }, 500),
+        "PATCH /api/settings/paused": { paused: true },
+      }),
+    );
+    const ov = section("overview");
+    expect(ov.textContent).toContain("합계를 불러오지 못했습니다");
+    act(() => button(ov, "일시정지").click());
+    act(() => button(dialog(), "확인").click());
+    await flush();
+    expect(bodyOf(patches()[0])).toEqual({ value: true });
   });
 
   test("계좌 조회가 실패하면 Empty 로 오류를 보인다", async () => {

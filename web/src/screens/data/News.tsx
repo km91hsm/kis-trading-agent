@@ -6,9 +6,7 @@ import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Table, type Column } from "../../components/Table";
 import { errorText, postJson } from "../../lib/api";
-import { now as clockNow } from "../../lib/clock";
-import { kstDate } from "../../lib/format";
-import { useResource } from "../../lib/hooks";
+import { useKstDate, useResource } from "../../lib/hooks";
 import { body, failed } from "../performance/ResourceView";
 import { MarketSelect, type Market } from "./Data.tsx";
 import { Events, when } from "./Events";
@@ -18,7 +16,7 @@ type ManualResp = { market: string; items: { received_at: string; title: string;
 
 export function News() {
   const [market, setMarket] = useState<Market>("KR");
-  const [today] = useState(() => kstDate(clockNow()));
+  const today = useKstDate();
   const newsParams = useMemo(() => ({ market, hours: "48", limit: "100" }), [market]);
   const news = useResource<NewsResp>("/news", newsParams, ["news"]);
   const items = news.data?.items;

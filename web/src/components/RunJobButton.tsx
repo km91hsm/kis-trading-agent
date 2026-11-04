@@ -1,6 +1,7 @@
 // 잡 실행 버튼 — 누르면 Confirm, 확인하면 POST /jobs {kind, params, confirm?}. 응답 id 를 onDone 으로.
 // 실전 대상(targetAccountId 가 실전 계좌, 또는 대상 없음 + trading + 실전 계좌 있음)이면 대화상자에
-// 실전 계좌 <select> 를 넣고 그 값을 confirm 으로 보낸다. 모의·비매매는 confirm 키 자체를 넣지 않는다.
+// 실전 계좌 <select> 를 넣고, 고른 계좌 id 를 Confirm live 로 넘겨 그대로 재입력해야 확인이 켜진다(스펙 §5 실전 확인 = 재입력).
+// 그 값을 confirm 으로 보낸다. 모의·비매매는 confirm 키 자체를 넣지 않는다.
 // 실패(409 데몬 없음·중복, 400, 401/403 등)는 버튼 아래 한 줄. 401/403 은 api.ts 가 전역 안내도 띄운다.
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError, postJson } from "../lib/api";
@@ -104,6 +105,7 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
             <p>잡을 대기열에 넣습니다.</p>
           )
         }
+        live={real && choice ? { accountId: choice } : undefined}
         confirmDisabled={real && !choice}
         onConfirm={() => void run()}
         onClose={() => setOpen(false)}

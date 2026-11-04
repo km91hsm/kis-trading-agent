@@ -22,6 +22,14 @@ function bodyOf(i = 0): Record<string, unknown> {
 function button(text: string) {
   return Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(text)) as HTMLButtonElement;
 }
+function typeId(value: string) {
+  const input = document.querySelector('[role="dialog"] input') as HTMLInputElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 function select(el: HTMLSelectElement, value: string) {
   act(() => {
     el.value = value;
@@ -30,7 +38,7 @@ function select(el: HTMLSelectElement, value: string) {
 }
 
 describe("RunJobButton", () => {
-  test("실전 계좌가 있고 trading kind 이면 드롭다운 값이 confirm 으로 POST /jobs 에 실린다", async () => {
+  test("실전 계좌가 있고 trading kind 이면 고른 계좌 id 를 재입력해야 확인이 켜지고 그 값이 confirm 으로 POST /jobs 에 실린다", async () => {
     ff = installFakeFetch({ "POST /api/jobs": route() });
     const onDone = vi.fn();
     render(<RunJobButton kind="trade_kr" params={{ dry: false }} label="KR 매매" trading realAccounts={["real-1", "real-2"]} onDone={onDone} />);
@@ -38,6 +46,11 @@ describe("RunJobButton", () => {
     const sel = document.querySelector('[role="dialog"] select') as HTMLSelectElement;
     expect(Array.from(sel.options).map((o) => o.value)).toEqual(["", "real-1", "real-2"]);
     select(sel, "real-2");
+    expect(button("확인").disabled).toBe(true);
+    typeId("real-1");
+    expect(button("확인").disabled).toBe(true);
+    typeId("real-2");
+    expect(button("확인").disabled).toBe(false);
     act(() => button("확인").click());
     await flush();
     expect(ff.calls).toHaveLength(1);
@@ -61,16 +74,20 @@ describe("RunJobButton", () => {
     expect(ff.calls).toHaveLength(0);
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     select(sel, "real-1");
+    expect(button("확인").disabled).toBe(true);
+    typeId("real-1");
     expect(button("확인").disabled).toBe(false);
   });
 
-  test("대상 계좌가 실전이면 그 계좌 하나만 미리 선택된 드롭다운", async () => {
+  test("대상 계좌가 실전이면 그 계좌 하나만 미리 선택된 드롭다운 + id 재입력", async () => {
     ff = installFakeFetch({ "POST /api/jobs": route() });
     render(<RunJobButton kind="trade_kr" trading targetAccountId="real-2" realAccounts={["real-1", "real-2"]} />);
     act(() => button("trade_kr").click());
     const sel = document.querySelector('[role="dialog"] select') as HTMLSelectElement;
     expect(Array.from(sel.options).map((o) => o.value)).toEqual(["real-2"]);
     expect(sel.value).toBe("real-2");
+    expect(button("확인").disabled).toBe(true);
+    typeId("real-2");
     act(() => button("확인").click());
     await flush();
     expect(bodyOf().confirm).toBe("real-2");
@@ -81,6 +98,7 @@ describe("RunJobButton", () => {
     render(<RunJobButton kind="trade_kr" trading targetAccountId="paper-1" realAccounts={["real-1"]} />);
     act(() => button("trade_kr").click());
     expect(document.querySelector('[role="dialog"] select')).toBeNull();
+    expect(document.querySelector('[role="dialog"] input')).toBeNull();
     act(() => button("확인").click());
     await flush();
     const body = bodyOf();

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Today } from "../today/Today.tsx";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
@@ -14,6 +14,7 @@ import {
   fixtureSpotDecision,
   fixtureSpotOrder,
   fixtureUsageCaps,
+  fixtureUsApproval,
   merged,
 } from "../../test/fixtures/today";
 
@@ -93,6 +94,41 @@ describe("오늘 화면", () => {
     expect(ap.textContent).toContain("005930");
     expect(button(ap, "승인")).toBeTruthy();
     expect(button(ap, "거절")).toBeTruthy();
+  });
+
+  test("대기 승인 행·확인 본문에 금액(계좌 통화)과 결정 상세 링크", async () => {
+    await mount(
+      routes({
+        "GET /api/approvals": { approvals: [fixtureApproval(), fixtureUsApproval()] },
+        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-us", currency: "USD", markets: ["US"] })],
+      }),
+    );
+    const ap = section("approvals");
+    const [kr, us] = Array.from(ap.querySelectorAll("li.approval")) as HTMLElement[];
+    expect(kr.textContent).toContain("210,000원");
+    expect(kr.querySelector('a[href="/decisions/spot/7"]')!.textContent).toContain("근거 전문");
+    expect(us.textContent).toContain("$461.00");
+    expect(us.querySelector("a")).toBeNull();
+    act(() => button(kr, "승인").click());
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain("매수 3주 · 210,000원");
+  });
+
+  test("날짜를 고르지 않았으면 「오늘」은 KST 자정에 넘어가 다음 날로 다시 읽는다", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-05T14:59:30Z")); // KST 23:59:30
+      await mount(routes());
+      const dates = () => ff!.calls.filter((c) => c.url.startsWith("/api/decisions")).map((c) => new URL(c.url, "http://x").searchParams.get("date"));
+      expect(dates()).toEqual(["2026-11-05"]);
+      vi.setSystemTime(new Date("2026-11-05T15:00:30Z")); // KST 다음 날 00:00:30
+      act(() => vi.advanceTimersByTime(60_000));
+      await flush();
+      expect(dates().at(-1)).toBe("2026-11-06");
+      expect((document.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-06");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("대기 승인이 없으면 approvals 섹션은 hidden", async () => {

@@ -4,9 +4,7 @@
 import { useState } from "react";
 import { DatePicker } from "../../components/DatePicker";
 import { Empty } from "../../components/Empty";
-import { now } from "../../lib/clock";
-import { kstDate } from "../../lib/format";
-import { useResource } from "../../lib/hooks";
+import { useKstDate, useResource } from "../../lib/hooks";
 import type { UsageResp } from "../../lib/usage";
 import { ApprovalsBlock, type Approval } from "./ApprovalsBlock";
 import { DecisionsList } from "./DecisionsList";
@@ -17,7 +15,10 @@ import { OrdersTimeline } from "./OrdersTimeline";
 import { LANE_LABEL, LANES, laneCards, type Account, type Daemon, type Decision, type Merged, type Notice, type Order } from "./today.ts";
 
 export function Today() {
-  const [date, setDate] = useState(() => kstDate(now()));
+  // picked = null 이면 「오늘」을 따라간다(KST 자정에 넘어감). 사용자가 다른 날을 고르면 그 날에 머문다.
+  const today = useKstDate();
+  const [picked, setPicked] = useState<string | null>(null);
+  const date = picked ?? today;
   const day = { date };
   const approvals = useResource<{ approvals: Approval[] }>("/approvals", undefined, ["approvals", "orders"]);
   const decisions = useResource<Merged<Decision>>("/decisions", day, ["decisions", "scalp", "fo"]);
@@ -39,13 +40,13 @@ export function Today() {
     <div className="screen" data-screen="today">
       <header className="screen-head">
         <h1 className="screen-title">오늘</h1>
-        <DatePicker value={date} onChange={(v) => v && setDate(v)} max={kstDate(now())} />
+        <DatePicker value={date} onChange={(v) => v && setPicked(v === today ? null : v)} max={today} />
       </header>
 
       <section id="approvals" className="screen-section" hidden={!pending.length && !approvals.error}>
         <h2>승인 대기 {pending.length}건</h2>
         {approvals.error ? <Empty title="승인 대기를 불러오지 못했습니다">{approvals.error.message}</Empty> : null}
-        <ApprovalsBlock items={pending} onDone={approvals.reload} />
+        <ApprovalsBlock items={pending} accounts={accounts.data ?? []} onDone={approvals.reload} />
       </section>
 
       <div className="lane-grid">

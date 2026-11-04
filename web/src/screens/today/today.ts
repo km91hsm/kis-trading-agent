@@ -9,7 +9,7 @@ export type Lane = "spot" | "scalp" | "fo";
 export const LANES: Lane[] = ["spot", "scalp", "fo"];
 export const LANE_LABEL: Record<Lane, string> = { spot: "현물", scalp: "단타", fo: "파생" };
 
-export type Account = { id: string; env: string; lane: string; paused?: boolean; pending_approvals?: number | null };
+export type Account = { id: string; env: string; lane: string; currency?: string; paused?: boolean; pending_approvals?: number | null };
 export type Decision = {
   asset: string;
   id: number | string;

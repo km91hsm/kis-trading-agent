@@ -47,6 +47,11 @@ export function fixtureApproval(over: Over = {}) {
   };
 }
 
+/** 달러 계좌(paper-us, currency USD)의 미국 종목 승인 — 금액 통화 표기용. 결정 id 없음(링크 없음). */
+export function fixtureUsApproval(over: Over = {}) {
+  return fixtureApproval({ id: 13, account_id: "paper-us", ticker: "AAPL", qty: 2, amount: "461.0", decision: { asset: "spot", id: null }, ...over });
+}
+
 export function fixtureSpotDecision(over: Over = {}) {
   return {
     asset: "spot",

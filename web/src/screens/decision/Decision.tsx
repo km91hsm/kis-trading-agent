@@ -35,7 +35,7 @@ function BackLink() {
 
 /** 아직 없는 자원의 자리: 오류면 문구, 아니면 「불러오는 중」. */
 function Pending({ res, what }: { res: Resource<unknown>; what: string }) {
-  return res.error ? <Empty title={`${what}을 불러오지 못했습니다`}>{res.error.message}</Empty> : <Empty title="불러오는 중" />;
+  return res.error ? <Empty title={`${what}을(를) 불러오지 못했습니다`}>{res.error.message}</Empty> : <Empty title="불러오는 중" />;
 }
 
 const pct = (v: number | null | undefined) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "—");

@@ -82,7 +82,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
             <input
               type="password"
               aria-label={s.name}
-              autoComplete="off"
+              autoComplete="new-password"
               placeholder="새 값"
               value={values[s.name] ?? ""}
               onChange={(e) => setValues((v) => ({ ...v, [s.name]: e.target.value }))}

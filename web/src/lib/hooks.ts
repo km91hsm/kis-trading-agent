@@ -6,6 +6,7 @@ import type { SseKey } from "../generated/sse-keys";
 import { ApiError, getJson } from "./api";
 import { cachedGet } from "./cache";
 import { now as clockNow } from "./clock";
+import { kstDate } from "./format";
 import { degradeQuotes, nextDelay, QUOTE_TTL_MS, type FoQuotesResp, type QuotesResp } from "./live";
 import { eventsClient } from "./sse";
 
@@ -95,6 +96,16 @@ export function useNow(tickMs = 1000): Date {
     return () => clearInterval(id);
   }, [tickMs]);
   return t;
+}
+
+/** 서버 보정 시각의 KST 날짜("YYYY-MM-DD"). tickMs 마다 다시 보고, 날짜 문자열이 바뀔 때만(자정) 새 값 → 「오늘」이 자정에 넘어간다. */
+export function useKstDate(tickMs = 60000): string {
+  const [d, setD] = useState(() => kstDate(clockNow()));
+  useEffect(() => {
+    const id = setInterval(() => setD(kstDate(clockNow())), tickMs);
+    return () => clearInterval(id);
+  }, [tickMs]);
+  return d;
 }
 
 export function useVisible(): boolean {
