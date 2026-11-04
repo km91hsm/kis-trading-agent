@@ -3,7 +3,10 @@
 
 `fo_router`: `GET /fo/legs?account_id=&date=`·`GET /fo/summary`·`GET /fo/today?date=`(옛
 `web/routers/fo.py` 조회 이식 — `account`·`scorecard`·`report` 는 Task 11 `analytics/fo/*`).
-`RESOURCES`: `/accounts/{id}/positions` 파생 조각(`fo_rows`, 파생 계좌만). 계좌는
+`decisions_router`: `GET /decisions/fo/{id}`(결정 + 봉투 다리)·`/decisions/fo/{id}/trace`(fo
+체크포인트). `RESOURCES`: `/accounts/{id}/positions` 파생 조각(`fo_rows`, 파생 계좌만),
+`/decisions`(`fo_decisions`)·`/orders`(`fo_order_legs` 를 (포지션·의도·라운드)로 묶은 행 +
+`legs`) 파생 조각. 계좌는
 `deps.ports["accounts"].fo_accounts()`. 파생 NAV 는 여기(`/fo/summary`)서 보인다 — accounts 통합
 현황은 `account_nav` 만 읽는다(T6-R2). SSE `fo`: 옛 지문 그대로."""
 
@@ -136,7 +139,108 @@ def fo_rows(deps: Any, q: dict[str, str]) -> list[dict]:
     return out
 
 
-RESOURCES = (ResourcePart("/accounts/{account_id}/positions", fo_rows),)
+# --- decisions·orders 조각 ----------------------------------------------------------------
+
+
+def _day(deps: Any, q: dict[str, str]) -> date | None:
+    """조회 거래일(KST). `market` 이 KR 이 아니면 None(파생은 KR 만)."""
+    if (q.get("market") or MARKET).upper() != MARKET:
+        return None
+    return date.fromisoformat(q["date"]) if q.get("date") else _today(deps)
+
+
+def _decision_status(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
+    """그 결정 봉투(request_id)로 만든 마지막 다리 상태 → 없으면 기록만이면 `record_only`."""
+    leg = conn.execute(
+        "SELECT status FROM fo_order_legs WHERE request_id = ? ORDER BY id DESC LIMIT 1",
+        (r["request_id"],),
+    ).fetchone()
+    if leg is not None:
+        return leg["status"]
+    try:
+        data = json.loads(r["data"]) if r["data"] else {}
+    except ValueError:
+        data = {}
+    return "record_only" if data.get("record_only") else None
+
+
+def fo_decision_rows(deps: Any, q: dict[str, str]) -> list[dict]:
+    """`ResourcePart("/decisions")` 파생 조각: 그날 `fo_decisions`. `account_id` 를 주면 그 계좌
+    결정 + 계좌 없는 아침 결정."""
+    d = _day(deps, q)
+    if d is None:
+        return []
+    sql, args = "SELECT * FROM fo_decisions WHERE date = ?", [d.isoformat()]
+    if q.get("account_id"):
+        sql += " AND (account_id IS NULL OR account_id = ?)"
+        args.append(q["account_id"])
+    with closing(deps.conn_factory()) as conn:
+        return [
+            {
+                "asset": "fo", "id": r["id"], "date": r["date"], "account_id": r["account_id"],
+                "intent": r["intent"], "status": _decision_status(conn, r),
+                "at": r["created_at"], "market": MARKET, "lane": "fo", "round": r["round"],
+                "direction": r["direction"], "vehicle": r["vehicle"],
+                "confidence": r["confidence"],
+            }  # fmt: skip
+            for r in conn.execute(sql + " ORDER BY id", args).fetchall()
+        ]
+
+
+def _leg(x: sqlite3.Row) -> dict:
+    return {
+        "id": x["id"], "attempt": x["attempt"], "status": x["status"], "order_id": x["order_id"],
+        "order_no": x["order_no"], "qty": x["qty"], "filled_qty": x["filled_qty"],
+        "price": x["price"], "order_type": x["order_type"], "sent_at": x["sent_at"],
+        "created_at": x["created_at"],
+    }  # fmt: skip
+
+
+def fo_order_rows(deps: Any, q: dict[str, str]) -> list[dict]:
+    """`ResourcePart("/orders")` 파생 조각: 그날(KST) 만든 다리를 (포지션·의도·라운드)로 묶어
+    현물 주문과 같은 모양 + `legs`(시도들). 상태·수량·가격은 마지막 시도, 체결은 합.
+    쿼리 `date`·`account_id`·`status`(쉼표로 여럿, 행 상태 기준)."""
+    d = _day(deps, q)
+    if d is None:
+        return []
+    lo, hi = ledger.day_bounds(d, MARKET)
+    sql = (
+        "SELECT l.*, p.code, o.side FROM fo_order_legs l JOIN fo_positions p "
+        "ON p.id = l.position_id LEFT JOIN orders o ON o.id = l.order_id "
+        "WHERE l.created_at >= ? AND l.created_at < ?"
+    )
+    args: list[Any] = [lo, hi]
+    if q.get("account_id"):
+        sql += " AND l.account_id = ?"
+        args.append(q["account_id"])
+    statuses = {s for s in (q.get("status") or "").split(",") if s}
+    groups: dict[tuple, list[sqlite3.Row]] = {}
+    with closing(deps.conn_factory()) as conn:
+        for x in conn.execute(sql + " ORDER BY l.id", args).fetchall():
+            groups.setdefault((x["position_id"], x["intent"], x["round"]), []).append(x)
+    out = []
+    for legs in groups.values():
+        first, last = legs[0], legs[-1]
+        if statuses and last["status"] not in statuses:
+            continue
+        side = next((x["side"] for x in reversed(legs) if x["side"]), None)
+        out.append({
+            "asset": "fo", "id": first["id"], "account_id": first["account_id"],
+            "market": MARKET, "ticker": first["code"], "side": side, "qty": last["qty"],
+            "price": last["price"], "order_type": last["order_type"], "status": last["status"],
+            "order_no": last["order_no"], "origin": "fo", "lane": "fo",
+            "position_id": first["position_id"], "intent": first["intent"],
+            "round": first["round"], "filled_qty": sum(int(x["filled_qty"] or 0) for x in legs),
+            "legs": [_leg(x) for x in legs], "at": first["created_at"],
+        })  # fmt: skip
+    return out
+
+
+RESOURCES = (
+    ResourcePart("/accounts/{account_id}/positions", fo_rows),
+    ResourcePart("/decisions", fo_decision_rows),
+    ResourcePart("/orders", fo_order_rows),
+)
 
 
 # --- 조회 라우터 -------------------------------------------------------------------------
@@ -211,6 +315,29 @@ def summary(request: Request) -> dict:
         return {"accounts": [_account_status(conn, deps, a, today) for a in _fo_accounts(deps)]}
 
 
+def _checks(mdir: Any, stages: list[str], account_id: str | None = None) -> dict:
+    """게이트·주문 체크포인트(`_fo_risk_check_<계좌>`·`_fo_order_<계좌>`) 요약. account_id 를 주면
+    그 계좌 것만."""
+    checks = {}
+    for stage in stages:
+        for prefix in ("_fo_risk_check_", "_fo_order_"):
+            if stage.startswith(prefix) and account_id in (None, stage[len(prefix):]):
+                break
+        else:
+            continue
+        data = (run_store.read_checkpoint(mdir, stage) or {}).get("data") or {}
+        verdict = data.get("verdict") or {}
+        checks[stage] = {
+            "approved": verdict.get("approved", data.get("approved")),
+            "reasons": (verdict.get("reasons") or data.get("reasons") or [])[:5],
+            "note": verdict.get("note") or data.get("note"),
+            "status": data.get("status"), "record_only": data.get("record_only"),
+            "error": data.get("error"),
+            **{k: verdict.get(k) for k in VERDICT_FIELDS if k in verdict},
+        }  # fmt: skip
+    return checks
+
+
 @fo_router.get("/today")
 def today_view(request: Request, date_: str | None = Query(None, alias="date")) -> dict:
     """오늘(또는 date) 아침 결정·재평가 라운드·계좌별 보류/일일 손실·게이트·주문 체크포인트."""
@@ -229,19 +356,7 @@ def today_view(request: Request, date_: str | None = Query(None, alias="date")) 
             for a in _fo_accounts(deps)
         ]  # fmt: skip
     mdir = run_store.market_dir(d, MARKET, deps.state)
-    checks = {}
-    for stage in run_store.list_checkpoints(mdir):
-        if stage.startswith("_fo_risk_check_") or stage.startswith("_fo_order_"):
-            data = (run_store.read_checkpoint(mdir, stage) or {}).get("data") or {}
-            verdict = data.get("verdict") or {}
-            checks[stage] = {
-                "approved": verdict.get("approved", data.get("approved")),
-                "reasons": (verdict.get("reasons") or data.get("reasons") or [])[:5],
-                "note": verdict.get("note") or data.get("note"),
-                "status": data.get("status"), "record_only": data.get("record_only"),
-                "error": data.get("error"),
-                **{k: verdict.get(k) for k in VERDICT_FIELDS if k in verdict},
-            }  # fmt: skip
+    checks = _checks(mdir, run_store.list_checkpoints(mdir))
     return {
         "date": d.isoformat(),
         "decision": next((x for x in decisions if x["round"] == 0), None),
@@ -279,7 +394,70 @@ def legs(
     ]
 
 
-ROUTERS = (fo_router,)
+decisions_router = APIRouter(prefix="/decisions/fo", tags=["decisions"])
+
+
+def _fo_decision(conn: sqlite3.Connection, decision_id: int) -> sqlite3.Row:
+    r = conn.execute("SELECT * FROM fo_decisions WHERE id = ?", (decision_id,)).fetchone()
+    if r is None:
+        raise HTTPException(status_code=404, detail=f"파생 결정 없음: {decision_id}")
+    return r
+
+
+@decisions_router.get("/{decision_id}")
+def decision_detail(request: Request, decision_id: int) -> dict:
+    """파생 결정 1건(화면 펼침 값) + 원본 `data` + 그 결정 봉투(request_id)로 만든 다리."""
+    with closing(request.app.state.deps.conn_factory()) as conn:
+        r = _fo_decision(conn, decision_id)
+        legs = conn.execute(
+            "SELECT * FROM fo_order_legs WHERE request_id = ? ORDER BY id", (r["request_id"],)
+        ).fetchall()
+        status = _decision_status(conn, r)
+    try:
+        data = json.loads(r["data"]) if r["data"] else {}
+    except ValueError:
+        data = {}
+    return {
+        "decision": {**_decision_row(r), "asset": "fo", "status": status,
+                     "request_id": r["request_id"]},
+        "data": data,
+        "legs": [{**_leg(x), "intent": x["intent"], "round": x["round"]} for x in legs],
+    }  # fmt: skip
+
+
+@decisions_router.get("/{decision_id}/trace")
+def decision_trace(request: Request, decision_id: int) -> dict:
+    """그날 fo 체크포인트로 본 판단 과정: 단계 목록(`_fo*`)·애널리스트·결정 체크포인트(아침
+    `_fo_decision`, 재평가 `_fo_decision_r<n>_<계좌>`)·게이트/주문 요약(계좌 결정이면 그 계좌)."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        r = _fo_decision(conn, decision_id)
+    mdir = run_store.market_dir(date.fromisoformat(r["date"]), MARKET, deps.state)
+    stages = [s for s in run_store.list_checkpoints(mdir) if s.startswith("_fo")]
+
+    def data(stage: str) -> dict:
+        d = (run_store.read_checkpoint(mdir, stage) or {}).get("data")
+        return d if isinstance(d, dict) else {}
+
+    analysts = [
+        {"role": s[len("_fo_analyst_"):], **{k: data(s).get(k)
+                                             for k in ("signal", "confidence", "summary")}}
+        for s in stages if s.startswith("_fo_analyst_")
+    ]  # fmt: skip
+    stage = (
+        "_fo_decision" if r["round"] == 0
+        else f"_fo_decision_r{r['round']}_{r['account_id']}"
+    )  # fmt: skip
+    return {
+        "decision": {**_decision_row(r), "asset": "fo"},
+        "stages": stages,
+        "analysts": analysts,
+        "checkpoint": data(stage) if stage in stages else None,
+        "checks": _checks(mdir, stages, r["account_id"]),
+    }
+
+
+ROUTERS = (fo_router, decisions_router)
 
 
 # --- SSE 지문 ---------------------------------------------------------------------------

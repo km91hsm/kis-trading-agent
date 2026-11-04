@@ -7,7 +7,12 @@
 
 `positions_router`(조회만): `GET /positions/overview?market=`(현물 전체 합산),
 `GET /positions/risk?account_id=&market=`(위험 카드). `RESOURCES`: `/accounts/{id}/positions`
-현물 조각(`positions_view.spot_rows`)."""
+현물 조각(`positions_view.spot_rows`), `/decisions`·`/orders` 현물(단타 포함) 조각.
+
+`decisions_router`(조회만, `decisions_view`): `GET /decisions/spot/news-refs?date=&market=`,
+`GET /decisions/spot/{id}`(+`/trace`·`/outcomes`·`/checkpoints/{stage}`),
+`GET /markets/{market}/today?date=&stage=`(stage 가 있으면 시장 단계 파일 하나),
+`GET /risk-checks?date=&account_id=&market=`. SSE `decisions`·`orders`·`triggers`."""
 
 from __future__ import annotations
 
@@ -17,10 +22,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import approvals, positions_view
+from trader.features.spot import approvals, decisions_view, positions_view
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
-from trader.kernel.registry.types import ResourcePart
+from trader.kernel.registry.types import ResourcePart, SseKey
 from trader.kernel.session.run_store import run_date_for
 from trader.kernel.web.auth import actor_of, require_same_origin, require_token
 from trader.kernel.web.routers import jobs as jobs_router
@@ -29,6 +34,7 @@ WRITE = [Depends(require_token), Depends(require_same_origin)]
 
 approvals_router = APIRouter(tags=["approvals"])
 positions_router = APIRouter(tags=["positions"])
+decisions_router = APIRouter(tags=["decisions"])
 
 
 class DecideBody(BaseModel):
@@ -122,5 +128,117 @@ def positions_risk(
     return {"account_id": acct.id, "market": m, **card}
 
 
-ROUTERS = (approvals_router, positions_router)
-RESOURCES = (ResourcePart("/accounts/{account_id}/positions", positions_view.spot_rows),)
+def _days(deps: Any, date_: str | None, market: str | None) -> dict:
+    try:
+        return decisions_view.days_by_market({"date": date_ or "", "market": _market(market) or ""},
+                                             deps.now())  # fmt: skip
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"date 형식 오류: {date_!r}") from None
+
+
+def _decision_or_404(conn: Any, decision_id: int) -> dict:
+    dec = decisions_view.get_decision(conn, decision_id)
+    if dec is None:
+        raise HTTPException(status_code=404, detail=f"결정 없음: {decision_id}")
+    return dec
+
+
+@decisions_router.get("/decisions/spot/news-refs")
+def news_refs(
+    request: Request, date_: str | None = Query(None, alias="date"), market: str | None = None
+) -> dict:
+    """그 거래일 결정들이 근거로 쓴 뉴스 `{"<news_id>": [decision_id, …]}`(뉴스 목록 라벨용)."""
+    deps = request.app.state.deps
+    days = _days(deps, date_, market)
+    with closing(deps.conn_factory()) as conn:
+        return decisions_view.news_refs_map(conn, days)
+
+
+@decisions_router.get("/decisions/spot/{decision_id}")
+def decision_detail(request: Request, decision_id: int) -> dict:
+    """결정 + 라운드 + 요약 + 쓴 뉴스 id(`news_refs`)."""
+    with closing(request.app.state.deps.conn_factory()) as conn:
+        body = decisions_view.detail(conn, decision_id)
+    if body is None:
+        raise HTTPException(status_code=404, detail=f"결정 없음: {decision_id}")
+    return body
+
+
+@decisions_router.get("/decisions/spot/{decision_id}/trace")
+def decision_trace(request: Request, decision_id: int) -> dict:
+    """판단 과정 한 묶음: 애널리스트 → 토론 → 결정 → 게이트 → 주문 + 체크포인트 목록."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        tr = decisions_view.trace(conn, decision_id, deps.state)
+    if tr is None:
+        raise HTTPException(status_code=404, detail=f"결정 없음: {decision_id}")
+    return tr
+
+
+@decisions_router.get("/decisions/spot/{decision_id}/outcomes")
+def decision_outcomes(request: Request, decision_id: int) -> dict:
+    with closing(request.app.state.deps.conn_factory()) as conn:
+        dec = _decision_or_404(conn, decision_id)
+        return {"decision": dec, "outcomes": decisions_view.outcomes(conn, decision_id)}
+
+
+@decisions_router.get("/decisions/spot/{decision_id}/checkpoints/{stage}")
+def decision_checkpoint(request: Request, decision_id: int, stage: str) -> dict:
+    """결정 종목 run 디렉터리의 체크포인트 하나(조회는 디렉터리를 만들지 않는다)."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        dec = _decision_or_404(conn, decision_id)
+    try:
+        cp = decisions_view.checkpoint(dec, stage, deps.state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    if cp is None:
+        raise HTTPException(status_code=404, detail=f"체크포인트 없음: {stage}")
+    return cp
+
+
+@decisions_router.get("/markets/{market}/today")
+def market_today(
+    request: Request, market: str, date_: str | None = Query(None, alias="date"),
+    stage: str | None = None,
+) -> dict:  # fmt: skip
+    """그 운영일(기본 시장 오늘)의 종목별 단계·스캔 요약·시장 단계 파일·뉴스 요청. `stage` 를 주면
+    시장 단계 파일 하나(`_scan`·`_market_view` …)."""
+    deps = request.app.state.deps
+    m = _market(market)
+    (d,) = _days(deps, date_, m).values()
+    if stage is not None:
+        try:
+            cp = decisions_view.market_checkpoint(m, d, stage, deps.state)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        if cp is None:
+            raise HTTPException(status_code=404, detail=f"시장 단계 파일 없음: {stage}")
+        return cp
+    with closing(deps.conn_factory()) as conn:
+        return decisions_view.market_today(conn, m, d, deps.state)
+
+
+@decisions_router.get("/risk-checks")
+def risk_checks(
+    request: Request, date_: str | None = Query(None, alias="date"),
+    account_id: str | None = None, market: str | None = None,
+) -> list[dict]:  # fmt: skip
+    """그 거래일(기본 시장마다 오늘) 결정들의 계좌별 판정."""
+    deps = request.app.state.deps
+    days = _days(deps, date_, market)
+    with closing(deps.conn_factory()) as conn:
+        return decisions_view.risk_checks(conn, days, account_id or None)
+
+
+ROUTERS = (approvals_router, positions_router, decisions_router)
+RESOURCES = (
+    ResourcePart("/accounts/{account_id}/positions", positions_view.spot_rows),
+    ResourcePart("/decisions", decisions_view.decision_rows),
+    ResourcePart("/orders", decisions_view.order_rows),
+)
+SSE_KEYS = (
+    SseKey("decisions", decisions_view.decisions_fp),
+    SseKey("orders", decisions_view.orders_fp),
+    SseKey("triggers", decisions_view.triggers_fp),
+)

@@ -133,6 +133,8 @@ def test_portfolio_effective_stop(client, ledger):
     assert ROW_KEYS <= set(row)
     assert row["asset"] == "stock" and row["lane"] == "spot" and row["currency"] == "KRW"
     assert row["qty"] == 1 and row["avg_price"] == "70000" and row["last_price"] is None
+    # at = 스냅샷 관측 시각(UTC ISO, merge 정렬용), 날짜는 snapshot_date
+    assert row["at"] == "2026-11-04T06:00:00+00:00" and row["snapshot_date"] == D
 
 
 def test_portfolio_position_plan_distances(client, ledger):

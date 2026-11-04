@@ -126,6 +126,12 @@ def account_rows(
     stop_pct = deps.settings.risk.stop_loss_pct
     excluded = excluded_tickers(deps.settings, (deps.ports or {}).get("regime"), market)
     nav = _dec(snap.get("nav")) or Decimal(0)
+    # at = 종목 행의 마지막 관측 시각(UTC ISO) — merge 가 시각으로 정렬한다. 날짜는 snapshot_date
+    seen = dict(conn.execute(
+        "SELECT ticker, created_at FROM positions_snapshot WHERE account_id=? AND market=? "
+        "AND date=? AND asset='stock'",
+        (account.id, market, snap["date"]),
+    ).fetchall())  # fmt: skip
     out = []
     for p in snap["positions"]:
         ticker = p["ticker"]
@@ -153,7 +159,7 @@ def account_rows(
             "horizon_days": plan["horizon_days"] if plan else None,
             "plan": plan, "weight": weight, "drift_pp": drift,
             "current_price": p.get("current_price"), "eval_amount": p.get("eval_amount"),
-            "snapshot_date": snap["date"], "at": snap["date"],
+            "snapshot_date": snap["date"], "at": seen.get(ticker),
         })  # fmt: skip
     return out
 
