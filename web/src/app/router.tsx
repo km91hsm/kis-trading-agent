@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Empty } from "../components/Empty";
 import { NAV } from "../generated/nav";
+import { Account } from "../screens/accounts/Account.tsx";
 import { Accounts } from "../screens/accounts/Accounts.tsx";
 import { Decision } from "../screens/decision/Decision.tsx";
 import { Today } from "../screens/today/Today.tsx";
@@ -27,7 +28,7 @@ function Placeholder({ screen }: { screen: Screen }) {
 export const ROUTES: { path: string; element: ReactElement }[] = [
   { path: NAV.today.path, element: <Today /> },
   { path: NAV.accounts.path, element: <Accounts /> },
-  { path: `${NAV.accounts.path}/:id`, element: <Placeholder screen="accounts" /> },
+  { path: `${NAV.accounts.path}/:id`, element: <Account /> },
   { path: NAV.performance.path, element: <Placeholder screen="performance" /> },
   { path: NAV.data.path, element: <Placeholder screen="data" /> },
   { path: NAV.system.path, element: <Placeholder screen="system" /> },

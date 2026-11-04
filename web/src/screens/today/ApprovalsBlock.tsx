@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Badge } from "../../components/Badge";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
-import { ApiError, patchJson } from "../../lib/api";
+import { errorText, patchJson } from "../../lib/api";
 import { fmtTime } from "../../lib/format";
 
 export type Approval = {
@@ -26,18 +26,6 @@ export type Approval = {
 type Action = "approve" | "reject";
 const ACTION_LABEL: Record<Action, string> = { approve: "승인", reject: "거절" };
 const SIDE_LABEL: Record<string, string> = { BUY: "매수", SELL: "매도" };
-
-/** 오류 본문에서 사람이 읽을 문구: detail 이 객체면 그 `error`, 문자열이면 그대로. */
-export function errorText(e: unknown): string {
-  if (!(e instanceof ApiError)) return String((e as Error)?.message ?? e);
-  try {
-    const d = JSON.parse(e.message) as { error?: unknown };
-    if (d && typeof d.error === "string") return d.error;
-  } catch {
-    /* 문자열 detail */
-  }
-  return e.message;
-}
 
 export function ApprovalsBlock({ items, onDone }: { items: Approval[]; onDone(): void }) {
   const [asking, setAsking] = useState<{ row: Approval; action: Action } | null>(null);

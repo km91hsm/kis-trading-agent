@@ -219,3 +219,43 @@
 }
 .account-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
 .account-stats dd { font-variant-numeric: tabular-nums; }
+
+/* ── 계좌별 화면(Task 10) ── */
+.positions-total {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.lot-list { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.lot-list li + li { margin-top: var(--space-1); }
+.risk-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.risk-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
+.risk-stats dd { font-variant-numeric: tabular-nums; }
+.risk-insufficient { color: var(--fg-muted); }
+.risk-contrib li {
+  display: grid;
+  grid-template-columns: 6em 1fr 5em;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.risk-bar { height: var(--space-2); background: var(--bg-sunken); border-radius: var(--radius); overflow: hidden; }
+.risk-bar-fill { height: 100%; background: var(--accent); }
+.risk-pct { text-align: right; font-variant-numeric: tabular-nums; }
+.mode-switch select { min-height: var(--touch); }
+.mode-switch .btn { min-height: var(--touch); }
+.mode-note { margin-top: var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); }
+.mode-error {
+  margin-top: var(--space-2);
+  color: var(--fail);
+  font-size: var(--text-sm);
+}

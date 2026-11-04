@@ -136,3 +136,15 @@ export function deleteJson<T = void>(path: string, opts?: WriteOpts): Promise<T>
 export function csvUrl(path: string, params: Record<string, string> = {}): string {
   return withQuery(path, { ...params, format: "csv" });
 }
+
+/** 오류 본문에서 사람이 읽을 문구: detail 이 객체면 그 `error`, 문자열이면 그대로. */
+export function errorText(e: unknown): string {
+  if (!(e instanceof ApiError)) return String((e as Error)?.message ?? e);
+  try {
+    const d = JSON.parse(e.message) as { error?: unknown };
+    if (d && typeof d.error === "string") return d.error;
+  } catch {
+    /* 문자열 detail */
+  }
+  return e.message;
+}

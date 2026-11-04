@@ -4,9 +4,8 @@ import { useState } from "react";
 import { Card } from "../../components/Card";
 import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
-import { patchJson } from "../../lib/api";
+import { errorText, patchJson } from "../../lib/api";
 import { useResource } from "../../lib/hooks";
-import { errorText } from "../today/ApprovalsBlock";
 import { AccountCardView } from "./AccountCard";
 import { cardRows, resumeNeedsConfirm, totals, type Account, type Overview } from "./accounts.ts";
 
