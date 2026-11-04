@@ -75,6 +75,12 @@ CLI(`uv run trader spot --help` 로 확인):
 - `get_trigger`/`mark_trigger_handled` 도 커널 `execution/ledger.py` 로 옮겼고 `ledger.py` 가 재export 한다(fo 재평가 공용).
 - FAKE 헬퍼(`fake_call`·`ensure_ok`·`FakeSessionError`·`fake_report`·`fake_turn`)는 커널 `session/fake.py` 를 import 한다. 파생(`fo`) 계좌 분기는 `features/fo`(`fills.sync`·`balance`)가 소유하며 spot 은 현물 계좌만 다룬다.
 
+## 웹 (M11, `routes.py`)
+
+- `approvals_router`: `GET /approvals`·`PATCH /approvals/{id}`(선점 + `approve_execute` 큐).
+- `positions_router`(조회만): `GET /positions/overview?market=`(현물 계좌 시장·환경별 합산, 파생 제외), `GET /positions/risk?account_id=&market=`(위험 카드 — 종가는 `ports["ml"].close_table`).
+- `RESOURCES`: `/accounts/{id}/positions` 현물 조각(`positions_view.spot_rows`). 손절 `{level, source}` 는 모니터와 같은 `stops.effective_stop`, 출처 문구 "결정"·"추적"(보유 묶음 뒤 바닥)·"기본 −N%"; 목표는 결정 `take_profit`("결정"). 헤지·현금 운용 ETF 는 stop 없음.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 CLI·명령

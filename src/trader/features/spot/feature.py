@@ -14,7 +14,7 @@ from trader.features.spot.jobs import (
 )
 from trader.features.spot.migrations import MIGRATIONS
 from trader.features.spot.ports import PORT
-from trader.features.spot.routes import ROUTERS
+from trader.features.spot.routes import RESOURCES, ROUTERS
 from trader.features.spot.scan_analyze import SCAN_ANALYZE
 from trader.features.spot.session_kinds import AGENTS, ANALYZE, RESUME
 from trader.features.spot.settings import SCHEDULE_SECTIONS, SECTIONS
@@ -35,6 +35,7 @@ FEATURE = Feature(
     telegram_commands=TELEGRAM_COMMANDS,
     telegram_callbacks=TELEGRAM_CALLBACKS,
     routes=ROUTERS,
+    resources=RESOURCES,
     nav=(NavItem("today", "approvals", "승인", 10),),
     jobs=(
         APPROVALS_EXPIRE, FILLS_SYNC, BALANCE_REFRESH, RECONCILE, REBALANCE, MONITOR,

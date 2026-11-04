@@ -99,6 +99,12 @@ control 네임스페이스(`Feature.control_namespaces`, A4): `fo_verified:<env>
 - **알림 `messages.py`**: 옛 문구 그대로 상수 5종·함수 15종. `reconcile_mismatch` 는 커널 것(`market="KR(파생)"`).
 - **상태·텔레그램**: `/fo`(읽기 전용)와 `/status` 「파생(선물옵션)」 절은 `status.lines`(원장만) 하나를 쓴다.
 
+## 웹 (M11, `routes.py`)
+
+- `GET /fo/legs?account_id=&date=`·`GET /fo/summary`(파생 NAV 는 `fo_nav_snapshot` — accounts 통합 현황은 `account_nav` 만)·`GET /fo/today?date=`. `account`·`scorecard`·`report` 는 M11 Task 11.
+- `RESOURCES`: `/accounts/{id}/positions` 파생 조각(파생 계좌만): `qty`=계약, `avg_price`=포인트(최근 `fo_positions_snapshot`), `krw_value`=승수 적용. stop 은 선물 `stop_fut`·옵션 `premium_stop`·지수 `stop_pt` 순 "손절 −N%"(평단 기준, 옵션의 지수 손절은 "손절 지수"), 손절이 없으면 강제 청산일까지 "만기 D-n"(level 없음). target 은 `tp_pt`("결정").
+- SSE `fo`(옛 지문), nav `accounts/fo-positions`·`today/fo-lane`.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 번호는 플랜 Ruling 과 1:1(`docs/superpowers/plans/2026-11-04-m10-fo.md`).

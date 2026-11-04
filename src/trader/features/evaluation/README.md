@@ -12,6 +12,10 @@
 - `settings.yaml` `memory`(`half_lives`·`warmup`·`drawdown_stop_pct`·`vix_spike_pct`·`top_k`).
 - `schedule.yaml` `reflect`·`daily_report`·`paper_review`·`rl_train`.
 
+## 웹 (`routes.py`)
+
+- `GET /accounts/{id}/tax-lots?market=&year=&format=csv`(옛 `portfolio.lots_router`, 표시 전용). 현물 계좌만(그 외 404). 성과·분석 자원은 M11 Task 11.
+
 ## 알려진 차이
 
 - A3: `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 컬럼이 없다(스펙 §2.4). 성숙은 `fill_outcome` 한 가지 시그니처.

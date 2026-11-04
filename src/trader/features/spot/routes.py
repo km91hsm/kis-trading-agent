@@ -3,25 +3,32 @@
 `approvals_router`: `GET /approvals?status=pending|all`, `PATCH /approvals/{id} {action, confirm?}`.
 웹 프로세스는 주문을 내지 않는다 — 승인은 `approvals.decide` 선점 + `approve_execute` 큐
 요청(202)까지, 집행은 데몬 큐 틱. 데몬이 꺼져 있으면 승인을 받지 않는다(선점이 집행 없이 남지
-않게). 계좌는 `deps.ports["accounts"]`(없으면 계좌 없음 → 모든 승인이 실전 확인 필요)."""
+않게). 계좌는 `deps.ports["accounts"]`(없으면 계좌 없음 → 모든 승인이 실전 확인 필요).
+
+`positions_router`(조회만): `GET /positions/overview?market=`(현물 전체 합산),
+`GET /positions/risk?account_id=&market=`(위험 카드). `RESOURCES`: `/accounts/{id}/positions`
+현물 조각(`positions_view.spot_rows`)."""
 
 from __future__ import annotations
 
 from contextlib import closing
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import approvals
+from trader.features.spot import approvals, positions_view
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
+from trader.kernel.registry.types import ResourcePart
+from trader.kernel.session.run_store import run_date_for
 from trader.kernel.web.auth import actor_of, require_same_origin, require_token
 from trader.kernel.web.routers import jobs as jobs_router
 
 WRITE = [Depends(require_token), Depends(require_same_origin)]
 
 approvals_router = APIRouter(tags=["approvals"])
+positions_router = APIRouter(tags=["positions"])
 
 
 class DecideBody(BaseModel):
@@ -78,4 +85,42 @@ def decide_approval(
     return {"status": "accepted", "request_id": rid}
 
 
-ROUTERS = (approvals_router,)
+def _market(value: str | None) -> str | None:
+    m = (value or "").upper() or None
+    if m is not None and m not in positions_view.MARKETS:
+        raise HTTPException(status_code=400, detail="market 은 KR|US")
+    return m
+
+
+@positions_router.get("/positions/overview")
+def positions_overview(request: Request, market: str | None = None) -> dict:
+    """현물 계좌 전체 합산(시장·환경별, 파생 제외). `market` 을 주면 그 시장만."""
+    deps = request.app.state.deps
+    m = _market(market)
+    with closing(deps.conn_factory()) as conn:
+        return positions_view.overview(conn, deps, [m] if m else None)
+
+
+@positions_router.get("/positions/risk")
+def positions_risk(
+    request: Request, account_id: str = Query(...), market: str | None = None
+) -> dict:
+    """위험 카드: VaR·CVaR 95%·베타·상관·위험 기여. 종가는 ml 포트, 표시 전용. 현물 계좌만(그 외
+    400), market 생략은 계좌 첫 시장."""
+    deps = request.app.state.deps
+    acct = next((a for a in _accounts(deps) if a.id == account_id), None)
+    if acct is None:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 현물 계좌: {account_id}")
+    m = _market(market) or acct.markets[0]
+    if m not in acct.markets:
+        raise HTTPException(status_code=400, detail=f"계좌 {acct.id} 에 없는 시장: {m}")
+    with closing(deps.conn_factory()) as conn:
+        card = positions_view.risk_card(
+            conn, (deps.ports or {}).get("ml"), account_id=acct.id, market=m,
+            today=run_date_for(m, deps.now()),
+        )  # fmt: skip
+    return {"account_id": acct.id, "market": m, **card}
+
+
+ROUTERS = (approvals_router, positions_router)
+RESOURCES = (ResourcePart("/accounts/{account_id}/positions", positions_view.spot_rows),)
