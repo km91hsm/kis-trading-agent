@@ -9,6 +9,8 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 - 글꼴: Pretendard(조사 추천 Fira 는 한글 미지원이라 대체). 기본 16px, 줄 1.5. 숫자는 `.num`(`tabular-nums`, 줄바꿈 없음). 코드·ID 는 `--font-mono`.
 - 글꼴 로딩: `pretendardvariable-dynamic-subset.css`(가변 1벌, unicode-range 조각 woff2 — 쓰는 범위만 받음, 빌드 용량 축소).
 - 아이콘: 인라인 SVG 만. 이모지 아이콘 금지.
+- 줄바꿈: `body` 에 `word-break: keep-all` + `overflow-wrap: anywhere` — 한국어는 어절 단위로 꺾고(「접/수」 방지) 긴 영문 id 만 강제로 자른다.
+- 맨 폼 컨트롤: 클래스 없는 `input`·`select`·`textarea` 는 `base.css` 의 `:where()` 기본(높이 `--touch`, 테두리 `--fg-muted`, 바탕 `--bg-elev`), 클래스 없는 `button` 바탕은 투명 — 브라우저 기본 회색(다크에서 대비 2:1)을 쓰지 않는다. 특이도 0 이라 부품·화면 규칙이 이긴다.
 
 ## 색 토큰 (라이트 / 다크) — 글자 대비는 `--bg` 기준(`--bg-elev` 위도 4.5:1 이상)
 | 토큰 | 라이트 | 대비 | 다크 | 대비 | 용도 |
@@ -35,6 +37,8 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 ## 반응형·표
 - 확인 폭: 375 · 768 · 1024 · 1440px. 모바일 우선.
 - 넓은 표는 좁은 폭에서 행을 카드로 바꾸거나 가로 스크롤 래퍼에 담는다(표가 화면을 밀어내지 않게).
+- 열은 숨기지 않는다. 화면 고유 표(지표·호가)는 좁은 폭에서도 `.table-scroll` 가로 스크롤로 남기고, 전역(`html`·`body`·본문)에 `overflow-x: hidden` 을 두지 않는다(`screens/__tests__/responsive.test.tsx` 가 고정).
+- 상단 상태 띠(<1024): 첫 줄 건강 요약 + 테마 토글, 다음 줄 사용률·시계. 좌우 가장자리 16px(본문과 같음).
 - 공통 부품(`components/`, 스타일 `components.css`): 표는 `Table`(≥1024px `<table>` · 미만 `RowCard`, `useWide`), 쓰기 확인은 `Confirm`, 잡 실행은 `RunJobButton`.
 
 ## 메뉴·앵커

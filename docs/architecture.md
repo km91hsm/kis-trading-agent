@@ -189,6 +189,16 @@
   - **스펙 §2.5 대비 알려진 차이**: `/decisions/{id}` → `/decisions/spot/{id}`·`/decisions/fo/{id}`; `/tax-lots` → `/accounts/{id}/tax-lots`; `/rl/*` → `/analytics/rl/*`; `/fo/{scorecard,report,summary}` → `/analytics/fo/*`(`/fo/summary` 도 남김); `/ml/*`·`/names*`·`/charts*`·`/features*`·`/markets/{m}/today`·`/risk-checks`·`/fo/legs|today` 는 자기 첫 세그먼트를 유지(별칭표로 자원에 묶음); `/system/ops` → `/system/health`(임시 판정, M12 `kernel/ops` 로 교체); 옛 `/fo/account` → `/system/fo`; `/quotes/us` 없음(`/quotes?market=US`); 플랜 추가 `GET /accounts/overview`·`/system/notices`·`/system/control-log`·`/quotes/fx`·`/quotes/fo`; 스펙 밖 추가 `/news/labels`·`GET /news/manual`·`/decisions/spot/news-refs`·`POST /system/usage/ensure-fresh`(같은 출처만, 토큰 없음 — R1). 자원별 세부 차이는 각 기능 README 「웹」 절.
 - 테스트: `tests/kernel/web/` (+ `web/` vitest)
 
+### 프런트(web/)
+
+M11b(플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`). React 19 + Vite 7 + TypeScript, 테스트 vitest/jsdom. `trader web` 이 `web/dist` 를 정적으로 낸다. 디자인 토큰·부품 규칙은 `web/DESIGN.md`.
+
+- 구조: `src/app/`(라우터 `router.tsx` 의 `ROUTES` — 다섯 화면 `/`·`/accounts`(+`/accounts/:id`)·`/performance`·`/data`·`/system` + `/decisions/:asset/:id`; `shell/` 상태 띠·2단 메뉴·인증 띠) · `src/lib/`(api·SSE·훅·포맷 등 순수 모듈) · `src/components/`(Table/RowCard·Confirm·RunJobButton·Chart 등 공통 부품) · `src/screens/<화면>/`(화면별 조립 + 순수 함수 `<화면>.ts`) · `src/styles/`(`tokens`·`base`·`shell`·`components`·`screens`.css). 화면은 NAV 섹션 컨테이너(`<section id={item.id}>`)를 데이터보다 먼저 그린다(하위 목차 앵커·IntersectionObserver).
+- 실시간 모델: `/api/events` SSE 는 탭 하나(리더, `localStorage` 하트비트 `trader.events.leader`)만 열고 `BroadcastChannel("trader-events")` 로 스냅샷을 다른 탭에 중계한다. 리더가 사라지면 다른 탭이 이어받고, SSE 가 안 되면 30초 폴링으로 떨어진다. 화면은 `useResource(path, params, keys)` 로 자원을 읽고, 구독한 SSE 키 지문이 바뀌면 그 자원만 다시 부른다. 시세는 SSE 가 아니라 `useQuotes`/`useFoQuotes` 폴링이며 간격은 응답의 `next_poll_ms`(탭이 안 보이면 멈춤). 서버 시각 보정은 응답 헤더 `X-Server-Time` 만 쓴다(SSE ping 은 주석이라 EventSource 에 닿지 않음 — M12 에서 `event: ping` 으로 바꾸면 `lib/sse.ts` 가 그대로 받는다).
+- 인증: 조회는 `getJson`(토큰 없음). 쓰기는 `postJson`·`patchJson`·`deleteJson` 이 `tokenStore`(`localStorage`)의 Bearer 토큰을 붙인다. 토큰이 필요한 조회(`/settings/secrets`)는 `getAuthed`, 같은 출처 전용 POST(`/system/bootstrap-token`·`/system/usage/ensure-fresh`)는 `postPublic`. 401/403 은 `AuthError` → `onAuthError` 리스너 → 셸의 「쓰기 토큰이 필요합니다 → 시스템」 띠. 원격에서 「이 PC 에서만」 403 이 예상되는 호출은 `quiet403` 으로 띠 없이 거절만 받는다.
+- 실전 확인: 실전 계좌 쓰기(모드 변경·승인·재개·trading 큐 kind)는 `Confirm` 의 `live={accountId}` 로 계좌 id 를 다시 입력해야 확인되고, 그 값이 본문 `confirm`(= 계좌 id, 백엔드 `require_confirm`)으로 간다. 대상 계좌 없는 trading kind 는 `RunJobButton` 의 실전 계좌 드롭다운 값이 `confirm`. 실전 표식은 `--live` 주황 + 글자 「실전」(`Confirm live`).
+- 생성 파일: `src/generated/sse-keys.ts`(`SSE_KEYS`·`NOISY_KEYS`)·`nav.ts`(`NAV`)는 손대지 않고 `trader dev gen-sse-keys`·`gen-nav` 로 만든다(`--check`·CI 동기 테스트). 검증: `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build`.
+
 ## cli
 
 - 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 과 `tool` 루트를 둔다.

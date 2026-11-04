@@ -20,6 +20,8 @@ body {
   color: var(--fg);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  word-break: keep-all; /* 한국어는 어절 단위로 줄바꿈(「접\n수」 방지) */
+  overflow-wrap: anywhere;
 }
 
 h1, h2, h3, h4, p, ul, ol, figure {
@@ -33,6 +35,25 @@ button, input, select, textarea {
 
 button {
   cursor: pointer;
+}
+
+/* 클래스 없는 폼 컨트롤도 브라우저 기본 회색 대신 토큰 색을 쓴다(:where 로 특이도 0 — 부품 규칙이 이긴다). */
+:where(button) {
+  background-color: transparent;
+}
+:where(input:not([type="checkbox"], [type="radio"], [type="range"]), select, textarea) {
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--fg-muted);
+  border-radius: var(--radius);
+  background-color: var(--bg-elev);
+}
+:where(textarea) {
+  padding: var(--space-2);
+}
+::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
 }
 
 img, svg {

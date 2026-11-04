@@ -38,6 +38,7 @@
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
 | `uv run trader dev gen-nav [--check]` | `web/src/generated/nav.ts`(기능 `nav` 메뉴) 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
+| `cd web && npm run dev` | 프런트 개발 서버(5173, `/api` 는 `trader web --port 8787` 로 프록시). 구조·실시간·인증은 `docs/architecture.md` 「프런트(web/)」 |
 
 ## 아키텍처 불변식
 

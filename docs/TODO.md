@@ -272,7 +272,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - 실기 2(보유 행이 있어야 확인): `features/fo/README.md` 「실기 미확인」
 
 ## M11 — features/quotes + 웹 API 12 자원 (백엔드만)
-웹 API 12 자원·SSE 키 생성·계약 테스트. 완료 기준: 모든 자원 엔드포인트 테스트 통과, 옛 엔드포인트 대응표 100%. (M11b: 새 웹 UI 구현은 별도 브레인스토밍·플랜) 플랜 `docs/superpowers/plans/2026-11-04-m11-web-api.md`(브랜치 `feat/m11-web-api`), UI 설계 `docs/superpowers/specs/2026-11-04-m11-web-ui-design.md`.
+웹 API 12 자원·SSE 키 생성·계약 테스트. 완료 기준: 모든 자원 엔드포인트 테스트 통과, 옛 엔드포인트 대응표 100%. (M11b: 새 웹 UI 구현은 아래 「M11b — 웹 UI 프런트(web/)」 절, 플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`) 플랜 `docs/superpowers/plans/2026-11-04-m11-web-api.md`(브랜치 `feat/m11-web-api`), UI 설계 `docs/superpowers/specs/2026-11-04-m11-web-ui-design.md`.
 - [x] UI 설계·플랜(a01cec9·1ce99c1, 보강 71f08db·78f2fef·3ba6003·183a9a0, 사전 점검 R4 068ee3d)
 - [x] Task 1 웹 셸 tailnet 게이트·`X-Server-Time`·merge·nav 생성(4b967bf)
 - [x] Task 2 마이그레이션 15 `notices`·`control_log` + 기록 경로(f649c36, fix 8bacd60)
@@ -307,6 +307,25 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - 웹 테스트 공백(경로 탈출·same-origin 포트·SSE `_SHARED`) · `gen-sse-keys`/`gen-nav` 대상 경로·`web_dist()` 를 소스 트리 기준으로(지금은 `project_root()` — scratch `TRADER_HOME` 에서 `--check` 하려면 생성 파일 복사 필요) · `_hostname`/`_host_of` 정리
 - 이연(M11b, 프런트): 새 UI 전체(설계 §9) · `RunJobButton` · 단타 행은 「단타」 절에 따로 · 결정 화면은 SSE `decisions`+`fo`+`orders` 구독 · 단타 결정 행은 상세 링크 없음 · `/settings/secrets` 는 토큰을 붙여 부름 · `discovery_line` 은 `/news/themes` 로 조립 · 파생 보유 부가 필드 필요 여부 · 수동 작업 confirm 입력은 실전 계좌 드롭다운(T3-R4/T12-R2 완화)
 - 이연(M12): `kernel/ops` 판정으로 `/system/health` 교체 · 운영 이상 텔레그램 발송·쿨다운 · `tailscale_hosts/users/public_base` 실제 값 설정(「사용자 확인 대기」) · 텔레그램 버튼 실기 확인 · `ensure_web_token` 연결 · KIS 환율 실기 확인(`FX@KRW` vs `FX@KRWKFTC` 값·자릿수·갱신 주기·빈 응답; `quotes.fx_code` 로 전환) · 거시 관측 저장소(`/news/events` 거시) · `settings.scalp.accounts` 계좌 키 · M12 절 「M11 최종 리뷰에서 옮긴 이연」 · 아래 「M11 에서 옮긴 비웹 이연」
+
+## M11b — 웹 UI 프런트(web/)
+M11 설계(`docs/superpowers/specs/2026-11-04-m11-web-ui-design.md`)의 새 웹 UI 를 `web/`(React 19 + Vite 7 + TS, vitest/jsdom)로 구현. 백엔드는 손대지 않는다. 플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`(브랜치 `feat/m11b-web-ui`), 승인 목업 사본(17860b5). 완료 기준: 다섯 화면 + 결정 상세, `npm run typecheck`·`npm test`·`npm run build`·`gen-nav`/`gen-sse-keys --check` 통과.
+- [x] Task 1 디자인 토큰·테마·테스트 기반(c3e306a, 보완 44cd5d5, fix 29a4526)
+- [x] Task 2 api·clock·format·glossary·usage·health 순수 모듈(6807aa0, fix 6d5b285)
+- [x] Task 3 SSE 리더 탭·시세 폴링·자원 훅(cf07c40, 플랜 2896b74, fix f8c5458)
+- [x] Task 4 앱 셸 — 라우터·상태 띠·2단 메뉴·PWA 매니페스트(8a437e8, fix 4910f56)
+- [x] Task 5 공통 부품 — 표/행 카드·확인 대화상자·잡 실행 버튼·차트(ca61703, fix c2a7ccc)
+- [x] Task 6 오늘 화면 — 대기 승인·레인 카드·결정 목록(37aa5d4, fix ac0d33d)
+- [x] Task 7 오늘 화면 — 주문·체결 타임라인·알림 피드·다음 할 일(555fe16)
+- [x] Task 8 결정 상세 — 라운드·trace·결과(21d3bb9, fix 6196774)
+- [x] Task 9 계좌·보유 통합 — 합계·환율·계좌 카드·전역 일시정지(017b82e)
+- [x] Task 10 계좌별 — 보유·손절/목표·리스크·모드 전환·NAV 차트·실시간 평가(f4d39b5, fix 97e5698)
+- [x] Task 11 성과 화면(af80166, fix cbd99bf)
+- [x] Task 12 데이터 화면 — 뉴스·이벤트·테마·지표/모델·감시목록·차트(b3eac7c)
+- [x] Task 13 시스템 화면(6e2b7ee, fix db54a33)
+- [x] Task 14 반응형 점검(`responsive.test.tsx`)·다듬기(맨 폼 컨트롤 토큰화·한국어 줄바꿈·<1024 상태 띠 2줄)·문서(이 줄을 담은 커밋)
+- 이연(프런트): 계좌 단위 일시정지 API 없음(`PATCH /accounts/{id} {paused}` → 화면 생략, 전역 일시정지만) · 옛 `/fo/positions` 부가 필드(`current`·`eval`·`budget_*`·`live_legs`) 없음 → 파생 행은 포인트·원화 평가만 · 단타 결정 상세 없음(`scalp-<id>` 422) → 단타 상세 링크 없음 · 웹 거부 알림은 M12(T5-R1/F1) · 아이콘 PNG(PWA 매니페스트 아이콘 래스터) 미작성
+- 백엔드 요청(M12 후보, 이 마일스톤은 손대지 않음): SSE ping 이벤트화(지금 `: ping {...}` 주석이라 EventSource 에 닿지 않음 — `event: ping` 으로 바꾸면 `lib/sse.ts` 가 그대로 받음, T3-R1) · `news_collect` 큐 kind 없음(데몬 interval 잡뿐 → 뉴스 「지금 수집」 버튼 생략, T12-R1) · `features` SSE 키 없음(지표·모델은 `market_views` 구독이라 피처 갱신이 즉시 반영 안 됨, T12-R2) · `/positions/risk` 한도 필드 없음(리스크 카드는 한도 대비 대신 위험 기여 상위 3 막대, T10-R4)
 
 ## M12 — kernel/ops + 번들 + 전환
 health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체.

@@ -268,9 +268,12 @@
   }
 }
 
-@media (max-width: 767px) {
-  .statusbar { flex-wrap: wrap; }
-  .statusbar-health { flex-basis: 100%; }
+@media (max-width: 1023px) {
+  /* <1024(하단 탭 폭): 첫 줄 건강 요약 + 테마 토글, 다음 줄: 사용률·시계(들어가면 한 줄). 본문과 같은 16px 가장자리. */
+  .statusbar { flex-wrap: wrap; row-gap: var(--space-1); padding-left: var(--space-4); padding-right: var(--space-4); }
+  .statusbar > * { order: 2; }
+  .statusbar-health { order: 0; flex-basis: calc(100% - var(--touch) - var(--space-3)); }
+  .statusbar > .theme-toggle { order: 1; }
 }
 
 /* ── 빈 화면 자리 ── */
