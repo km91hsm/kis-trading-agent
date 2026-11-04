@@ -28,6 +28,14 @@ class AccountsPort(Protocol):
 
     def holiday_fn(self) -> Callable[[str, date], bool] | None: ...
 
+    def fo_accounts(self) -> list[Any]:
+        """파생(asset fo) 계좌와 그 브로커 — 레인 fo 전용. 현물 접근자는 fo 를 제외한다."""
+        ...
+
+    def fo_brokers(self) -> dict[str, Any]:
+        """파생(asset fo) 계좌와 그 브로커 — 레인 fo 전용. 현물 접근자는 fo 를 제외한다."""
+        ...
+
 
 class InputsPort(Protocol):
     """종목 입력(공시·뉴스·거시 등) 수집."""

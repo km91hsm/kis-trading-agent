@@ -15,6 +15,8 @@ from trader.kernel.config.time import MARKET_TZ
 REGULAR = {"KR": ("09:00", "15:30"), "US": ("09:30", "16:00")}
 MARKET_CLOSE: dict[str, time] = {"KR": time(15, 30), "US": time(16, 0)}  # 현지 정규장 마감
 US_EARLY_CLOSE = "13:00"  # NYSE 조기 마감일(`us_early_closes`)
+FO_SESSION = ("08:45", "15:45")  # KRX 파생 정규장(KST)
+FO_LAST_DAY_CLOSE = "15:20"  # 최종거래일 마감(KST)
 
 
 def _hm(s: str) -> time:
@@ -147,3 +149,24 @@ def completed_candles(market: str, candles: list[Any], now: datetime) -> list[An
     local_day = now.astimezone(MARKET_TZ[market]).date()
     last_ok = local_day if session_over(market, now) else local_day - timedelta(days=1)
     return drop_incomplete_tail([c for c in candles if c.date <= last_ok])
+
+
+def fo_close_hm(last_trade_day: bool) -> str:
+    """파생 정규장 마감(KST 'HH:MM'). 최종거래일은 15:20."""
+    return FO_LAST_DAY_CLOSE if last_trade_day else FO_SESSION[1]
+
+
+def is_fo_open(now: datetime, *, last_trade_day: bool = False) -> bool:
+    """KRX 파생 정규장 열림(평일 08:45~15:45, 최종거래일 ~15:20). 휴장일 판정은 호출자 몫이다."""
+    local = now.astimezone(MARKET_TZ["KR"])
+    if local.weekday() >= 5:
+        return False
+    return in_window(
+        local.time().replace(second=0, microsecond=0), FO_SESSION[0], fo_close_hm(last_trade_day)
+    )
+
+
+def index_live(now: datetime) -> bool:
+    """현물 지수(코스피200)가 갱신되는 시간(평일 09:00~15:30 KST).
+    밖이면 파생 보호선은 지수 조건을 쓰지 않는다."""
+    return is_open("KR", now)

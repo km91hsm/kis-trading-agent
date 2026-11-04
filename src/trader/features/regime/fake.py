@@ -10,23 +10,8 @@ from datetime import date
 from typing import Any
 
 from trader.features.regime import tools
+from trader.kernel.session.fake import ensure_ok, fake_call
 from trader.kernel.session.run_store import market_dir, read_checkpoint
-
-FAKE_MODEL = "fake"
-
-
-class FakeSessionError(RuntimeError):
-    """FAKE 세션 도구 호출 거부(커널 러너가 error 결과로 닫는다)."""
-
-
-def _call(agent: str) -> dict:
-    return {
-        "agent": agent,
-        "model": FAKE_MODEL,
-        "session_id": "fake",
-        "cost_usd": 0.0,
-        "duration_ms": 0,
-    }
 
 
 def _report(ticker: str, asof: str) -> dict:
@@ -62,11 +47,6 @@ def _turn(side: str, round_no: int) -> dict:
     }
 
 
-def _ok(r: dict) -> None:
-    if not r["ok"]:
-        raise FakeSessionError(r["error"])
-
-
 def write_fake_market(
     ctx: tools.MarketToolContext, *, market: str, date: date, debate_rounds: int
 ) -> list[str]:
@@ -75,7 +55,7 @@ def write_fake_market(
     inputs = (read_checkpoint(d, "_market_inputs") or {}).get("data") or {}
     proxy = inputs.get("proxy") or tools.MARKET_PROXY_LABEL.get(market, market)
     written: list[str] = []
-    _ok(
+    ensure_ok(
         tools.market_write(
             ctx,
             market=market,
@@ -83,14 +63,14 @@ def write_fake_market(
             stage="_market_analyst",
             payload=_report(proxy, date.isoformat()),
             agent="analyst-market",
-            call_meta=_call("analyst-market"),
+            call_meta=fake_call("analyst-market"),
         )
     )
     written.append("_market_analyst")
     for rnd in range(0, min(debate_rounds, 1) + 1):
         for side in ("bull", "bear"):
             agent = f"market-researcher-{side}"
-            _ok(
+            ensure_ok(
                 tools.market_write(
                     ctx,
                     market=market,
@@ -98,14 +78,14 @@ def write_fake_market(
                     stage=f"_market_debate_r{rnd}_{side}",
                     payload=_turn(side, rnd),
                     agent=agent,
-                    call_meta=_call(agent),
+                    call_meta=fake_call(agent),
                 )
             )
             written.append(f"_market_debate_r{rnd}_{side}")
-    _ok(tools.market_summarize(ctx, market=market, date=date))
+    ensure_ok(tools.market_summarize(ctx, market=market, date=date))
     written.append("_market_summary")
     bear = (inputs.get("regime") or {}).get("state") == "bear"
-    _ok(
+    ensure_ok(
         tools.submit_market_view(
             ctx,
             market=market,
@@ -121,7 +101,7 @@ def write_fake_market(
                 "invalidation_conditions": [],
             },
             agent="strategist",
-            call_meta=_call("strategist"),
+            call_meta=fake_call("strategist"),
         )
     )
     written.append("_market_view")

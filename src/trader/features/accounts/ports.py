@@ -23,9 +23,24 @@ class AccountsPortImpl:
     이 포트는 현물 레인용이라 파생(fo) 계좌는 받는 즉시 걸러 낸다 — 계좌·브로커·시세가 모두
     같은 현물 목록에서 나온다."""
 
-    def __init__(self, accounts: list[Account], secrets: Secrets) -> None:
-        self._accounts = api.split_accounts(accounts)[0]
+    def __init__(self, accounts: list[Account], secrets: Secrets, settings: Any = None) -> None:
+        self._accounts, self._fo_accounts = api.split_accounts(accounts)
         self._secrets = secrets
+        self._settings = settings
+
+    def fo_accounts(self) -> list[Account]:
+        """파생(asset fo) 계좌 — 레인 fo 전용."""
+        return list(self._fo_accounts)
+
+    def fo_brokers(self) -> dict[str, Any]:
+        """파생 계좌 id → 브로커. `settings.fo`(덕 타이핑 — fo 를 import 하지 않는다)가 없으면
+        경고 후 빈 dict. 키 없는 계좌는 `api.build_brokers` 규칙대로 제외한다."""
+        fo_cfg = getattr(self._settings, "fo", None)
+        if fo_cfg is None:
+            logger.warning("settings.fo 없음 — 파생 브로커 생략")
+            return {}
+        built = api.build_brokers(self._secrets, self._fo_accounts, fo_product=fo_cfg.product_cfg())
+        return {b.account.id: b for b in built}
 
     def accounts(self) -> list[Account]:
         return list(self._accounts)
@@ -67,4 +82,7 @@ class AccountsPortImpl:
         return is_holiday
 
 
-PORT = Port("accounts", lambda b: AccountsPortImpl(api.load_accounts(secrets=b.secrets), b.secrets))
+PORT = Port(
+    "accounts",
+    lambda b: AccountsPortImpl(api.load_accounts(secrets=b.secrets), b.secrets, b.settings),
+)

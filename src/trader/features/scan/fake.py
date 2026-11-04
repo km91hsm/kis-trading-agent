@@ -8,23 +8,8 @@ from typing import Any
 
 from trader.features.scan import tools
 from trader.features.scan.tools import ScanToolContext
+from trader.kernel.session.fake import FakeSessionError, fake_call
 from trader.kernel.session.run_store import market_dir, read_checkpoint
-
-FAKE_MODEL = "fake"
-
-
-class FakeSessionError(RuntimeError):
-    """FAKE 세션 도구 호출 거부(커널 러너가 error 결과로 닫는다)."""
-
-
-def _call(agent: str) -> dict:
-    return {
-        "agent": agent,
-        "model": FAKE_MODEL,
-        "session_id": "fake",
-        "cost_usd": 0.0,
-        "duration_ms": 0,
-    }
 
 
 def _tool_ctx(ctx: Any) -> ScanToolContext:
@@ -70,7 +55,7 @@ def run_fake_discover(ctx: Any, spec: Any) -> list[str]:
         date=date,
         payload={"candidates": cands, "notes": ["FAKE 모드"]},
         agent="scout",
-        call_meta=_call("scout"),
+        call_meta=fake_call("scout"),
     )
     return ["_discovery"]
 
@@ -114,7 +99,7 @@ def run_fake_screen(ctx: Any, spec: Any) -> list[str]:
                 "notes": ["FAKE 모드"],
             },
             agent="scout",
-            call_meta=_call("scout"),
+            call_meta=fake_call("scout"),
         )
         if r["ok"]:
             candidates = r["candidates"]
@@ -134,7 +119,7 @@ def run_fake_screen(ctx: Any, spec: Any) -> list[str]:
         date=date,
         payload={"picks": picks, "rejected": [c["ticker"] for c in scored[5:]]},
         agent="screener",
-        call_meta=_call("screener"),
+        call_meta=fake_call("screener"),
     )
     if not r["ok"]:
         raise FakeSessionError(r["error"])

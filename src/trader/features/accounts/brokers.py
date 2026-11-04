@@ -78,7 +78,7 @@ def build_brokers(
             continue
         if a.asset == "fo" and fo_product is None:
             logger.warning(
-                "계좌 %s 건너뜀: 파생 상품 설정(settings.fo)이 없습니다 — M10 에서 연결", a.id
+                "계좌 %s 건너뜀: settings.fo 없음 — 파생 브로커 생략", a.id
             )
             continue
         built.append(factory.build_broker(to_broker_account(a), creds, fo_product=fo_product))

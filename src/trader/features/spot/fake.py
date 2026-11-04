@@ -11,13 +11,13 @@ from datetime import date
 
 from trader.features.spot import tools
 from trader.kernel.lane.types import LaneContext
+from trader.kernel.session.fake import fake_call
 from trader.kernel.session.run_store import list_checkpoints, read_checkpoint, run_dir
 from trader.kernel.session.runner import SessionSpec
 
 logger = logging.getLogger("trader.spot")
 
 ANALYST_ROLES = ("technical", "fundamental", "news_macro", "sentiment")
-FAKE_MODEL = "fake"
 
 
 def fake_report(ticker: str, asof: str, role: str) -> dict:
@@ -70,16 +70,6 @@ def fake_decision(ticker: str) -> dict:
     }
 
 
-def _call(agent: str) -> dict:
-    return {
-        "agent": agent,
-        "model": FAKE_MODEL,
-        "session_id": "fake",
-        "cost_usd": 0.0,
-        "duration_ms": 0,
-    }
-
-
 def run_fake_ticker(
     ctx: tools.ToolContext,
     ticker: str,
@@ -109,7 +99,7 @@ def run_fake_ticker(
             stage=stage,
             payload=payload,
             agent=agent,
-            call_meta=_call(agent),
+            call_meta=fake_call(agent),
         )
         if not r["ok"]:
             raise tools.ToolError(r["error"])
@@ -152,7 +142,7 @@ def run_fake_ticker(
             date=d,
             payload=fake_decision(ticker),
             agent="trader",
-            call_meta=_call("trader"),
+            call_meta=fake_call("trader"),
             stage=stage,
         )
         if not r["ok"]:
@@ -166,7 +156,7 @@ def run_fake_ticker(
             date=d,
             payload=fake_decision(ticker),
             agent="trader",
-            call_meta=_call("trader"),
+            call_meta=fake_call("trader"),
         )
         if not r["ok"]:
             raise tools.ToolError(r["error"])
@@ -215,7 +205,6 @@ def run_fake_resume(lane_ctx: LaneContext, spec: SessionSpec) -> list[str]:
 
 __all__ = [
     "ANALYST_ROLES",
-    "FAKE_MODEL",
     "fake_decision",
     "fake_report",
     "fake_turn",
