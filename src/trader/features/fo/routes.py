@@ -143,8 +143,11 @@ def fo_rows(deps: Any, q: dict[str, str]) -> list[dict]:
 
 
 def _day(deps: Any, q: dict[str, str]) -> date | None:
-    """조회 거래일(KST). `market` 이 KR 이 아니면 None(파생은 KR 만)."""
+    """조회 거래일(KST). `market` 이 KR 이 아니거나 `account_id` 가 파생 계좌가 아니면(현물·모르는
+    계좌) None — 파생은 KR·파생 계좌만(`fo_rows` 와 같은 규칙)."""
     if (q.get("market") or MARKET).upper() != MARKET:
+        return None
+    if q.get("account_id") and q["account_id"] not in {a.id for a in _fo_accounts(deps)}:
         return None
     return date.fromisoformat(q["date"]) if q.get("date") else _today(deps)
 

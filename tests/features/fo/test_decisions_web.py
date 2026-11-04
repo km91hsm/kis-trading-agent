@@ -154,3 +154,14 @@ def test_fo_decision_trace_reads_fo_checkpoints(client, ledger, project):
     ]
     assert tr["checkpoint"] == {"intent": "ENTER"}
     assert tr["checks"][f"_fo_risk_check_{ACCT}"]["approved"] is False
+
+
+def test_fo_parts_skip_non_fo_account_filter(client, ledger):
+    """계좌 필터가 현물·모르는 계좌면 파생 조각은 비어 있다(아침 결정 account_id NULL 포함)."""
+    pid = _position(ledger)
+    _fo_decision(ledger)
+    _leg(ledger, pid, at="2026-10-27T00:31:00+00:00")
+    for acct in ("paper-main", "ghost"):
+        assert client.get("/api/decisions", params={"account_id": acct}).json()["items"] == []
+        assert client.get("/api/orders", params={"account_id": acct}).json()["items"] == []
+    assert len(client.get("/api/decisions", params={"account_id": ACCT}).json()["items"]) == 1

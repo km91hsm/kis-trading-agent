@@ -267,7 +267,7 @@ def test_decision_rows_carry_order_state_and_scalp_lane(client, ledger):
     assert sc["lane"] == "scalp" and sc["id"] == f"scalp-{sid}" and sc["order_id"] == sid
     assert sc["side"] == "BUY" and sc["qty"] == 2 and sc["status"] == "accepted"
     mine = client.get("/api/decisions", params={"account_id": "real-main"}).json()["items"]
-    assert [x for x in mine if x["asset"] == "spot"] == []
+    assert mine == []  # 현물 계좌 필터에 파생 아침 결정(account_id NULL)도 섞이지 않는다
 
 
 def test_orders_isolated_per_account(client, ledger):
@@ -323,6 +323,23 @@ def test_risk_checks_by_date(client, ledger):
     assert rc["ticker"] == "005930" and rc["market"] == "KR" and rc["date"] == D.isoformat()
     (rc2,) = client.get("/api/risk-checks", params={"date": "2026-11-03"}).json()
     assert rc2["decision_id"] == old and rc2["approved"] is True
+
+
+def test_risk_checks_older_date_beyond_limit(client, ledger, monkeypatch):
+    """날짜 조건은 SQL 에서 먼저 건다 — 더 최근 판정이 상한보다 많아도 옛 날짜 판정이 나온다."""
+    from trader.features.spot import decisions_view
+
+    monkeypatch.setattr(decisions_view, "RISK_CHECKS_LIMIT", 3)
+    old = _decide(ledger, ticker="000660", d=date(2026, 11, 3))
+    xledger.insert_risk_check(ledger, decision_id=old, account_id="paper-main", approved=True,
+                              adjusted_qty=1, reasons=[])  # fmt: skip
+    did = _decide(ledger)
+    for _ in range(5):
+        xledger.insert_risk_check(ledger, decision_id=did, account_id="paper-main",
+                                  approved=False, adjusted_qty=None, reasons=["x"])  # fmt: skip
+    (rc,) = client.get("/api/risk-checks", params={"date": "2026-11-03"}).json()
+    assert rc["decision_id"] == old
+    assert len(client.get("/api/risk-checks").json()) == 3  # 상한은 날짜 조건 뒤에
 
 
 def test_csv_format_for_orders_decisions(client, ledger):

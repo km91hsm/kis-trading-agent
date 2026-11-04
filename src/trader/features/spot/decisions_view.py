@@ -30,7 +30,8 @@ from trader.kernel.session import run_store
 MARKETS = ("KR", "US")
 BUY_ACTIONS = ("BUY", "ADD")
 SELL_ACTIONS = ("SELL", "TRIM")
-NEWS_REF = re.compile(r"^news:(\d+)$")
+NEWS_REF = re.compile(r"news:([0-9]+)")
+RISK_CHECKS_LIMIT = 500  # /risk-checks 한 번에 돌려주는 판정 수(날짜 조건 뒤에 적용)
 MARKET_STAGE = re.compile(r"^_[a-z0-9_]{1,40}$")
 ROLE_LABEL = {
     "technical": "차트", "fundamental": "회사가치", "news_macro": "뉴스·거시",
@@ -245,7 +246,7 @@ def news_ids_of(data: dict) -> list[int]:
     """리포트 evidence 중 `source_id` 가 `news:<id>` 인 뉴스 id."""
     out = []
     for e in data.get("evidence") or []:
-        m = NEWS_REF.match(str(e.get("source_id") or "")) if isinstance(e, dict) else None
+        m = NEWS_REF.fullmatch(str(e.get("source_id") or "")) if isinstance(e, dict) else None
         if m:
             out.append(int(m.group(1)))
     return out
@@ -494,22 +495,26 @@ def market_checkpoint(market: str, d: date, stage: str, state: Path | None) -> d
 def risk_checks(
     conn: sqlite3.Connection, days: dict[str, date], account_id: str | None
 ) -> list[dict]:
-    """그 거래일 결정들의 판정(최신 순). 결정 행이 없는 판정(단계 단위 실행)은 판정 시각이 KST
-    그날(KR 거래일)인 것."""
-    fallback = days.get("KR") or next(iter(days.values()), None)
-    lo, hi = xledger.day_bounds(fallback, "KR") if fallback else ("", "")
+    """그 거래일 결정들의 판정(최신 순, 최대 `RISK_CHECKS_LIMIT`). 결정 행이 없는 판정(단계 단위
+    실행)은 판정 시각이 KST 그날(KR 거래일)인 것. 날짜 조건은 SQL 에서 먼저 걸고 상한은 그 뒤."""
+    if not days:
+        return []
+    fallback = days.get("KR") or next(iter(days.values()))
+    lo, hi = xledger.day_bounds(fallback, "KR")
+    by_market = " OR ".join("(d.market=? AND d.date=?)" for _ in days)
+    where = f"((d.id IS NOT NULL AND ({by_market})) OR (d.id IS NULL AND rc.created_at >= ? " \
+        "AND rc.created_at < ?))"
+    args: list[Any] = [x for m, d in days.items() for x in (m, d.isoformat())] + [lo, hi]
+    if account_id:
+        where += " AND rc.account_id=?"
+        args.append(account_id)
     out = []
     for r in conn.execute(
         "SELECT rc.*, d.ticker, d.market, d.date, d.action FROM risk_checks rc "
-        "LEFT JOIN decisions d ON d.id=rc.decision_id "
-        + ("WHERE rc.account_id=? " if account_id else "") + "ORDER BY rc.id DESC LIMIT 500",
-        [account_id] if account_id else [],
+        f"LEFT JOIN decisions d ON d.id=rc.decision_id WHERE {where} "
+        f"ORDER BY rc.id DESC LIMIT {RISK_CHECKS_LIMIT}",
+        args,
     ).fetchall():
-        if r["date"] is not None:
-            if (d := days.get(r["market"])) is None or d.isoformat() != r["date"]:
-                continue
-        elif not (lo <= r["created_at"] < hi):
-            continue
         row = dict(r)
         row["approved"] = bool(row["approved"])
         row["reasons"] = _loads(row.pop("reasons_json"), [])

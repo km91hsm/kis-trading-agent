@@ -261,3 +261,11 @@ def test_csv_response_columns_and_empty():
     r = csv_response([{"a": 1, "b": None, "c": "x"}], "t.csv", columns=["c", "a", "b"])
     assert r.body.decode("utf-8") == "﻿c,a,b\r\nx,1,\r\n"
     assert csv_response([], "e.csv", columns=None).body.decode("utf-8") == "﻿\r\n"
+
+
+def test_csv_response_nested_values_are_json():
+    """목록·사전 칸은 repr 이 아니라 JSON(한글 그대로)."""
+    from trader.kernel.web.csv import csv_response
+
+    r = csv_response([{"a": [{"q": 1}], "b": {"k": "값"}}], "t.csv")
+    assert r.body.decode("utf-8").lstrip("﻿").splitlines()[1] == '"[{""q"": 1}]","{""k"": ""값""}"'
