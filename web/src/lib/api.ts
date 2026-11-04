@@ -132,6 +132,21 @@ export function deleteJson<T = void>(path: string, opts?: WriteOpts): Promise<T>
   return write<T>("DELETE", path, null, opts);
 }
 
+/** 토큰 없는 같은 출처 POST(T13-R1) — `ensure-fresh`·`bootstrap-token` 처럼 직접 로컬·Origin 검사만 하는 경로.
+ *  Authorization 을 붙이지 않는다(브라우저가 Origin 을 붙인다). */
+export function postPublic<T>(path: string, body?: unknown, opts: { signal?: AbortSignal } = {}): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const hasBody = body !== null && body !== undefined;
+  if (hasBody) headers["Content-Type"] = "application/json";
+  return send<T>("POST", BASE + path, { headers, body: hasBody ? JSON.stringify(body) : undefined, signal: opts.signal });
+}
+
+/** 토큰이 필요한 조회(예: `GET /settings/secrets`). 토큰이 없으면 쓰기와 같이 AuthError. */
+export function getAuthed<T>(path: string, params?: Record<string, string>, opts?: WriteOpts): Promise<T> {
+  const q = withQuery(path, params).slice(BASE.length);
+  return write<T>("GET", q, null, opts);
+}
+
 /** CSV 내려받기 링크(`?format=csv`). 조회라 토큰 없음. */
 export function csvUrl(path: string, params: Record<string, string> = {}): string {
   return withQuery(path, { ...params, format: "csv" });

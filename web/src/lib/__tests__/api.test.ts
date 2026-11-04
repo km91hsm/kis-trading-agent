@@ -10,6 +10,7 @@ import {
   onAuthError,
   patchJson,
   postJson,
+  postPublic,
   tokenStore,
 } from "../api";
 import { noteServerTime, serverOffsetMs } from "../clock";
@@ -225,5 +226,19 @@ describe("취소", () => {
     } finally {
       globalThis.fetch = orig;
     }
+  });
+});
+
+describe("postPublic", () => {
+  it("토큰 없이 Authorization 헤더 없이 POST 하고 JSON 을 돌려준다", async () => {
+    tokenStore.set("tok"); // 저장돼 있어도 붙이지 않는다
+    const f = install({ "POST /api/system/usage/ensure-fresh": { fresh: true, age_s: 3 } });
+    await expect(postPublic("/system/usage/ensure-fresh")).resolves.toEqual({ fresh: true, age_s: 3 });
+    expect(f.calls[0].url).toBe("/api/system/usage/ensure-fresh");
+    expect(f.calls[0].init?.method).toBe("POST");
+    expect(header(f.calls[0].init, "Authorization")).toBeUndefined();
+    tokenStore.set("");
+    install({ "POST /api/x": (_u: URL, init?: RequestInit) => JSON.parse(String(init?.body)) as unknown });
+    await expect(postPublic("/x", { a: 1 })).resolves.toEqual({ a: 1 });
   });
 });

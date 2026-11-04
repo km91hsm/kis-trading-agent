@@ -317,3 +317,24 @@
 .data-sort { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 .data-history { margin-top: var(--space-3); }
 .data-jobs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* 시스템 */
+.sys-toc { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-4); font-size: var(--text-sm); }
+.sys-meters { list-style: none; display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
+.sys-meter { display: grid; grid-template-columns: 6rem minmax(6rem, 16rem) 3.5rem 1fr; align-items: center; gap: var(--space-2); }
+.sys-meter meter { width: 100%; }
+.sys-meter[data-level="warn"] .num { color: var(--warn); }
+.sys-meter[data-level="fail"] .num { color: var(--fail); }
+.sys-lines { list-style: none; display: grid; gap: var(--space-1); margin: var(--space-2) 0; }
+.sys-log { font-family: var(--font-mono); font-size: var(--text-sm); }
+.sys-pre { font-family: var(--font-mono); font-size: var(--text-sm); white-space: pre-wrap; color: var(--fg-muted); margin: var(--space-2) 0; }
+.sys-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-2) var(--space-4); }
+.sys-dl dt { color: var(--fg-muted); font-size: var(--text-sm); }
+.sys-secrets input,
+.sys-toc a { min-height: var(--touch); }
+.sys-secrets input { font: inherit; padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); }
+.sys-secrets .btn { min-height: var(--touch); }
+@media (max-width: 1023px) {
+  .sys-meter { grid-template-columns: 5rem 1fr 3.5rem; }
+  .sys-meter > .data-muted { grid-column: 1 / -1; }
+}
