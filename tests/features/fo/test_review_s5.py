@@ -3,7 +3,8 @@
 Task 5 는 실행기·저장·복구·규칙 건을 싣고, Task 7 이 엔진·재평가 건
 (`test_settle_requires_fills_ok_*`·`test_resizing_up_position_is_stop_protected`·
 `test_replace_flag_*`·`test_reeval_hold_tp_*`)을 맨 뒤에 더했다. `.claude/settings.json` 거부
-목록 건(`test_settings_denies_fo_session`)은 Task 8."""
+목록 건(`test_settings_denies_fo_session`)은 이 저장소에 그 파일이 없어(CLAUDE.md 금지사항으로
+대체, Task 9) 옮기지 않았다."""
 
 from __future__ import annotations
 

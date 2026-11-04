@@ -1,12 +1,15 @@
 """fo 기능 선언 (레인): 설정 절·마이그레이션 14·control 네임스페이스·세션 종류·에이전트·도구·
 데몬 잡 3개(`kr_fo_session`·`kr_fo_monitor`·`kr_fo_reconcile`)·큐 kind 4개(A5).
 
-CLI·텔레그램·상태 절은 뒤 Task 가 채운다."""
+CLI(`trader fo …`)·텔레그램 `/fo`·상태 절 「파생(선물옵션)」(Task 8)."""
 
+from trader.features.fo.cli import fo_app
 from trader.features.fo.jobs import JOBS, QUEUE_KINDS
 from trader.features.fo.migrations import MIGRATIONS
 from trader.features.fo.session_kinds import AGENTS, FO, FO_RESUME
 from trader.features.fo.settings import SECTIONS
+from trader.features.fo.status import STATUS_SECTION
+from trader.features.fo.telegram import FO_CMD
 from trader.features.fo.tools import (
     FO_SUBMIT_RULE,
     FO_WRITE_RULES,
@@ -29,5 +32,6 @@ TOOLS = (
 FEATURE = Feature(
     id="fo", tier="lane", sections=SECTIONS, migrations=MIGRATIONS,
     control_namespaces=CONTROL_NAMESPACES, session_kinds=(FO, FO_RESUME), agents=AGENTS,
-    tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS,
+    tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS, cli=fo_app, telegram_commands=(FO_CMD,),
+    status_sections=(STATUS_SECTION,),
 )  # fmt: skip
