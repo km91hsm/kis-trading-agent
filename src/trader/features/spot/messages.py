@@ -31,3 +31,29 @@ def hedge(
         f"{account} · {label}",
         [f"{'매수' if entering else '매도'} {qty}주", detail],
     )
+
+
+# --- 승인 알림 버튼(텔레그램 콜백 `apv:*`, `telegram.handle_callback` 이 받는다) ----------------
+
+APPROVAL_PREFIX = "apv"
+
+
+def approval_buttons(approval_id: int, env: str | None) -> list[list[tuple[str, str]]]:
+    """모의는 바로 승인·거절, 실전(모르는 env 포함)은 2단계 — 먼저 확인 버튼을 받는다."""
+    p = f"{APPROVAL_PREFIX}:{approval_id}"
+    if env == "paper":
+        return [[("승인", f"{p}:yes"), ("거절", f"{p}:no")]]
+    return [[("실전 승인…", f"{p}:ask"), ("거절", f"{p}:no")]]
+
+
+def real_confirm_button(approval_id: int, account_id: str) -> list[list[tuple[str, str]]]:
+    """실전 2단계 확인 버튼: 데이터에 계좌 id 가 실려 `decide(confirm=…)` 로 간다."""
+    data = f"{APPROVAL_PREFIX}:{approval_id}:yes:{account_id}"
+    return [[(f"실전 {account_id} 승인 확인", data)]]
+
+
+def decision_link(public_base: str | None, decision_id: int) -> str | None:
+    """폰에서 여는 결정 화면 주소. 외부 주소 설정이 없으면 None."""
+    if not public_base:
+        return None
+    return f"{public_base.rstrip('/')}/decisions/spot/{decision_id}"

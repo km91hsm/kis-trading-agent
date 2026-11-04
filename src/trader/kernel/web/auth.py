@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from urllib.parse import urlsplit
 
@@ -65,3 +66,10 @@ def require_confirm(body: dict, account_id: str, env: str) -> None:
         raise HTTPException(
             status_code=400, detail="실전 계좌 동작은 confirm 에 계좌 id 를 적어야 합니다"
         )
+
+
+def actor_of(request: Request) -> str:
+    """제어 변경 기록용 웹 행위자: 설정 토큰의 SHA-256 지문 앞 8자(토큰 자체는 남기지 않는다).
+    `require_token` 을 지난 요청에서만 부른다."""
+    token = request.app.state.deps.token or ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]

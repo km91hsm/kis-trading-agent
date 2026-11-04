@@ -24,6 +24,7 @@ from typing import Any
 
 from trader.features.spot import labels, rules, stance
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot import messages as spot_messages
 from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.schemas import Decision
 from trader.kernel.broker.errors import KisApiError
@@ -1177,8 +1178,9 @@ def _execute_account(
     if policy.mode == "approve" and not is_stop_loss:
         try:
             entry["approval_id"] = core.request_approval(
-                deps, intent, env=account.env, reasons=verdict.reasons
-            )
+                deps, intent, env=account.env, reasons=verdict.reasons,
+                buttons_of=spot_messages.approval_buttons, link_of=_decision_link(ctx),
+            )  # fmt: skip
         except BaseException:
             # 승인에 묶인 키를 풀면 다른 경로가 같은 키를 잡아 같은 주문이 두 번 나갈 수 있다
             if key is not None and not deps.idem.has_approval(key):
@@ -1256,6 +1258,12 @@ def _claim(
 
 def _account(ctx: ExecContext, account_id: str) -> Any | None:
     return next((a for a in ctx.accounts if a.id == account_id), None)
+
+
+def _decision_link(ctx: ExecContext) -> Callable[[int], str | None]:
+    """승인 알림 끝의 결정 화면 링크(`settings.web.public_base` 가 있을 때)."""
+    base = getattr(getattr(ctx.settings, "web", None), "public_base", None)
+    return lambda decision_id: spot_messages.decision_link(base, decision_id)
 
 
 def _decision_row(ctx: ExecContext, decision_id: int | None) -> dict | None:

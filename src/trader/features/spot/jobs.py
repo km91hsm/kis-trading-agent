@@ -1,6 +1,6 @@
-"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·`fills_sync`(체결 동기화)·`balance_refresh`·
-`{market}_reconcile`(야간 대사)·`{market}_rebalance`(주간 리밸런스)·`{market}_monitor`(장중 감시)·
-`notice_listener`(체결통보)."""
+"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·큐 `approve_execute`(결정된 승인 집행)·
+`fills_sync`(체결 동기화)·`balance_refresh`·`{market}_reconcile`(야간 대사)·
+`{market}_rebalance`(주간 리밸런스)·`{market}_monitor`(장중 감시)·`notice_listener`(체결통보)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from trader.features.spot import (
+    approvals,
     balance,
     cash_park,
     executor,
@@ -35,6 +36,7 @@ from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
 from trader.kernel.daemon.runner import STALE_SESSION_AGE
 from trader.kernel.execution import core
+from trader.kernel.execution import ledger as xledger
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.notify import messages
@@ -536,7 +538,52 @@ def reevaluate_request(deps, params: dict, progress) -> dict:
     return out
 
 
+class ApproveExecuteParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: int
+    actor: str | None = None
+
+
+def _not_run(aid: int, status: str, **why: str) -> dict:
+    return {"ok": False, "approval_id": aid, "status": status, **why}
+
+
+def approve_execute_body(deps, params: dict, progress) -> dict:
+    """큐 `approve_execute`: `approvals.decide` 로 선점된 승인 1건을 집행한다(웹은 주문하지 않고
+    이 요청만 넣는다). 결정 없이 들어온 요청(`/api/jobs`·CLI 직접 등록)은 실전 확인을 우회하므로
+    거부하고, 이미 처리된 승인은 `{"status": "done"}` 으로 건너뛴다(멱등)."""
+    aid = int(params["approval_id"])
+    conn = deps.conn_factory()
+    try:
+        a = xledger.get_approval(conn, aid)
+        if a is None:
+            return _not_run(aid, "missing", error=f"승인 요청 #{aid} 없음")
+        if a["status"] != "pending":
+            return _not_run(aid, "done", skipped=f"승인 요청 #{aid} 은 이미 처리됨: {a['status']}")
+        if not a.get("decided_channel"):
+            return _not_run(
+                aid, "not_decided", error=f"승인 요청 #{aid} 은 웹·텔레그램 결정 전이라 집행 안 함"
+            )
+        port = deps.ports.get("accounts")
+        if port is None:
+            approvals.release(conn, aid)
+            return _not_run(aid, "pending", error="계좌 포트 없음 — 집행 불가(결정은 풀었어요)")
+        progress(f"승인 #{aid} 집행")  # 종료 중이면 여기서 JobCancelled — 주문 전에 멈춘다
+        ectx = executor.exec_ctx_from(
+            deps.settings, conn, port, deps.notifier or NullNotifier(), deps.now, deps.state,
+            ports=deps.ports,
+        )  # fmt: skip
+        return approvals.execute(ectx, aid)
+    finally:
+        conn.close()
+
+
 QUEUE_KINDS = (
+    QueueKind(
+        "approve_execute", ApproveExecuteParams, "승인 집행", "fast", 0, True, False,
+        approve_execute_body,
+    ),
     QueueKind(
         "fills_sync", EmptyParams, "체결 동기화", "fast", 0, False, True, fills_then_balance
     ),

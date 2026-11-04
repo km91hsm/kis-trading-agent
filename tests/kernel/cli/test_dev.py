@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 from trader.kernel.cli.main import app
+from trader.kernel.registry import discover
 from trader.kernel.web import gen
 
 REL = "web/src/generated/sse-keys.ts"
@@ -36,7 +37,7 @@ def test_gen_nav_writes_then_check_passes(project):
     r = CliRunner().invoke(app, ["dev", "gen-nav"])
     assert r.exit_code == 0, r.output
     target = project / NAV_REL
-    assert target.read_text(encoding="utf-8") == gen.nav_ts([])
+    assert target.read_text(encoding="utf-8") == gen.nav_ts(discover())  # 기능 nav 포함
     assert b"\r\n" not in target.read_bytes()
     ok = CliRunner().invoke(app, ["dev", "gen-nav", "--check"])
     assert ok.exit_code == 0 and "nav 최신" in ok.output

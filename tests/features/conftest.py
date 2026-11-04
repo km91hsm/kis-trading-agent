@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,9 +35,11 @@ def web_client(
     *,
     token: str | None = "t",
     now: datetime | Callable[[], datetime] | None = None,
+    ports: Mapping | None = None,
 ) -> TestClient:
     """주어진 기능만 마운트한 웹 앱의 TestClient. 원장은 project/state/trader.db 에
-    모든 마이그레이션을 적용해 둔다. Host 는 TestClient 기본값 testserver 를 허용한다."""
+    모든 마이그레이션을 적용해 둔다. Host 는 TestClient 기본값 testserver 를 허용한다.
+    ports 는 `WebDeps.ports`(예: `{"accounts": …}`)."""
     ledger = project / "state" / "trader.db"
     conn = db.connect(ledger)
     try:
@@ -58,5 +60,6 @@ def web_client(
         tailscale_users=(),
         public_base=None,
         features=features,
+        ports=dict(ports or {}),
     )
     return TestClient(create_app(deps))

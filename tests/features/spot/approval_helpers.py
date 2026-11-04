@@ -49,15 +49,17 @@ def make_port(accounts, brokers) -> AccountsPortImpl:
     return port
 
 
-def make_pending(conn, settings, accounts, brokers, *, account_id="paper-main", now=None) -> int:
-    """approve 모드 계좌의 승인 요청을 만들고 id 를 돌려준다."""
+def make_pending(
+    conn, settings, accounts, brokers, *, account_id="paper-main", now=None, notifier=None
+) -> int:
+    """approve 모드 계좌의 승인 요청을 만들고 id 를 돌려준다. notifier 는 승인 알림을 받는다."""
     acct = next(a for a in accounts if a.id == account_id)
     modes.set_account_mode(conn, acct, "approve")
     ectx = executor.exec_ctx_from(
         settings,
         conn,
         make_port(accounts, brokers),
-        Sent(),
+        notifier or Sent(),
         now or (lambda: datetime.now(UTC)),
         None,
     )
