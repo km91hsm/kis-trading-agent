@@ -7,6 +7,7 @@ positions 조각·SSE `fo`·nav, `analytics_routes.py` `/analytics/fo/*`, `syste
 
 from trader.features.fo.analytics_routes import analytics_fo_router
 from trader.features.fo.cli import fo_app
+from trader.features.fo.health import AREA
 from trader.features.fo.jobs import JOBS, QUEUE_KINDS
 from trader.features.fo.migrations import MIGRATIONS
 from trader.features.fo.routes import RESOURCES, ROUTERS, SSE_KEYS
@@ -40,7 +41,7 @@ FEATURE = Feature(
     tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS, cli=fo_app, telegram_commands=(FO_CMD,),
     status_sections=(STATUS_SECTION,),
     routes=(*ROUTERS, analytics_fo_router, system_fo_router), resources=RESOURCES,
-    sse_keys=SSE_KEYS,
+    sse_keys=SSE_KEYS, health_areas=(AREA,),
     nav=(NavItem("accounts", "fo-positions", "파생 보유", 20),
          NavItem("today", "fo-lane", "파생", 30)),
 )  # fmt: skip

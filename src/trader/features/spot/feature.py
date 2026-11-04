@@ -2,6 +2,7 @@
 
 from trader.features.spot.cli import spot_app
 from trader.features.spot.executor import ORIGINS
+from trader.features.spot.health import AREA
 from trader.features.spot.jobs import (
     APPROVALS_EXPIRE,
     BALANCE_REFRESH,
@@ -44,4 +45,5 @@ FEATURE = Feature(
     ),  # fmt: skip
     queue_kinds=QUEUE_KINDS,
     ports=(PORT,),
+    health_areas=(AREA,),
 )
