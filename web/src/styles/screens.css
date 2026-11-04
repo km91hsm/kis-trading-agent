@@ -131,3 +131,41 @@
 
 /* 다음 할 일 */
 .job-row { font-variant-numeric: tabular-nums; }
+
+/* ── 결정 상세 ── */
+.back-line { margin-bottom: var(--space-2); }
+.back-link { display: inline-flex; align-items: center; min-height: var(--touch); color: var(--fg-muted); }
+.decision-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.decision-lines {
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+}
+.decision-summary { margin-top: var(--space-2); color: var(--fg-muted); }
+.analyst-summary { color: var(--fg-muted); }
+.analyst-evidence { padding-left: var(--space-4); color: var(--fg-muted); }
+.round-row,
+.debate-turn { font-variant-numeric: tabular-nums; }
+.debate summary { cursor: pointer; min-height: var(--touch); display: flex; align-items: center; }
+.stage-chips { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.stage-chip {
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+.stage-chip[aria-pressed="true"] { border-color: var(--live); color: var(--live); }
+.checkpoint-json {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  max-height: 480px;
+  overflow: auto;
+  background: var(--bg-sunken);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.decision-outcomes { margin-top: var(--space-3); }

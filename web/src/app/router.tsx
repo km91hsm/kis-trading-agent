@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Empty } from "../components/Empty";
 import { NAV } from "../generated/nav";
+import { Decision } from "../screens/decision/Decision.tsx";
 import { Today } from "../screens/today/Today.tsx";
 import { navGroups, type Screen } from "./shell/Nav";
 import { Shell } from "./shell/Shell";
@@ -22,15 +23,6 @@ function Placeholder({ screen }: { screen: Screen }) {
   );
 }
 
-function DecisionPlaceholder() {
-  return (
-    <div className="screen" data-screen="decision">
-      <h1 className="screen-title">결정 상세</h1>
-      <Empty title="준비 중" />
-    </div>
-  );
-}
-
 export const ROUTES: { path: string; element: ReactElement }[] = [
   { path: NAV.today.path, element: <Today /> },
   { path: NAV.accounts.path, element: <Placeholder screen="accounts" /> },
@@ -38,7 +30,7 @@ export const ROUTES: { path: string; element: ReactElement }[] = [
   { path: NAV.performance.path, element: <Placeholder screen="performance" /> },
   { path: NAV.data.path, element: <Placeholder screen="data" /> },
   { path: NAV.system.path, element: <Placeholder screen="system" /> },
-  { path: "/decisions/:asset/:id", element: <DecisionPlaceholder /> },
+  { path: "/decisions/:asset/:id", element: <Decision /> },
 ];
 
 export function AppRoutes() {
