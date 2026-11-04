@@ -3,6 +3,8 @@
 kind 표는 발견된 기능 + 커널 잡(`catalog.with_kernel`)의 `QueueKind` 다(데몬·CLI 와 같은 목록).
 실행 주체는 데몬의 큐 틱뿐이라 데몬이 살아 있지 않으면 요청을 받지 않는다(409).
 `trading` kind 가 실전 계좌(`params.account_id`)를 가리키면 본문 `confirm` 에 계좌 id 가 필요하다.
+대상 계좌가 없는 `trading` kind 는 실전 계좌가 하나라도 있으면 `confirm` 이 실전 계좌 id 중
+하나여야 하고, 계좌 포트가 없으면 거절한다(fail-safe, M11 Ruling T3-R4).
 """
 
 from __future__ import annotations
@@ -53,6 +55,19 @@ def account_env(deps: Any, account_id: str) -> str:
         if getattr(acct, "id", None) == account_id:
             return str(getattr(acct, "env", None) or "real")
     return "real"
+
+
+def require_confirm_any_real(deps: Any, body: dict) -> None:
+    """대상 계좌 없는 trading kind: 실전 계좌가 있으면 `confirm` 이 그 id 중 하나여야 한다."""
+    port = (deps.ports or {}).get("accounts")
+    if port is None:
+        raise HTTPException(status_code=400, detail="계좌 정보가 없어 실전 확인을 할 수 없습니다")
+    real = {
+        str(a.id) for a in port.accounts() if str(getattr(a, "env", None) or "real") != "paper"
+    }
+    if real and body.get("confirm") not in real:
+        detail = "실전 계좌가 포함된 작업은 confirm 에 실전 계좌 id 를 적어야 합니다"
+        raise HTTPException(status_code=400, detail=detail)
 
 
 def _enabled(spec: Any, settings: Any) -> bool:
@@ -149,6 +164,8 @@ def request_job(request: Request, body: JobBody) -> dict:
     account_id = params.get("account_id")
     if table[body.kind].trading and account_id:
         require_confirm(body.model_dump(), str(account_id), account_env(deps, str(account_id)))
+    elif table[body.kind].trading:
+        require_confirm_any_real(deps, body.model_dump())
     if not daemon_alive(deps):
         raise HTTPException(status_code=409, detail=DAEMON_DOWN)
     with closing(deps.conn_factory()) as conn:

@@ -74,6 +74,26 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
     return deps
 
 
+# 웹이 받지 않는 주문 집행 포트 이름(현물 executor 포트). 이름 밖에서도 `execute`·주문 호출을
+# 드러내는 포트는 `_executes` 가 거른다 — 웹은 원장 + 큐만 쓴다(M11 Ruling T3-R3).
+EXECUTION_PORTS = frozenset({"stock_exec"})
+
+
+def _executes(port: object) -> bool:
+    for name in dir(port):
+        if name.startswith("_"):
+            continue
+        low = name.lower()
+        if ("execute" in low or "order" in low) and callable(getattr(port, name, None)):
+            return True
+    return False
+
+
+def web_ports(ports: dict) -> dict:
+    """부트가 조립한 포트 중 주문 집행 포트를 뺀 사본(웹 프로세스 분리)."""
+    return {n: p for n, p in ports.items() if n not in EXECUTION_PORTS and not _executes(p)}
+
+
 def build_web_deps(boot_: Boot) -> WebDeps:
     return WebDeps(
         settings=boot_.settings,
@@ -86,7 +106,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         tailscale_users=tuple(boot_.settings.web.tailscale_users),
         public_base=boot_.settings.web.public_base,
         features=boot_.features,
-        ports=boot_.ports,
+        ports=web_ports(boot_.ports),
     )
 
 

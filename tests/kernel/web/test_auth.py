@@ -59,6 +59,13 @@ def test_direct_local_rejects_forwarded(deps):
         assert c.post("/api/t/local", headers={h: "1.2.3.4"}).status_code == 403, h
 
 
+def test_direct_local_rejects_any_x_forwarded_header(deps):
+    """프록시가 붙이는 `x-forwarded-*` 는 무엇이든 루프백 판정을 끈다(Host·Proto·Port 포함)."""
+    c = _client(deps, client=LOCAL)
+    for h in ("x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "X-Forwarded-Server"):
+        assert c.post("/api/t/local", headers={h: "127.0.0.1"}).status_code == 403, h
+
+
 def test_same_origin(deps):
     c = _client(deps, client=LOCAL)
     ok = c.post(

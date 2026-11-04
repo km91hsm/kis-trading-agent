@@ -124,6 +124,34 @@ def test_build_web_deps(project, monkeypatch):
         b.conn.close()
 
 
+def test_build_web_deps_excludes_execution_ports(project, monkeypatch):
+    """웹은 원장+큐만 쓴다(T3-R3): 주문 집행 포트(`stock_exec`, `execute`·주문 호출을 가진
+    포트)는 웹 deps 에서 빠지고 나머지 포트는 그대로 넘어간다."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    class _Exec:
+        def execute(self, *a):
+            return None
+
+    class _Orders:
+        def place_order(self, *a):
+            return None
+
+    accounts = SimpleNamespace(accounts=lambda: [])
+    b = boot_mod.boot(settings=True, conn=True)
+    try:
+        b = replace(b, ports={
+            "accounts": accounts, "stock_exec": SimpleNamespace(), "exec2": _Exec(),
+            "orders2": _Orders(), "ml": SimpleNamespace(close_table=lambda: None),
+        })  # fmt: skip
+        deps = main_mod.build_web_deps(b)
+        assert set(deps.ports) == {"accounts", "ml"}
+        assert deps.ports["accounts"] is accounts
+    finally:
+        b.conn.close()
+
+
 def test_daemon_exits_1_when_lock_not_acquired(project, monkeypatch):
     class FakeDaemon:
         def __init__(self, features, deps):

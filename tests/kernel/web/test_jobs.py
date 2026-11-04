@@ -49,6 +49,7 @@ def _feature() -> Feature:
             _qk("fx_scan", _Market, "시장 스캔", "slow"),
             _qk("fx_order", _Account, "계좌 작업", "fast", trading=True),
             _qk("fx_info", _Empty, "정보 확인", "info"),
+            _qk("fx_all", _Empty, "전 계좌 작업", "fast", trading=True),
         ),
     )
 
@@ -157,6 +158,30 @@ def test_trading_kind_without_accounts_port_is_treated_as_real(project, monkeypa
     assert client2.post("/api/jobs", json=unknown, headers=AUTH).status_code == 400
     ok = client2.post("/api/jobs", json={**unknown, "confirm": "ghost"}, headers=AUTH)
     assert ok.status_code == 200
+
+
+class _PaperOnly:
+    def accounts(self):
+        return [SimpleNamespace(id="paper-1", env="paper")]
+
+
+def test_trading_kind_without_account_id_needs_a_real_account_confirm(project, monkeypatch):
+    """대상 계좌가 없는 trading kind: 실전 계좌가 하나라도 있으면 confirm 이 실전 계좌 id 중
+    하나여야 한다(T3-R4). 모의뿐이면 confirm 없이 받고, 포트가 없으면 거절(fail-safe)."""
+    _alive(monkeypatch, True)
+    client, _ = _client(project)
+    body = {"kind": "fx_all"}
+    assert client.post("/api/jobs", json=body, headers=AUTH).status_code == 400
+    wrong = client.post("/api/jobs", json={**body, "confirm": "paper-1"}, headers=AUTH)
+    assert wrong.status_code == 400 and "confirm" in wrong.json()["detail"]
+    ok = client.post("/api/jobs", json={**body, "confirm": "real-1"}, headers=AUTH)
+    assert ok.status_code == 200
+    deps = ledger_deps(project, features=[_feature()], ports={"accounts": _PaperOnly()})
+    paper_only = make_client(deps)
+    assert paper_only.delete(f"/api/jobs/{ok.json()['id']}", headers=AUTH).status_code == 204
+    assert paper_only.post("/api/jobs", json=body, headers=AUTH).status_code == 200
+    no_port = make_client(replace(deps, ports={}))
+    assert no_port.post("/api/jobs", json={**body, "confirm": "x"}, headers=AUTH).status_code == 400
 
 
 def test_get_jobs_lists_kind_registry_and_schedule_table(project):
