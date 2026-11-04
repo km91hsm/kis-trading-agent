@@ -133,3 +133,15 @@ def test_to_web_maps_levels_and_drops_ok():
     only_watch = health.to_web(_result(watch), version="v", features=[])
     assert only_watch["level"] == "ok" and only_watch["reasons"][0]["level"] == "info"
     assert health.to_web(_result(), version="v", features=[])["level"] == "ok"
+
+
+def test_check_with_real_features_has_all_areas(make_ctx):
+    """실제 기능 + 빈 원장: 기능 영역이 모두 돌고 실패(`.error`) 항목이 없다."""
+    from trader.kernel.registry import discover
+
+    from .conftest import FakeAccounts, account
+
+    accounts = FakeAccounts([account("paper-main", ["KR", "US"])])
+    r = health.check(make_ctx(ports={"accounts": accounts}, features=discover()))
+    assert {"regime", "ingest", "evaluation", "quotes", "saveticker"} <= set(r["areas"])
+    assert not [i["key"] for i in r["items"] if i["key"].endswith(".error")]

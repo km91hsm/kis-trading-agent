@@ -4,6 +4,7 @@
 from trader.features.evaluation.analytics_routes import ROUTERS as ANALYTICS_ROUTERS
 from trader.features.evaluation.analytics_routes import SSE_KEYS
 from trader.features.evaluation.cli import evaluation_app
+from trader.features.evaluation.health import AREA as HEALTH
 from trader.features.evaluation.jobs import (
     DAILY_REPORT,
     PAPER_REVIEW,
@@ -42,4 +43,5 @@ FEATURE = Feature(
     telegram_commands=(DAILY,),
     status_sections=(STATUS_SECTION,),
     hooks=(Hook("scan_analyze.post", shadow_record_hook),),
+    health_areas=(HEALTH,),
 )
