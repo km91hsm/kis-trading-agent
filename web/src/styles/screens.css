@@ -169,3 +169,53 @@
   font-size: var(--text-sm);
 }
 .decision-outcomes { margin-top: var(--space-3); }
+
+/* ── 계좌·보유 ── */
+.totals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.totals-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.totals-pnl { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.totals-fx {
+  grid-column: 1 / -1;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.pause-control { margin-bottom: var(--space-4); }
+.pause-control .btn { min-height: var(--touch); }
+.pause-error {
+  margin-top: var(--space-2);
+  color: var(--fail);
+  font-size: var(--text-sm);
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+@media (min-width: 1024px) {
+  .account-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.account-card {
+  display: block;
+  color: var(--fg);
+  text-decoration: none;
+}
+.account-card:hover { border-color: var(--accent); }
+.account-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.account-mode { margin-bottom: var(--space-2); }
+.account-mode-note { color: var(--fg-muted); font-size: var(--text-sm); }
+.account-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+.account-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
+.account-stats dd { font-variant-numeric: tabular-nums; }
