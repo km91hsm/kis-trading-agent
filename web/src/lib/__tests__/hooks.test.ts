@@ -101,9 +101,30 @@ describe("useResource", () => {
     await flush();
     expect(fake.calls.length).toBe(1);
     expect(container.textContent).toBe("7||7||");
-    emit(["positions"]); // 1초 안 — 캐시를 쓴다
+    emit(["positions"]); // 같은 이벤트로 두 컴포넌트가 재조회해도 진행 중 요청을 나눠 1회
     await flush();
-    expect(fake.calls.length).toBe(1);
+    expect(fake.calls.length).toBe(2);
+  });
+
+  it("SSE 변화가 1초 안에 와도 재조회한다(reload 직후 포함)", async () => {
+    let n = 0;
+    fake = installFakeFetch({ "GET /api/positions": () => ({ n: ++n }) });
+    let reload: () => void = () => {};
+    function R() {
+      const r = useResource<Pos>("/positions", { account: "z" }, ["positions"]);
+      reload = r.reload;
+      return createElement("span", null, String(r.data?.n ?? "-"));
+    }
+    const { container } = render(createElement(R));
+    await flush();
+    expect(container.textContent).toBe("1");
+    act(() => reload());
+    await flush();
+    expect(container.textContent).toBe("2");
+    emit(["positions"]); // reload 응답 직후(1초 안) 변화
+    await flush();
+    expect(fake.calls.length).toBe(3);
+    expect(container.textContent).toBe("3");
   });
 
   it("enabled:false 면 부르지 않고, 오류는 ApiError 로 둔다", async () => {

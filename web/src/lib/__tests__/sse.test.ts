@@ -220,6 +220,32 @@ describe("리더 탭·중계", () => {
     b.close();
   });
 
+  it("승계당한 옛 리더가 깨어나면 자기 EventSource 를 닫고 follower 로 내려간다", () => {
+    const h = harness();
+    let aNow = 1_000_000;
+    const a = h.mk("a", { now: () => aNow }); // 숨겨져 타이머가 멈춘 리더
+    const b = h.mk("b");
+    h.advance(STALE_MS + 1);
+    vi.advanceTimersByTime(HEARTBEAT_MS); // a 의 하트비트는 옛 시각 그대로 → b 가 승계
+    expect(FakeSource.instances.length).toBe(2);
+    expect(parseLeader(h.storage.getItem(LEADER_KEY))?.id).toBe("b");
+    // a 가 깨어남: 기록은 b 것이고 신선하다 → 강등
+    aNow = 1_000_000 + STALE_MS + 1 + HEARTBEAT_MS;
+    vi.advanceTimersByTime(HEARTBEAT_MS);
+    expect(FakeSource.instances[0].closed).toBe(true);
+    expect(FakeSource.instances[1].closed).toBe(false);
+    expect(FakeSource.instances.length).toBe(2);
+    expect(parseLeader(h.storage.getItem(LEADER_KEY))?.id).toBe("b");
+    // 강등된 a 는 b 의 중계를 받는다
+    const got: SseKey[][] = [];
+    a.subscribe((k) => got.push(k));
+    FakeSource.instances[1].emit("change", snap({ orders: "9" }));
+    expect(got.length).toBe(1);
+    a.close();
+    expect(FakeSource.instances[1].closed).toBe(false); // follower 의 close 는 리더를 건드리지 않는다
+    b.close();
+  });
+
   it("channel 이 null 이면 탭마다 직접 연다", () => {
     const c = createEventsClient({
       EventSourceCtor: FakeSource as unknown as typeof EventSource,

@@ -18,7 +18,7 @@ function sweep(t: number): void {
   for (const [k, e] of cache) if (!e.promise && e.users <= 0 && t - e.at >= DEDUPE_MS) cache.delete(k);
 }
 
-/** 진행 중이면 그 promise 를, DEDUPE_MS 안에 받은 값이 있으면 그 값을 준다(force 면 새로 부른다).
+/** 진행 중이면 그 promise 를, DEDUPE_MS 안에 받은 값이 있으면 그 값을 준다(force 면 받은 값은 건너뛰고 새로 부르되, 진행 중 요청은 force 여도 나눠 쓴다).
  *  release() 로 마지막 사용자가 떠나면 진행 중 요청을 AbortSignal 로 끊는다. */
 export function cachedGet<T>(path: string, params: Record<string, string>, force: boolean): { promise: Promise<T>; release(): void } {
   const key = path + JSON.stringify(params);

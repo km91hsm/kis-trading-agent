@@ -225,6 +225,19 @@ export function createEventsClient(deps: EventsDeps = {}): EventsClient {
     }
     post({ type: "leader-gone", id: selfId });
   };
+  /** 리더 하트비트. 숨겨져 타이머가 멈춘 사이 다른 탭이 승계했으면(기록이 남의 것이고 신선) 강등한다 —
+   *  덮어쓰면 EventSource 가 둘이 되고 기록을 서로 빼앗는다. */
+  const leaderBeat = () => {
+    const rec = readLeader();
+    if (rec && rec.id !== selfId && !canLead(rec, selfId, now())) {
+      leader = false;
+      source?.close();
+      source = null;
+      post({ type: "hello" }); // 새 리더에게 마지막 스냅샷·상태를 받는다
+      return;
+    }
+    writeLeader();
+  };
   const tryLead = () => {
     if (canLead(readLeader(), selfId, now())) becomeLeader();
   };
@@ -268,7 +281,7 @@ export function createEventsClient(deps: EventsDeps = {}): EventsClient {
     relay.addEventListener("message", onMessage);
     tryLead();
     if (!leader) post({ type: "hello" });
-    heartbeat = setInterval(() => (leader ? writeLeader() : tryLead()), HEARTBEAT_MS);
+    heartbeat = setInterval(() => (leader ? leaderBeat() : tryLead()), HEARTBEAT_MS);
   } else {
     leader = true; // 중계가 없으면 스스로 연다
     open();

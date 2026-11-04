@@ -32,6 +32,12 @@ export function useResource<T>(
   const [n, setN] = useState(0);
   const force = useRef(false);
   const deferred = useRef(false);
+  // 구독 키 변화·reload 는 1초 dedupe 를 우회한다(값이 바뀌었다는 신호라 직전 응답은 낡았다).
+  // 진행 중 요청은 그대로 나눠 써서 같은 이벤트로 여러 컴포넌트가 재조회해도 1회.
+  const refetch = useCallback(() => {
+    force.current = true;
+    setN((x) => x + 1);
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
@@ -62,12 +68,12 @@ export function useResource<T>(
     const off = eventsClient().subscribe((changed) => {
       if (!changed.some((k) => mine.has(k))) return;
       if (isHidden()) deferred.current = true; // 보이면 한 번에 읽는다
-      else setN((x) => x + 1);
+      else refetch();
     });
     const onVis = () => {
       if (!isHidden() && deferred.current) {
         deferred.current = false;
-        setN((x) => x + 1);
+        refetch();
       }
     };
     document.addEventListener("visibilitychange", onVis);
@@ -75,12 +81,9 @@ export function useResource<T>(
       off();
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [enabled, kkey]);
+  }, [enabled, kkey, refetch]);
 
-  const reload = useCallback(() => {
-    force.current = true;
-    setN((x) => x + 1);
-  }, []);
+  const reload = refetch;
   return { ...state, reload };
 }
 
