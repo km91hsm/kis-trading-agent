@@ -171,6 +171,7 @@ web/src/
 public/manifest.webmanifest  public/icons/
 ```
 - 상태 관리는 fetch 캐시 + SSE 무효화(라이브러리 없음). 라우트 다섯 개 + 결정 상세.
+- PC 왼쪽 메뉴는 2단: 화면 5개 아래에 그 화면의 하위 목차(`nav.ts` 의 `NavItem(screen, id, label, order)`)를 **줄마다 하나씩** 펼치고 현재 항목을 표시한다. 본문에는 같은 탭을 중복해 두지 않는다(휴대폰은 메뉴가 없으므로 상단 탭 유지). 상세 화면은 하위 목차 위에 「‹ 돌아가기」 한 줄.
 - 반응형 기준: 행 카드(<1024px) / 메뉴+본문(≥1024px). 1024~1279px 는 왼쪽 메뉴를 아이콘(56px)으로 접어 표 폭을 지키고, 그래도 좁으면 표는 첫 열 고정 + 가로 스크롤(열 숨김 금지). 1024px 미만은 표를 행 카드(1줄 메타 · 1줄 제목 말줄임 · 1줄 칩)로 바꾼다.
 - 디자인 체계(색·글자·간격 토큰, 상태색 3단계, 실전 색, 다크)는 M11b 첫 Task 에서 `ui-ux-pro-max` 로 정해 `tokens.css` 와 짧은 `web/DESIGN.md` 에 고정; 이후 화면은 그 부품만 조합. 대시보드 다듬기는 `design-taste-frontend` 로 한 번.
 - 테스트: vitest 순수 함수 5종 이식 + 화면별 렌더 테스트(jsdom, 합성 응답) 각 1~2개. `npm run typecheck && npm test -- --run && npm run build` 가 CI.
