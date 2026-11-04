@@ -1,5 +1,7 @@
 """데몬 ↔ 세이브티커 수집 서비스: 앱이 켜져 있는 동안 서비스를 띄우고(계정 파일이 있을 때만),
-죽으면 다시, 종료 때 정리. 장애 감시는 텔레그램, 보관 기간 정리는 운영일 1회."""
+죽으면 다시, 종료 때 정리. 장애 감시는 텔레그램, 보관 기간 정리는 운영일 1회. 웹 '다시 시작'
+요청(control `saveticker_restart_requested`)은 이 잡이 소비한다(옛
+`test_saveticker_extension_restart_uses_popup_instead_of_legacy_reset` 단언은 여기로)."""
 
 import threading
 from datetime import UTC, datetime
@@ -9,9 +11,13 @@ import pytest
 
 from trader.features.saveticker import automation, job
 from trader.features.saveticker.feature import FEATURE
+from trader.features.saveticker.store import atomic_json
 from trader.kernel.cli.boot import build_registry
 from trader.kernel.daemon.jobs import build
 from trader.kernel.daemon.runner import DaemonDeps
+from trader.kernel.ledger import control, db
+from trader.kernel.registry import discover
+from trader.kernel.registry.contracts import all_migrations
 
 NOW = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
 
@@ -42,10 +48,16 @@ def _reset():
 
 
 def _deps(project, *, stop=None):
+    ledger = project / "state" / "trader.db"
+    c = db.connect(ledger)
+    try:
+        db.init_schema(c, all_migrations(discover()))
+    finally:
+        c.close()
     return DaemonDeps(
         settings=SimpleNamespace(),
         schedule=SimpleNamespace(),
-        conn_factory=lambda: None,
+        conn_factory=lambda: db.connect(ledger),
         state=project / "state",
         now=lambda: NOW,
         markets=["KR"],
@@ -158,3 +170,56 @@ def test_stop_event_skips_start_and_teardown_runs_once(project, monkeypatch):
     job.stop(deps)
     job.stop(deps)
     assert stopped == [automation.STOP_GRACE_S]
+
+
+FLAG = "saveticker_restart_requested"
+RUNTIME = ("state", "external", "saveticker", "runtime")
+
+
+def _request_restart(deps):
+    conn = deps.conn_factory()
+    try:
+        control.set_flag(conn, FLAG, {"at": NOW.isoformat(), "actor": "web"})
+    finally:
+        conn.close()
+
+
+def _flag(deps):
+    conn = deps.conn_factory()
+    try:
+        return control.get_flag(conn, FLAG)
+    finally:
+        conn.close()
+
+
+def test_restart_request_clears_blocks_and_flag(project, monkeypatch):
+    """웹 '다시 시작' 요청: 정지·작업 쉬기 기록을 지우고(옛 legacy reset) 플래그를 지운다 —
+    같은 틱에 서비스가 다시 뜬다."""
+    spawned, _ = _patch(monkeypatch)
+    (project / "secrets" / "saveticker.env").write_text("x", encoding="utf-8")
+    runtime = project.joinpath(*RUNTIME)
+    atomic_json(runtime / "service.json", {"state": "blocked", "reason": "restart_limit",
+                                           "at": NOW.isoformat()})  # fmt: skip
+    deps = _deps(project)
+    assert job.watch(deps, None)["service"] != "실행 중" and not spawned  # 정지 중이라 안 뜬다
+    _request_restart(deps)
+    out = job.watch(deps, None)
+    assert out["restart"] == "정지 기록 지움" and _flag(deps) is None
+    assert automation.read(runtime / "service.json")["state"] == "stopped"
+    assert len(spawned) == 1 and out["service"].startswith("시작")
+    assert "restart" not in job.watch(deps, None)  # 소비했으니 다음 틱엔 없음
+
+
+def test_extension_restart_uses_popup_instead_of_legacy_reset(project, monkeypatch):
+    """확장 백엔드는 Chrome 확장 아이콘에서 재개한다 — 옛 정지 기록 지우기를 하지 않고 안내만
+    보낸 뒤 플래그를 지운다."""
+    _patch(monkeypatch)
+    cleared = []
+    monkeypatch.setattr(automation, "clear_blocks", lambda home: cleared.append(home))
+    atomic_json(project.joinpath(*RUNTIME) / "bridge-config.json", {"backend": "extension"})
+    deps = _deps(project)
+    _request_restart(deps)
+    out = job.watch(deps, None)
+    assert cleared == [] and _flag(deps) is None
+    assert "Chrome" in out["restart"]
+    assert any("Chrome" in m for m in deps.notifier.msgs)

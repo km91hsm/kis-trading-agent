@@ -29,6 +29,10 @@
 - 로거 `trader.regime`. 저장 시각은 UTC ISO8601, 날짜 기본값은 KST.
 - `market_view` 큐 kind 는 `trading=False` 를 유지한다(M9 Ruling A15e): 시장 세션은 개장 전에도 돌아야 하므로 장중 전용 kind 로 묶지 않는다(옛 `TRADING_KINDS` 포함은 따르지 않음).
 
+## 웹 (M11, `routes.py`)
+
+- `GET /system/regime?market=`(옛 `system.regime_status`, 토큰 없음): 헤지 설정 요약(enabled·max/min_weight_pct·leverage·bear_min_signals·market_session·instruments) + `regime.summary`(시장별 state·signals·values·오늘 시장 판단 `view`·적중률 `scorecard`, 오늘 = `deps.now()` 의 KST 날짜) + 킬스위치 `{on, reason, source, accounts, at}`(옛 응답에 없던 것). market 을 주면 그 시장만(운영하지 않는 시장은 400). nav `system/regime`(국면).
+
 ## 공개면 (`api.py`)
 
 `HedgeCfg`·`HedgeInstrument`·`BlackoutCfg`·`load`(국면 플래그)·`core_count`·`killswitch_reason`·`blackout_reason`. 시장 세션 산출은 레인이 `ports["regime"]` 로 받는다. fo 레인(M10)이 쓰는 포트 메서드: `load(conn, market)`(저장된 국면 레코드 — `state`)·`view_today(conn, market, today)`(오늘 시장 뷰 — `context.market_view`)·`hedge_tickers(market)`(현물 헤지 종목 — 헤지 보유 읽기)·`killswitch_reason(conn, account_id)`(킬스위치 사유 — 게이트·엔진의 진입 회수).

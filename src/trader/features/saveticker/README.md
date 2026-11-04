@@ -7,6 +7,13 @@
 - 리더(`reader.py`)가 같은 폴더를 읽어 뉴스 항목·종목 TOP5·지수·순위·캘린더·리포트 발췌를 돌려준다(`snapshot`, `upcoming`, `for_ticker`, `read_news_items`).
 - 데몬 잡 `saveticker`(60초, heavy 밖)가 `automation.should_start` 를 따라 `trader saveticker service` 를 분리 프로세스로 띄우고, 장애 감시를 텔레그램(`messages.saveticker_health`)으로 돌리고, 운영일 1회 `Store.prune(retention_days)` 를 한다. 종료 때 `procs.stop_tree` 로 정리한다.
 
+## 웹 (M11, `routes.py`)
+
+- `GET /system/saveticker`(옛 `system.saveticker_status`, 토큰 없음): `configured`(계정 파일 유무, 확장 모드는 계정 불필요) + `automation.status`. 계정·값은 돌려주지 않는다.
+- `POST /system/saveticker/restart`(토큰 + 같은 출처, T11-R2): control `saveticker_restart_requested = {at, actor}` 를 세우고 `control_log`(channel web)에 남길 뿐 수집 프로세스·파일은 건드리지 않는다. 확장 모드면 응답 `note` 로 Chrome 확장 팝업 재개를 안내한다. 데몬 잡 `watch` 가 다음 틱에 `consume_restart` 로 소비한다: 확장 백엔드는 정지 기록을 지우지 않고 안내 알림만(옛 409 "popup instead of legacy reset"), 그 외는 `automation.clear_blocks` 후 같은 틱에 띄우기 판정. 어느 쪽이든 플래그를 지운다(수집이 꺼져 있으면 남아 있다가 켜진 뒤 소비).
+- 제어 네임스페이스 `saveticker_restart_requested`, nav `system/saveticker`(저장소).
+- 옛 재시작은 `require_direct_local`(이 PC 직접 접속)이었으나 이제 토큰 + 같은 출처다(웹이 직접 실행하지 않고 요청만 남기므로).
+
 ## 공개면 (`api.py`)
 
 `SaveTickerCfg`, `load_cfg`, `DEFAULT_DIR`, `resolve_dir`, `home`, `credentials_path`, `available`, `published_at_of`, `markets_of`, `read_news_items`, `report_excerpt`, `upcoming`, `snapshot`, `for_ticker`, `JSONL_DAYS`, `NEWS_STREAMS`, `SCHEMA_VERSION`. 다른 기능(ingest)은 이 파일만 import 한다.
