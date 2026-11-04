@@ -35,6 +35,7 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 ## 반응형·표
 - 확인 폭: 375 · 768 · 1024 · 1440px. 모바일 우선.
 - 넓은 표는 좁은 폭에서 행을 카드로 바꾸거나 가로 스크롤 래퍼에 담는다(표가 화면을 밀어내지 않게).
+- 공통 부품(`components/`, 스타일 `components.css`): 표는 `Table`(≥1024px `<table>` · 미만 `RowCard`, `useWide`), 쓰기 확인은 `Confirm`, 잡 실행은 `RunJobButton`.
 
 ## 메뉴·앵커
 - 화면 안 섹션 컨테이너는 `id={item.id}`(자동 생성 `generated/nav.ts` 의 id)를 단다 — 하위 목차가 `<path>#<id>` 로 스크롤하고 `IntersectionObserver` 로 현재 섹션을 표시한다.

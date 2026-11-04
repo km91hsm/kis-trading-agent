@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import App from "./app/App";
+import "./styles/components.css";
 import { applyTheme, prefersDark, resolveTheme, themeStore } from "./lib/theme";
 
 // 첫 렌더 전에 테마를 적용해 깜빡임을 막는다.
