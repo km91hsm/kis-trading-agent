@@ -61,8 +61,9 @@ function authFail(e: AuthError): never {
   throw e;
 }
 
-/** 쓰기 옵션: `token` 은 저장된 토큰 대신 쓸 값(저장 전 확인용), `signal` 은 취소. */
-export type WriteOpts = { token?: string; signal?: AbortSignal };
+/** 쓰기 옵션: `token` 은 저장된 토큰 대신 쓸 값(저장 전 확인용), `signal` 은 취소,
+ *  `quiet403` 이면 403(이 PC 에서만 등)은 리스너 통지 없이 AuthError(403) 로 거부만 한다(401 은 그대로 통지). */
+export type WriteOpts = { token?: string; signal?: AbortSignal; quiet403?: boolean };
 
 function withQuery(path: string, params?: Record<string, string>): string {
   const url = BASE + path;
@@ -70,7 +71,7 @@ function withQuery(path: string, params?: Record<string, string>): string {
   return url + (url.includes("?") ? "&" : "?") + new URLSearchParams(params).toString();
 }
 
-async function errorOf(res: Response): Promise<never> {
+async function errorOf(res: Response, quiet403 = false): Promise<never> {
   let detail = `${res.status} ${res.statusText}`.trim();
   try {
     const body = (await res.json()) as { detail?: unknown };
@@ -79,11 +80,12 @@ async function errorOf(res: Response): Promise<never> {
   } catch {
     /* 본문 없음·JSON 아님 */
   }
+  if (res.status === 403 && quiet403) throw new AuthError(403, detail);
   if (res.status === 401 || res.status === 403) authFail(new AuthError(res.status, detail));
   throw new ApiError(res.status, detail);
 }
 
-async function send<T>(method: string, url: string, init: RequestInit): Promise<T> {
+async function send<T>(method: string, url: string, init: RequestInit, quiet403 = false): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, { ...init, method });
@@ -93,7 +95,7 @@ async function send<T>(method: string, url: string, init: RequestInit): Promise<
   }
   const serverTime = res.headers.get("X-Server-Time");
   if (serverTime) noteServerTime(serverTime);
-  if (!res.ok) await errorOf(res);
+  if (!res.ok) await errorOf(res, quiet403);
   const text = await res.text();
   if (!text) return undefined as T;
   try {
@@ -113,7 +115,7 @@ async function write<T>(method: string, path: string, body: unknown, opts: Write
     headers,
     body: hasBody ? JSON.stringify(body) : undefined,
     signal: opts.signal,
-  });
+  }, opts.quiet403);
 }
 
 export function getJson<T>(path: string, params?: Record<string, string>, opts: { signal?: AbortSignal } = {}): Promise<T> {
@@ -134,11 +136,11 @@ export function deleteJson<T = void>(path: string, opts?: WriteOpts): Promise<T>
 
 /** 토큰 없는 같은 출처 POST(T13-R1) — `ensure-fresh`·`bootstrap-token` 처럼 직접 로컬·Origin 검사만 하는 경로.
  *  Authorization 을 붙이지 않는다(브라우저가 Origin 을 붙인다). */
-export function postPublic<T>(path: string, body?: unknown, opts: { signal?: AbortSignal } = {}): Promise<T> {
+export function postPublic<T>(path: string, body?: unknown, opts: { signal?: AbortSignal; quiet403?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const hasBody = body !== null && body !== undefined;
   if (hasBody) headers["Content-Type"] = "application/json";
-  return send<T>("POST", BASE + path, { headers, body: hasBody ? JSON.stringify(body) : undefined, signal: opts.signal });
+  return send<T>("POST", BASE + path, { headers, body: hasBody ? JSON.stringify(body) : undefined, signal: opts.signal }, opts.quiet403);
 }
 
 /** 토큰이 필요한 조회(예: `GET /settings/secrets`). 토큰이 없으면 쓰기와 같이 AuthError. */

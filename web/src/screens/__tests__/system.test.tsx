@@ -2,7 +2,7 @@ import { act, StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { System } from "../system/System.tsx";
-import { tokenStore } from "../../lib/api";
+import { onAuthError, tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
@@ -221,6 +221,19 @@ describe("시스템 화면", () => {
     expect(s.textContent).not.toContain("secret-value-1");
     expect(s.textContent).toContain("재시작");
     expect(callsTo("/settings/secrets")).toHaveLength(loads + 1); // 저장 뒤 다시 읽음
+  });
+
+  test("시크릿 GET 403(원격) → 인라인 「이 PC 에서만」, 셸 토큰 띠(onAuthError)는 부르지 않는다", async () => {
+    tokenStore.set("tok");
+    const seen: unknown[] = [];
+    const off = onAuthError((e) => seen.push(e));
+    try {
+      await mount(routes({ "GET /api/settings/secrets": forbidden }));
+      expect(section("secrets").textContent).toContain("이 PC 에서만");
+      expect(seen).toHaveLength(0);
+    } finally {
+      off();
+    }
   });
 
   test("시크릿 POST 403 → 「이 PC 에서만」", async () => {

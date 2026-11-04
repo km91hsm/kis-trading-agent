@@ -21,7 +21,7 @@ export function TokenPanel({ onChange }: { onChange(): void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await postPublic<{ token: string }>("/system/bootstrap-token");
+      const r = await postPublic<{ token: string }>("/system/bootstrap-token", undefined, { quiet403: true });
       store(r.token);
     } catch (e) {
       setError(e instanceof ApiError && e.status === 403 ? "이 PC 에서만 받을 수 있습니다" : errorText(e));

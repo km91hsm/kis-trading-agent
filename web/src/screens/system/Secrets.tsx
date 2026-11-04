@@ -1,6 +1,6 @@
 // 연결 키 — GET /settings/secrets(토큰 + 이 PC 직접 접속, 이름·설정 여부만)를 마운트·토큰 저장·저장 뒤에 읽고,
 // 키마다 비밀번호 입력 → 「저장」 → POST /settings/secrets {values}. 값은 화면에 되돌려 보이지 않고 저장 뒤 입력을 비운다.
-// 403 은 「이 PC 에서만」. SSE 키가 없어 구독하지 않는다.
+// 403 은 「이 PC 에서만」(quiet403 — 셸 토큰 띠는 띄우지 않는다). SSE 키가 없어 구독하지 않는다.
 import { useCallback, useEffect, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
@@ -26,7 +26,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
   useEffect(() => {
     if (!hasToken) return;
     const ctrl = new AbortController();
-    getAuthed<SecretsResp>("/settings/secrets", undefined, { signal: ctrl.signal }).then(
+    getAuthed<SecretsResp>("/settings/secrets", undefined, { signal: ctrl.signal, quiet403: true }).then(
       (d) => {
         setData(d);
         setLoadError(null);
@@ -45,7 +45,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
     setError(null);
     setNotice(null);
     try {
-      const r = await postJson<SaveResp>("/settings/secrets", { values: filled });
+      const r = await postJson<SaveResp>("/settings/secrets", { values: filled }, { quiet403: true });
       setValues({});
       const parts = [`${r.updated.length}개 저장했습니다`];
       if (r.env_overridden.length) parts.push(`환경변수가 우선합니다: ${r.env_overridden.join(", ")}`);

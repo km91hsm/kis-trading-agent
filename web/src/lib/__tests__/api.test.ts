@@ -6,6 +6,7 @@ import {
   AuthError,
   csvUrl,
   deleteJson,
+  getAuthed,
   getJson,
   onAuthError,
   patchJson,
@@ -240,5 +241,41 @@ describe("postPublic", () => {
     tokenStore.set("");
     install({ "POST /api/x": (_u: URL, init?: RequestInit) => JSON.parse(String(init?.body)) as unknown });
     await expect(postPublic("/x", { a: 1 })).resolves.toEqual({ a: 1 });
+  });
+});
+
+describe("quiet403", () => {
+  it("getAuthed(..., {quiet403: true}) 403 은 리스너를 부르지 않고 AuthError(403) 로 거부", async () => {
+    tokenStore.set("tok");
+    install({ "GET /api/settings/secrets": () => new Response(JSON.stringify({ detail: "이 PC 에서만" }), { status: 403 }) });
+    const seen: AuthError[] = [];
+    const off = onAuthError((e) => seen.push(e));
+    try {
+      const err = await getAuthed("/settings/secrets", undefined, { quiet403: true }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(AuthError);
+      expect((err as AuthError).status).toBe(403);
+      expect((err as AuthError).message).toBe("이 PC 에서만");
+      expect(seen).toHaveLength(0);
+      const err2 = await postPublic("/system/bootstrap-token", undefined, { quiet403: true }).catch((e: unknown) => e);
+      expect((err2 as AuthError).status).toBe(404); // 경로 없음 — 403 아닌 오류는 그대로
+    } finally {
+      off();
+      tokenStore.set("");
+    }
+  });
+
+  it("quiet403 이어도 401 은 리스너에 통지", async () => {
+    tokenStore.set("tok");
+    install({ "GET /api/settings/secrets": () => new Response(JSON.stringify({ detail: "토큰이 틀렸습니다" }), { status: 401 }) });
+    const seen: AuthError[] = [];
+    const off = onAuthError((e) => seen.push(e));
+    try {
+      const err = await getAuthed("/settings/secrets", undefined, { quiet403: true }).catch((e: unknown) => e);
+      expect((err as AuthError).status).toBe(401);
+      expect(seen.map((e) => e.status)).toEqual([401]);
+    } finally {
+      off();
+      tokenStore.set("");
+    }
   });
 });
