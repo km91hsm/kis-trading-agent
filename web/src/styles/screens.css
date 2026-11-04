@@ -65,3 +65,4 @@
   min-width: 3em;
 }
 .lane-stats dd { font-variant-numeric: tabular-nums; }
+.lane-note { color: var(--fg-muted); }

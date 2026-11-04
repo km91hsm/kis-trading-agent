@@ -10,7 +10,22 @@ const STATE: Record<LaneCard["state"], { tone: Tone; text: string }> = {
   paused: { tone: "fail", text: "일시정지" },
 };
 
-export function LaneCardView({ card }: { card: LaneCard }) {
+/** 결정·주문 조회가 끝나지 않았거나(loading) 실패하면(error) 집계 대신 그 상태만 보인다(빈 목록을 「완료」로 오인하지 않게). */
+export type LaneFetch = "ready" | "loading" | "error";
+const FETCH: Record<Exclude<LaneFetch, "ready">, { tone: Tone; text: string }> = {
+  loading: { tone: "muted", text: "불러오는 중" },
+  error: { tone: "fail", text: "불러오지 못함" },
+};
+
+export function LaneCardView({ card, fetch = "ready" }: { card: LaneCard; fetch?: LaneFetch }) {
+  if (fetch !== "ready") {
+    const f = FETCH[fetch];
+    return (
+      <Card title={LANE_LABEL[card.lane]} right={<Badge tone={f.tone}>{f.text}</Badge>}>
+        <p className="lane-note">결정·주문 집계 —</p>
+      </Card>
+    );
+  }
   const s = STATE[card.state];
   const { buy, sell, hold } = card.decisions;
   return (

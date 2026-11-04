@@ -177,6 +177,30 @@ describe("오늘 화면", () => {
     expect(section("decisions").querySelector("a[download]")!.getAttribute("href")).toBe("/api/decisions?date=2026-11-04&format=csv");
   });
 
+  test("승인 조회가 실패하면 섹션을 숨기지 않고 오류 문구를 보인다", async () => {
+    await mount(routes({ "GET /api/approvals": () => json({ detail: "db locked" }, 500) }));
+    const ap = section("approvals");
+    expect(ap.hidden).toBe(false);
+    expect(ap.textContent).toContain("승인 대기를 불러오지 못했습니다");
+    expect(ap.textContent).toContain("db locked");
+  });
+
+  test("주문 조회가 실패하면 레인 카드에 「완료」 대신 「불러오지 못함」", async () => {
+    await mount(routes({ "GET /api/orders": () => json({ detail: "boom" }, 500) }));
+    const spot = section("spot-lane");
+    expect(spot.hidden).toBe(false);
+    expect(spot.textContent).not.toContain("완료");
+    expect(spot.textContent).toContain("불러오지 못함");
+    expect(spot.textContent).not.toContain("미체결 0");
+  });
+
+  test("주문·결정이 오기 전에는 레인 카드에 「불러오는 중」", async () => {
+    await mount(routes({ "GET /api/orders": () => new Promise(() => {}) }));
+    const spot = section("spot-lane");
+    expect(spot.textContent).not.toContain("완료");
+    expect(spot.textContent).toContain("불러오는 중");
+  });
+
   test("partial 응답이면 결정 표 위에 칩", async () => {
     await mount(routes({ "GET /api/decisions": merged([fixtureSpotDecision()], true) }));
     const dec = section("decisions");

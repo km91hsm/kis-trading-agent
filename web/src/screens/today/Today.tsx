@@ -10,7 +10,7 @@ import { useResource } from "../../lib/hooks";
 import type { UsageResp } from "../../lib/usage";
 import { ApprovalsBlock, type Approval } from "./ApprovalsBlock";
 import { DecisionsList } from "./DecisionsList";
-import { LaneCardView } from "./LaneCards";
+import { LaneCardView, type LaneFetch } from "./LaneCards";
 import { LANE_LABEL, LANES, laneCards, type Account, type Decision, type Merged, type Order } from "./today.ts";
 
 export function Today() {
@@ -26,6 +26,8 @@ export function Today() {
   const cards = accounts.data
     ? laneCards(accounts.data, decisions.data?.items ?? [], orders.data?.items ?? [], usage.data?.caps_by_kind ?? [])
     : null;
+  const laneFetch: LaneFetch =
+    decisions.error || orders.error ? "error" : !decisions.data || !orders.data ? "loading" : "ready";
 
   return (
     <div className="screen" data-screen="today">
@@ -34,8 +36,9 @@ export function Today() {
         <DatePicker value={date} onChange={(v) => v && setDate(v)} max={kstDate(now())} />
       </header>
 
-      <section id="approvals" className="screen-section" hidden={!pending.length}>
+      <section id="approvals" className="screen-section" hidden={!pending.length && !approvals.error}>
         <h2>승인 대기 {pending.length}건</h2>
+        {approvals.error ? <Empty title="승인 대기를 불러오지 못했습니다">{approvals.error.message}</Empty> : null}
         <ApprovalsBlock items={pending} onDone={approvals.reload} />
       </section>
 
@@ -45,7 +48,7 @@ export function Today() {
           return (
             <section key={lane} id={`${lane}-lane`} className="screen-section" hidden={!!cards && !card} aria-label={LANE_LABEL[lane]}>
               {card ? (
-                <LaneCardView card={card} />
+                <LaneCardView card={card} fetch={laneFetch} />
               ) : accounts.error ? (
                 <Empty title="계좌를 불러오지 못했습니다">{accounts.error.message}</Empty>
               ) : (
