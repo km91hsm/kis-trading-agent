@@ -315,6 +315,8 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
   - M8: `DELETE /jobs/{id}` 로 대기 중인 `approve_execute` 를 취소해도 승인 선점이 TTL 까지 남음 → spot `approvals.release` 훅 또는 409
   - T5-R2: approve 의 `DuplicateRequest` → 202 기존 request_id 경로가 사실상 도달 불가(정리 또는 제거)
   - 웹 거부 알림: 스펙 §8.10(e) '웹이 보내는 알림은 없다'와 충돌 → 큐 kind 또는 데몬 watcher 로(텔레그램 거부 알림은 fix wave 에서 구현, T5-R1)
+  - F7(재리뷰): 환율 `fail_at` 기록(`fx_cache:%`)이 `CONTROL_CURSOR_LIKE` 에 없어 FRED 키 없음·장애 시 300초마다 control SSE 지문이 바뀜 → `fx_cache:%` 를 커서류로 등록하거나 원천 없을 때 `fail_at` 생략
+  - F8(재리뷰): `features/quotes/README.md` 「실패는 캐시하지 않음」·`quotes/api.py` docstring 이 음성 캐시·stale 과 어긋남 → 문구 갱신
 - M11 에서 옮긴 비웹 이연: 섹터 자동분류 `_classify`·`auto_classify` 호출자(M5·M7) · `_close_stale` 커널 헬퍼 통합(M7) · `metrics.pending_approvals/account_stance/stance_by_market`(M8) · spot monitor 의 단타 보유분 제외 검토(M9·M10) · `InputsPort.recent`(scalp·fo 판정 뉴스·거시, fo `_novel_news` raw SQL) · FAKE 사본 잔여(regime `_turn`) · `AccountsPort` dict 가짜 포트 정리 · `views.account_summary` 의존 `test_performance_fo` 2건 · 커널 승격 후보 `reeval.handled_marker`·`_wrap_section`·`_boot_notifier`·`_check_hm`(M10)
 - 이연(M0 리뷰):
   - `Lock` 주입 clock
