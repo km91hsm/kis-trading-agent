@@ -1,0 +1,67 @@
+/* 화면별 배치 — 색·간격은 tokens.css 변수만. */
+
+/* ── 오늘 ── */
+.screen-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.screen-head .screen-title { margin-bottom: 0; }
+
+.approvals {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+.approval {
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.approval-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.approval-meta {
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.approval-summary { margin: var(--space-2) 0; }
+.approval-error {
+  color: var(--fail);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-2);
+}
+.approval-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.approval-actions .btn { min-height: var(--touch); }
+
+.lane-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+.lane-grid > .screen-section { margin-bottom: 0; }
+.lane-stats {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.lane-stats > div {
+  display: flex;
+  gap: var(--space-2);
+}
+.lane-stats dt {
+  color: var(--fg-muted);
+  min-width: 3em;
+}
+.lane-stats dd { font-variant-numeric: tabular-nums; }
