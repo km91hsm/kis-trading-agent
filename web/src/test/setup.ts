@@ -1,6 +1,7 @@
 // vitest(jsdom) 공통 준비 — jsdom 에 없는 브라우저 API 를 최소 스텁으로 채우고(있으면 그대로 둔다),
-// 테스트마다 localStorage 를 비운다.
-import { beforeEach } from "vitest";
+// 테스트마다 localStorage·data-theme 를 비우고, 끝나면 render() 로 붙인 트리를 모두 떼어 낸다.
+import { afterEach, beforeEach } from "vitest";
+import { cleanup } from "./render";
 
 // React 에 act 환경임을 알려 "not wrapped in act" 경고를 막는다.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,4 +72,9 @@ for (const name of ["ResizeObserver", "IntersectionObserver"]) {
 
 beforeEach(() => {
   if (typeof localStorage !== "undefined") localStorage.clear();
+  if (typeof document !== "undefined") document.documentElement.removeAttribute("data-theme");
+});
+
+afterEach(() => {
+  cleanup();
 });

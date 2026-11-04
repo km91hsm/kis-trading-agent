@@ -1,5 +1,6 @@
 // 테스트용 가짜 fetch — "<METHOD> <pathname>" 키로 응답을 고른다(쿼리 문자열은 매칭에서 무시).
-// 값이 함수면 (URL, init) 으로 불러 그 반환값을 JSON 으로 돌려준다. 없는 경로는 404 {detail:"no route"}.
+// 값이 함수면 (URL, init) 으로 불러 그 반환값을 JSON 으로 돌려준다(반환값이 Response 면 그대로 — 4xx/5xx 흉내).
+// 없는 경로는 404 {detail:"no route"}.
 
 type Handler = unknown | ((url: URL, init?: RequestInit) => unknown);
 
@@ -27,7 +28,7 @@ export function installFakeFetch(routes: Record<string, Handler>): FakeFetch {
     if (!(key in routes)) return json({ detail: "no route" }, 404);
     const h = routes[key];
     const body = typeof h === "function" ? await (h as (u: URL, i?: RequestInit) => unknown)(url, init) : h;
-    return json(body);
+    return body instanceof Response ? body : json(body);
   };
   return {
     calls,
