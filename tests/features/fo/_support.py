@@ -1,7 +1,9 @@
 """fo 테스트 공용 헬퍼(옛 `tests/fo/test_positions.py`·`test_executor.py` 의 결합 헬퍼 분리). 복구·
 실행기·체결·엔진 테스트가 import 한다: `_bal`(잔고)·`_row`(브로커 보유 행)·`_state`(주문 상태)·
 `_open`(진입 다리 예약)·`_recover`(전송 유예가 지난 시점의 복구), 실행기 헬퍼 `account`·`balance`·
-`holding`·`settings`·`decision`·`env`·`make_ctx`·`ckpt`·`state`·`_held_position`(옛 그대로)."""
+`holding`·`settings`·`decision`·`env`·`make_ctx`·`ckpt`·`state`·`_held_position`(옛 그대로),
+입력·세션·도구 헬퍼 `_candles`·`_master_with_chain`·`_market`·`_ctx`·`_fo`·`_tool_ctx`·
+`_reports`·`_debate`·`_ready`·`_env`·`_two_accounts`(옛 `test_inputs`·`test_tools_fo`)."""
 
 from __future__ import annotations
 
@@ -21,7 +23,14 @@ from trader.features.fo.types import FoExecContext
 from trader.features.regime import ports as regime_ports
 from trader.kernel.broker.fake import FakeFoBroker, FakeMarket
 from trader.kernel.broker.fo import CONTRACT_VERSION
-from trader.kernel.broker.models import FoBalance, FoCash, FoOrderable, FoOrderState, FoPosition
+from trader.kernel.broker.models import (
+    Candle,
+    FoBalance,
+    FoCash,
+    FoOrderable,
+    FoOrderState,
+    FoPosition,
+)
 from trader.kernel.cli.boot import build_registry
 from trader.kernel.config.loader import load
 from trader.kernel.ledger import control
@@ -31,7 +40,8 @@ from trader.kernel.session.run_store import market_dir, read_checkpoint
 __all__ = [
     "ACCT", "MASTER", "NOW", "T0", "TODAY", "_bal", "_held_position", "_open", "_recover", "_row",
     "_state", "account", "balance", "ckpt", "decision", "env", "holding", "make_ctx", "settings",
-    "state",
+    "state", "D", "_candles", "_master_with_chain", "_market", "_ctx", "_fo", "_tool_ctx",
+    "_reports", "_debate", "_ready", "_env", "_two_accounts", "ports_for",
 ]  # fmt: skip
 
 
@@ -210,3 +220,133 @@ def _held_position(conn, ctx, qty=2, **over):
                                                  code=fields["code"],
                                                  side=fields["contract_side"])])  # fmt: skip
     return store.get_position(conn, pid)
+
+
+# --- 입력·세션·도구 헬퍼(옛 `tests/fo/test_inputs.py`·`orchestrator/test_tools_fo.py`) -------
+
+D = TODAY
+
+
+def _candles(n=30):
+    """D 이전 n 일의 합성 일봉(종가 341 → 341+n-1)."""
+    return [
+        Candle(
+            date=D - timedelta(days=n - i), open=Decimal(340 + i), high=Decimal(342 + i),
+            low=Decimal(338 + i), close=Decimal(341 + i), volume=100 + i,
+        )  # fmt: skip
+        for i in range(n)
+    ]
+
+
+def _master_with_chain(strikes=range(330, 372, 2)):
+    cs = [contract("105W11", "FUTURES")]
+    for k in strikes:
+        cs.append(contract(f"205W11{k}", "CALL", Decimal(k)))
+        cs.append(contract(f"305W11{k}", "PUT", Decimal(k)))
+    return cs
+
+
+def _market(fail=None, chain_strikes=range(330, 372, 2), now=NOW):
+    fo_quotes = {"105W11": quote()}
+    for k in chain_strikes:
+        for kind, pre, dl in (("CALL", "205", 0.5), ("PUT", "305", -0.5)):
+            fo_quotes[f"{pre}W11{k}"] = quote(
+                code=f"{pre}W11{k}", kind=kind, price="5.00", delta=dl, iv=18.0,
+                strike=Decimal(k), basis=None, volume=10 if kind == "CALL" else 12,
+            )  # fmt: skip
+    return FakeMarket(
+        candles={"069500": _candles()}, fo_quotes=fo_quotes, fo_candles={"105W11": _candles()},
+        kospi200=(Decimal("350"), now), fail=fail, now=lambda: now,
+    )  # fmt: skip
+
+
+def _ctx(conn, *, market=None, master=None, now=NOW, **fo):
+    """입력·세션 테스트의 `FoExecContext`(검증 플래그 없음, 포트는 `ports_for`)."""
+    acct = account()
+    broker = FakeFoBroker(acct, balance=balance(), now=lambda: now)
+    s = settings(**fo)
+    return FoExecContext(
+        settings=s, accounts=[acct], conn=conn, brokers={acct.id: broker},
+        market_client=market or _market(now=now), master=master or _master_with_chain(),
+        now=lambda: now, ports=ports_for(s, [acct]),
+    )  # fmt: skip
+
+
+def _fo(conn, *, now=NOW, asof=None, enabled=True):
+    """검증 플래그를 켠 실행 컨텍스트 + 저장된 `_fo_inputs`."""
+    from trader.features.fo import inputs as inputs_mod
+
+    fo = _ctx(conn, now=now, enabled=enabled)
+    for v in ("FUTURES", "OPTION_BUY", "OPTION_SELL"):  # 실기 검증 플래그(없으면 신규 거부)
+        control.set_flag(conn, executor.verified_key(fo.settings, fo.accounts[0], v),
+                         CONTRACT_VERSION)  # fmt: skip
+    inp = inputs_mod.build_inputs(fo, today=D, asof=asof or now, accounts=fo.accounts)
+    inputs_mod.save_inputs(inp, today=D, state=None)
+    return fo, inp
+
+
+def _tool_ctx(conn, fo, inp, now=NOW, *, dry_run=False):
+    from trader.features.fo import tools
+
+    ctx = tools.FoToolContext(settings=fo.settings, conn=conn, now=lambda: now, fo=fo,
+                              dry_run=dry_run)  # fmt: skip
+    ctx._inputs = inp  # type: ignore[attr-defined]
+    return ctx
+
+
+def _reports(ctx, roles=("technical", "sentiment")):
+    from tests.features.spot.helpers import ok_report
+    from trader.features.fo import tools
+
+    for r in roles:
+        out = tools.fo_write(
+            ctx, date=D, stage=f"_fo_analyst_{r}", payload=ok_report(ticker="KOSPI200", role=r),
+            agent=f"analyst-{r}",
+        )  # fmt: skip
+        assert out["ok"], out
+
+
+def _debate(ctx, rounds=(0,)):
+    from tests.features.spot.helpers import ok_turn
+    from trader.features.fo import tools
+
+    for n in rounds:
+        for side in ("bull", "bear"):
+            out = tools.fo_write(
+                ctx, date=D, stage=f"_fo_debate_r{n}_{side}", payload=ok_turn(side, n),
+                agent=f"researcher-{side}",
+            )  # fmt: skip
+            assert out["ok"], out
+
+
+def _ready(ctx):
+    from trader.features.fo import tools
+
+    _reports(ctx)
+    _debate(ctx)
+    assert tools.fo_summarize(ctx, date=D)["ok"]
+
+
+def _env(ctx, **dec):
+    base = dict(
+        intent="OPEN", direction="LONG", vehicle="FUTURES", target_leverage=1.0,
+        order_type="LIMIT", entry_price=350.5, stop_pt=345.0, take_profit_pt=360.0,
+        confidence=0.7, rationale="t", horizon_days=5,
+    )  # fmt: skip
+    base.update(dec)
+    return {"decision": base, "request_id": ctx._inputs["meta"]["request_id"]}
+
+
+def _two_accounts(conn):
+    """파생 계좌 2개(paper-fo·paper-fo2) + 준비된 단계 — 계좌별 격리·재개 테스트용."""
+    fo, inp = _fo(conn)
+    second = make_account("paper-fo2", "paper", "auto", ["KR"], acnt_prdt_cd="03", asset="fo")
+    fo.accounts.append(second)
+    fo.brokers[second.id] = FakeFoBroker(second, balance=balance(), now=lambda: NOW,
+                                         orderable=fo.brokers[ACCT].orderable_result)  # fmt: skip
+    fo.ports = ports_for(fo.settings, list(fo.accounts))
+    for v in ("FUTURES", "OPTION_BUY", "OPTION_SELL"):
+        control.set_flag(conn, executor.verified_key(fo.settings, second, v), CONTRACT_VERSION)
+    ctx = _tool_ctx(conn, fo, inp)
+    _ready(ctx)
+    return ctx
