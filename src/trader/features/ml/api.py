@@ -13,6 +13,7 @@ from trader.features.ml.features import (
     latest_rows,
     sector_medians,
     store_mtime,
+    ticker_history,
     write_rows,
     zscore,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "sector_medians",
     "signal_for",
     "store_mtime",
+    "ticker_history",
     "train_quant",
     "tune_quant",
     "walkforward_folds",

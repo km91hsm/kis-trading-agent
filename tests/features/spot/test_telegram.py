@@ -92,6 +92,30 @@ def test_reject_and_unknown_id(conn, settings, accounts, brokers):
     assert "승인 실패" in handle_approve(c, "999")
 
 
+def test_reject_sends_one_reject_notice(conn, settings, accounts, brokers):
+    """텔레그램 거부는 `[거부]` 알림 1줄(kind approval·계좌 id)을 남긴다(T5-R1, M9). 실패한 거부는
+    알림이 없다."""
+    from dataclasses import replace
+
+    class Msgs(Sent):
+        def __init__(self):
+            super().__init__()
+            self.messages = []
+
+        def send_message(self, msg):
+            self.messages.append(msg)
+            return self.send(msg.text)
+
+    aid = make_pending(conn, settings, accounts, brokers)
+    c = replace(_cctx(conn, settings, accounts, brokers), notifier=Msgs())
+    handle_reject(c, str(aid))
+    (notice,) = c.notifier.messages
+    assert notice.text.startswith("[거부]") and f"#{aid}" in notice.text
+    assert (notice.kind, notice.account_id) == ("approval", "paper-main")
+    handle_reject(c, str(aid))  # 이미 결정됨 → 거부 실패, 알림 없음
+    assert len(c.notifier.messages) == 1
+
+
 def test_untrusted_sender_rejected(conn, settings, accounts, brokers):
     aid = make_pending(conn, settings, accounts, brokers)
     c = _cctx(conn, settings, accounts, brokers)

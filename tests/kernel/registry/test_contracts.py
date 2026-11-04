@@ -11,9 +11,9 @@ OK_ROOT = FIXTURES / "features_ok"
 
 
 def _ok() -> list[Feature]:
-    # alpha 가 v2·v3·v6·v9 자리를 채워 커널 모듈(v4·v5·v7·v8)과 버전이 연속되게 한다.
+    # alpha 가 v2·v3·v6·v9~v14 자리를 채워 커널 모듈(v4·v5·v7·v8)과 버전이 연속되게 한다.
     alpha, beta = discover("tests.fixtures.features_ok")
-    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, 9))
+    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, *range(9, 15)))
     return [replace(alpha, migrations=stubs), beta]
 
 
@@ -79,12 +79,12 @@ def test_interleaved_migration_versions_across_features_are_accepted():
     alpha, beta = _ok()
     alpha = replace(
         alpha,
-        migrations=tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 6, 9)),
+        migrations=tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 6, *range(9, 15))),
     )
     beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
     msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
     assert not any("마이그레이션" in m for m in msgs)
-    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 10))
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 16))
 
 
 def test_duplicate_version_still_reported_with_interleaving():
@@ -178,3 +178,20 @@ def test_evaluation_port_declared_in_kernel_ports():
         "update_breaker", "rl_sizer", "rl_propose", "rl_record",
     }  # fmt: skip
     assert all(callable(getattr(EvaluationPort, m, None)) for m in methods)
+
+
+def test_duplicate_nav_ids_and_callback_prefixes_reported():
+    from trader.kernel.registry.types import NavItem, TelegramCallback
+
+    alpha, beta = _ok()
+    nav = NavItem(screen="today", id="fo-lane", label="파생", order=30)
+    cb = TelegramCallback(prefix="ap:", handler=lambda ctx, data: "ok")
+    msgs = contracts.check(
+        [
+            replace(alpha, nav=(nav,), telegram_callbacks=(cb,)),
+            replace(beta, nav=(nav,), telegram_callbacks=(cb,)),
+        ],
+        roots=[OK_ROOT],
+    )
+    assert "nav id 중복: fo-lane" in msgs
+    assert "텔레그램 콜백 prefix 중복: ap:" in msgs

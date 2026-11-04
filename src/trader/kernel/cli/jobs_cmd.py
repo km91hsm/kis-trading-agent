@@ -11,6 +11,7 @@ from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import ConfigError
 from trader.kernel.daemon import heartbeat
 from trader.kernel.daemon import queue as jobq
+from trader.kernel.daemon.catalog import with_kernel
 from trader.kernel.daemon.lock import Lock
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import Feature
@@ -41,7 +42,7 @@ def build_jobs_app(features: list[Feature]) -> typer.Typer:
     app = typer.Typer(help="작업 큐 (요청만 넣고 실행은 데몬 큐 틱)", no_args_is_help=True)
 
     def kinds() -> jobq.Kinds:
-        return jobq.kinds_of(features)
+        return jobq.kinds_of(with_kernel(features))
 
     @app.command("list")
     @config_errors

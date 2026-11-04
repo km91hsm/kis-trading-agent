@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 from fastapi import APIRouter
 
 from trader.kernel.config.sections import Section
 from trader.kernel.ledger.migrations import Migration
+
+if TYPE_CHECKING:  # 순환 import 방지: 둘 다 이 모듈을 import 한다
+    from trader.kernel.notify.commands import CommandContext
+    from trader.kernel.web.deps import WebDeps
 
 
 class RegistryError(Exception):
@@ -102,6 +106,33 @@ class TelegramCommand:
     help_line: str
     # (CommandContext, arg: str | None) -> str — 돌려준 문자열을 디스패처가 보낸다
     handler: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class TelegramCallback:
+    """인라인 버튼 콜백: `callback_data` 가 prefix 로 시작하면 handler(ctx, data) 결과를 보낸다."""
+
+    prefix: str
+    handler: Callable[[CommandContext, str], str]
+
+
+@dataclass(frozen=True)
+class ResourcePart:
+    """여러 기능이 한 API 경로에 조각을 보태는 조회 자원. 커널 `web.merge` 가 같은 path 를
+    GET 하나로 합친다. fn(deps, q) — q 는 쿼리 + 경로 파라미터, 반환은 행 dict 목록."""
+
+    path: str
+    fn: Callable[[WebDeps, dict[str, str]], list[dict]]
+
+
+@dataclass(frozen=True)
+class NavItem:
+    """웹 메뉴 항목: 커널 고정 화면(screen) 아래 하위 목차. order 오름차순으로 놓인다."""
+
+    screen: Literal["today", "accounts", "performance", "data", "system"]
+    id: str
+    label: str
+    order: int
 
 
 @dataclass(frozen=True)
@@ -197,8 +228,10 @@ class Feature:
     tools: tuple[ToolCommand, ...] = ()
     routes: tuple[APIRouter, ...] = ()
     sse_keys: tuple[SseKey, ...] = ()
-    nav: tuple[dict, ...] = ()
+    resources: tuple[ResourcePart, ...] = ()
+    nav: tuple[NavItem, ...] = ()
     telegram_commands: tuple[TelegramCommand, ...] = ()
+    telegram_callbacks: tuple[TelegramCallback, ...] = ()
     health_areas: tuple[HealthArea, ...] = ()
     status_sections: tuple[StatusSection, ...] = ()
     control_namespaces: tuple[str, ...] = ()

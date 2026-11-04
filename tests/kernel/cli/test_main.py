@@ -59,6 +59,7 @@ def test_boot_loads_settings_and_conn(project):
             "fo",
             "ingest",
             "ml",
+            "quotes",
             "regime",
             "saveticker",
             "scalp",
@@ -118,6 +119,80 @@ def test_build_web_deps(project, monkeypatch):
         assert deps.token == "tok"
         assert deps.dist == project.resolve() / "web" / "dist"
         assert deps.features == b.features
+        assert deps.ports == b.ports
+    finally:
+        b.conn.close()
+
+
+def test_build_web_deps_excludes_execution_ports(project, monkeypatch):
+    """웹은 원장+큐만 쓴다(T3-R3): 주문 집행 포트(`stock_exec`, `execute`·주문 호출을 가진
+    포트)는 웹 deps 에서 빠지고 나머지 포트는 그대로 넘어간다."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    class _Exec:
+        def execute(self, *a):
+            return None
+
+    class _Orders:
+        def place_order(self, *a):
+            return None
+
+    accounts = SimpleNamespace(accounts=lambda: [])
+    b = boot_mod.boot(settings=True, conn=True)
+    try:
+        b = replace(b, ports={
+            "accounts": accounts, "stock_exec": SimpleNamespace(), "exec2": _Exec(),
+            "orders2": _Orders(), "ml": SimpleNamespace(close_table=lambda: None),
+        })  # fmt: skip
+        deps = main_mod.build_web_deps(b)
+        assert set(deps.ports) == {"accounts", "ml"}
+        assert deps.ports["accounts"].accounts() == []
+    finally:
+        b.conn.close()
+
+
+def test_build_web_deps_wraps_accounts_port_read_only(project, monkeypatch):
+    """웹 accounts 포트는 읽기 전용 래퍼(I2): 계좌 목록·일시정지·정책만 위임하고 브로커(주문
+    경로)·시세 클라이언트는 노출하지 않는다."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    class _Port:
+        def accounts(self):
+            return ["spot-1"]
+
+        def fo_accounts(self):
+            return ["fo-1"]
+
+        def paused(self, conn):
+            return True
+
+        def policy(self, conn, account):
+            return ("approve", None)
+
+        def brokers(self):
+            raise AssertionError("웹이 브로커를 만들면 안 된다")
+
+        def fo_brokers(self):
+            raise AssertionError("웹이 파생 브로커를 만들면 안 된다")
+
+        def market_client(self):
+            raise AssertionError("웹은 계좌 포트로 시세 클라이언트를 만들지 않는다")
+
+    b = boot_mod.boot(settings=True, conn=True)
+    try:
+        deps = main_mod.build_web_deps(replace(b, ports={"accounts": _Port()}))
+        port = deps.ports["accounts"]
+        assert not hasattr(port, "brokers") and not hasattr(port, "fo_brokers")
+        assert not hasattr(port, "market_client")
+        assert port.accounts() == ["spot-1"] and port.fo_accounts() == ["fo-1"]
+        assert port.paused(None) is True and port.policy(None, "spot-1") == ("approve", None)
+        # 현물 전용 포트(fo_accounts 없음)는 래퍼에서도 없어 라우트의 getattr 분기가 그대로 산다
+        deps = main_mod.build_web_deps(
+            replace(b, ports={"accounts": SimpleNamespace(accounts=lambda: [])})
+        )
+        assert getattr(deps.ports["accounts"], "fo_accounts", None) is None
     finally:
         b.conn.close()
 

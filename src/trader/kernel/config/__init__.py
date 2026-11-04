@@ -22,6 +22,12 @@ class WebSettings(BaseModel):
 
     bind: str = "127.0.0.1"
     port: int = 8787
+    # tailscale serve 로 들어오는 Host 이름(예: pc.tailnet.ts.net). 비면 루프백만 허용
+    tailscale_hosts: list[str] = Field(default_factory=list)
+    # 허용할 Tailscale-User-Login(소문자 비교). 비면 tailnet Host 만으로 허용
+    tailscale_users: list[str] = Field(default_factory=list)
+    # 폰에서 여는 외부 주소(예: https://pc.tailnet.ts.net). 없으면 None
+    public_base: str | None = None
 
 
 class NotifySettings(BaseModel):

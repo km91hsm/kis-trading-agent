@@ -21,11 +21,12 @@ from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
 from trader.kernel.notify import NullNotifier
 from trader.kernel.notify.commands import CommandContext, poll_once
+from trader.kernel.notify.record import ledger_recorder
 from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_receiver
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover, hooks
 from trader.kernel.registry.types import Feature
-from trader.kernel.web.app import create_app
+from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
 from trader.kernel.web.deps import WebDeps
 
 logger = logging.getLogger("trader.cli")
@@ -59,7 +60,9 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         gates={},
         stop_event=threading.Event(),
         dry_run=dry_run,
-        notifier=make_notifier(secrets, enabled=boot_.settings.notify.enabled),
+        notifier=make_notifier(
+            secrets, enabled=boot_.settings.notify.enabled, record=ledger_recorder(db.connect)
+        ),
         secrets=secrets,
         registry=boot_.registry,
         hooks=hooks.by_point(boot_.features),
@@ -71,6 +74,48 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
     return deps
 
 
+# 웹이 받지 않는 주문 집행 포트 이름(현물 executor 포트). 이름 밖에서도 `execute`·주문 호출을
+# 드러내는 포트는 `_executes` 가 거른다 — 웹은 원장 + 큐만 쓴다(M11 Ruling T3-R3).
+EXECUTION_PORTS = frozenset({"stock_exec"})
+
+
+def _executes(port: object) -> bool:
+    for name in dir(port):
+        if name.startswith("_"):
+            continue
+        low = name.lower()
+        if ("execute" in low or "order" in low) and callable(getattr(port, name, None)):
+            return True
+    return False
+
+
+# 웹 라우트가 accounts 포트에서 쓰는 조회 메서드(계좌 목록·일시정지·정책). brokers·fo_brokers
+# (주문 경로)·market_client·holiday_fn 은 웹에 넘기지 않는다 — 시세는 quotes 가 따로 만든다
+# (M11 최종 리뷰 I2).
+READ_ONLY_ACCOUNTS = ("accounts", "fo_accounts", "paused", "policy")
+
+
+class ReadOnlyAccounts:
+    """accounts 포트의 웹용 읽기 전용 보기: `READ_ONLY_ACCOUNTS` 중 원 포트에 있는 것만
+    위임한다(없는 메서드는 래퍼에도 없어 라우트의 `getattr(port, "fo_accounts", None)` 분기가
+    그대로 산다)."""
+
+    def __init__(self, port: object) -> None:
+        for name in READ_ONLY_ACCOUNTS:
+            fn = getattr(port, name, None)
+            if callable(fn):
+                setattr(self, name, fn)
+
+
+def web_ports(ports: dict) -> dict:
+    """부트가 조립한 포트 중 주문 집행 포트를 뺀 사본(웹 프로세스 분리). accounts 포트는
+    `ReadOnlyAccounts` 로 감싼다."""
+    out = {n: p for n, p in ports.items() if n not in EXECUTION_PORTS and not _executes(p)}
+    if "accounts" in out:
+        out["accounts"] = ReadOnlyAccounts(out["accounts"])
+    return out
+
+
 def build_web_deps(boot_: Boot) -> WebDeps:
     return WebDeps(
         settings=boot_.settings,
@@ -79,7 +124,11 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         token=load_secrets().WEB_TOKEN,
         dist=paths.web_dist(),
         now=lambda: datetime.now(UTC),
+        extra_hosts=tuple(boot_.settings.web.tailscale_hosts),
+        tailscale_users=tuple(boot_.settings.web.tailscale_users),
+        public_base=boot_.settings.web.public_base,
         features=boot_.features,
+        ports=web_ports(boot_.ports),
     )
 
 
@@ -110,9 +159,11 @@ def web(
     port: int | None = typer.Option(None, "--port", help="포트 (기본: settings.web.port)"),
 ) -> None:
     """웹 UI·API 서버를 띄운다."""
-    b = boot(settings=True, conn=True, log_name="web")
+    b = boot(ports=True, log_name="web")  # 계좌 env(실전 confirm) 등은 ports 로 본다
     host = host or b.settings.web.bind
     port = port or b.settings.web.port
+    if host not in LOOPBACK_HOSTS:
+        logger.warning("웹 서버를 루프백 밖(%s)에 바인드합니다 — tailscale serve 를 쓰세요", host)
     try:
         uvicorn.run(create_app(build_web_deps(b)), host=host, port=port, log_config=None)
     finally:

@@ -48,3 +48,22 @@ def test_ledger_backup_body_writes_file_and_prunes(project):
     out = bj.ledger_backup_body(deps)
     assert out["file"].startswith("trader-") and out["pruned"] == 0
     assert (state / "backups" / out["file"]).exists()
+
+
+def test_usage_probe_queue_kind_shared_by_daemon_cli_web(project, monkeypatch):
+    """`usage_probe` 는 커널 내장 큐 kind — 데몬 큐 표·`trader jobs`·웹이 같은 목록(with_kernel)."""
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.jobs_cmd import build_jobs_app
+    from trader.kernel.daemon import Daemon
+    from trader.kernel.daemon.catalog import with_kernel
+    from trader.kernel.daemon.queue import kinds_of
+
+    q = kinds_of(with_kernel([]))["usage_probe"]
+    assert q.lane == "info" and q.trading is False and q.restart_requeue is False
+    daemon = Daemon([], make_deps(project, settings=_settings()))
+    assert daemon.deps.queue.kinds["usage_probe"] is q
+    assert "usage_probe" in CliRunner().invoke(build_jobs_app([]), ["kinds"]).output
+    seen = {}
+    monkeypatch.setattr(bj, "usage_probe_body", lambda d, force=False: seen.update(f=force) or {})
+    assert q.body(None, {"force": True}, None) == {} and seen == {"f": True}

@@ -1,14 +1,19 @@
 """fo 기능 선언 (레인): 설정 절·마이그레이션 14·control 네임스페이스·세션 종류·에이전트·도구·
 데몬 잡 3개(`kr_fo_session`·`kr_fo_monitor`·`kr_fo_reconcile`)·큐 kind 4개(A5).
 
-CLI(`trader fo …`)·텔레그램 `/fo`·상태 절 「파생(선물옵션)」(Task 8)."""
+CLI(`trader fo …`)·텔레그램 `/fo`·상태 절 「파생(선물옵션)」(Task 8)·웹 조회(`routes.py`: 라우터·
+positions 조각·SSE `fo`·nav, `analytics_routes.py` `/analytics/fo/*`, `system_routes.py`
+`/system/fo`, M11)."""
 
+from trader.features.fo.analytics_routes import analytics_fo_router
 from trader.features.fo.cli import fo_app
 from trader.features.fo.jobs import JOBS, QUEUE_KINDS
 from trader.features.fo.migrations import MIGRATIONS
+from trader.features.fo.routes import RESOURCES, ROUTERS, SSE_KEYS
 from trader.features.fo.session_kinds import AGENTS, FO, FO_RESUME
 from trader.features.fo.settings import SECTIONS
 from trader.features.fo.status import STATUS_SECTION
+from trader.features.fo.system_routes import system_fo_router
 from trader.features.fo.telegram import FO_CMD
 from trader.features.fo.tools import (
     FO_SUBMIT_RULE,
@@ -16,7 +21,7 @@ from trader.features.fo.tools import (
     fo_tool_app,
     submit_fo_decision_cmd,
 )
-from trader.kernel.registry.types import Feature, ToolCommand
+from trader.kernel.registry.types import Feature, NavItem, ToolCommand
 
 # 옛 control 플래그 키 접두(A4): `fo_verified:<env>:<acct>:<product>:<vehicle>` 등
 CONTROL_NAMESPACES = (
@@ -34,4 +39,8 @@ FEATURE = Feature(
     control_namespaces=CONTROL_NAMESPACES, session_kinds=(FO, FO_RESUME), agents=AGENTS,
     tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS, cli=fo_app, telegram_commands=(FO_CMD,),
     status_sections=(STATUS_SECTION,),
+    routes=(*ROUTERS, analytics_fo_router, system_fo_router), resources=RESOURCES,
+    sse_keys=SSE_KEYS,
+    nav=(NavItem("accounts", "fo-positions", "파생 보유", 20),
+         NavItem("today", "fo-lane", "파생", 30)),
 )  # fmt: skip

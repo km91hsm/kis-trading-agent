@@ -33,6 +33,13 @@
 
 단타 전용 스케줄 키는 없다(`schedule.yaml` 에 `scalp` 절을 더하지 않는다).
 
+## 웹 (M11, `routes.py`)
+
+- `RESOURCES`: `/accounts/{id}/positions` 단타 조각 — 모의 현물 계좌이면서 오늘 상태 파일 다리에 든 계좌만. stop/target = 체결 평단(없으면 신호가) × (1 ∓ `stop_pct`/`take_profit_pct`, `engine.pos_cfg` 덮어쓰기 반영), 출처 "단타 규칙". 설정에 단타 계좌 목록은 없다(모의 계좌 전체가 대상).
+- SSE `scalp`: 시장별 오늘 상태 파일 mtime + 보유 수. nav `today/scalp-lane`.
+- 웹 알려진 차이: 단타가 든 종목은 같은 계좌에 현물 행(브로커 스냅샷)과 단타 행(lane `scalp`)으로 두 번 나온다(T7-R1) — M11b 는 단타 행을 「단타」 절에 따로 그리고 보유 표 합계에 더하지 않는다. `settings.scalp.accounts` 는 없다(대상 = 오늘 상태 파일에 다리가 있는 모의 현물 계좌, T7-R2).
+- `GET /system/scalp?market=`(옛 `system.scalp_status`): 설정(enabled·judge·max_weight_pct·max_positions) + 시장별 오늘 open/closed/halted/pending·판정자 사후 비교(`judge_summary`, 분봉 조회 없음). 운영하지 않는 시장은 400.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 - A1 주문·취소·체결 동기화는 `ports["stock_exec"]`(spot 현물 집행 서비스 — 게이트·승인·멱등·기록은 spot `executor`, 취소는 커널 `core.cancel`, 체결은 spot `fills`)로만 지난다. 옛 엔진은 `orchestrator.executor` 를 직접 불렀다.

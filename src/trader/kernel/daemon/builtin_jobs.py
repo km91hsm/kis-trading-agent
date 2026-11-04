@@ -9,12 +9,14 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from trader.kernel.config import KST
 from trader.kernel.ledger import backup as ledger_backup
 from trader.kernel.notify import commands
 from trader.kernel.notify.commands import CommandContext
 from trader.kernel.notify.telegram import make_receiver
-from trader.kernel.registry.types import Feature, JobSpec
+from trader.kernel.registry.types import Feature, JobSpec, QueueKind
 from trader.kernel.session import quick, usage
 
 logger = logging.getLogger("trader.daemon")
@@ -123,4 +125,23 @@ LEDGER_BACKUP = JobSpec(
     misfire="idempotent", catch_up="direct", start_soon_s=0, body=ledger_backup_body,
 )  # fmt: skip
 BUILTIN_JOBS: tuple[JobSpec, ...] = (TELEGRAM_POLL, USAGE_PROBE, LEDGER_BACKUP)
-BUILTIN_FEATURE = Feature(id="kernel_builtin", tier="service", jobs=BUILTIN_JOBS)
+
+
+class UsageProbeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = False  # True = 시스템 화면 '지금 확인'(최근 관측 무시), 페이지 접속 요청은 False
+
+
+def usage_probe_request(deps: Any, params: dict, progress: Any = None) -> dict:
+    """큐 요청 `usage_probe` → 내장 잡과 같은 본체(`usage_probe_body`)."""
+    return usage_probe_body(deps, force=bool(params.get("force")))
+
+
+USAGE_PROBE_KIND = QueueKind(
+    kind="usage_probe", params_model=UsageProbeParams, label="Claude 사용량 확인", lane="info",
+    priority=0, trading=False, restart_requeue=False, body=usage_probe_request,
+)  # fmt: skip
+BUILTIN_FEATURE = Feature(
+    id="kernel_builtin", tier="service", jobs=BUILTIN_JOBS, queue_kinds=(USAGE_PROBE_KIND,)
+)

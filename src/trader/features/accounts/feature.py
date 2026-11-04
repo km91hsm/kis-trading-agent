@@ -4,9 +4,10 @@ from trader.features.accounts.cli import accounts_app
 from trader.features.accounts.gates import GATES
 from trader.features.accounts.migrations import MIGRATIONS
 from trader.features.accounts.ports import PORT
+from trader.features.accounts.routes import ROUTERS, SSE_KEYS
 from trader.features.accounts.settings import SCHEDULE_SECTIONS, SECTION
 from trader.features.accounts.telegram import STATUS_SECTION, TELEGRAM_COMMANDS
-from trader.kernel.registry.types import Feature
+from trader.kernel.registry.types import Feature, NavItem
 
 FEATURE = Feature(
     id="accounts",
@@ -14,7 +15,9 @@ FEATURE = Feature(
     sections=(SECTION, *SCHEDULE_SECTIONS),
     migrations=MIGRATIONS,
     cli=accounts_app,
-    routes=(),  # 웹 자원은 M11
+    routes=ROUTERS,
+    nav=(NavItem("accounts", "overview", "통합", 0),),
+    sse_keys=SSE_KEYS,
     telegram_commands=TELEGRAM_COMMANDS,
     status_sections=(STATUS_SECTION,),
     control_namespaces=("paused",),

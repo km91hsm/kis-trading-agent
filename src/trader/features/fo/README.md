@@ -99,6 +99,16 @@ control 네임스페이스(`Feature.control_namespaces`, A4): `fo_verified:<env>
 - **알림 `messages.py`**: 옛 문구 그대로 상수 5종·함수 15종. `reconcile_mismatch` 는 커널 것(`market="KR(파생)"`).
 - **상태·텔레그램**: `/fo`(읽기 전용)와 `/status` 「파생(선물옵션)」 절은 `status.lines`(원장만) 하나를 쓴다.
 
+## 웹 (M11, `routes.py`)
+
+- `GET /fo/legs?account_id=&date=`·`GET /fo/summary`(파생 NAV 는 `fo_nav_snapshot` — accounts 통합 현황은 `account_nav` 만)·`GET /fo/today?date=`.
+- `analytics_routes.py`: `GET /analytics/fo/scorecard`(만기 채점 결정의 방향 적중률·계약 손익 합, FLAT 제외)·`/analytics/fo/report?account_id=&days=`(파생 NAV 추이 — 레인이라 evaluation 을 import 하지 않고 `fo_nav_snapshot` 을 직접 읽는다)·`/analytics/fo/summary`(`/fo/summary` 와 같은 처리기).
+- `system_routes.py`: `GET /system/fo`(옛 `/fo/account` 를 파생 계좌 전체로, T11-R1): 계좌마다 `id·env·mode·mode_note·paused·state·enabled` + 오늘 fo 트리거 + control 플래그 7종 요약(`fo_verified` 수단별 bool·`fo_halted` 오늘 여부·`fo_day_open` 기준 날짜·`fo_alerts` 오늘 보낸 수·`fo_ref_iv` 열린 포지션별 값·`fo_pending_entry` bool·`fo_replace` 포지션 id 목록), 시장·한도 맥락(`context`)은 하나. 계좌번호 없음.
+- `RESOURCES`: `/accounts/{id}/positions` 파생 조각(파생 계좌만): `qty`=계약, `avg_price`=포인트(최근 `fo_positions_snapshot`), `krw_value`=승수 적용. stop 은 선물 `stop_fut`·옵션 `premium_stop`·지수 `stop_pt` 순 "손절 −N%"(평단 기준, 옵션의 지수 손절은 "손절 지수"), 손절이 없으면 강제 청산일까지 "만기 D-n"(level 없음). target 은 `tp_pt`("결정").
+- `RESOURCES` 의 `/decisions`(그날 `fo_decisions`)·`/orders`(다리를 포지션·의도·라운드로 묶은 행, id = 첫 다리) 파생 조각, 상세 `GET /decisions/fo/{id}`·`/trace`.
+- SSE `fo`(옛 지문), nav `accounts/fo-positions "파생 보유"`·`today/fo-lane "파생"`.
+- 웹 알려진 차이: 보유 행은 옛 `/fo/positions` 의 부가 필드(`current`·`eval`·`budget_*`·`live_legs`·`qty_target`·`leverage_used` 등)를 싣지 않는다(M11b 가 필요하면 더한다). `/analytics/fo/summary` 는 `/fo/summary` 의 별칭이다. 스펙 §2.5 의 `/fo/{scorecard,report}` 는 `/analytics/fo/*` 로, 옛 `/fo/account` 는 `/system/fo` 로 옮겼다.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 번호는 플랜 Ruling 과 1:1(`docs/superpowers/plans/2026-11-04-m10-fo.md`).

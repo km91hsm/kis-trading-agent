@@ -15,7 +15,8 @@
 - 포트(`ports.py`): `ports["scan"]` = `ScanPortImpl.theme_of(conn, market, today)` → 종목 → 오늘 상위 테마·shock 사건 라벨(없으면 None). spot 게이트가 쓴다. `watchlist(conn, market)` → 런타임 관심종목(`/watch`·웹, market 을 주면 그 시장 종목만 접두사 없이) — scalp 후보 소스(M9).
 - CLI(`cli.py`, `uv run trader scan --help`): `trader scan theme show [--market KR] [--live]`, `trader scan events show [--market KR]`(읽기 전용 JSON), `trader scan run [--market --asof --dry-run]`(`--dry-run` 은 screener 세션 없이 정량 상위만)·`backtest`·`universe check|sectors`(아래 M7 절).
 - 문구(`messages.py`): `theme_heat`·`theme_name`·`event_detected`.
-- 다른 기능의 표를 읽는 데이터 접근: `ingest` 의 `news_items`, `spot` 의 `ticker_names`(`SELECT ticker, name FROM ticker_names WHERE market=?`).
+- 다른 기능의 표를 읽는 데이터 접근: `ingest` 의 `news_items`(라벨용 id 조회 포함), `spot` 의 `ticker_names`(`SELECT ticker, name FROM ticker_names WHERE market=?`).
+- 웹 자원(`routes.py`): `GET /news/labels?ids=1,2`(≤500) → `{id: {catalyst: is_catalyst(source), themes: [그 시장 최신 테마 열기 상위 top_n 중 기사 종목이 속한 테마]}}`(없는 id 는 빠진다), `GET /news/themes?market=&n=10` → `{market, date, observed_at, top_n, themes}`(control `theme_heat:<m>` 의 `top(heat, n)`), `GET /settings/watchlist` → `{tickers}`, `PATCH /settings/watchlist {tickers}`(토큰 + 같은 출처, `set_watchlist(channel="web", actor=토큰 지문)`, 형식 오류 400). SSE 키 `theme`(`theme_heat` 건수·최대 id·최신 observed_at)·`watchlist`(저장된 목록). 메뉴 `data/themes "테마·감시목록"`. 웹 알려진 차이: 옛 `/system/theme` → `/news/themes`, 옛 `/control/watchlist` → `PATCH /settings/watchlist`. 기사 라벨(`/news/labels`)은 ingest 행과 갈라 scan 이 붙인다.
 
 ## 규칙
 

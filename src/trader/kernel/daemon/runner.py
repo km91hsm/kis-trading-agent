@@ -142,12 +142,13 @@ def _trigger(job: ScheduledJob) -> Any:
 
 class Daemon:
     def __init__(self, features: list[Feature], deps: DaemonDeps) -> None:
+        from trader.kernel.daemon.catalog import with_kernel
         from trader.kernel.daemon.queue import kinds_of
         from trader.kernel.daemon.queue_jobs import QueueState
 
         self.features = features
         if deps.queue is None:
-            deps = replace(deps, queue=QueueState(kinds=kinds_of(features)))
+            deps = replace(deps, queue=QueueState(kinds=kinds_of(with_kernel(features))))
         if not deps.features:
             deps = replace(deps, features=features)
         self.deps = deps
@@ -164,12 +165,12 @@ class Daemon:
     def start(self, *, install_signals: bool = True) -> bool:
         """잡 정의 검증 → 잠금 → bootstrap 훅·큐 복구·stale 정리 → 놓친 cron 따라잡기 →
         스케줄러 등록(기능 잡 + 큐 잡 4개)·기동 → 하트비트. 잠금을 못 잡으면 False."""
-        from trader.kernel.daemon import builtin_jobs as bj
         from trader.kernel.daemon import queue_jobs as qj
+        from trader.kernel.daemon.catalog import with_kernel
 
         deps = self.deps
         self._jobs = build(
-            [*self.features, qj.QUEUE_FEATURE, bj.BUILTIN_FEATURE],
+            with_kernel(self.features),
             schedule=deps.schedule, settings=deps.settings, markets=deps.markets, ctx=deps,
         )  # fmt: skip
         if not self._lock.acquire():

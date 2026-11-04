@@ -75,6 +75,16 @@ CLI(`uv run trader spot --help` 로 확인):
 - `get_trigger`/`mark_trigger_handled` 도 커널 `execution/ledger.py` 로 옮겼고 `ledger.py` 가 재export 한다(fo 재평가 공용).
 - FAKE 헬퍼(`fake_call`·`ensure_ok`·`FakeSessionError`·`fake_report`·`fake_turn`)는 커널 `session/fake.py` 를 import 한다. 파생(`fo`) 계좌 분기는 `features/fo`(`fills.sync`·`balance`)가 소유하며 spot 은 현물 계좌만 다룬다.
 
+## 웹 (M11, `routes.py`)
+
+- `approvals_router`: `GET /approvals`·`PATCH /approvals/{id}`(선점 + `approve_execute` 큐).
+- `positions_router`(조회만): `GET /positions/overview?market=`(현물 계좌 시장·환경별 합산, 파생 제외), `GET /positions/risk?account_id=&market=`(위험 카드 — 종가는 `ports["ml"].close_table`).
+- `decisions_router`(조회만, `decisions_view.py`): `GET /decisions/spot/{id}`·`/trace`·`/outcomes`·`/checkpoints/{stage}`·`GET /decisions/spot/news-refs`, `GET /markets/{market}/today`(옛 `/today`·`/market-checkpoint`), `GET /risk-checks?date=`.
+- `RESOURCES` 의 `/decisions`·`/orders` 현물 조각(단타 행 포함, `format=csv` 는 merge 가 처리).
+- SSE `decisions`·`orders`·`triggers`, nav `today/approvals "승인"`·`today/spot-lane "현물"`.
+- 웹 알려진 차이: 스펙 §2.5 의 `/decisions/{id}` 는 자산별 `/decisions/spot/{id}`·`/decisions/fo/{id}` 로 갈렸다. 단타 결정 행은 그날 `origin=scalp` 주문에서 합성하고 id 가 문자열 `scalp-<order_id>` 라 상세(`/decisions/spot/{id}`)는 422(T8-R1, M11b 는 상세 링크 없이 그린다). `decisions` SSE 지문은 현물 결정만 본다 — 파생·단타 행 변화는 `fo`·`orders` 키로 받는다(M11b 는 셋을 함께 구독). `/markets/{m}/today` 에 옛 `discovery_line` 이 없다(scan 소유, 레인이 import 할 수 없음 → M11b 가 `/news/themes` 로 조립, T8-R2). CLI `approvals approve` 는 웹·텔레그램의 decide 를 거치지 않아 `decided_by` 가 비고 notices·control_log 에 남지 않는다(사용자 전용 경로).
+- `RESOURCES`: `/accounts/{id}/positions` 현물 조각(`positions_view.spot_rows`). 손절 `{level, source}` 는 모니터와 같은 `stops.effective_stop`, 출처 문구 "결정"·"추적"(보유 묶음 뒤 바닥)·"기본 −N%"; 목표는 결정 `take_profit`("결정"). 헤지·현금 운용 ETF 는 stop 없음.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 CLI·명령

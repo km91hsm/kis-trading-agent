@@ -41,7 +41,8 @@ from trader.kernel.execution.types import (
     OrderIntent,
 )
 from trader.kernel.notify import messages
-from trader.kernel.notify.telegram import Notifier
+from trader.kernel.notify.telegram import Message, Notifier
+from trader.kernel.notify.telegram import send as send_notice
 from trader.kernel.session.run_store import checkpoint_payload, write_checkpoint
 
 logger = logging.getLogger("trader.execution")
@@ -367,8 +368,14 @@ def request_approval(
     env: str,
     ttl: timedelta = APPROVAL_TTL,
     reasons: Sequence[str] = (),
+    buttons_of: Callable[[int, str], list | None] | None = None,
+    link_of: Callable[[int], str | None] | None = None,
 ) -> int:
     """승인 요청을 pending 으로 저장하고 실행 키를 묶은 뒤 알린다. 승인 id 를 돌려준다.
+
+    `buttons_of(approval_id, env)` 는 알림에 붙일 버튼 행(기능이 정한 callback_data),
+    `link_of(decision_id)` 는 본문 끝 1줄 링크(결정 id 가 없으면 부르지 않는다). 둘 다 None 이면
+    옛 평문 그대로다 — 커널은 문구만 만들고 버튼·링크의 뜻은 모른다.
 
     시장가는 금액을 모르므로 요청 시 현재가(quote_price)를 남겨 승인 뒤 주문의 amount 로 쓴다.
     주문 단계(order_stage)·실행 키·origin 도 남겨 승인 실행이 이어 쓴다. `reasons` 는 리스크 판정
@@ -396,25 +403,54 @@ def request_approval(
     )
     if intent.idem_key:
         deps.idem.bind(intent.idem_key, approval_id=aid, at=now.isoformat())
-    notify_quietly(
-        deps.notifier,
-        messages.approval_request(
-            approval_id=aid,
-            account=intent.account_id,
-            market=intent.market,
-            label=deps.label(intent.ticker, intent.name),
-            side=intent.side,
-            qty=intent.qty,
-            price=intent.price,
-            reasons=list(reasons),
-            opinion=messages.DecisionBrief.of(intent.opinion),
-            kind=_kind(intent.order_stage),
-            env=env,
-            quote_price=intent.quote_price,
-            expires_at=expires,
-        ),
+    text = messages.approval_request(
+        approval_id=aid,
+        account=intent.account_id,
+        market=intent.market,
+        label=deps.label(intent.ticker, intent.name),
+        side=intent.side,
+        qty=intent.qty,
+        price=intent.price,
+        reasons=list(reasons),
+        opinion=messages.DecisionBrief.of(intent.opinion),
+        kind=_kind(intent.order_stage),
+        env=env,
+        quote_price=intent.quote_price,
+        expires_at=expires,
     )
+    _notify_approval(deps, intent, aid, env, text, buttons_of, link_of)
     return aid
+
+
+def _notify_approval(
+    deps: ExecDeps,
+    intent: OrderIntent,
+    approval_id: int,
+    env: str,
+    text: str,
+    buttons_of: Callable[[int, str], list | None] | None,
+    link_of: Callable[[int], str | None] | None,
+) -> None:
+    """승인 알림 전송. 버튼·링크 콜백 실패나 버튼 데이터 거부(ValueError)는 평문으로 다시 보낸다 —
+    승인 요청 알림이 버튼 때문에 사라지지 않게. 전송 실패는 경고만(요청은 되돌리지 않는다)."""
+    buttons = None
+    try:
+        link = link_of(intent.decision_id) if link_of and intent.decision_id else None
+        if link:
+            text = f"{text}\n{link}"
+        buttons = buttons_of(approval_id, env) if buttons_of else None
+    except Exception as e:  # noqa: BLE001 - 꾸밈 실패가 알림을 막지 않는다
+        logger.warning("승인 알림 버튼·링크 생성 실패 #%s: %s", approval_id, type(e).__name__)
+    msg = Message(text, kind="approval", account_id=intent.account_id, buttons=buttons)
+    try:
+        send_notice(deps.notifier, msg)
+        return
+    except ValueError as e:  # 버튼 데이터 한도 초과 등 — 평문으로
+        logger.warning("승인 알림 버튼 거부 #%s: %s — 평문으로 보냄", approval_id, e)
+    except Exception as e:  # noqa: BLE001 - 알림 채널 장애는 승인 요청과 무관
+        logger.warning("알림 전송 실패: %s", type(e).__name__)
+        return
+    notify_quietly(deps.notifier, text)
 
 
 # --- 승인 처리 ----------------------------------------------------------------------------

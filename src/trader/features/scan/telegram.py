@@ -15,9 +15,13 @@ def handle_watch(ctx: CommandContext, arg: str | None) -> str:
     current = watchlist.get_watchlist(conn)
     try:
         if sub == "add" and len(parts) == 2:
-            current = watchlist.set_watchlist(conn, [*current, parts[1]])
+            current = watchlist.set_watchlist(
+                conn, [*current, parts[1]], channel="telegram", actor=ctx.actor
+            )
         elif sub == "remove" and len(parts) == 2:
-            current = watchlist.remove_watch(conn, parts[1])
+            current = watchlist.remove_watch(
+                conn, parts[1], channel="telegram", actor=ctx.actor
+            )
         elif sub != "list":
             return "사용법: /watch add|remove <ticker> | /watch list"
     except ValueError as e:

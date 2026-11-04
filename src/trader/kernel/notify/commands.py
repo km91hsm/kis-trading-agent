@@ -1,13 +1,14 @@
 """텔레그램 명령 디스패처. 명령 집합은 기능이 `Feature.telegram_commands` 로 등록하고,
 커널은 내장 `/status`(기능의 `status_sections` 를 모아 보여 줌)와
-`/run`(큐 요청)만 가진다. CLI·데몬 공용."""
+`/run`(큐 요청)만 가진다. 인라인 버튼 콜백은 `Feature.telegram_callbacks` 의 prefix
+(callback_data 의 첫 `:` 앞)로 찾는다. CLI·데몬 공용."""
 
 from __future__ import annotations
 
 import logging
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ logger = logging.getLogger("trader.notify")
 OFFSET_FLAG = "telegram_offset"
 HELP_FLAG = "telegram_help_at"  # 마지막 도움말 발송 시각(폴링 사이에도 유지)
 HELP_EVERY_S = 60
+NO_HANDLER = "처리할 수 없는 버튼"
+BAD_REPLY = "처리 실패(잘못된 응답)"
+UNTRUSTED_TAIL = "1:1 채팅 또는 허용 사용자(TELEGRAM_ALLOWED_USERS)만 쓸 수 있어요"
 STATUS = "status"  # 커널 내장 명령 — 기능이 같은 이름을 등록할 수 없다
 RUN = "run"  # 커널 내장 명령 — 큐에 작업 요청을 넣는다
 BUILTINS = (STATUS, RUN)
@@ -37,6 +41,7 @@ class CommandContext:
     features: list[Feature]
     echo: Callable[[str], None] = lambda s: None
     ports: dict[str, Any] = field(default_factory=dict)  # 기능이 내놓은 포트(이름 → 구현)
+    actor: str | None = None  # 명령을 보낸 사람(제어 변경 기록용; poll_once 가 업데이트마다 채운다)
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
@@ -76,8 +81,9 @@ def run_message(ctx: CommandContext, arg: str | None) -> str:
     """`/run <작업> [KR|US] [종목]` — 데몬 큐에 요청을 넣는다(실행은 데몬이 순서대로)."""
     from trader.kernel.cli.jobs_cmd import daemon_running
     from trader.kernel.daemon import queue as jobq
+    from trader.kernel.daemon.catalog import with_kernel
 
-    kinds = jobq.kinds_of(ctx.features)
+    kinds = jobq.kinds_of(with_kernel(ctx.features))
     tokens = (arg or "").split()
     if not tokens:
         return f"사용법: /run <작업> [KR|US] [종목]\n작업: {', '.join(sorted(kinds))}"
@@ -90,6 +96,10 @@ def run_message(ctx: CommandContext, arg: str | None) -> str:
         rid = jobq.enqueue(ctx.conn, kinds, kind, params, source="telegram", now=ctx.now())
     except ValueError as e:  # 알 수 없는 작업·파라미터 오류·중복(DuplicateRequest)
         return f"거부: {e}"
+    jobq.log_request(
+        ctx.conn, kind=kind, req_id=rid, params=jobq.validate(kinds, kind, params),
+        channel="telegram", actor=ctx.actor, now=ctx.now(),
+    )  # fmt: skip
     return messages.event(f"요청 #{rid}", f"{jobq.label(kinds, kind)} — 데몬이 순서대로 실행해요")
 
 
@@ -107,6 +117,53 @@ def _help_due(ctx: CommandContext) -> bool:
     return True
 
 
+def _actor(u: Any) -> str | None:
+    return str(getattr(u, "sender_id", "") or getattr(u, "chat_id", "") or "") or None
+
+
+def _callback_handler(features: list[Feature], data: str) -> Callable[..., str] | None:
+    prefix = data.split(":", 1)[0]
+    for f in features:
+        for cb in f.telegram_callbacks:
+            if cb.prefix == prefix:
+                return cb.handler
+    return None
+
+
+def _handle_callback(ctx: CommandContext, receiver: Any, u: Any) -> bool:
+    """버튼 누름 1건: 핸들러 결과로 응답하고 원 메시지 뒤에 덧붙인다.
+    실패면 False(예외는 삼킨다)."""
+    try:
+        if not u.trusted:
+            # 그룹 채팅의 아무 구성원이 승인 버튼을 누르지 못하게
+            receiver.answer_callback(u.callback_id, f"버튼은 {UNTRUSTED_TAIL}")
+            return True
+        handler = _callback_handler(ctx.features, u.data)
+        if handler is None:
+            receiver.answer_callback(u.callback_id, NO_HANDLER)
+            return True
+        reply = handler(replace(ctx, actor=_actor(u)), u.data)
+        if not isinstance(reply, str):
+            logger.error("텔레그램 버튼 핸들러가 문자열이 아닌 응답: %s", u.data)
+            receiver.answer_callback(u.callback_id, BAD_REPLY)
+            return False
+    except Exception as e:  # noqa: BLE001 - 콜백 하나의 실패가 폴링 루프·오프셋을 막지 않는다
+        logger.exception("텔레그램 버튼 처리 실패: %s", u.data)
+        try:
+            receiver.answer_callback(u.callback_id, f"처리 실패({type(e).__name__})")
+        except Exception:  # noqa: BLE001
+            logger.debug("버튼 실패 응답 실패", exc_info=True)
+        return False
+    try:
+        receiver.answer_callback(u.callback_id, reply[:200])
+        if u.message_id is not None:
+            receiver.edit_message(u.chat_id, u.message_id, f"{u.message_text}\n\n{reply}")
+        ctx.echo(f"버튼 {u.data}")
+    except Exception:  # noqa: BLE001 - 핸들러는 이미 실행됐다: 응답·출력 실패는 기록만
+        logger.exception("텔레그램 버튼 응답 실패: %s", u.data)
+    return True
+
+
 def poll_once(ctx: CommandContext, receiver: Any) -> dict:
     """getUpdates 1회: 명령을 처리하고 오프셋을 control `telegram_offset` 에 저장한다."""
     conn = ctx.conn
@@ -118,6 +175,12 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
     handled = 0
     failed = 0
     for u in updates:
+        if getattr(u, "kind", "message") == "callback":
+            handled += 1
+            if not _handle_callback(ctx, receiver, u):
+                failed += 1
+            set_flag(conn, OFFSET_FLAG, int(u.update_id) + 1)
+            continue
         parsed = parse_command(u.text)
         if parsed is None:
             if u.text.strip().startswith("/"):
@@ -139,7 +202,7 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             ctx.notifier.send(
                 messages.event(
                     "명령 거부",
-                    f"/{name} 은 1:1 채팅 또는 허용 사용자(TELEGRAM_ALLOWED_USERS)만 쓸 수 있어요",
+                    f"/{name} 은 {UNTRUSTED_TAIL}",
                 )
             )
             set_flag(conn, OFFSET_FLAG, int(u.update_id) + 1)
@@ -148,9 +211,9 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             if name == STATUS:
                 reply = status_message(ctx)
             elif name == RUN:
-                reply = run_message(ctx, arg)
+                reply = run_message(replace(ctx, actor=_actor(u)), arg)
             else:
-                reply = cmd.handler(ctx, arg)
+                reply = cmd.handler(replace(ctx, actor=_actor(u)), arg)
             ctx.notifier.send(reply)
             ctx.echo(f"{name} {arg or ''}".strip())
         except Exception as e:  # noqa: BLE001 - 명령 하나의 실패가 나머지·오프셋을 막지 않는다

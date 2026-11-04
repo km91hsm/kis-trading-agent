@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from urllib.parse import urlsplit
 
@@ -25,7 +26,15 @@ def is_direct_local(request: Request) -> bool:
     return (
         client in ("127.0.0.1", "::1")
         and host in ("127.0.0.1", "localhost", "::1")
-        and not any(request.headers.get(h) for h in PROXY_HEADERS)
+        and not _proxied(request)
+    )
+
+
+def _proxied(request: Request) -> bool:
+    """프록시 흔적: 알려진 헤더 또는 이름이 `x-forwarded-` 로 시작하는 헤더(둘 다 값이 비어도
+    존재만으로)."""
+    return any(h in request.headers for h in PROXY_HEADERS) or any(
+        k.lower().startswith("x-forwarded-") for k in request.headers
     )
 
 
@@ -57,3 +66,18 @@ def require_token(request: Request) -> None:
         raise HTTPException(
             status_code=401, detail="토큰이 필요합니다 (Authorization: Bearer <WEB_TOKEN>)"
         )
+
+
+def require_confirm(body: dict, account_id: str, env: str) -> None:
+    """실전(env != paper) 계좌 동작은 본문 `confirm` 에 계좌 id 를 그대로 적어야 한다."""
+    if env != "paper" and body.get("confirm") != account_id:
+        raise HTTPException(
+            status_code=400, detail="실전 계좌 동작은 confirm 에 계좌 id 를 적어야 합니다"
+        )
+
+
+def actor_of(request: Request) -> str:
+    """제어 변경 기록용 웹 행위자: 설정 토큰의 SHA-256 지문 앞 8자(토큰 자체는 남기지 않는다).
+    `require_token` 을 지난 요청에서만 부른다."""
+    token = request.app.state.deps.token or ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]

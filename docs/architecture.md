@@ -160,19 +160,39 @@
 
 ## web
 
-- 책임: FastAPI 셸. 인증 3등급·루프백 Host 게이트·기능 라우터 마운트·SSE 지문 조립·정적 dist. 기능 이름은 모른다.
-- 공개면: `create_app`, `WebDeps`, `require_token`·`require_direct_local`·`require_same_origin`·`is_direct_local`, `sse`(`snapshot`), `gen`(`sse_keys_ts`).
+- 책임: FastAPI 셸. Host·tailnet 게이트·인증 3등급·커널 자원(system·jobs·runs·calls·events)·기능 라우터와 merge 자원 마운트·SSE 지문 조립·`nav.ts`/`sse-keys.ts` 생성·정적 dist. 기능 이름은 모른다.
+- 공개면: `create_app`, `WebDeps`(`ports`·`tailscale_users`·`public_base` 포함), `auth`(`require_token`·`require_direct_local`·`require_same_origin`·`is_direct_local`·`require_confirm`·`actor_of`), `merge`(`mount`), `sse`(`snapshot`·`KERNEL_PROBES`), `gen`(`sse_keys_ts`·`nav_ts`), `csv.csv_response`, `routers.KERNEL_ROUTERS`.
 - 규약:
-  - 인증: 토큰 / 직접 로컬 / same-origin 의 3등급을 라우트 의존성으로 건다.
-  - 기능 라우터는 `feature.routes` 만 마운트한다. 기능이 없으면 `/api/system/health`·`/api/events` 만 있다.
-  - SSE 스냅샷은 레지스트리의 `SseKey` 로 조립하고 커널 키 `daemon` 의 지문은 `{alive, minute}`(노이즈 키).
-  - `web/src/generated/sse-keys.ts` 는 `gen` 이 만든다. 최신 여부는 `dev gen-sse-keys --check` 로 검사한다.
+  - **게이트 + 인증 3등급**(M11): 미들웨어가 Host 를 루프백·`settings.web.tailscale_hosts` 로 제한하고(userinfo `@` 든 Host 는 거부), 루프백 밖 Host 는 `tailscale_users` 가 있으면 `Tailscale-User-Login` 이 그 목록에 있어야 한다. ① 조회(GET)는 토큰 없음 ② 쓰기(POST/PATCH/DELETE)는 `require_token`(Bearer `WEB_TOKEN`, 미설정이면 닫힘) + `require_same_origin` ③ 키 입력·토큰 받기·계좌 추가삭제는 `require_direct_local` — 루프백 클라이언트 ∧ 루프백 Host ∧ 프록시 흔적 없음(`tailscale-user-login`·`forwarded`·`x-real-ip`·이름이 `x-forwarded-` 로 시작하는 모든 헤더). 실전 계좌 동작(모드 변경·승인·실전 auto 가 있을 때 재개·trading 큐 kind)은 본문 `confirm == 계좌 id`(`require_confirm`); 대상 계좌 없는 trading kind 는 실전 계좌가 있으면 `confirm` 이 실전 계좌 id 중 하나여야 하고 계좌 포트가 없으면 거절한다.
+  - 모든 응답에 `X-Server-Time`(ISO-8601 UTC), SSE ping 은 `: ping {"server_time": …}`. 베어 `/api`·모르는 `/api/*` 는 메서드 무관 404.
+  - **SSE 스냅샷**: 커널 키 `daemon`(노이즈, `{alive, minute}`) + `KERNEL_PROBES`(`usage`·`control`(값 기반 해시, 커서·TTL 플래그 `CONTROL_CURSOR_LIKE` 제외)·`jobs`·`runs`·`notices`) + 기능 `Feature.sse_keys`. `CONTROL_CURSOR_LIKE` 가 기능 키 접두(`news_trigger_at:%`·`ws_session_busy:%`·`fx_cache:%`)를 품는 것은 알려진 약한 위반이다(T10-R3, 기능 선언으로 옮길 후보).
+  - **merge 자원**: 여러 기능이 같은 경로의 `ResourcePart(path, fn)` 를 내면 `merge.mount` 가 `GET` 하나로 합친다. 응답 `{"items", "partial"}` — 조각이 예외·비목록이면 나머지만 내고 `partial=True`. `items` 는 `at` 을 ISO 로 읽어 역순(날짜만은 00:00 UTC, 못 읽으면 끝). `?format=csv` 면 같은 items 를 CSV. 경로 변수·쿼리는 조각에 그대로 넘긴다.
+  - **생성 파일**: `web/src/generated/sse-keys.ts`(`gen.sse_keys_ts`)·`nav.ts`(`gen.nav_ts`, 커널 고정 5 화면 + `Feature.nav` 의 `NavItem(screen, id, label, order)`, id 는 전역 유일)는 `dev gen-sse-keys`·`dev gen-nav` 로 만들고 `--check` 와 CI 동기 테스트가 지킨다.
+  - **웹 프로세스 분리**: `trader web` 은 `boot(ports=True)` 로 포트를 조립하되 `build_web_deps` 가 주문 집행 포트(`stock_exec`, 그리고 `execute`·주문 이름의 호출을 가진 포트)를 뺀 사본만 넘기고, accounts 포트는 조회 메서드(`accounts`·`fo_accounts`·`paused`·`policy`)만 위임하는 `ReadOnlyAccounts` 로 감싼다(`main.web_ports` — `brokers`·`fo_brokers`·`market_client` 없음). 웹 라우터는 브로커·알림 객체를 쥐지 않고 쓰기는 원장 + 큐(`job_requests`)뿐 — 실제 집행·알림은 데몬이 큐를 꺼내 한다. 예외: `quotes` 허브는 표시용 KIS 시세 클라이언트를 쓴다(앱키·토큰 캐시 공유 `TRADER_KIS_SHARED_DIR`).
+  - **웹이 쓰는 control 키**: `usage_throttle`(커널 `PATCH /settings/usage-throttle`)·`saveticker_restart_requested`(데몬 saveticker 잡이 소비)·`fx_cache:<pair>`(quotes 하루 캐시, 원천 실패 때 `fail_at` 음성 캐시 300초)·`paused`·`watchlist`·계좌 모드(`account_modes`) — 변경과 조작(수동 작업 요청·취소 `job:<kind>`, 계좌 추가·삭제 `account:<id>`, 연결 키 변경 `secrets:env` 키 이름만; 텔레그램 `/run` 도 `job:<kind>` channel `telegram`)은 `control.log_change`(channel `web`, actor = 토큰 지문)로 `control_log` 에 남는다. `ws_session_busy:<env>` 는 데몬 체결통보 리스너가 쓰고 웹 시세 허브가 읽는다(세션 양보).
+  - **12 자원 소유표**(스펙 §2.5, 대응 검사 `tests/kernel/web/test_endpoint_map.py` — 첫 세그먼트 → 자원 별칭표 포함):
+
+    | 자원 | 경로 | 소유 |
+    |---|---|---|
+    | accounts | `/accounts`, `/accounts/overview`, `/accounts/{id}` (PATCH·POST·DELETE) | accounts |
+    | positions | `/accounts/{id}/positions`(merge: spot+scalp+fo), `/positions/{overview,risk}`, `/accounts/{id}/tax-lots` | spot·scalp·fo·evaluation |
+    | decisions | `/decisions`(merge), `/decisions/{spot,fo}/{id}[/trace…]`, `/markets/{m}/today`, `/risk-checks`, `/fo/today` | spot·fo |
+    | orders | `/orders`(merge), `/fo/legs`, `/fo/summary` | spot·fo |
+    | approvals | `/approvals`, `PATCH /approvals/{id}` | spot |
+    | jobs | `/jobs`(+POST), `/jobs/requests`, `DELETE /jobs/{id}`, `/runs`, `/calls` | 커널 |
+    | events | `/events`(SSE) | 커널 |
+    | news | `/news`, `/news/{events,themes,labels,manual}` | ingest·scan |
+    | quotes | `/quotes`, `/quotes/{indices,book,fo,fx}`, `/names*`, `/charts*`, `/features/*`, `/ml/models*` | quotes·ml |
+    | settings | `/settings`, `/settings/{paused,watchlist,usage-throttle,secrets}` | accounts·scan·커널 |
+    | system | `/system/{health,status,usage,daemon,notices,control-log,regime,saveticker,scalp,fo}`, `POST /system/{bootstrap-token,saveticker/restart,usage/ensure-fresh}` | 커널·regime·saveticker·scalp·fo |
+    | analytics | `/analytics/performance*`, `/analytics/{shadow,calibration,memory}`, `/analytics/rl/*`, `/analytics/fo/*` | evaluation·fo |
+  - **스펙 §2.5 대비 알려진 차이**: `/decisions/{id}` → `/decisions/spot/{id}`·`/decisions/fo/{id}`; `/tax-lots` → `/accounts/{id}/tax-lots`; `/rl/*` → `/analytics/rl/*`; `/fo/{scorecard,report,summary}` → `/analytics/fo/*`(`/fo/summary` 도 남김); `/ml/*`·`/names*`·`/charts*`·`/features*`·`/markets/{m}/today`·`/risk-checks`·`/fo/legs|today` 는 자기 첫 세그먼트를 유지(별칭표로 자원에 묶음); `/system/ops` → `/system/health`(임시 판정, M12 `kernel/ops` 로 교체); 옛 `/fo/account` → `/system/fo`; `/quotes/us` 없음(`/quotes?market=US`); 플랜 추가 `GET /accounts/overview`·`/system/notices`·`/system/control-log`·`/quotes/fx`·`/quotes/fo`; 스펙 밖 추가 `/news/labels`·`GET /news/manual`·`/decisions/spot/news-refs`·`POST /system/usage/ensure-fresh`(같은 출처만, 토큰 없음 — R1). 자원별 세부 차이는 각 기능 README 「웹」 절.
 - 테스트: `tests/kernel/web/` (+ `web/` vitest)
 
 ## cli
 
 - 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 과 `tool` 루트를 둔다.
-- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`).
+- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`·`gen-nav`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`).
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
   - 설정 오류는 `config_errors` 데코레이터가 사용자용 메시지로 바꾼다.

@@ -65,6 +65,9 @@ def test_telegram_pause_resume_mode(project, conn):
     assert not modes.is_paused(conn)
     commands.poll_once(ctx, Recv(["/mode paper-main approve"]))
     assert modes.get_account_mode(conn, _acct("paper-main")) == "approve"
+    rows = conn.execute("SELECT key, channel, actor FROM control_log ORDER BY id").fetchall()
+    assert [r["key"] for r in rows] == ["paused", "paused", "account_mode:paper-main"]
+    assert {(r["channel"], r["actor"]) for r in rows} == {("telegram", "1")}
     commands.poll_once(ctx, Recv(["/mode nope auto", "/mode paper-main fast"]))
     assert any("사용법" in m or "알 수 없는" in m for m in sent.msgs[-2:])
 

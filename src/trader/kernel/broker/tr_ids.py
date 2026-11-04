@@ -105,11 +105,19 @@ _TR: dict[str, tuple[str, str, str | None]] = {
     # 2026-10-29 실기 확인
     "DOM_STOCK_INFO": ("/uapi/domestic-stock/v1/quotations/search-stock-info", "CTPF1002R", None),
     "OVS_STOCK_INFO": ("/uapi/overseas-price/v1/quotations/search-info", "CTPF1702R", None),
-    # 현재가상세: 업종코드(e_icod) — 섹터 제안(universe sectors)에만 쓴다
+    # 현재가상세: 업종코드(e_icod) — 섹터 제안(universe sectors), 당일환율(t_rate) — 환율 대안
     "OVS_PRICE_DETAIL": (
         "/uapi/overseas-price/v1/quotations/price-detail",
         "HHDFS76200200",
         "HHDFS76200200",
+    ),
+    # 종목_지수_환율기간별시세: 환율(X / FX@KRW) 조회 — 계좌 불필요, 모의도 같은 TR.
+    # 공식 examples_llm/overseas_stock/inquire_daily_chartprice 에서 2026-11-05 확인
+    # (조사 docs/research/2026-11-05-kis-fx-rate-api.md)
+    "OVS_FX_DAILY": (
+        "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice",
+        "FHKST03030100",
+        "FHKST03030100",
     ),
     "OVS_DAILY": (
         "/uapi/overseas-price/v1/quotations/dailyprice",

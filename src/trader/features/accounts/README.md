@@ -9,9 +9,11 @@
 
 ## 공개면 (`api.py`)
 
-`LIVE_CONFIRM`, `Account`, `ConfirmationRequired`, `Mode`, `account_mode`, `build_brokers`, `build_market`, `effective_mode`, `get_account_mode`, `is_paused`, `load_accounts`, `market_creds`, `split_accounts`, `to_broker_account`. 다른 기능은 이 파일만 import 한다. `routes=()`(웹 라우트는 M11).
+`LIVE_CONFIRM`, `Account`, `ConfirmationRequired`, `Mode`, `account_mode`, `build_brokers`, `build_market`, `effective_mode`, `get_account_mode`, `is_paused`, `load_accounts`, `market_creds`, `split_accounts`, `to_broker_account`. 다른 기능은 이 파일만 import 한다.
 
 CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secrets import`.
+
+웹(`routes.py`, M11): `GET /accounts`(행: id·env·lane·markets·currency·mode·mode_note·mode_source·paused·nav·nav_at·cash·cash_at·usd_nav·day_pnl·positions_count·pending_approvals — 금액 `str(Decimal)`, `*_at` 은 `account_nav.created_at` UTC, 스냅샷 없으면 null)·`GET /accounts/overview`(KRW·USD 합계 + `quotes.api.fx_rate` 가 있으면 원화 환산, 파생 제외)·`PATCH /accounts/{id}`(실전은 `confirm`=계좌 id; 실전 auto 는 본문 `confirm` 에 계좌 id 를 다시 적으면 웹이 LIVE 확인 기록을 남긴다 — `live_confirmed_json` 에 confirm·at·channel `web`·actor(토큰 지문), `control_log` `account_mode:<id>` 도 같은 channel·actor. 이미 기록이 있으면 다시 쓰지 않는다. 사용자 결정 T6-R1 변경 2026-11-05)·`POST /accounts`·`DELETE /accounts/{id}`(이 PC 직접 접속만)·`GET /settings`·`PATCH /settings/paused`(실전 auto 계좌가 있으면 재개에 그 id 중 하나를 `confirm`)·`GET|POST /settings/secrets`(직접 접속만 — GET 도 토큰을 요구한다: 옛 `POST /control/secrets/status` 는 직접 접속만 봤다. M11b 계약: 연결 키 화면은 토큰을 붙여 부른다). 조립은 `overview.py`(`lane_of`: asset fo → fo, `settings.scalp.accounts` 덕 타이핑 → scalp, 그 밖 spot). SSE 키 `accounts`(모드 지문+paused)·`positions`(보유·NAV 최근 사흘)·`approvals`(pending 수+상태 지문), 메뉴 `accounts/overview "통합"`. 알려진 차이: `settings.scalp.accounts` 키는 아직 없어 `lane_of` 의 scalp 규칙은 맞는 계좌가 없다(T7-R2 — 단타 설정에 계좌 키가 생기면 통일), 파생 NAV 는 통합 현황에 없다(`account_nav` 만 읽음, 파생은 `/fo/summary`, T6-R2).
 
 ## 규약
 
@@ -26,7 +28,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 
 ## 테스트
 
-`tests/features/accounts/` — 모드·`accounts_io`·`secrets_io`·다중 계좌 키·CLI·텔레그램 명령.
+`tests/features/accounts/` — 모드·`accounts_io`·`secrets_io`·다중 계좌 키·CLI·텔레그램 명령·웹 자원(`test_routes.py`).
 
 ## 알려진 차이 (옛 저장소 대비)
 
@@ -37,7 +39,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 5. `exec-key list|release` 는 M4.
 6. `accounts_io.blockers` 는 테이블이 없으면 그 사유를 생략한다. 끝난 주문 상태 목록은 커널 `execution.types.dead_status_sql` 을 쓴다(M9). `test_accounts_io.py` 의 `db` fixture 는 M4 전까지 최소 스탠드인 테이블을 CREATE 한다.
 7. 체결통보 리스너(`_notice_listeners`)는 M5.
-8. `ensure_web_token`(`secrets_io`)은 아직 어디에도 연결되지 않았다. 연결·키 웹 라우트는 M11.
+8. `ensure_web_token`(`secrets_io`)은 아직 어디에도 연결되지 않았다. 연결 키 웹 라우트는 `GET|POST /settings/secrets`(옛 `POST /control/secrets/status` → GET). 계좌 삭제는 옛 `POST /control/accounts/remove` → `DELETE /accounts/{id}`, 모드는 옛 `POST /control/mode`(실전 auto confirm=LIVE) → `PATCH /accounts/{id}`(confirm=계좌 id + 기존 LIVE 기록).
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
 11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 커널 `notify.messages` 에 이식하지 않았다 — `SCALP_EXIT` 는 M9 에서 scalp `messages.py` 로 이식됐다(`carry_over` 추가), `DecisionBrief` 는 spot 몫.
@@ -46,5 +48,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.
 16. 옛 코드는 계좌를 지워도 control 플래그(모드·LIVE 확인)가 남았으나 새 코드는 `remove_account` 때 `account_modes` 행을 지운다(같은 id 로 다시 만든 계좌에 넘어가지 않게).
+17. 파생 계좌 NAV 는 `account_nav` 만 읽는다(옛 `fo_nav_snapshot` 은 fo 레인 소유라 읽지 않는다) — fo 가 `account_nav` 에 쓰지 않으면 null.
+18. `settings.scalp.accounts` 키는 아직 없어 lane `scalp` 는 나오지 않는다(판정 규칙만 둠).
 
 - M8: 텔레그램 `/daily`(일일 성과 리포트)가 evaluation 에서 등록된다.

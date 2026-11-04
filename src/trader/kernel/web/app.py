@@ -1,20 +1,24 @@
-"""FastAPI 앱 조립: 루프백 Host 게이트 + 기능 라우터 마운트 + health + SSE + 정적 서빙."""
+"""FastAPI 앱 조립: Host·tailnet 게이트 + 서버 시각 헤더 + 커널 자원(system·jobs·runs) + SSE
++ 기능 라우터·merge 마운트 + 정적 서빙."""
 
 from __future__ import annotations
 
 import logging
-from importlib import metadata
-from urllib.parse import urlsplit
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
-from trader.kernel.web import sse
+from trader.kernel.web import merge, sse
+from trader.kernel.web.auth import _host_of
 from trader.kernel.web.deps import WebDeps
+from trader.kernel.web.routers import KERNEL_ROUTERS
 
 logger = logging.getLogger("trader.web")
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+API_METHODS = ["GET", "POST", "PATCH", "DELETE", "PUT"]
+LOGIN_HEADER = "tailscale-user-login"
 
 NO_DIST_HTML = (
     "<!doctype html><html lang='ko'><meta charset='utf-8'><body style='font-family:sans-serif'>"
@@ -25,65 +29,68 @@ NO_DIST_HTML = (
 )
 
 
-def _version() -> str:
-    try:
-        return metadata.version("trader")
-    except metadata.PackageNotFoundError:
-        return "0.2.0"
+def _forbidden(detail: str) -> JSONResponse:
+    return JSONResponse({"detail": detail}, status_code=403)
 
 
-def _hostname(value: str) -> str:
-    try:
-        return (urlsplit("//" + value).hostname or "").lower()
-    except ValueError:
-        return ""
+def _gate(request: Request, allowed: set[str], users: set[str]) -> Response | None:
+    """Host·tailnet 로그인 게이트. 통과면 None, 막으면 403 응답.
+
+    DNS 리바인딩으로 토큰 없는 조회 API 를 읽지 못하게 Host 를 루프백·tailnet 허용 목록으로
+    제한한다. userinfo(`@`)가 든 Host 는 파서마다 해석이 달라 항상 거부한다. 루프백이 아닌
+    Host 는 `tailscale_users` 가 있으면 `Tailscale-User-Login` 이 그 목록에 있어야 한다."""
+    raw = request.headers.get("host") or ""
+    host = _host_of(raw)
+    if "@" in raw or host not in allowed:
+        return _forbidden("허용되지 않은 Host 입니다 (로컬·tailnet 전용)")
+    if host not in LOOPBACK_HOSTS and users:
+        login = (request.headers.get(LOGIN_HEADER) or "").strip().lower()
+        if login not in users:
+            return _forbidden("허용되지 않은 tailnet 사용자입니다")
+    return None
+
+
+def _spa_response(dist: Path, rest: str) -> Response:
+    """dist 는 요청마다 확인한다 (서버를 띄운 뒤 빌드해도 재시작 없이 서빙)."""
+    dist = dist.resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        return HTMLResponse(NO_DIST_HTML)
+    candidate = dist / rest if rest else None
+    if candidate is not None and candidate.is_file() and dist in candidate.resolve().parents:
+        return FileResponse(candidate)
+    return FileResponse(index)
 
 
 def create_app(deps: WebDeps) -> FastAPI:
     app = FastAPI(title="trader", docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.deps = deps
-    allowed = {*LOOPBACK_HOSTS, *(_hostname(h) or h.lower() for h in deps.extra_hosts)}
+    allowed = {*LOOPBACK_HOSTS, *(_host_of(h) or h.lower() for h in deps.extra_hosts)}
+    users = {u.strip().lower() for u in deps.tailscale_users if u.strip()}
 
-    # 로컬 전용: DNS 리바인딩으로 토큰 없는 조회 API 를 읽지 못하게 Host 를 제한한다
     @app.middleware("http")
-    async def loopback_host_gate(request: Request, call_next):
-        if _hostname(request.headers.get("host") or "") not in allowed:
-            return JSONResponse(
-                {"detail": "허용되지 않은 Host 입니다 (로컬 전용)"}, status_code=403
-            )
-        return await call_next(request)
-
-    @app.get("/api/system/health")
-    def health() -> dict:
-        return {"ok": True, "version": _version(), "features": [f.id for f in deps.features]}
+    async def shell_gate(request: Request, call_next):
+        response = _gate(request, allowed, users) or await call_next(request)
+        response.headers["X-Server-Time"] = request.app.state.deps.now().isoformat()
+        return response
 
     app.include_router(sse.router, prefix="/api")
+    for router in KERNEL_ROUTERS:
+        app.include_router(router, prefix="/api")
     for feature in deps.features:
         for router in feature.routes:
             app.include_router(router, prefix="/api")
+    merge.mount(app, deps.features)
 
-    @app.get("/api/{rest:path}", include_in_schema=False)
-    def _api_404(rest: str) -> JSONResponse:
-        return JSONResponse({"detail": f"없는 API: /api/{rest}"}, status_code=404)
+    @app.api_route("/api", methods=API_METHODS, include_in_schema=False)
+    @app.api_route("/api/{rest:path}", methods=API_METHODS, include_in_schema=False)
+    def _api_404(request: Request) -> JSONResponse:
+        return JSONResponse(
+            {"detail": f"없는 API 경로입니다: {request.url.path}"}, status_code=404
+        )
 
-    dist = deps.dist.resolve()
-    if (dist / "index.html").is_file():
-
-        @app.get("/{rest:path}", include_in_schema=False)
-        def _spa(rest: str) -> FileResponse:
-            candidate = dist / rest if rest else None
-            if (
-                candidate is not None
-                and candidate.is_file()
-                and dist in candidate.resolve().parents
-            ):
-                return FileResponse(candidate)
-            return FileResponse(dist / "index.html")
-
-    else:
-
-        @app.get("/{rest:path}", include_in_schema=False)
-        def _notice(rest: str) -> HTMLResponse:
-            return HTMLResponse(NO_DIST_HTML)
+    @app.get("/{rest:path}", include_in_schema=False)
+    def _spa(rest: str) -> Response:
+        return _spa_response(deps.dist, rest)
 
     return app

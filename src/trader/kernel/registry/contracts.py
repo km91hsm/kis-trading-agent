@@ -13,7 +13,7 @@ from trader.kernel.execution.migrations import EXECUTION, EXECUTION_V7
 from trader.kernel.execution.types import ORIGIN_CHECK
 from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
-from trader.kernel.ledger.migrations import KERNEL, Migration
+from trader.kernel.ledger.migrations import KERNEL, WEB, Migration
 from trader.kernel.ledger.migrations import check as check_migrations
 from trader.kernel.registry.types import Feature
 from trader.kernel.session.migrations import SESSION
@@ -26,7 +26,7 @@ KERNEL_EXEMPT = Path("registry") / "discover.py"
 
 
 # ledger.migrations.KERNEL(v1)에 넣지 않는 커널 모듈 소유 마이그레이션
-KERNEL_MODULES: list[Migration] = [SESSION, EXECUTION, EXECUTION_V7, QUEUE]
+KERNEL_MODULES: list[Migration] = [SESSION, EXECUTION, EXECUTION_V7, QUEUE, WEB]
 
 
 def _dups(items: Iterable[str]) -> list[str]:
@@ -58,6 +58,8 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         ("에이전트 이름", [a.name for f in features for a in f.agents]),
         ("포트", [p.name for f in features for p in f.ports]),
         ("게이트", [g.name for f in features for g in f.gates]),
+        ("nav id", [n.id for f in features for n in f.nav]),
+        ("텔레그램 콜백 prefix", [c.prefix for f in features for c in f.telegram_callbacks]),
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
     msgs += [

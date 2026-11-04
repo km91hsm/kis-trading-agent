@@ -18,12 +18,12 @@ def _mode_label(conn, account: Account) -> str:
 
 
 def pause(ctx: Any, arg: str | None) -> str:
-    modes.set_paused(ctx.conn, True)
+    modes.set_paused(ctx.conn, True, channel="telegram", actor=ctx.actor)
     return messages.event("일시정지", "모든 계좌의 주문을 멈췄어요")
 
 
 def resume(ctx: Any, arg: str | None) -> str:
-    modes.set_paused(ctx.conn, False)
+    modes.set_paused(ctx.conn, False, channel="telegram", actor=ctx.actor)
     return messages.event("재개", "주문을 다시 내요")
 
 
@@ -41,7 +41,9 @@ def mode(ctx: Any, arg: str | None) -> str:
             "상향은 CLI `trader accounts mode <계좌> approve|auto --confirm LIVE` 로만"
         )
     try:
-        modes.set_account_mode(ctx.conn, acct, new_mode)
+        modes.set_account_mode(
+            ctx.conn, acct, new_mode, channel="telegram", actor=ctx.actor
+        )
     except (ValueError, modes.ConfirmationRequired) as e:
         return f"거부: {e}"
     return messages.mode_changed(account=acct.id, mode=new_mode)
