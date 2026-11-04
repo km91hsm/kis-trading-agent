@@ -58,3 +58,35 @@ KERNEL: list[Migration] = [
         ),
     )
 ]
+
+
+# 웹 API(M11): 알림·제어 변경 기록 + 승인 결정자. KERNEL(v1) 목록이 아닌 커널 모듈 목록에 들어간다.
+WEB = Migration(
+    15,
+    "web",
+    statements=(
+        """CREATE TABLE IF NOT EXISTS notices (
+            id INTEGER PRIMARY KEY,
+            at TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            account_id TEXT,
+            text TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            ok INTEGER NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_notices_at ON notices(at)",
+        """CREATE TABLE IF NOT EXISTS control_log (
+            id INTEGER PRIMARY KEY,
+            at TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            actor TEXT,
+            key TEXT NOT NULL,
+            old TEXT,
+            new TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_control_log_at ON control_log(at)",
+        "ALTER TABLE approvals ADD COLUMN decided_by TEXT",
+        "ALTER TABLE approvals ADD COLUMN decided_channel TEXT",
+    ),
+    owner="kernel/web",
+)

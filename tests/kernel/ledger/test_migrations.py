@@ -40,7 +40,7 @@ def test_all_migrations_include_session_v4(project):
     from trader.kernel.registry.contracts import all_migrations
 
     migs = all_migrations(discover())
-    assert [m.version for m in migs] == list(range(1, 15))
+    assert [m.version for m in migs] == list(range(1, 16))
     v4 = next(m for m in migs if m.version == 4)
     assert v4.owner == "kernel/session"
     c = db.connect()
@@ -48,3 +48,27 @@ def test_all_migrations_include_session_v4(project):
     names = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     c.close()
     assert {"agent_calls", "llm_rate_limits"} <= names
+
+
+def _migrated(project):
+    from trader.kernel.ledger import db
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.contracts import all_migrations
+
+    c = db.connect()
+    db.init_schema(c, all_migrations(discover()))
+    return c
+
+
+def test_migration_15_creates_notices_and_control_log(project):
+    c = _migrated(project)
+    names = {r["name"] for r in c.execute("SELECT name FROM sqlite_master")}
+    c.close()
+    assert {"notices", "control_log", "ix_notices_at", "ix_control_log_at"} <= names
+
+
+def test_migration_15_adds_decided_columns_to_approvals(project):
+    c = _migrated(project)
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(approvals)")}
+    c.close()
+    assert {"decided_by", "decided_channel"} <= cols

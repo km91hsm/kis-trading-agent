@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,12 +25,33 @@ logger = logging.getLogger("trader.notify")
 MAX_LEN = 4000
 
 
+@dataclass
+class Message:
+    """종류·계좌·버튼이 붙은 알림. buttons 는 (라벨, callback_data) 행 목록(렌더는 텔레그램 몫)."""
+
+    text: str
+    kind: str = "info"
+    account_id: str | None = None
+    buttons: list[list[tuple[str, str]]] | None = None
+
+
 class Notifier(Protocol):
     def send(self, text: str, *, escape: bool = True) -> bool: ...
 
 
+def send(notifier: Notifier, msg: Message) -> bool:
+    """`send_message` 가 있으면 그것으로, 없는 옛 알림기·가짜는 평문 `send` 로(버튼은 버린다)."""
+    fn = getattr(notifier, "send_message", None)
+    if fn is not None:
+        return fn(msg)
+    return notifier.send(msg.text)
+
+
 class NullNotifier:
     """설정이 없을 때 쓰는 빈 알림기. 항상 성공으로 돌려준다."""
+
+    def send_message(self, msg: Message) -> bool:
+        return self.send(msg.text)
 
     def send(self, text: str, *, escape: bool = True) -> bool:
         logger.debug("알림 생략(텔레그램 미설정): %s", text[:80])
@@ -76,8 +98,10 @@ class TelegramNotifier:
         *,
         http: httpx.Client | None = None,
         outbox: Path | None = None,
+        record: Callable[[dict], None] | None = None,
     ) -> None:
         quiet_httpx()
+        self._record = record
         self._url = f"https://api.telegram.org/bot{token}/sendMessage"
         self._chat_id = chat_id
         self._http = http or httpx.Client(timeout=10)
@@ -101,13 +125,44 @@ class TelegramNotifier:
         """4,000자 단위로 나눠 보낸다(기본 HTML 이스케이프). 전송 실패분은 outbox 에 보관하고
         보관에 성공했으면 True(재전송은 `flush_outbox` 몫 — 호출부가 다시 보내면 중복, 2-T1),
         보관함이 없거나 보관도 실패하면 False + 경고."""
+        return self._deliver(Message(text), escape=escape)
+
+    def send_message(self, msg: Message) -> bool:
+        """종류·계좌를 붙여 보내고 기록한다(buttons 는 아직 렌더하지 않는다)."""
+        return self._deliver(msg, escape=True)
+
+    def _deliver(self, msg: Message, *, escape: bool) -> bool:
+        text = msg.text
         if not text or not text.strip():
             return True
         chunks = _chunks(text, MAX_LEN, escape=escape)
+        delivered = True
+        result = True
         for i, chunk in enumerate(chunks):
             if not self._post(chunk):
-                return self._queue(chunks[i:])
-        return True
+                delivered = False
+                result = self._queue(chunks[i:])
+                break
+        self._emit(msg, delivered)
+        return result
+
+    def _emit(self, msg: Message, ok: bool) -> None:
+        """기록 훅. 실제 전달 여부(ok)를 남기고, 훅 오류는 발신에 영향을 주지 않는다."""
+        if self._record is None:
+            return
+        try:
+            self._record(
+                {
+                    "at": datetime.now(UTC).isoformat(),
+                    "kind": msg.kind,
+                    "account_id": msg.account_id,
+                    "text": msg.text,
+                    "channel": "telegram",
+                    "ok": ok,
+                }
+            )
+        except Exception as e:  # noqa: BLE001 — 기록이 발신을 깨면 안 된다
+            logger.warning("알림 기록 실패: %s", type(e).__name__)
 
     def _queue(self, chunks: list[str]) -> bool:
         """보관 성공이면 True."""
@@ -183,7 +238,11 @@ class TelegramNotifier:
 
 
 def make_notifier(
-    secrets: Secrets, *, http: httpx.Client | None = None, enabled: bool = True
+    secrets: Secrets,
+    *,
+    http: httpx.Client | None = None,
+    enabled: bool = True,
+    record: Callable[[dict], None] | None = None,
 ) -> Notifier:
     """enabled=False 면 시크릿이 있어도 NullNotifier(설정의 알림 끔 스위치)."""
     if enabled and secrets.TELEGRAM_BOT_TOKEN and secrets.TELEGRAM_CHAT_ID:
@@ -194,6 +253,7 @@ def make_notifier(
             secrets.TELEGRAM_CHAT_ID,
             http=http,
             outbox=paths.state_dir() / "notify_outbox.jsonl",
+            record=record,
         )
     return NullNotifier()
 

@@ -28,3 +28,29 @@ def set_flag(conn: sqlite3.Connection, key: str, value: Any) -> None:
 def delete_flag(conn: sqlite3.Connection, key: str) -> None:
     conn.execute("DELETE FROM control WHERE key = ?", (key,))
     conn.commit()
+
+
+def log_change(
+    conn: sqlite3.Connection,
+    *,
+    channel: str,
+    actor: str | None,
+    key: str,
+    old: Any,
+    new: Any,
+    at: str,
+) -> int:
+    """제어 변경 기록(control_log). old/new 는 JSON 으로 저장하고 None 은 NULL 로 둔다."""
+    cur = conn.execute(
+        "INSERT INTO control_log(at, channel, actor, key, old, new) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            at,
+            channel,
+            actor,
+            key,
+            None if old is None else json.dumps(old, ensure_ascii=False),
+            None if new is None else json.dumps(new, ensure_ascii=False),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)

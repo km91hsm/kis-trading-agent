@@ -6,7 +6,8 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from trader.kernel.ledger.control import get_flag, set_flag
+from trader.kernel.ledger.control import get_flag, log_change, set_flag
+from trader.kernel.ledger.db import now_iso
 
 _TICKER_RE = re.compile(r"^(?:(?:KR|US):)?[A-Z0-9.\-]{1,12}$")  # 선택적 시장 접두사
 _KR_CODE_RE = re.compile(r"^\d{6}$")
@@ -32,7 +33,13 @@ def get_watchlist(conn: sqlite3.Connection, market: str | None = None) -> list[s
     return [t for m, t in (split_market(i) for i in items) if m == market]
 
 
-def set_watchlist(conn: sqlite3.Connection, tickers: list[str]) -> list[str]:
+def set_watchlist(
+    conn: sqlite3.Connection,
+    tickers: list[str],
+    *,
+    channel: str = "cli",
+    actor: str | None = None,
+) -> list[str]:
     """형식 검증(영숫자·.·- 12자 이내, 선택적 `KR:`/`US:` 접두사, 대문자화) 후 저장.
 
     같은 (시장, 종목) 은 처음 쓴 표기 하나만 남긴다(`005930` 과 `KR:005930` 은 같은 항목).
@@ -47,7 +54,12 @@ def set_watchlist(conn: sqlite3.Connection, tickers: list[str]) -> list[str]:
         if key not in keys:
             keys.add(key)
             out.append(u)
+    old = get_watchlist(conn)
     set_flag(conn, "watchlist", out)
+    if old != out:
+        log_change(
+            conn, channel=channel, actor=actor, key="watchlist", old=old, new=out, at=now_iso()
+        )
     return out
 
 

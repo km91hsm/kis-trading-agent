@@ -21,6 +21,7 @@ from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
 from trader.kernel.notify import NullNotifier
 from trader.kernel.notify.commands import CommandContext, poll_once
+from trader.kernel.notify.record import ledger_recorder
 from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_receiver
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover, hooks
@@ -59,7 +60,9 @@ def build_daemon_deps(boot_: Boot, *, dry_run: bool) -> DaemonDeps:
         gates={},
         stop_event=threading.Event(),
         dry_run=dry_run,
-        notifier=make_notifier(secrets, enabled=boot_.settings.notify.enabled),
+        notifier=make_notifier(
+            secrets, enabled=boot_.settings.notify.enabled, record=ledger_recorder(db.connect)
+        ),
         secrets=secrets,
         registry=boot_.registry,
         hooks=hooks.by_point(boot_.features),

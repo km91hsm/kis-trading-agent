@@ -8,7 +8,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from trader.features.accounts.settings import Account, Mode
-from trader.kernel.ledger.control import get_flag, set_flag
+from trader.kernel.ledger.control import get_flag, log_change, set_flag
 from trader.kernel.ledger.db import now_iso
 
 logger = logging.getLogger("trader.accounts")
@@ -55,7 +55,13 @@ def get_account_mode(conn: sqlite3.Connection, account: Account) -> Mode:
 
 
 def set_account_mode(
-    conn: sqlite3.Connection, account: Account, mode: str, *, confirm: str | None = None
+    conn: sqlite3.Connection,
+    account: Account,
+    mode: str,
+    *,
+    confirm: str | None = None,
+    channel: str = "cli",
+    actor: str | None = None,
 ) -> None:
     """검증을 전부 마친 뒤 한 문장으로 쓴다. 같은 값이면 updated_at 이 바뀌지 않는다."""
     if mode not in get_args(Mode):
@@ -64,6 +70,7 @@ def set_account_mode(
         raise ConfirmationRequired(
             f"실전 계좌 '{account.id}' 를 auto 로 바꾸려면 confirm='{LIVE_CONFIRM}' 가 필요합니다."
         )
+    old = get_account_mode(conn, account)
     confirmed = (
         json.dumps({"confirm": confirm, "at": now_iso()})
         if account.env == "real" and mode == "auto"
@@ -78,6 +85,11 @@ def set_account_mode(
         (account.id, mode, confirmed, now_iso()),
     )
     conn.commit()
+    if old != mode:
+        log_change(
+            conn, channel=channel, actor=actor, key=f"account_mode:{account.id}",
+            old=old, new=mode, at=now_iso(),
+        )
     logger.info("계좌 %s 모드 → %s", account.id, mode)
 
 
@@ -114,5 +126,13 @@ def is_paused(conn: sqlite3.Connection) -> bool:
     return bool(get_flag(conn, "paused", False))
 
 
-def set_paused(conn: sqlite3.Connection, value: bool) -> None:
+def set_paused(
+    conn: sqlite3.Connection, value: bool, *, channel: str = "cli", actor: str | None = None
+) -> None:
+    old = is_paused(conn)
     set_flag(conn, "paused", bool(value))
+    if old != bool(value):
+        log_change(
+            conn, channel=channel, actor=actor, key="paused",
+            old=old, new=bool(value), at=now_iso(),
+        )

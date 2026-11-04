@@ -17,6 +17,7 @@ from trader.kernel.notify.messages import (
     throttle_skip,
 )
 from trader.kernel.notify.telegram import (
+    Message,
     Notifier,
     NullNotifier,
     TelegramNotifier,
@@ -25,11 +26,13 @@ from trader.kernel.notify.telegram import (
     make_notifier,
     make_receiver,
     parse_command,
+    send,
 )
 
 __all__ = [
     "CommandContext",
     "DecisionBrief",
+    "Message",
     "Notifier",
     "NullNotifier",
     "TelegramNotifier",
@@ -50,5 +53,6 @@ __all__ = [
     "order_unknown",
     "parse_command",
     "poll_once",
+    "send",
     "throttle_skip",
 ]
