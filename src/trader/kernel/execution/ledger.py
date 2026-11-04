@@ -867,3 +867,30 @@ def insert_trigger(
     )
     conn.commit()
     return int(cur.lastrowid)
+
+
+def mark_trigger_handled(
+    conn: sqlite3.Connection, trigger_id: int, marker: str, *, handled_at: str
+) -> None:
+    """트리거를 처리 완료로 표시한다. marker 는 세션 id 또는 '실패:…'(기동 실패)."""
+    conn.execute(
+        "UPDATE triggers SET handled_at=?, session_id=? WHERE id=?",
+        (handled_at, marker, trigger_id),
+    )
+    conn.commit()
+
+
+def get_trigger(conn: sqlite3.Connection, trigger_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT id, market, ticker, kind, detail, price, decision_id, handled_at FROM triggers "
+        "WHERE id=?",
+        (trigger_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    try:
+        out["detail"] = json.loads(out["detail"]) if out.get("detail") else {}
+    except ValueError:
+        out["detail"] = {}
+    return out

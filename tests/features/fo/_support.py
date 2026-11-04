@@ -3,11 +3,13 @@
 `_open`(진입 다리 예약)·`_recover`(전송 유예가 지난 시점의 복구), 실행기 헬퍼 `account`·`balance`·
 `holding`·`settings`·`decision`·`env`·`make_ctx`·`ckpt`·`state`·`_held_position`(옛 그대로),
 입력·세션·도구 헬퍼 `_candles`·`_master_with_chain`·`_market`·`_ctx`·`_fo`·`_tool_ctx`·
-`_reports`·`_debate`·`_ready`·`_env`·`_two_accounts`(옛 `test_inputs`·`test_tools_fo`)."""
+`_reports`·`_debate`·`_ready`·`_env`·`_two_accounts`(옛 `test_inputs`·`test_tools_fo`), 엔진 헬퍼
+`at`·`_engine_market`(옛 `test_engine._market` — 입력 테스트의 `_market` 과 이름이 겹쳐 바꿈)·
+`_open_with_live_entry`·`_pending_flag`(옛 `test_engine`)."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -27,11 +29,13 @@ from trader.kernel.broker.models import (
     Candle,
     FoBalance,
     FoCash,
+    FoFill,
     FoOrderable,
     FoOrderState,
     FoPosition,
 )
 from trader.kernel.cli.boot import build_registry
+from trader.kernel.config import KST
 from trader.kernel.config.loader import load
 from trader.kernel.ledger import control
 from trader.kernel.registry import discover
@@ -41,7 +45,8 @@ __all__ = [
     "ACCT", "MASTER", "NOW", "T0", "TODAY", "_bal", "_held_position", "_open", "_recover", "_row",
     "_state", "account", "balance", "ckpt", "decision", "env", "holding", "make_ctx", "settings",
     "state", "D", "_candles", "_master_with_chain", "_market", "_ctx", "_fo", "_tool_ctx",
-    "_reports", "_debate", "_ready", "_env", "_two_accounts", "ports_for",
+    "_reports", "_debate", "_ready", "_env", "_two_accounts", "ports_for", "at", "_engine_market",
+    "_open_with_live_entry", "_pending_flag", "fill", "daemon_deps",
 ]  # fmt: skip
 
 
@@ -350,3 +355,93 @@ def _two_accounts(conn):
     ctx = _tool_ctx(conn, fo, inp)
     _ready(ctx)
     return ctx
+
+
+# --- 엔진 헬퍼(옛 `tests/fo/test_engine.py`) -----------------------------------------------
+
+
+def at(h: int, m: int = 0) -> datetime:
+    """2026-10-27(화) KST 시:분의 UTC 시각."""
+    return datetime(2026, 10, 27, h, m, tzinfo=KST).astimezone(UTC)
+
+
+def _engine_market(now, *, idx="350", idx_age_s=0, fut="350.5", opt=None):
+    """선물 시세 + (선택) 옵션 시세 + 코스피200(나이 `idx_age_s`)."""
+    quotes = {"105W11": quote(price=fut)}
+    if opt is not None:
+        quotes[opt.code] = opt
+    return FakeMarket(fo_quotes=quotes,
+                      kospi200=(Decimal(idx), now - timedelta(seconds=idx_age_s)))  # fmt: skip
+
+
+def _open_with_live_entry(conn, ctx):
+    """아침 결정으로 진입 다리 1개를 접수(미체결)시키고, 취소하면 전량 취소로 끝나게 해 둔다."""
+    out = executor.run_leg(ctx, executor.account_of(ctx, ACCT), env())
+    assert out[0]["status"] == "accepted"
+    leg = store.live_legs(conn, account_id=ACCT)[0]
+    ctx.brokers[ACCT].states[leg.order_no] = FoOrderState(
+        order_no=leg.order_no, order_qty=leg.qty, filled_qty=0, remaining_qty=0,
+        rejected_qty=0, cancelled_qty=leg.qty, terminal=True, state="cancelled",
+    )  # fmt: skip
+    return leg
+
+
+def _pending_flag(conn, today=TODAY):
+    """진입 창 밖에서 보류된 아침 결정(`fo_pending_entry:<계좌>`)."""
+    from trader.features.fo import tools
+
+    control.set_flag(conn, f"{tools.FO_PENDING_FLAG}{ACCT}", {
+        "date": today.isoformat(), "stage": "_fo_decision",
+        "envelope": env(decision()).model_dump(mode="json"), "request_id": "r1",
+        "requested_at": at(8, 25).isoformat(), "dry_run": False,
+    })  # fmt: skip
+
+
+def fill(order_no, *, filled, amount, remaining, orgn=None, side="BUY", code="105W11"):
+    """합성 체결(옛 `test_fills_fo.fill`). `amount` 는 포인트 합(가격 × 수량); KIS 체결금액(통화)은
+    승수를 곱한 값이다."""
+    mult = FoCfg(enabled=True).product_cfg().multiplier
+    return FoFill(
+        order_no=order_no, orgn_order_no=orgn, code=code, side=side, remaining_qty=remaining,
+        filled_qty=filled, rejected_qty=0, cancelled_qty=0,
+        filled_amount=Decimal(amount) * mult,  # 통화 금액(포인트 × 승수)
+        avg_price=None, filled_at=NOW,
+    )  # fmt: skip
+
+
+# --- 데몬 헬퍼(옛 `tests/test_daemon_fo._fo_deps`) ------------------------------------------
+
+
+def daemon_deps(now, *, accounts=None, brokers=None, market=None, holidays=(), s=None, **kw):
+    """fo 잡·큐 본문용 커널 `DaemonDeps`. accounts 포트는 파생 계좌 `accounts`(기본 모의 1개)와
+    브로커 `brokers`(기본 NAV 1억 가짜), 시세 `market`, 휴장일 `holidays`. 큐 kind 표는 fo 것."""
+    import threading
+
+    from trader.features.fo.feature import FEATURE
+    from trader.kernel.daemon import queue_jobs
+    from trader.kernel.daemon.queue import kinds_of
+    from trader.kernel.daemon.runner import DaemonDeps
+    from trader.kernel.ledger import db
+    from trader.kernel.platform import paths
+
+    accounts = [account()] if accounts is None else list(accounts)
+    if brokers is None:
+        brokers = {a.id: FakeFoBroker(a, balance=balance(), now=lambda: now) for a in accounts}
+    market = market if market is not None else FakeMarket(
+        fo_quotes={"105W11": quote()}, kospi200=(Decimal("350"), now))  # fmt: skip
+    s = s or settings()
+    hol = set(holidays)
+    acc = SimpleNamespace(
+        fo_accounts=lambda: list(accounts), fo_brokers=lambda: dict(brokers), accounts=list,
+        brokers=list, market_client=lambda: market, policy=accounts_api.account_mode,
+        paused=accounts_api.is_paused, holiday_fn=lambda: (lambda m, d: d in hol),
+    )  # fmt: skip
+    ports = {"accounts": acc, "regime": regime_ports.build_port(SimpleNamespace(settings=s))}
+    base = dict(
+        settings=s, schedule=load("schedule", build_registry(discover())), conn_factory=db.connect,
+        state=paths.state_dir(), now=lambda: now, markets=["KR"], gates={},
+        stop_event=threading.Event(), dry_run=False, notifier=Notes(), ports=ports,
+        queue=queue_jobs.QueueState(kinds=kinds_of([FEATURE])),
+    )  # fmt: skip
+    base.update(kw)
+    return DaemonDeps(**base)

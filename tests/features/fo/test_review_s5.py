@@ -1,8 +1,9 @@
 """Phase 26 단계 5 전체 교차 리뷰 B 반영(Codex 2·Claude 2 → S5-n).
 
-Task 5 는 실행기·저장·복구·규칙 건을 싣는다. 엔진·재평가 건(`test_settle_requires_fills_ok_*`·
-`test_resizing_up_position_is_stop_protected`·`test_replace_flag_*`·`test_reeval_hold_tp_*`)과
-`.claude/settings.json` 거부 목록 건(`test_settings_denies_fo_session`)은 Task 7·8 에서 더한다."""
+Task 5 는 실행기·저장·복구·규칙 건을 싣고, Task 7 이 엔진·재평가 건
+(`test_settle_requires_fills_ok_*`·`test_resizing_up_position_is_stop_protected`·
+`test_replace_flag_*`·`test_reeval_hold_tp_*`)을 맨 뒤에 더했다. `.claude/settings.json` 거부
+목록 건(`test_settings_denies_fo_session`)은 Task 8."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from tests.features.fo._support import (
     ACCT,
     T0,
     TODAY,
+    _engine_market,
     _held_position,
     account,
     balance,
@@ -298,3 +300,83 @@ def test_recover_cancelled_prepared_resize_keeps_intent(conn):
     assert store.get_leg(conn, lid).status == "cancelled"
     out = executor.continue_reduce(ctx, account(), store.get_position(conn, pos.id))
     assert out["intent"] == "RESIZE_DOWN" and ctx.brokers[ACCT].orders[-1].qty == 2
+
+
+# --- 엔진·재평가(Task 7) ---------------------------------------------------------------------
+
+
+def _engine_tick(ctx):
+    from trader.features.fo import engine
+
+    return engine.tick(ctx, request_reeval=lambda c, p: None)
+
+
+def test_settle_requires_fills_ok_and_zeroes_qty(conn):
+    ctx = make_ctx(conn, market=_engine_market(at(10, 30)), reeval={"periodic_max_per_day": 0})
+    pos = _held_position(conn, ctx, qty=1, code="205W11350", kind="CALL", vehicle="OPTION_BUY",
+                         last_trade_date="2026-10-26", entry_premium=Decimal("5"))  # fmt: skip
+    with store.tx(conn):
+        store.transition(conn, pos.id, expected_version=pos.version, status="awaiting_settlement")
+    ctx.brokers[ACCT].balance = balance()
+    ctx.brokers[ACCT].fail = {"get_fills"}
+    _engine_tick(ctx)
+    assert store.get_position(conn, pos.id).status == "awaiting_settlement"
+    ctx.brokers[ACCT].fail = set()
+    _engine_tick(ctx)
+    cur = store.get_position(conn, pos.id)
+    assert cur.status == "settled" and cur.qty_held == 0
+    assert any("HTS" in t for t in ctx.notifier.msgs)
+
+
+def test_resizing_up_position_is_stop_protected(conn):
+    now = at(10, 30)
+    ctx = make_ctx(conn, market=_engine_market(now, idx="340"), now=now,
+                   reeval={"periodic_max_per_day": 0})  # fmt: skip
+    pos = _held_position(conn, ctx, qty=2, status="resizing")
+    with store.tx(conn):
+        lid = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
+                               round=1, attempt=1, qty=1, price=Decimal("349"),
+                               order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, lid, status="accepted", order_no="X9",
+                      accepted_at=now.isoformat(), sent_at=now.isoformat())  # fmt: skip
+    ctx.brokers[ACCT].states["X9"] = state("X9", order_qty=1, filled=0, remaining=0,
+                                           cancelled=1, terminal=True, st="cancelled")
+    out = _engine_tick(ctx)
+    assert out["accounts"][ACCT]["exits"][0]["intent"] == "STOP"
+
+
+def test_replace_flag_only_when_close_sent_and_discarded_after_stop(conn):
+    from trader.features.fo import reeval
+    from trader.kernel.ledger import control
+
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    control.set_flag(conn, "paused", True)  # 청산이 기록만 → 플래그 없음
+    e = env(decision(intent="REPLACE", direction="SHORT", stop_pt=355.0, take_profit_pt=340.0),
+            account_id=ACCT, position_id=pos.id, expected_version=pos.version)  # fmt: skip
+    out = reeval.apply(ctx, e, round_n=1)
+    assert out["replace_pending"] is False
+    assert control.get_flag(conn, reeval.replace_key(ACCT, pos.id)) is None
+    control.set_flag(conn, "paused", False)
+    cur = store.get_position(conn, pos.id)
+    e2 = e.model_copy(update={"expected_version": cur.version})
+    assert reeval.apply(ctx, e2, round_n=2)["replace_pending"] is True
+    # 이 라운드의 CLOSE 가 아니라 다른 경로(STOP)로 닫힌 것처럼: 다리를 STOP 으로 바꿔 체결
+    leg = store.live_legs(conn, position_id=pos.id)[0]
+    conn.execute("UPDATE fo_order_legs SET intent = 'STOP' WHERE id = ?", (leg.id,))
+    with store.tx(conn):
+        store.record_fill_progress(conn, leg.id, 2)
+    executor.finalize(ctx, store.get_position(conn, pos.id))
+    res = reeval.continue_replace(ctx, executor.account_of(ctx, ACCT))
+    assert res and "discarded" in res[0] and len(ctx.brokers[ACCT].orders) == 1
+
+
+def test_reeval_hold_tp_on_wrong_side_ignored(conn):
+    from trader.features.fo import reeval
+
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2, tp_pt=Decimal("370"))
+    e = env(decision(intent="HOLD", stop_pt=346.0, take_profit_pt=340.0), account_id=ACCT,
+            position_id=pos.id, expected_version=pos.version)  # fmt: skip
+    out = reeval.apply(ctx, e, round_n=1)
+    assert store.get_position(conn, pos.id).tp_pt == Decimal("370") and "익절선" in out["note"]
