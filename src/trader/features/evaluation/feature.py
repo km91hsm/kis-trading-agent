@@ -1,5 +1,8 @@
-"""evaluation 기능 선언 (서비스): 설정 절·원장 v13·제어 네임스페이스·잡·CLI·웹 조회(`routes.py`)."""
+"""evaluation 기능 선언 (서비스): 설정 절·원장 v13·제어 네임스페이스·잡·CLI·웹 조회(`routes.py`
+세금 로트, `analytics_routes.py` 「성과」·SSE `market_views`·`shadow`·`memory`)·nav."""
 
+from trader.features.evaluation.analytics_routes import ROUTERS as ANALYTICS_ROUTERS
+from trader.features.evaluation.analytics_routes import SSE_KEYS
 from trader.features.evaluation.cli import evaluation_app
 from trader.features.evaluation.jobs import (
     DAILY_REPORT,
@@ -17,7 +20,7 @@ from trader.features.evaluation.settings import SCHEDULE_SECTIONS, SECTIONS
 from trader.features.evaluation.status import STATUS_SECTION
 from trader.features.evaluation.telegram import DAILY
 from trader.features.evaluation.tool_cli import TOOLS
-from trader.kernel.registry.types import Feature, Hook
+from trader.kernel.registry.types import Feature, Hook, NavItem
 
 FEATURE = Feature(
     id="evaluation",
@@ -25,7 +28,10 @@ FEATURE = Feature(
     sections=(*SECTIONS, *SCHEDULE_SECTIONS),
     migrations=MIGRATIONS,
     cli=evaluation_app,
-    routes=ROUTERS,
+    routes=(*ROUTERS, *ANALYTICS_ROUTERS),
+    sse_keys=SSE_KEYS,
+    nav=(NavItem("performance", "performance-overview", "성과", 0),
+         NavItem("performance", "memory", "복기", 20)),
     control_namespaces=("memory_breaker", "vix_last"),
     ports=(PORT,),
     jobs=(DAILY_REPORT, PAPER_REVIEW, REFLECT_JOB, RL_TRAIN),

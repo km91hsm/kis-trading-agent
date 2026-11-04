@@ -12,9 +12,11 @@
 - `settings.yaml` `memory`(`half_lives`·`warmup`·`drawdown_stop_pct`·`vix_spike_pct`·`top_k`).
 - `schedule.yaml` `reflect`·`daily_report`·`paper_review`·`rl_train`.
 
-## 웹 (`routes.py`)
+## 웹 (`routes.py`·`analytics_routes.py`)
 
-- `GET /accounts/{id}/tax-lots?market=&year=&format=csv`(옛 `portfolio.lots_router`, 표시 전용). 현물 계좌만(그 외 404). 성과·분석 자원은 M11 Task 11.
+- `GET /accounts/{id}/tax-lots?market=&year=&format=csv`(옛 `portfolio.lots_router`, 표시 전용). 현물 계좌만(그 외 404).
+- 「성과」(`analytics_routes.py`, 모양은 `analytics_view.py`, 토큰 없음): `GET /analytics/performance?account_id=&market=&days=`(옛 `/performance`, `cached_report` — 입력 버전에 `account_nav`/`fo_nav_snapshot` 을 더했다: 새 원장은 NAV 를 positions_snapshot 이 아니라 그쪽에 둔다)·`/analytics/performance/compare?days=`(계좌·**시장**마다 한 행 `{account_id, env, lane, market, currency, metrics|null}`; lane 은 asset fo → fo, 그 외 spot — 단타 계좌는 여기서 구분할 수 없어 spot 으로 보인다; NAV 이력이 없으면 `metrics: null`)·`/analytics/shadow?market=`·`/analytics/calibration?limit=`(`calibration_runs` 최근 — 첫 독자)·`/analytics/memory?q=&limit=1..200`(q = 종목: 그 종목의 최근 엔트리 상황 벡터·시장으로 `store.retrieve`, 없으면 최근 엔트리; 상황 벡터는 내보내지 않는다)·`/analytics/rl/experiments[/{version}]`·`/rl/shadow`·`/rl/report`(옛 `rl.py`). 계좌는 `ports["accounts"]`(현물 + 파생, 모르면 400).
+- SSE `market_views`·`shadow`·`memory`(옛 `sse.py` `_q` 지문, noisy 아님). nav `performance/performance-overview`(성과)·`performance/memory`(복기).
 
 ## 알려진 차이
 
@@ -29,7 +31,7 @@
 - `convergence_rate` 는 `debate_turns.decision_date`, `signal_hits`/`pending` 은 `analyst_reports.decision_date` 와 조인한다. `open_window._exchanges` 는 spot 소유 `ticker_exchanges` 테이블을 SQL 로 읽는다.
 - `ports._decided_at` 은 US 백필(운영일이 지금이 아닐 때)에도 `MARKET_CLOSE["KR"]`(15:30 KST)를 쓴다 — 플랜 Task 5 결정(Ruling F2).
 - 미국 일일 리포트(16:20 ET)는 07:10 KST `fills_sync` 보다 먼저 돌아 `realized_5d` 가 하루 늦을 수 있다.
-- 이연: M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market`; M12 status/health 보정 재점검.
+- 이연: `metrics.pending_approvals/account_stance/stance_by_market`; M12 status/health 보정 재점검.
 - `theme.mature`/`mature_views` 는 reflect 가 부른다(M6 이연 회수).
 
 ### 보존한 옛 결함 (고치지 않음)
