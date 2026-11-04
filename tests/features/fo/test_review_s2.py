@@ -7,17 +7,23 @@
 →확정 경로(S2-5)·만료된 축소 다리 재발행(S2-4)·잔고 덮어쓰기 대신 체결 반영(S2-11·C2-1)·회수
 선반영 체결의 경제값 1회(S2-3)·빈 entering 정리(C2-2)·잠금 밖 조회(S2-12)·조회 실패는 보류(C2-5).
 
-Task 3 은 저장 계층·복구(positions) 건만 싣는다. 게이트(rules)·실행기(executor) 건은 Task 4~5 에서
-이 파일에 이어 붙인다."""
+Task 3 은 저장 계층·복구(positions), Task 4 는 게이트(rules·sizing) 건을 싣는다. 실행기(executor)
+건은 Task 5 에서 이 파일에 이어 붙인다."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 
+from tests.features.fo._gate import NAV, cfg, gate, orderable, portfolio, position
+from tests.features.fo._gate import NOW as GNOW
+from tests.features.fo._gate import decision as gdecision
+from tests.features.fo._gate import leg as gleg
+from tests.features.fo._gate import quote as gquote
 from tests.features.fo._support import ACCT, NOW, TODAY, _bal, _open, _recover, _row, _state
-from trader.features.fo import positions, store
+from trader.features.fo import positions, rules, sizing, store
 from trader.features.fo.store import ReservePlan
 from trader.kernel.execution import ledger
 
@@ -156,3 +162,77 @@ def test_recover_releases_lock_between_broker_queries(conn):
                             order_state_of=order_state_of, fills_of=lambda d: [], today=TODAY,
                             now=NOW)  # fmt: skip
     assert flags == [False, False] and rep.legs_fixed == 2
+
+
+# --- 게이트 -----------------------------------------------------------------------------
+
+
+def test_entry_rejected_on_target_position_status():
+    """대상 포지션 자체가 closing·exit_failed·awaiting_settlement·unknown 이면 진입·증액 거부
+    (C2-4)."""
+    for st in ("closing", "exit_failed", "awaiting_settlement", "unknown"):
+        pos = position(status=st, qty_held=2)
+        v = rules.evaluate(
+            gate(gdecision(intent="RESIZE", target_leverage=1.0), position=pos,
+                 port=portfolio(positions=[pos]))  # fmt: skip
+        )
+        assert not v.approved and any(f"포지션 상태 {st}" in r for r in v.reasons), st
+
+
+def test_resize_down_ignores_entry_only_rejections():
+    """감액 RESIZE 는 enabled·검증·신선도·진입 창·킬스위치·halted 와 무관하게 RESIZE_DOWN 을
+    만든다(S2-6). 시세 노후도 진입 조건이다."""
+    pos = position(qty_held=3, qty_target=3, leverage_used=1.0)
+    gi = gate(
+        gdecision(intent="RESIZE", target_leverage=0.2), position=pos,
+        port=portfolio(positions=[pos], verified={}, halted=True),
+        cfg=cfg(enabled=False, vehicles=[]), inputs_fresh=False, killswitch=True,
+        now=GNOW + timedelta(hours=6),  # 16:30 KST — 진입 창 밖, 시세 노후
+    )  # fmt: skip
+    v = rules.evaluate(gi)
+    assert v.approved and v.legs[0].intent == "RESIZE_DOWN" and v.legs[0].qty == 2, v.reasons
+    assert "감액" in v.note and "진입 조건 무시" in v.note
+
+
+def test_held_planned_loss_uses_average_price():
+    """보유분 계획 손실은 평균체결가 기준(S2-7): 평균 350·손절 환산 340.4 ×2 = 96만 → r=1% 예산
+    100만에 신규 0."""
+    pos = position(qty_held=2, qty_target=2, leverage_used=1.0, stop_pt=Decimal("340"),
+                   entry_premium=Decimal("350"))  # fmt: skip
+    q = gquote(price="342.5", underlying=Decimal("342"))
+    d = gdecision(intent="RESIZE", target_leverage=1.0, entry_price=342.5, stop_pt=340.0,
+                  take_profit_pt=350.0)  # fmt: skip
+    v = rules.evaluate(
+        gate(d, position=pos, port=portfolio(positions=[pos]), quote=q,
+             underlying=Decimal("342"), cfg=cfg(risk_per_trade_pct=0.01))  # fmt: skip
+    )
+    assert v.legs == [] and v.lifetime_budget["planned"] == Decimal("960000"), v.reasons
+    assert v.planned_loss_existing == Decimal("960000")
+
+
+def test_margin_allowance_subtracts_reserved_entry_contracts():
+    """허용 신규 = floor(q × (1 − buffer)) − 로컬 예약 계약(S2-8). 축소 다리는 예약이 아니다
+    (C2-9)."""
+    n, reasons = sizing.margin_check(
+        n=8, orderable=orderable(ord_qty=10), nav=NAV, local_reserved=Decimal(0), reserved_qty=3,
+        buffer_pct=0.2, add_margin=Decimal(0), notional=Decimal("17500000"), margin_rate=0.12,
+        rate_asof=TODAY, max_age_days=30, today=TODAY,
+    )  # fmt: skip
+    assert (n, reasons) == (5, [])
+    legs = [
+        gleg(id=1, intent="CLOSE", status="accepted", qty=2),
+        gleg(id=2, intent="OPEN", status="accepted", qty=2, filled_qty=1),
+    ]
+    assert sizing.reserved_qty(legs) == 1
+    assert sizing.local_reserved(legs, per_contract=Decimal("100")) == Decimal("100")
+
+
+def test_stored_leverage_never_exceeds_approved_on_resize():
+    """가격 상승으로 실제 노출 0.7 인 보유(승인 0.5)를 감액해도 저장 배수는 0.5 를 넘지 않는다
+    (S2-9)."""
+    pos = position(qty_held=4, qty_target=4, leverage_used=0.5)
+    v = rules.evaluate(
+        gate(gdecision(intent="RESIZE", target_leverage=0.5), position=pos,
+             port=portfolio(positions=[pos]), cfg=cfg(max_contracts=10))  # fmt: skip
+    )
+    assert v.legs and v.legs[0].intent == "RESIZE_DOWN" and v.leverage_used <= 0.5
