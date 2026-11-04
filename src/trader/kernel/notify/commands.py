@@ -77,8 +77,9 @@ def run_message(ctx: CommandContext, arg: str | None) -> str:
     """`/run <작업> [KR|US] [종목]` — 데몬 큐에 요청을 넣는다(실행은 데몬이 순서대로)."""
     from trader.kernel.cli.jobs_cmd import daemon_running
     from trader.kernel.daemon import queue as jobq
+    from trader.kernel.daemon.catalog import with_kernel
 
-    kinds = jobq.kinds_of(ctx.features)
+    kinds = jobq.kinds_of(with_kernel(ctx.features))
     tokens = (arg or "").split()
     if not tokens:
         return f"사용법: /run <작업> [KR|US] [종목]\n작업: {', '.join(sorted(kinds))}"

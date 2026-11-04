@@ -39,7 +39,10 @@ def test_extra_hosts_allowed(deps):
 
 def test_health_shape(deps_with_feature):
     body = make_client(deps_with_feature).get("/api/system/health").json()
-    assert body == {"ok": True, "version": metadata.version("trader"), "features": ["fixture"]}
+    assert set(body) == {"level", "reasons", "checked_at", "version", "features"}
+    assert body["version"] == metadata.version("trader") and body["features"] == ["fixture"]
+    assert body["level"] == "fail"  # 데몬 없음 (원장 미초기화는 warn 사유로만)
+    assert [r["level"] for r in body["reasons"] if r["area"] == "ledger"] == ["warn"]
 
 
 def test_feature_routes_mounted_under_api(deps_with_feature):

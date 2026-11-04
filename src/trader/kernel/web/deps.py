@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,3 +29,6 @@ class WebDeps:
     # 외부(폰)에서 여는 주소(예: https://pc.tailnet.ts.net). 알림 링크 등에 쓴다
     public_base: str | None = None
     features: list[Feature] = ()  # type: ignore[assignment]
+    # 기능이 내놓은 포트(이름 → 구현, `DaemonDeps.ports` 와 같은 모양).
+    # 라우터는 커널 Protocol 로만 쓴다
+    ports: Mapping[str, Any] = field(default_factory=dict)

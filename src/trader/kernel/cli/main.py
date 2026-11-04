@@ -86,6 +86,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         tailscale_users=tuple(boot_.settings.web.tailscale_users),
         public_base=boot_.settings.web.public_base,
         features=boot_.features,
+        ports=boot_.ports,
     )
 
 
@@ -116,7 +117,7 @@ def web(
     port: int | None = typer.Option(None, "--port", help="포트 (기본: settings.web.port)"),
 ) -> None:
     """웹 UI·API 서버를 띄운다."""
-    b = boot(settings=True, conn=True, log_name="web")
+    b = boot(ports=True, log_name="web")  # 계좌 env(실전 confirm) 등은 ports 로 본다
     host = host or b.settings.web.bind
     port = port or b.settings.web.port
     if host not in LOOPBACK_HOSTS:

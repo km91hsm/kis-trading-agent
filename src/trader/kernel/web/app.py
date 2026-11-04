@@ -1,10 +1,9 @@
-"""FastAPI 앱 조립: Host·tailnet 게이트 + 서버 시각 헤더 + 기능 라우터·merge 마운트 + health
-+ SSE + 정적 서빙."""
+"""FastAPI 앱 조립: Host·tailnet 게이트 + 서버 시각 헤더 + 커널 자원(system·jobs·runs) + SSE
++ 기능 라우터·merge 마운트 + 정적 서빙."""
 
 from __future__ import annotations
 
 import logging
-from importlib import metadata
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -13,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from trader.kernel.web import merge, sse
 from trader.kernel.web.auth import _host_of
 from trader.kernel.web.deps import WebDeps
+from trader.kernel.web.routers import KERNEL_ROUTERS
 
 logger = logging.getLogger("trader.web")
 
@@ -27,13 +27,6 @@ NO_DIST_HTML = (
     "<p>API 는 <a href='/api/system/health'>/api/system/health</a> 로 확인할 수 있습니다.</p>"
     "</body></html>"
 )
-
-
-def _version() -> str:
-    try:
-        return metadata.version("trader")
-    except metadata.PackageNotFoundError:
-        return "0.2.0"
 
 
 def _forbidden(detail: str) -> JSONResponse:
@@ -81,11 +74,9 @@ def create_app(deps: WebDeps) -> FastAPI:
         response.headers["X-Server-Time"] = request.app.state.deps.now().isoformat()
         return response
 
-    @app.get("/api/system/health")
-    def health() -> dict:
-        return {"ok": True, "version": _version(), "features": [f.id for f in deps.features]}
-
     app.include_router(sse.router, prefix="/api")
+    for router in KERNEL_ROUTERS:
+        app.include_router(router, prefix="/api")
     for feature in deps.features:
         for router in feature.routes:
             app.include_router(router, prefix="/api")

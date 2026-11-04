@@ -48,6 +48,27 @@ def make_deps(project: Path, **overrides) -> WebDeps:
     return replace(base, **overrides)
 
 
+def ledger_deps(project: Path, **overrides) -> WebDeps:
+    """커널 마이그레이션을 적용한 원장 + 커널 설정(llm·markets)을 가진 WebDeps."""
+    from trader.kernel.config import LlmSettings
+    from trader.kernel.ledger.db import init_schema
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.contracts import all_migrations
+
+    conn = connect(project / "state" / "ledger.db")
+    try:
+        init_schema(conn, all_migrations(discover()))  # 버전은 기능과 이어진다
+    finally:
+        conn.close()
+    settings = SimpleNamespace(llm=LlmSettings(usage_file=None), markets=["KR", "US"])
+    return make_deps(project, **{"settings": settings, **overrides})
+
+
+# 쓰기 요청 헤더: make_deps 토큰 + make_client Host(127.0.0.1)와 같은 출처
+AUTH = {"Authorization": "Bearer secret", "Origin": "http://127.0.0.1"}
+SAME = {"Origin": "http://127.0.0.1"}
+
+
 @pytest.fixture
 def deps(project: Path) -> WebDeps:
     return make_deps(project)

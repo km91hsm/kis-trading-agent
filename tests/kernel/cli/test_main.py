@@ -118,6 +118,7 @@ def test_build_web_deps(project, monkeypatch):
         assert deps.token == "tok"
         assert deps.dist == project.resolve() / "web" / "dist"
         assert deps.features == b.features
+        assert deps.ports == b.ports
     finally:
         b.conn.close()
 

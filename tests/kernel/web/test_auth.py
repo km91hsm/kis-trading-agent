@@ -1,4 +1,4 @@
-"""인증 3등급 의존성: 토큰·직접 로컬·같은 출처. 쓰기 엔드포인트가 없어 테스트 전용 라우터를 건다."""
+"""인증 3등급 의존성: 토큰·직접 로컬·같은 출처. 등급별 검사는 테스트 전용 라우터로 건다."""
 
 from __future__ import annotations
 
@@ -22,16 +22,6 @@ def _probe_app(deps: WebDeps):
     router.post("/t/origin", dependencies=[Depends(require_same_origin)])(lambda: {"ok": True})
     # 기능 라우터로 건다: create_app 뒤에 붙이면 `/api/{rest:path}` 404 가 먼저 잡는다
     return create_app(replace(deps, features=[Feature(id="t", tier="service", routes=(router,))]))
-
-
-def _bootstrap_feature() -> Feature:
-    """키·토큰 받기 등급(직접 로컬 + 같은 출처) 엔드포인트 하나만 가진 테스트 기능."""
-    router = APIRouter()
-    router.post(
-        "/system/bootstrap-token",
-        dependencies=[Depends(require_direct_local), Depends(require_same_origin)],
-    )(lambda: {"token": "x"})
-    return Feature(id="probe", tier="service", routes=(router,))
 
 
 def _client(deps: WebDeps, **kw):
@@ -94,7 +84,6 @@ def test_tailnet_login_allowlist_and_direct_local_stays_false(project):
         project,
         extra_hosts=(TAILNET,),
         tailscale_users=("me@example.com",),
-        features=[_bootstrap_feature()],
     )
     c = make_client(deps)
     ok = c.get(
