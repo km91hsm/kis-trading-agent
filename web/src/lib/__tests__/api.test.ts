@@ -207,3 +207,23 @@ describe("tokenStore", () => {
     expect(localStorage.getItem("trader.webToken")).toBeNull();
   });
 });
+
+describe("취소", () => {
+  it("이미 취소된 signal 로 getJson 을 부르면 ApiError 가 아닌 AbortError 로 거부된다", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const orig = globalThis.fetch;
+    // 실제 fetch 처럼 취소된 signal 이면 AbortError(DOMException 이 아닐 수도 있는 클래스)로 거부
+    globalThis.fetch = (async (_i: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+      return new Response("{}");
+    }) as typeof fetch;
+    try {
+      const err = await getJson("/accounts", undefined, { signal: ctrl.signal }).catch((e: unknown) => e);
+      expect(err).not.toBeInstanceOf(ApiError);
+      expect((err as { name?: string }).name).toBe("AbortError");
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});

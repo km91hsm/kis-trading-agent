@@ -88,7 +88,7 @@ async function send<T>(method: string, url: string, init: RequestInit): Promise<
   try {
     res = await fetch(url, { ...init, method });
   } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") throw e; // 취소는 그대로
+    if ((e as { name?: string })?.name === "AbortError") throw e; // 취소는 그대로(undici·jsdom 클래스가 달라 이름으로 본다)
     throw new ApiError(0, "서버에 연결할 수 없습니다");
   }
   const serverTime = res.headers.get("X-Server-Time");
