@@ -1,6 +1,7 @@
 """scalp 판정자: 스레드 풀·클램프·데몬 단일체·에이전트 등록."""
 
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -399,3 +400,30 @@ def test_ask_returns_none_when_cap_reached_or_throttled(project, settings, conn,
     assert not ok and why
     assert ask({"ticker": "005930"}, ScalpVerdict) is None
     assert spawned == []  # 어느 쪽도 세션을 띄우지 않았다
+
+
+def test_judge_for_is_thread_safe_singleton(settings, monkeypatch):
+    real = judge.ScalpJudge
+    built: list = []
+
+    def slow(ask):  # 생성이 느리면 락이 없을 때 여러 스레드가 동시에 만든다
+        time.sleep(0.05)
+        built.append(1)
+        return real(ask)
+
+    monkeypatch.setattr(judge, "ScalpJudge", slow)
+    deps = SimpleNamespace(settings=settings, stop_event=threading.Event())
+    start = threading.Barrier(8)
+    got: list = []
+
+    def run():
+        start.wait()
+        got.append(judge.judge_for(deps))
+
+    threads = [threading.Thread(target=run) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(got) == 8 and len({id(j) for j in got}) == 1
+    assert len(built) == 1  # 풀(스레드)을 하나만 만들었다
