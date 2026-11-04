@@ -27,12 +27,36 @@ COST_BPS = (0, 10, 20, 30)
 def nav_series(
     conn: sqlite3.Connection, account_id: str, market: str, *, days: int = 30, asset: str = "stock"
 ) -> list[tuple[str, Decimal]]:
-    """계좌·시장의 (날짜, NAV). 파생 계좌(`asset="fo"`)는 M10 전까지 `[]`(A15)."""
+    """계좌·시장의 (날짜, NAV). 파생 계좌(`asset="fo"`)는 `fo_nav_snapshot`(KR 만)."""
     if asset == "fo":
-        return []
+        return _fo_nav_series(conn, account_id, days=days)
     return repo.nav_history(
         conn, account_id, market, days=days, has_session=market_hours.has_session
     )
+
+
+def _fo_nav_series(
+    conn: sqlite3.Connection, account_id: str, *, days: int
+) -> list[tuple[str, Decimal]]:
+    """파생 NAV 일별 스냅샷: 마지막 날짜 기준 `days` 일, NAV 가 있는 평일만. 서비스 기능이 레인
+    테이블을 SQL 로 읽는 것이라 fo 를 import 하지 않는다."""
+    last = conn.execute(
+        "SELECT MAX(date) AS d FROM fo_nav_snapshot WHERE account_id = ? AND nav IS NOT NULL",
+        (account_id,),
+    ).fetchone()["d"]
+    if last is None:
+        return []
+    since = (date.fromisoformat(last) - timedelta(days=days)).isoformat()
+    rows = conn.execute(
+        "SELECT date, nav FROM fo_nav_snapshot WHERE account_id = ? AND nav IS NOT NULL "
+        "AND date > ? ORDER BY date",
+        (account_id, since),
+    ).fetchall()
+    return [
+        (r["date"], Decimal(str(r["nav"])))
+        for r in rows
+        if date.fromisoformat(r["date"]).weekday() < 5
+    ]
 
 
 def _returns(values: list[Decimal]) -> list[float]:

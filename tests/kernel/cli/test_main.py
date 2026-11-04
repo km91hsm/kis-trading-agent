@@ -56,6 +56,7 @@ def test_boot_loads_settings_and_conn(project):
             "accounts",
             "briefing",
             "evaluation",
+            "fo",
             "ingest",
             "ml",
             "regime",

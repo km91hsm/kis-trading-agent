@@ -17,6 +17,6 @@ def test_discover_without_feature_module_raises():
 def test_discover_real_package_lists_accounts():
     ids = [f.id for f in discover()]
     assert ids == [
-        "accounts", "briefing", "evaluation", "ingest", "ml", "regime", "saveticker", "scalp",
-        "scan", "spot",
+        "accounts", "briefing", "evaluation", "fo", "ingest", "ml", "regime", "saveticker",
+        "scalp", "scan", "spot",
     ]  # fmt: skip
