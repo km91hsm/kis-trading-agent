@@ -1,6 +1,6 @@
 """환율 원천(`quotes.fx`): KIS 먼저 → 거시(FRED DEXKOUS) → 없음(404). KST 하루 1회 control 캐시.
 
-KIS 환율 원천은 아직 주입점(`fx.kis_fx`, 기본 None)만 있다 — 가짜 원천으로만 시험한다."""
+KIS 원천 주입점(`fx.kis_fx`)은 여기서 가짜 원천으로 시험한다(실제 연결은 `test_fx_kis.py`)."""
 
 from datetime import UTC, datetime, timedelta
 

@@ -1,7 +1,9 @@
 """환율 원천과 하루 캐시. 순서: KIS → 거시(FRED `DEXKOUS`, 원/달러) → 없음(None, 라우트는 404).
 
-- KIS 원천은 주입점 `kis_fx`(기본 None)만 둔다 — KIS 의 단순 환율 시세 TR 을 확인하지 못해 추측으로
-  TR 을 박지 않았다(후속 작업이 시세 클라이언트 메서드로 채운다). `() -> {"rate", "as_of"} | None`.
+- KIS 원천은 주입점 `kis_fx`(`() -> {"rate", "as_of"} | None`, 기본 None)다. quotes 런타임이 시세
+  클라이언트를 만들 때(`routes._build_runtime`) 채운다: `FHKST03030100`(시장 X, 종목
+  `settings.quotes.fx_code` 기본 `FX@KRW`, 계좌 불필요) → 없으면 `HHDFS76200200` 의 `t_rate`.
+  조사 `docs/research/2026-11-05-kis-fx-rate-api.md`(코드 차이·자릿수·갱신 주기는 실기 미확인).
 - 거시 원천은 `ingest.api.Fred` 로 `DEXKOUS` 최신 관측값을 읽는다(`FRED_API_KEY` 없으면 원천 없음).
 - 결과는 control `fx_cache:<pair>` 에 KST 날짜와 함께 저장해 하루 한 번만 원천을 부른다.
   원천이 던지는 예외는 그 원천을 건너뛴다(표시 전용 — 주문·게이트는 쓰지 않는다).
@@ -34,7 +36,7 @@ CACHE_PREFIX = "fx_cache:"
 FAIL_TTL_S = 300  # 원천 실패 뒤 다시 묻지 않는 시간(음성 캐시)
 FIELDS = ("pair", "rate", "as_of", "source")
 
-# KIS 환율 원천 주입점(후속 작업). None 이면 KIS 원천 없음
+# KIS 환율 원천 주입점(`routes._build_runtime` 이 채운다). None 이면 KIS 원천 없음
 kis_fx: Callable[[], dict | None] | None = None
 
 

@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from trader.features.accounts import accounts_io, modes, overview, secrets_io
 from trader.features.accounts.accounts_io import AccountSpec
 from trader.features.accounts.settings import Account, Mode, load_accounts
+from trader.features.quotes import api as quotes_api
 from trader.kernel.config import ConfigError
 from trader.kernel.config.secrets import Secrets
 from trader.kernel.ledger import control
@@ -119,6 +120,7 @@ def list_accounts(request: Request) -> list[dict]:
 @accounts_router.get("/accounts/overview")
 def accounts_overview(request: Request) -> dict:
     deps = request.app.state.deps
+    quotes_api.prepare_fx(deps)  # KIS 환율 원천 먼저(없으면 FRED)
     with closing(deps.conn_factory()) as conn:
         return overview.totals(
             conn, deps.settings, _accounts(deps), now=deps.now(), paused=modes.is_paused(conn)

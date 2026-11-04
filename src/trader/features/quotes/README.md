@@ -8,6 +8,7 @@
 
 ## 공개면 (`api.py`)
 
+- `prepare_fx(deps) -> None` — quotes 런타임(과 KIS 환율 원천)을 원장 위치마다 한 번 조립. `fx_rate` 를 quotes 경로보다 먼저 부르는 화면이 쓴다.
 - `fx_rate(settings, conn, pair="USDKRW") -> dict | None` — `{pair, rate: str(Decimal), as_of, source: "kis"|"macro"}`, 원천이 없거나 모르는 쌍이면 None. 원천이 모두 실패하면 `fail_at` 을 남기고 `fx.FAIL_TTL_S`(300초) 동안 다시 묻지 않으며, 그동안·실패 때 이전 날짜 값이 있으면 `stale: true` 를 붙여 준다.
 
 ## 웹 자원 (`routes.py`, 토큰 없음)
@@ -31,14 +32,14 @@
 
 - **허브**: 41칸 중 `max_tickers`(40) = 지수 2 + 호가 1 + 체결가 37(최근 요청 순), 임차 `lease_s` 30초(호가 `book_lease_s` 10초), `idle_s` 60초 무요청·장 밖이면 스레드 종료(스레드 하나 `kis-ws-quotes`, 연결은 그 스레드만). 접속 실패·끊김·접속키 거절은 지수 백오프(최대 30초), 거절 종목은 10분 제외, 10초 넘은 틱은 REST 로 보완. 표시 전용 — 신호·주문·게이트는 읽지 않는다.
 - **세션 양보**: KIS 는 앱키당 웹소켓 세션 하나. 데몬의 체결통보 리스너(`spot.notice`)가 시세와 같은 실전 앱키 세션을 쥐면 control `ws_session_busy:real` = `{"until": UTC ISO}`(지금+90초, 60초마다 갱신, 놓을 때 삭제)를 쓰고, 허브 `busy()`(`hub.session_busy`, 원장 2초 캐시)는 until 이 미래인 동안 붙지 않는다(`status()["yield_reason"] = "ws_session_busy"`, 다른 연결이 쥐면 `appkey_in_use`).
-- **환율**(`fx.py`): KIS → 거시(FRED `DEXKOUS`, `FRED_API_KEY` 없으면 원천 없음) → None. KIS 원천은 주입점 `fx.kis_fx`(기본 None)만 있다 — KIS 단순 환율 TR 을 확인하지 못해 후속 작업으로 둔다. 결과는 control `fx_cache:<pair>`(`control_namespaces=("fx_cache",)`)에 KST 날짜와 함께 저장해 하루 1회만 원천을 부른다(실패는 `fail_at` 로 `FAIL_TTL_S`=300초 음성 캐시, 이전 레코드가 있으면 `stale: true`).
-- 설정: `settings.yaml` `quotes: {realtime_ws: true, us_poll_ms: 5000, fo_poll_ms: 2000}`(`settings.QuotesSettings`). `realtime_ws: false` 면 국내도 REST 폴링만.
+- **환율**(`fx.py`): KIS `FHKST03030100`(종목_지수_환율기간별시세, 시장 `X`, 종목 `settings.quotes.fx_code` 기본 `FX@KRW`, 계좌 불필요, 최근 7일 KST 범위 `output1.ovrs_nmix_prpr` → 0 이면 `output2[0]`) → KIS `HHDFS76200200`(현재가상세 `NAS`/`AAPL` 1회) `output.t_rate` → 거시(FRED `DEXKOUS`, `FRED_API_KEY` 없으면 원천 없음) → None(404). KIS 두 단계는 주입점 `fx.kis_fx` 에 런타임 조립 때(`routes._build_runtime`, 시세 클라이언트가 있을 때만) 붙고 응답은 `source: "kis"`. 계좌 개요(`/accounts/overview`)는 `api.prepare_fx(deps)` 로 런타임을 먼저 조립해 FRED 값이 하루 캐시를 먼저 차지하지 않게 한다. 실기 확인 항목 3개(`FX@KRW` vs `FX@KRWKFTC` 값 차이, `ovrs_nmix_prpr` 자릿수·갱신 주기, 하루 범위 빈 응답)는 `docs/research/2026-11-05-kis-fx-rate-api.md` 참조. 결과는 control `fx_cache:<pair>`(`control_namespaces=("fx_cache",)`)에 KST 날짜와 함께 저장해 하루 1회만 원천을 부른다(실패는 `fail_at` 로 `FAIL_TTL_S`=300초 음성 캐시, 이전 레코드가 있으면 `stale: true`).
+- 설정: `settings.yaml` `quotes: {realtime_ws: true, us_poll_ms: 5000, fo_poll_ms: 2000, fx_code: "FX@KRW"}`(`settings.QuotesSettings`). `realtime_ws: false` 면 국내도 REST 폴링만.
 - 허브는 데몬 스레드라 웹 앱 종료 때 따로 내리지 않는다(유휴 60초면 스스로 끝난다).
 
 ## 테스트
 
-`tests/features/quotes/`: `test_hub.py`(옛 허브 18건 + 세션 양보 2건, 가짜 연결·시계), `test_routes.py`(옛 자원 13건 + poll·파생·키 없음), `test_fx.py`(kis→macro→404·하루 캐시·FRED), `test_names_charts.py`(종목명·검색·일봉 마커·선·분봉 락·캐시). 네트워크 없음.
+`tests/features/quotes/`: `test_hub.py`(옛 허브 18건 + 세션 양보 2건, 가짜 연결·시계), `test_routes.py`(옛 자원 13건 + poll·파생·키 없음), `test_fx.py`(kis→macro→404·하루 캐시·FRED), `test_fx_kis.py`(KIS 환율 연결·`fx_code`·개요 선조립), `test_names_charts.py`(종목명·검색·일봉 마커·선·분봉 락·캐시). 네트워크 없음.
 
-웹 알려진 차이: KIS 환율 원천은 주입점 `fx.kis_fx` 뿐이라 운영 환율은 FRED(`FRED_API_KEY` 있을 때)에서 온다(T9-R5, KIS TR 확인 뒤 연결). 미국 시세 전용 경로(`/quotes/us`)는 없다 — `GET /quotes?market=US`(R4). 웹 프로세스에서 KIS 클라이언트를 쥐는 유일한 예외(표시 전용, 앱키·토큰 캐시 공유 `TRADER_KIS_SHARED_DIR`).
+웹 알려진 차이: 환율 KIS TR 은 공식 샘플 기준으로 붙였고 실기 값은 미확인이다(T9-R2/R5). 미국 시세 전용 경로(`/quotes/us`)는 없다 — `GET /quotes?market=US`(R4). 웹 프로세스에서 KIS 클라이언트를 쥐는 유일한 예외(표시 전용, 앱키·토큰 캐시 공유 `TRADER_KIS_SHARED_DIR`).
 
 옛 대비: `/names` 는 캐시 적중을 원장 `ticker_names` 에 쓰지 않는다(웹은 읽기 전용). 차트는 계좌 필터(`account_id`)·결정·트리거 마커를 빼고 체결 마커 + 손절·목표 선으로 바꿨다.

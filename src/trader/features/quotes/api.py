@@ -6,7 +6,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
-from trader.features.quotes import fx
+from trader.features.quotes import fx, routes
 
 
 def fx_rate(settings: Any, conn: sqlite3.Connection, pair: str = "USDKRW") -> dict | None:
@@ -17,4 +17,12 @@ def fx_rate(settings: Any, conn: sqlite3.Connection, pair: str = "USDKRW") -> di
     return fx.rate(conn, pair, now=datetime.now(UTC))
 
 
-__all__ = ["fx_rate"]
+def prepare_fx(deps: Any) -> None:
+    """KIS 환율 원천을 붙인다(quotes 런타임을 원장 위치마다 한 번 조립).
+
+    `fx_rate` 를 quotes 경로보다 먼저 부르는 화면(계좌 개요)이 하루 캐시를 FRED 값으로 먼저
+    굳히지 않게 앞서 부른다."""
+    routes.runtime_for(deps)
+
+
+__all__ = ["fx_rate", "prepare_fx"]

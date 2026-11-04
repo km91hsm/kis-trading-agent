@@ -9,7 +9,8 @@
   `settings.quotes.fo_poll_ms` · 장외 60000.
 - 시세 클라이언트는 시크릿의 공용 실전 키(`KIS_REAL_*`)로 직접 만든다(accounts 를 import 하지
   않는다 — accounts 가 quotes 를 import 한다). 키가 없으면 시세 클라이언트·허브 없이 빈 값·스냅샷만.
-  런타임(시세 클라이언트 + 허브)은 원장 위치(`deps.state`)마다 프로세스에 한 번 만든다.
+  런타임(시세 클라이언트 + 허브)은 원장 위치(`deps.state`)마다 프로세스에 한 번 만든다. 시세
+  클라이언트가 생기면 같은 때 KIS 환율 원천(`fx.kis_fx`)도 그 클라이언트로 붙인다.
 """
 
 from __future__ import annotations
@@ -85,7 +86,30 @@ def _build_runtime(deps: Any) -> Runtime:
     except Exception as e:  # noqa: BLE001 — 조립 실패는 시세 없음으로(요청이 500 이 되지 않게)
         logger.warning("시세 클라이언트·허브 생략: 조립 실패 (%s)", type(e).__name__)
         return Runtime(None, None)
+    fx.kis_fx = _kis_fx_source(market, deps.settings.quotes.fx_code)
     return Runtime(market, hub)
+
+
+def _kis_fx_source(market: Any, code: str):
+    """`fx.kis_fx` 콜러블: `get_fx_usdkrw(code)`(FHKST03030100) → `get_fx_from_detail()`
+    (HHDFS76200200 `t_rate`) 순서로 처음 값 `{rate, as_of, code}`, 둘 다 없거나 실패하면 None
+    (다음 원천 FRED 는 `fx.rate` 가 잇는다)."""
+
+    def source() -> dict | None:
+        for name, step in (
+            ("FHKST03030100", lambda: market.get_fx_usdkrw(code)),
+            ("HHDFS76200200", market.get_fx_from_detail),
+        ):
+            try:
+                got = step()
+            except Exception as e:  # noqa: BLE001 — 한 TR 실패는 다음 TR 로
+                logger.warning("KIS 환율 %s 실패: %s", name, type(e).__name__)
+                continue
+            if got and got.get("rate"):
+                return got
+        return None
+
+    return source
 
 
 def runtime_for(deps: Any) -> Runtime:
@@ -108,6 +132,7 @@ def reset() -> None:
     with _runtime_lock:
         olds = list(_runtimes.values())
         _runtimes.clear()
+    fx.kis_fx = None
     for rt in olds:
         if rt.hub is not None:
             rt.hub.stop()
@@ -400,6 +425,7 @@ def fx_quote(request: Request, pair: str = "USDKRW") -> dict:
     if pair not in fx.PAIRS:
         raise HTTPException(status_code=400, detail=f"pair 는 {'|'.join(fx.PAIRS)} 만")
     deps = request.app.state.deps
+    runtime_for(deps)  # KIS 환율 원천(`fx.kis_fx`)은 런타임 조립 때 붙는다
     with closing(deps.conn_factory()) as conn:
         got = fx.rate(conn, pair, now=deps.now())
     if got is None:

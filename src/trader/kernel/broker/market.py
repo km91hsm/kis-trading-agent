@@ -172,6 +172,52 @@ class KisMarket(FoMarketMixin):
             asof=self._now(),
         )
 
+    # --- 환율 (USD/KRW, 조사 docs/research/2026-11-05-kis-fx-rate-api.md) ----------------
+
+    def get_fx_usdkrw(self, code: str = "FX@KRW") -> dict | None:
+        """종목_지수_환율기간별시세(`OVS_FX_DAILY`, X=환율)로 원/달러.
+
+        최근 7일(KST) 일봉을 받아 `output1.ovrs_nmix_prpr`(현재가)를 쓰고, 0·결측이면 최신 일봉
+        `output2[0]` 종가를 쓴다. `as_of` 는 최신 일봉 영업일(없으면 오늘 KST).
+        `{"rate": Decimal, "as_of": "YYYY-MM-DD", "code": code}`, 쓸 값이 없으면 None.
+        `FX@KRW`·`FX@KRWKFTC` 차이·자릿수·갱신 주기는 실기 미확인."""
+        today = self._now().astimezone(KST).date()
+        data = self._client.get(
+            path("OVS_FX_DAILY"),
+            "OVS_FX_DAILY",
+            {
+                "FID_COND_MRKT_DIV_CODE": "X",
+                "FID_INPUT_ISCD": code,
+                "FID_INPUT_DATE_1": (today - timedelta(days=7)).strftime("%Y%m%d"),
+                "FID_INPUT_DATE_2": today.strftime("%Y%m%d"),
+                "FID_PERIOD_DIV_CODE": "D",
+            },
+        )
+        head = (_rows(data.get("output1")) or [{}])[0]
+        days = _rows(data.get("output2"))
+        rate = _dec(head.get("ovrs_nmix_prpr"))
+        if rate <= 0 and days:
+            rate = _dec(days[0].get("ovrs_nmix_prpr"))
+        if rate <= 0:
+            return None
+        raw = str(days[0].get("stck_bsop_date") or "").strip() if days else ""
+        as_of = _ymd(raw).isoformat() if len(raw) == 8 else today.isoformat()
+        return {"rate": rate, "as_of": as_of, "code": code}
+
+    def get_fx_from_detail(self, exchange: str = "NAS", symbol: str = "AAPL") -> dict | None:
+        """현재가상세(`OVS_PRICE_DETAIL`) 의 `t_rate`(당일환율) — 미국 종목 하나로 1회 호출.
+        `{"rate": Decimal, "as_of": 오늘 KST, "code": "HHDFS76200200"}`, 값이 없으면 None."""
+        data = self._client.get(
+            path("OVS_PRICE_DETAIL"),
+            "OVS_PRICE_DETAIL",
+            {"AUTH": "", "EXCD": exchange, "SYMB": symbol},
+        )
+        rate = _dec((data.get("output") or {}).get("t_rate"))
+        if rate <= 0:
+            return None
+        today = self._now().astimezone(KST).date().isoformat()
+        return {"rate": rate, "as_of": today, "code": "HHDFS76200200"}
+
     def get_name_kr(self, ticker: str) -> str | None:
         """종목명 (일봉 API output1.hts_kor_isnm). DART 가 죽었을 때의 폴백."""
         today = self._now().astimezone(KST).date()

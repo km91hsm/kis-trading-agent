@@ -247,3 +247,4 @@ quotes:
   realtime_ws: true
   us_poll_ms: 5000         # 미국 정규장 화면 폴링(ms)
   fo_poll_ms: 2000         # 파생 정규장 화면 폴링(ms)
+  fx_code: "FX@KRW"       # KIS 환율 종목코드(FHKST03030100, X). FX@KRWKFTC 와 차이는 실기 미확인
