@@ -50,6 +50,7 @@ test("상태 띠는 health level 과 첫 사유, 사용률 칩 2개를 그린다
   expect(chips[0].textContent).toContain("72%");
   expect(chips[0].getAttribute("data-level")).toBe("warn");
   expect(chips[1].textContent).toContain("31%");
+  expect(chips[1].getAttribute("data-level")).toBe("ok"); // 70% 미만 = 정상(초록)
 });
 
 test("PC 폭에서 왼쪽 메뉴가 하위 목차를 한 줄씩 펼친다 (data-nav-item 수 = NAV items 합)", async () => {

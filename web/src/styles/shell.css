@@ -75,6 +75,7 @@
   white-space: nowrap;
 }
 .usage-chip-label { color: var(--fg-muted); }
+.usage-chip[data-level="ok"] { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
 .usage-chip[data-level="warn"] { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
 .usage-chip[data-level="fail"] { color: var(--fail); background: var(--fail-bg); border-color: var(--fail); }
 
@@ -231,7 +232,7 @@
   }
 }
 
-/* <1024: 하단 탭 5개 56px + 안전 영역, 7일 칩·뉴욕 시각·세션 숨김 */
+/* <1024: 하단 탭 5개 56px + 안전 영역, 7일 칩·뉴욕 시각 숨김(장 세션은 남긴다) */
 @media (max-width: 1023px) {
   .shell-main {
     padding-bottom: calc(56px + env(safe-area-inset-bottom) + var(--space-4));
@@ -262,7 +263,6 @@
   .nav-items,
   .usage-chip[data-usage-chip="7d"],
   .clock-et,
-  .clock-phase,
   .theme-toggle-label {
     display: none;
   }
