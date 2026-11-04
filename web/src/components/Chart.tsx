@@ -1,6 +1,6 @@
 // lightweight-charts(5.x) 래퍼 — 선 시리즈 + 표식(markers) + 가격선(lines). 폭은 ResizeObserver 로 맞추고
 // 언마운트 때 chart.remove(). 차트는 한 번만 만들고 props 변화는 setData·setMarkers·가격선 재생성으로 반영한다.
-// (Task 11 은 candles prop 을 더해 CandlestickSeries 를 같은 방식으로 붙인다.)
+// `extra` 는 비교용 선 시리즈(성과 화면 벤치마크) — 배열이 바뀌면 옛 시리즈를 떼고 다시 붙인다(메모해서 넘길 것).
 import { useEffect, useRef } from "react";
 import {
   LineSeries,
@@ -16,20 +16,24 @@ import {
 export type ChartPoint = { time: string; value: number };
 export type ChartMarker = { time: string; text: string; color: string };
 export type ChartLine = { price: number; label: string; color: string };
+export type ChartExtra = { label: string; data: ChartPoint[] };
 
 export type ChartProps = {
   series: ChartPoint[];
   markers?: ChartMarker[];
   lines?: ChartLine[];
+  extra?: ChartExtra[];
   height?: number;
 };
+
+const EXTRA_COLORS = ["--fg-muted", "--warn", "--ok"];
 
 function cssVar(name: string): string | undefined {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || undefined;
 }
 
-export function Chart({ series, markers, lines, height = 240 }: ChartProps) {
+export function Chart({ series, markers, lines, extra, height = 240 }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -91,6 +95,20 @@ export function Chart({ series, markers, lines, height = 240 }: ChartProps) {
       if (lineRef.current === s) for (const p of made) s.removePriceLine(p);
     };
   }, [lines]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !extra?.length) return;
+    const made = extra.map((x, i) => {
+      const s = chart.addSeries(LineSeries, { color: cssVar(EXTRA_COLORS[i % EXTRA_COLORS.length]), lineWidth: 1, title: x.label });
+      s.setData(x.data.map((p) => ({ time: p.time as Time, value: p.value })));
+      return s;
+    });
+    chart.timeScale().fitContent();
+    return () => {
+      if (chartRef.current === chart) for (const s of made) chart.removeSeries(s);
+    };
+  }, [extra]);
 
   return <div ref={el} className="chart" style={{ height }} />;
 }

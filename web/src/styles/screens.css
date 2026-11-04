@@ -259,3 +259,35 @@
   color: var(--fail);
   font-size: var(--text-sm);
 }
+
+/* ── 성과(Task 11) ── 휴대폰은 카드 한 열 */
+.perf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.perf-filters select,
+.perf-filters input,
+.perf-filters .btn { min-height: var(--touch); }
+.perf-periods { display: inline-flex; gap: var(--space-1); }
+.perf-periods .btn[aria-pressed="true"] {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.perf-stats {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+@media (min-width: 640px) {
+  .perf-stats { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+}
+.perf-stat-value { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.perf-legend,
+.perf-note { color: var(--fg-muted); font-size: var(--text-sm); margin: var(--space-2) 0; }
+.perf-dist { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.perf-sub { margin: var(--space-3) 0 var(--space-2); }

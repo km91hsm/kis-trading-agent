@@ -5,6 +5,7 @@ const m = vi.hoisted(() => {
   const markersApi = { setMarkers: vi.fn(), detach: vi.fn() };
   const chart = {
     addSeries: vi.fn(() => series),
+    removeSeries: vi.fn(),
     applyOptions: vi.fn(),
     remove: vi.fn(),
     timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
@@ -84,5 +85,15 @@ describe("Chart", () => {
     r.rerender(<Chart series={[{ time: "2026-11-05", value: 2 }]} />);
     expect(m.createChart).toHaveBeenCalledTimes(1);
     expect(m.series.setData).toHaveBeenLastCalledWith([{ time: "2026-11-05", value: 2 }]);
+  });
+
+  test("extra 는 선 시리즈를 더 붙여 setData 하고, 바뀌면 옛 시리즈를 뗀다", () => {
+    const extra = [{ label: "1/N 균등", data: [{ time: "2026-11-05", value: 1.01 }] }];
+    const r = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={extra} />);
+    expect(m.chart.addSeries).toHaveBeenCalledTimes(2);
+    expect((m.chart.addSeries.mock.calls[1] as unknown[])[1]).toMatchObject({ title: "1/N 균등" });
+    expect(m.series.setData).toHaveBeenCalledWith([{ time: "2026-11-05", value: 1.01 }]);
+    r.rerender(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={[]} />);
+    expect(m.chart.removeSeries).toHaveBeenCalledTimes(1);
   });
 });
