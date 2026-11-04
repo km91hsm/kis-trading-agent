@@ -50,7 +50,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
   - bare `import trader.features.a` 가 서비스 기능 간에 허용되는 구멍 막기(+테스트)
   - `test_discover_real_package…` 실제 목록 단언
   - WEB_TOKEN 을 `secrets/.env` 에서도 읽기(python-dotenv)
-- 이연(M2 리뷰, minor): `Boot.secrets` 타입 `Secrets | None`·`build_web_deps` 재읽기 제거; `settings.py` 자리표시자 판정 헬퍼화; `commands.py` echo 예외 집계(try/else)·미인식 명령 도움말 블록 중복; `notify.enabled=false` 와 토큰 없음 문구 구분; `modes.py` docstring; `telegram.py` `ctx: Any`; T1 `load_secrets` UnicodeDecodeError 바이트 위치 노출; T9 `accounts add` ValidationError 원문 echo 가독성; T10 `/mode … fast` 경로 단언 약함; T4 `/status` 절별 격리(M4 가 status 절을 더하기 전에)·`commands.registry` 검사를 `registry.contracts.check` 로 이동(M4)·데몬 telegram 잡 예외 내성(M4); 핸들러가 컨텍스트의 accounts/secrets 를 쓰도록
+- 이연(M2 리뷰, minor): `Boot.secrets` 타입 `Secrets | None`·`build_web_deps` 재읽기 제거; `settings.py` 자리표시자 판정 헬퍼화; `commands.py` echo 예외 집계(try/else)·미인식 명령 도움말 블록 중복; `notify.enabled=false` 와 토큰 없음 문구 구분; `modes.py` docstring; `telegram.py` `ctx: Any`; T1 `load_secrets` UnicodeDecodeError 바이트 위치 노출; T9 `accounts add` ValidationError 원문 echo 가독성; T10 `/mode … fast` 경로 단언 약함; T4 `/status` 절별 격리(M9 Task 1 완료)·`commands.registry` 검사를 `registry.contracts.check` 로 이동(M4)·데몬 telegram 잡 예외 내성(M4); 핸들러가 컨텍스트의 accounts/secrets 를 쓰도록
   - 상세 차이는 `features/accounts/README.md`·`docs/architecture.md` 「notify」 의 "알려진 차이"
 
 ## M3 — features/ingest + saveticker
@@ -139,7 +139,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - M6: killswitch·hedge·`cash_park`·`excluded_tickers`(monitor 의 헤지/현금 운용 건너뛰기·`cancel_buys`)
   - (M7 회수 완료): 공시/뉴스 트리거 생산(`news.post_ingest` 훅)·`analyze_ticker` kind(종목 락 `locks.lock_for` 공유)·discover·`reevaluate` 의 dry_run 담긴 요청 실행 단언·US 거래소 보강 단언
   - M8: memory(메모리 브레이커 인자·`test_resume` memory 1건)·`close` 무효화 종가표(`close_table` 콜러블 주입, Ruling 14)
-  - M9: `ops_check` 잡·health
+  - M12: `ops_check` 잡·health(`kernel/ops`, M9 플랜 A15 에서 M12 로 옮김)
   - M10: fo 분기·`test_balance_dispatch` 3건·`test_fills_fo`
   - M11: jobs 라우터(웹 큐 API)·섹터 자동분류(`_classify`)·웹 시세 허브 `hub_blocked` 비켜서기(live_quotes yielding)
   - 커널 후보: `_close_stale_sessions` 공개 헬퍼화(spot jobs 와 runner 중복)
@@ -164,11 +164,9 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - 이연(M6):
   - (M7 회수 완료; `events check` CLI 는 훅으로 대체): discovery 연동(scout 후보 검증·병합·`event_watch` 입력, 옛 `test_events` 3·4·9·10)·`theme.compute` 의 `vol_z`(피처 스토어)·리밸런스 `sector_of` 주입(섹터 상한)·screener regime 컨텍스트(옛 `scan/test_screener` 2건)
   - M8: `theme.mature` 데몬 호출(종가표 주입, 피처 스토어)·`metrics.decision_distribution`(헤지 결정 제외 단언은 `source` 로 대체)·`ml_trained` 메시지·`_default_sector_of` 예외 로그·`mature(close_table=None)` 테스트
-  - M9: `_scalp_open`(리밸런스 단타 보유 제외; 지금은 빈 집합)·`hedge_tick` pending 플래그 시 데몬 재시도 없음(옛 결함 보존, `MAX_RETRIES` 죽은 코드)·리밸런스 잔고·시세 전부 실패에도 done 플래그 기록(옛 동일)·커널 `status_message` 절별 실패 격리·`market_view` QueueKind `trading=False`(옛 `TRADING_KINDS` 포함) 확인·stale 예탁원 알림 매 실행(옛 동일)·`test_cli_regime` scalp 1건
-  - M9: 큐 kind `rebalance` 의 `market` 을 `Literal["KR","US"]` 로 검증(현재 `ReconcileParams` 재사용)
-  - M9: 커널 `llm.timeout_by_kind` 기본값에 `market` 없음 — 기존 settings.yaml 사용자는 템플릿 재복사 필요(README/릴리스 노트 안내)
+  - (M9 회수 완료): `_scalp_open` → `ports["scalp"].open_tickers` 합집합 · `hedge_tick` pending 플래그 시 데몬 재시도 없음·리밸런스 잔고·시세 전부 실패에도 done 플래그·stale 예탁원 알림 = 옛 동작 보존 확인(변경 없음) · 커널 `status_message` 절별 격리 완료 · `market_view` QueueKind `trading=False` 유지(Ruling A15e, regime README 규칙 절) · `test_cli_regime` scalp 1건 → `tests/features/scalp/test_cli.py` · 큐 kind `rebalance` `RebalanceParams` 완료 · `timeout_by_kind` `market: 600` 기본값 완료(기존 settings.yaml 사용자는 템플릿 재복사 안내 유지)
   - M10: 커널 `latest_positions` 에 asset 필터 없음 — fo 행 생기면 시장 세션 입력에 파생 포지션 섞임; spot `_latest_positions` 와 통합
-  - M9(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격
+  - M10(fo 이식 때): FAKE 헬퍼·검증/요약 헬퍼의 spot/regime 중복 → `kernel.session` 승격
   - M11: 웹 `/api/system/theme`(옛 `test_daemon_theme::test_api_theme`)
   - M12: `trader status` 의 국면 절(옛 `test_status_regime_section`)
   - 사용자 확인: `models.market_researcher_bull|bear` 모델 키가 옛 `researcher_bull|bear` 와 분리됨(옛 설정을 따르지 않음) — 필요하면 `config/settings.yaml` 에 키 추가
@@ -219,14 +217,31 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - [x] Task 12 spot 통합(메모리/보정 컨텍스트·`35_calibration`·`memory_entry_id`·브레이커·RL)
 - [x] Task 13 features/briefing(아침 브리핑, haiku 단발)
 - [x] Task 14 문서·템플릿·TODO·전체 재검증
-- [ ] PR·CI(ubuntu+windows)·머지(머지는 사용자)
+- [x] PR·CI(ubuntu+windows)·머지 (#9, main 766e131)
 - Ruling(M8 플랜): A1 RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지; `rl_train` 독립 cron 토 10:30) · A2 레인 접점은 `ports["evaluation"]` 하나 · A3 `memory_entries` 에 `realized_return`·`alpha_vs_benchmark` 없음(스펙 §2.4) · A5 `round_trip_bp` 커널 승격(M7 P1 해소) · A6 `MonitorContext.close_table` 주입(M5 Ruling 14) · A7 `features_snapshot` 유지 + reflect 재스냅샷 · A8 retention prune 은 M12, fills 선동기화 없음 · A10 `usage_probe` 커널 내장 interval(1800 고정) · A13 CLI 는 `trader evaluation …` 만(최상위 별칭은 M12) · A15 `test_performance_fo` 는 M10
 - Ruling(M8, 실행 중 추가): T2-R1 `quick.ask_json` 은 `agents.with_schema` 재사용 · T9-R2(T9-R1 뒤집음) `readiness.interval_kinds_of` 는 interval 잡 `kind` 수집(커널 잡 큐·내장 잡 포함) · `store.held_at` 은 `account_nav` 만 있는 날을 보유 없음으로 · 집행 브레이커는 계좌 자신의 30일 NAV(paper 다수면 마지막) · `_rl_record` 는 exec-key 선점 뒤(선점 실패 시 `applied=0`)
 - 이연(M8): M10 `test_performance_fo` 6건·fo `nav_series` stub · M11 `/api/performance`·`/api/rl`·`/api/memory`·`lots` CSV·`metrics.pending_approvals/account_stance/stance_by_market` · M12 reflect 의 `retention.prune`·status/health 보정 재점검·최상위 CLI 별칭 결정·`usage_probe.interval_min` 반영
 
 ## M9 — features/scalp
-단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과.
-- [ ] 착수 전
+단타 Lane. 완료 기준: 옛 `scalp/*`·`test_daemon_scalp` 이식 통과. 플랜 `docs/superpowers/plans/2026-11-04-m9-scalp.md`(브랜치 `feat/m9-scalp`).
+- [x] 플랜 작성(Task 1~8, Ruling A1~A16)
+- [x] Task 1 커널·spot·scan 준비(`StockExecPort`·`ScalpPort`·`ScanPort.watchlist`·tradability 승격·`_kind` 접미사·`/status` 절 격리·A15 소수정)
+- [x] Task 2 scalp 뼈대(feature·settings·schemas·messages·fake·README·템플릿·기능 목록 테스트)
+- [x] Task 3 signals(진입 신호·청산 규칙·백테스트)
+- [x] Task 4 state·judge·`scalp-judge` 에이전트
+- [x] Task 5 engine(허용·후보·진입·판정 회수·틱·digest·report)
+- [x] Task 6 exits(다리·체결 동기화·취소·흡수·이월)
+- [x] Task 7 jobs·ports(`{market}_scalp` 잡·outbox flush·teardown·`ScalpPort`·리밸런스 제외)
+- [x] Task 8 CLI·status·README·CLAUDE.md·TODO·전체 재검증
+- [ ] PR·CI(ubuntu+windows)·머지
+- Ruling(M9 플랜): A1 주문 경로는 spot 이 노출하는 `stock_exec` 포트(execute·cancel·sync_fills; 게이트 복제 기각) · A2 `scalp` origin 은 spot ORIGINS 유지 · A3 JSON 상태 파일 유지·마이그레이션 없음(legacy 테스트 1건 미이식) · A4 잡 `{market}_scalp` kind `scalp` interval `{market}.monitor.interval_s`·게이트 `none`(본문이 창·휴장·일시정지 거르고 outbox flush) · A5 판정자 `quick.ask_json` + `session_allowance(kind="scalp_judge")` · A6 후보 = `_scan` 체크포인트 + `job_requests(source=news)` + `ScanPort.watchlist` · A8 모의 전용 `skip_accounts`, `block_reason` 커널 승격 · A9 `ScalpPort.open_tickers` 로 리밸런스 제외 · A10 `SCALP_EXIT` 에 `carry_over` 추가 · A12 `event.at` 은 주입 시계 · A13 커널 `status_message` 절 격리 · A14 `_kind` 가 `_entry/_exit` 꼬리 제거 · A15 `OPEN_STATUSES` 커널, `DEAD_STATUSES` import, `timeout_by_kind` 기본 `market: 600`, `RebalanceParams`, `market_view trading=False` 유지, `ops_check`/health 는 M12 · A16 판정 컨텍스트 뉴스는 빈 목록(`InputsPort.recent` 는 M11/M12 후보)
+- Ruling(M9, 실행 중 추가): P1 `timeout_by_kind` 기본값 테스트는 `tests/kernel/config/test_llm_settings.py` · T4-R1 `judge_context.regime` 은 `ports["regime"].load` 저장 레코드를 그대로(없음 → `{state: None, count: None}`; 플랜 A5/A6 의 `state()/core_count()` 문구 대체) · T5-R1 `max_positions` 는 `allowed()` 가 아니라 진입 루프가 open+pending 으로 센다(옛 동작, 플랜 A7 정정) · T6-R1 커널 `core.cancel` 은 잔량(`qty − SUM(fills.qty)`)으로 취소, 잔량 0 이면 브로커 호출 없이 `ok False` "남은 수량 없음(전량 체결)"(spot US 취소에도 적용, KR 은 `QTY_ALL_ORD_YN=Y` 라 무영향) · T7-R1 `SCALP_TICK.gate="none"`, 본문이 `ctx.gates["monitor"]` 를 런타임에 재사용(창 밖·주말·휴장)·`accounts.paused` 직접 확인·건너뛴 모든 경로에서 outbox flush, `exchanges={}` · T8-R1 scalp CLI --market 이 KR/US 외면 exit 1(옛은 US 처리) · T8-R2 report --live US 거래소 = 판정 사건 → 원장 ticker_exchanges → NAS(옛 universe.us, 레인은 scan import 불가) · F2 scalp backtest 도 today=run_date_for 를 넘김(옛 UTC 날짜 결함 수정)
+- 이연(M9):
+  - M10: FAKE 헬퍼 `kernel.session` 승격 · 커널 `latest_positions` asset 필터
+  - M10(최종 리뷰): `skip_accounts` 에 `policy != "auto"` 추가 검토(approve 모의 계좌 승인 요청 누적, F1) · adopt SQL `origin='scalp'` 필터(F3) · `scalp_body` monitor 게이트 부재 시 fail-closed(`{"skipped": "monitor 게이트 없음"}`) · 틱 단위 브로커·시세 클라이언트 캐시(`ScalpContext`; 지금은 호출마다 `accounts_port.brokers()` 재생성) · `judge_for` 전역 단일체 생성 `threading.Lock` · spot monitor 가 단타 보유분(`open_tickers`)을 손절·트리거 대상에서 빼지 않음(검토) · 다음 플랜 Global Constraints 의 "이름 금지" 문구를 "계좌·개인·수집 원문 금지" 로 좁히기(상장사 이름 리터럴은 저장소 관례)
+  - M11: 웹 `/system/scalp` 자원·SSE `scalp` 키 · `InputsPort.recent`(판정 컨텍스트 뉴스, 지금 `news=[]`)
+  - M12: `ops_check`/health · `trader status` 단타 절 CLI 점검
+  - 테스트 보강: US 시장 테스트(`exchange_of` 폴백·`analyze_targets` 거래소) · `StockExecPortImpl.cancel` broker None 가드 · 커널 tradability 테스트의 spot 헬퍼 import 정리 · `test_state` 종목명 리터럴 합성화
 
 ## M10 — features/fo
 파생 Lane(`LegStore`, 커널 executor 코어 위). 완료 기준: 옛 `fo/*` 계열 테스트 이식 통과.

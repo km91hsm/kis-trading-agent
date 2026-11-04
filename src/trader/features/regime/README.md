@@ -12,7 +12,7 @@
 - 시장 세션(`market_view.py`): 입력 조립 `build_inputs`(국면·지수 proxy 60봉·거시·저장소/구글 거시 뉴스·시장 메모·세이브티커·헤지 보유·모의 계좌 섹터 비중, 절별 오류 격리 `errors`) → `_market_inputs` → 세션 1회 `run_market_view`(`hedge.enabled and hedge.market_session` 아니면·상한이면 생략) → `_market_view` 읽기. 제안은 원장 `market_views` 에 남기고(`record_view`) 만기 뒤 지수 수익으로 채점한다(`mature_views`·`scorecard`). `market_sessions_today` 는 `llm.market_session_cap` 용.
 - 세션 종류(`session_kinds.py`): `MARKET`(kind·timeout·runs `market`, 추가 상한 `llm.market_session_cap`, hard 감속). 러너 매핑은 `agents_for_runner()`(AGENTS + 별칭 `orchestrator`).
 - 도구(`tools.py`·`tool_cli.py`): `trader tool market bundle|write|summarize`·`trader tool submit-market-view`. 전제조건(`_market_inputs` → `_market_analyst` → 토론 → `_market_summary` → 제출)·`debate_rounds` 상한·파일명↔페이로드 일치는 도구가 강제한다. 제출은 `_market_view` + control `market_view:<m>`(날짜 포함) + `market_views`.
-- 스키마(`schemas.py`): `HedgeProposal`(stance·hedge_weight ≤0.25·leveraged·scalp_ok·confidence·horizon_days·rationale ≤500·invalidation_conditions). 리포트·턴은 커널 공용.
+- 스키마(`schemas.py`): `HedgeProposal`(stance·hedge_weight ≤0.25·leveraged·scalp_ok·confidence·horizon_days·rationale ≤500·invalidation_conditions). 리포트·턴은 커널 공용. `scalp_ok` 의 소비처는 scalp `engine.allowed()`(`ports["regime"].view_today` — 확신이 `hedge.agent_min_confidence` 이상이고 `scalp_ok=false` 면 단타 신규 진입 금지, M9).
 - 에이전트(`agents/`): `analyst-market`·`market-researcher-bull`·`market-researcher-bear`·`strategist`·`market-orchestrator`(market 모드 절만).
 - FAKE(`fake.py`): `FAKE_CLAUDE=1` 이면 `run_fake_market(ctx, spec)` → `write_fake_market` 가 같은 도구로 NEUTRAL 리포트·토론 r0(+r1)·요약·제안(bear → RISK_OFF 0.10, 그 외 RISK_ON 0.0)을 쓴다.
 - 입력(`inputs.py`): `proxy_candles`(지수 proxy 완성 일봉, `market_hours.completed_candles`)·`vix`(US, `FRED_API_KEY`)·`flow_weak_signal`(KR 외인 수급, `hedge.flow_signal`).
@@ -27,6 +27,7 @@
 
 - 코드는 `trader.kernel.*` 와 다른 기능의 `api.py` 만 import 한다(3층 규칙). 레인(spot)은 이 기능을 import 하지 않고 `ports["regime"]` 로 받는다.
 - 로거 `trader.regime`. 저장 시각은 UTC ISO8601, 날짜 기본값은 KST.
+- `market_view` 큐 kind 는 `trading=False` 를 유지한다(M9 Ruling A15e): 시장 세션은 개장 전에도 돌아야 하므로 장중 전용 kind 로 묶지 않는다(옛 `TRADING_KINDS` 포함은 따르지 않음).
 
 ## 공개면 (`api.py`)
 
@@ -54,7 +55,7 @@
 14. `market_view` 큐 kind 는 `trading=False` 다(옛 `TRADING_KINDS` 에는 포함). stale 예탁원 알림은 `ksd_events` 가 돌 때마다 낸다(옛 동일).
 15. `regime.messages.ml_trained`(학습 완료 알림 문구)는 이식하지 않았다(M8).
 16. `{market}_regime` 은 `heavy=True` 다(Ruling P6 — 옛 시장 세션이 `scan_analyze` 의 heavy 락 안에서 돌던 것을 보존). `ksd_events` 는 `event_blackout.enabled` 가 아니라 `"KR" in settings.markets` 일 때 등록된다(Ruling P7 — 옛 데몬도 블랙아웃이 꺼져 있어도 미리 수집). `event_blackout.enabled` 는 `blackout.reason` 게이트와 stale 알림에만 쓴다.
-17. `/status` 의 「국면」 절은 커널 `status_message` 가 절별 실패를 격리하지 않으므로 `settings=None` 이면 빈 목록을 돌려준다(커널 격리는 M9 ops).
+17. `/status` 의 「국면」 절은 `settings=None` 이면 빈 목록을 돌려준다. 커널 `status_message` 는 M9 부터 절별 실패를 격리한다(실패 절은 한 줄).
 18. 자동 킬스위치 알림: 옛 코드는 health 점검이 켜진 킬스위치를 나중에 알렸다. 이제 잔고 관측(`killswitch_observe`)이 **새로 켠 즉시 1회** 알린다(Ruling P11) — spot `build_portfolio` 가 포트의 `killswitch_message(conn, account_id)`(커널 Protocol 밖, 덕 타이핑; `messages.killswitch_on` 문구, 이 계좌가 막혀 있지 않으면 None)를 `notify_quietly` 로 보낸다. 이미 켜진 뒤 관측은 False 라 다시 알리지 않는다. 관측이 없는 경로(`record=False`·FAKE 세션)는 알리지 않는다.
 19. 스케줄 기본값 변경(M7, Ruling S1): `regime` 을 `07:25`(KR, KST) / `08:25`(US, 뉴욕)로 앞당겼다(템플릿 `schedule.yaml` 과 `RegimeSchedule` 기본값을 함께). 옛 데몬은 국면 갱신·시장 세션을 `<시장>_scan_analyze` 안에서 돌렸지만 이 저장소는 `{market}_regime` 이 별도 잡이라, scan→analyze(`scan_analyze` 07:30 / 08:30)가 항상 오늘 국면·시장 제안을 보게 하려고 그 5분 앞에 둔다. 기존 `config/schedule.yaml` 에 옛 값(`07:30` 등)이 있으면 같은 시각이 되어 순서가 보장되지 않으니 직접 고친다.
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -388,6 +388,14 @@ class ReconcileParams(BaseModel):
     market: str | None = None
 
 
+class RebalanceParams(BaseModel):
+    """리밸런스 요청. market 이 없으면 데몬 시장 전체."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    market: Literal["KR", "US"] | None = None
+
+
 # --- 큐 reevaluate (옛 daemon `_reevaluate_request`) ----------------------------------
 
 
@@ -536,7 +544,7 @@ QUEUE_KINDS = (
         "reconcile", ReconcileParams, "대사", "fast", 0, False, True, reconcile_request
     ),
     QueueKind(
-        "rebalance", ReconcileParams, "리밸런스", "fast", 0, True, False,
+        "rebalance", RebalanceParams, "리밸런스", "fast", 0, True, False,
         rebalance.rebalance_request,
     ),
     QueueKind(

@@ -1,4 +1,4 @@
-"""scan 포트: 레인이 `Boot.ports["scan"]` 로 받는 종목 → 오늘 상위 테마 조회
+"""scan 포트: 레인이 `Boot.ports["scan"]` 로 받는 종목 → 오늘 상위 테마·섹터·관심종목 조회
 (커널 `execution.ports.ScanPort`). 판정 로직은 `membership` 에 있고 여기서는 설정만 입혀 부른다."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from datetime import date
 from typing import Any
 
 from trader.features.ingest.api import load_sectors
-from trader.features.scan import membership, run, sector_suggest
+from trader.features.scan import membership, run, sector_suggest, watchlist
 from trader.features.scan.settings import load_events
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import Port
@@ -57,6 +57,10 @@ class ScanPortImpl:
         """종목 → 섹터: sectors.yaml 우선, 없으면 자동 분류 캐시(`state/cache/sector_auto.json`),
         그래도 없으면 None."""
         return sector_suggest.resolver(load_sectors(), market, state=paths.state_dir())
+
+    def watchlist(self, conn: sqlite3.Connection, market: str | None) -> list[str]:
+        """런타임 관심종목(`/watch`·웹). market 을 주면 그 시장 종목만 접두사 없이."""
+        return watchlist.get_watchlist(conn, market)
 
 
 def build_port(boot: Any) -> ScanPortImpl:

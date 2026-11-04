@@ -20,6 +20,8 @@ ORIGIN_CHECK = (
 # 살아 있지 않은 주문 상태 — 중복 방지·당일 매수·주문금액·보유 폴백이 모두 이 목록을 쓴다.
 # expired 는 체결 동기화가 마감 뒤 체결 없는 accepted·unknown 주문에 붙인다.
 DEAD_STATUSES = ("rejected", "cancelled", "failed", "expired")
+# 아직 살아 있는(체결·취소를 기다리는) 주문 상태 — 미체결 집계·일일 리포트가 쓴다.
+OPEN_STATUSES = ("accepted", "unknown", "partial")
 
 # 승인 요청 유효 시간
 APPROVAL_TTL = timedelta(minutes=30)

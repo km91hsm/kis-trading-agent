@@ -34,13 +34,13 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 3. `/watch`·watchlist 는 M7(scan).
 4. `/approve`·`/reject`·`/run`·`/kill`·`/daily`·`/fo` 는 각 M(M4·M7·M6·M8·M10). `/status` 의 데몬·국면·스캔·미승인 줄도 해당 M 이 `status_sections` 로 더한다.
 5. `exec-key list|release` 는 M4.
-6. `accounts_io.blockers` 는 테이블이 없으면 그 사유를 생략한다. `DEAD_STATUSES` 는 이 기능 안의 로컬 상수이며 M4 가 커널로 옮긴다. `test_accounts_io.py` 의 `db` fixture 는 M4 전까지 최소 스탠드인 테이블을 CREATE 한다.
+6. `accounts_io.blockers` 는 테이블이 없으면 그 사유를 생략한다. 끝난 주문 상태 목록은 커널 `execution.types.dead_status_sql` 을 쓴다(M9). `test_accounts_io.py` 의 `db` fixture 는 M4 전까지 최소 스탠드인 테이블을 CREATE 한다.
 7. 체결통보 리스너(`_notice_listeners`)는 M5.
 8. `ensure_web_token`(`secrets_io`)은 아직 어디에도 연결되지 않았다. 연결·키 웹 라우트는 M11.
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
-11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 `notify.messages` 에 이식하지 않았다(M4/M5/M9 가 더한다).
-12. `/status` 는 한 절이 예외를 내면 명령 전체가 실패한다(절별 격리 없음).
+11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 커널 `notify.messages` 에 이식하지 않았다 — `SCALP_EXIT` 는 M9 에서 scalp `messages.py` 로 이식됐다(`carry_over` 추가), `DecisionBrief` 는 spot 몫.
+12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다).
 13. `notify.enabled=false` 와 토큰 없음이 `telegram poll|loop` 에서 같은 토큰 오류 문구로 나온다(원인 구분 없음).
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.

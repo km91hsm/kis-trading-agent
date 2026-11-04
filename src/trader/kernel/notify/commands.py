@@ -64,7 +64,11 @@ def status_message(ctx: CommandContext) -> str:
     lines: list[str] = []
     for f in ctx.features:
         for sec in f.status_sections:
-            lines.extend(sec.render(ctx))
+            try:
+                lines.extend(sec.render(ctx))
+            except Exception as e:  # noqa: BLE001 - 절 하나의 실패가 나머지 절을 가리지 않는다
+                logger.exception("상태 절 조회 실패: %s", sec.title)
+                lines.append(f"- {sec.title}: 조회 실패({type(e).__name__}: {e})")
     return messages.event("상태", *(lines or ["등록된 상태 절 없음"]))
 
 

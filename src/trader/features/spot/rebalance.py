@@ -3,8 +3,8 @@
 
 - 목표: 종목의 최근 결정(source≠hedge, action ∈ BUY·ADD·TRIM, `lookback_days` 안). HOLD·SELL·
   결정 없음은 건너뛴다(HOLD 의 target_weight 는 '그대로' 라 목표로 쓰면 안 된다).
-- 제외: `excluded.excluded_tickers`(헤지 ETF·현금 운용 ETF). 단타(scalp) 보유는 M9 에서 연결한다
-  (지금은 빈 집합).
+- 제외: `excluded.excluded_tickers`(헤지 ETF·현금 운용 ETF) ∪ 단타 보유
+  (`ports["scalp"].open_tickers`, 포트가 없으면 빈 집합).
 - 순서: 모든 계좌의 TRIM 을 먼저, 그다음 ADD(현금을 먼저 만든다). 계좌별로 드리프트를 따로 재고
   밴드 안인 계좌는 `skip_accounts`.
 - 주문: 파이썬이 만든 Decision(원 결정의 보유기간·익절·손절, 현재가 지정가) → `executor.execute(
@@ -111,8 +111,10 @@ def run(
     if ctx.paused(ctx.conn):
         # 판정·플래그 없이 건너뛴다 — 재개 뒤 그 주 리밸런스 유지(2-O15)
         return {"skipped": "일시정지"}
-    # 단타(scalp) 보유 제외는 M9 에서 더한다
     exclude = set(excluded_tickers(ctx.settings, ctx.ports.get("regime"), market))
+    sc = ctx.ports.get("scalp")
+    if sc is not None:  # 단타가 들고 있는 종목은 건드리지 않는다(A9)
+        exclude |= set(sc.open_tickers(ctx.state, market, today))
     accounts = [a for a in ctx.accounts if market in a.markets and a.id in ctx.brokers]
     need: dict[tuple[str, str], set[str]] = {}  # (action, ticker) → 계좌들
     legs_out: list[dict] = []

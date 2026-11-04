@@ -129,6 +129,28 @@ cash_park:
   reserve_pct: 0.20
   min_amount: 500000
 
+# 분 단위 단타 층 (Phase 23). **모의 계좌 전용, 기본 끔.** 1분봉 신호(거래량 급증 ∧ 당일 고가·VWAP 동시 돌파)는
+# 파이썬이 감지·집행하고, 에이전트는 후보(오늘 picks·새 뉴스 종목·관심종목)와 허용 여부(strategist scalp_ok)만
+# 정한다. bear 국면·RISK_OFF 제안(확신 기준 이상)이면 그날 단타 없음. 켜기 전에 `trader scalp backtest` 로 본다.
+scalp:
+  enabled: false
+  max_weight_pct: 0.05       # 계좌 NAV 대비 진입 비중
+  max_positions: 2           # 동시 보유 단타 종목 수
+  max_universe: 10           # 틱마다 분봉을 받는 종목 수 상한 (KIS 20/s 안)
+  volume_mult: 3.0           # 최근 5분 거래량 ≥ 직전 20분 평균 × 배수
+  take_profit_pct: 0.015
+  stop_pct: 0.01
+  max_hold_min: 60
+  warmup_min: 15             # 개장 뒤 이 시간은 진입 없음
+  close_before_min: 20       # 마감 전 이 시간부터 신규 금지·전량 청산
+  daily_stop_pct: 0.01       # 단타 일일 실현손실(NAV 비중 합) 한도 — 닿으면 그날 중단
+  judge: false               # 분 단위 LLM 판정자(scalp-judge, haiku): 신호마다 GO/NO_GO — 켜면 판정 없이는 진입 안 함
+  judge_daily_cap: 60        # 판정 호출 하루 상한 (분석 세션 상한과 별도)
+  judge_timeout_s: 45        # 이 시간 안에 판정이 안 오면 버림(진입 안 함)
+  judge_max_drift_pct: 0.003 # 판정을 기다리는 사이 신호가보다 0.3% 넘게 움직이면 버림
+  judge_hold_every_min: 5    # 보유 중 유지/조기 청산 조언 주기(조언은 조기 청산만 — 손절·마감은 파이썬)
+  digest_every_min: 30       # 진입·청산 텔레그램 묶음 주기 (첫 묶음은 바로, 중단·마감은 즉시)
+
 # 주간 리밸런스: 최근 결정(lookback_days 안)의 target_weight 대비 band_pct(비중) 넘게 벗어난 보유만
 # 되돌린다(TRIM 먼저). 시각은 schedule.yaml rebalance
 rebalance:

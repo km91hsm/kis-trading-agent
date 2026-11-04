@@ -447,3 +447,12 @@ def test_rebalance_injects_sector_of_from_scan_port(ctx, conn, monkeypatch):
     ctx.ports = {k: v for k, v in ctx.ports.items() if k != "scan"}
     _run(ctx, dry_run=True)
     assert got and all(s is None for s in got)
+
+
+def test_run_excludes_scalp_open_tickers_via_port(ctx, conn):
+    """A9: 단타가 들고 있는 종목은 리밸런스 다리에서 뺀다(`ScalpPort.open_tickers`)."""
+    _seed(conn)
+    ctx.ports = {**ctx.ports, "scalp": SimpleNamespace(open_tickers=lambda *a: {"005930"})}
+    out = _run(ctx)
+    assert all(leg["ticker"] != "005930" for leg in out["legs"])
+    assert [o.ticker for o in ctx.brokers["paper-main"].orders] == ["000660"]
