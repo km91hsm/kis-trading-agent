@@ -46,7 +46,7 @@ def _job(job_id):
 # --- 선언 -----------------------------------------------------------------------------------
 
 
-def test_feature_declares_three_jobs_and_three_queue_kinds():
+def test_feature_declares_three_jobs_and_four_queue_kinds():
     specs = {j.id: j for j in FEATURE.jobs}
     assert list(specs) == ["kr_fo_session", "kr_fo_monitor", "kr_fo_reconcile"]
     s, m, r = specs["kr_fo_session"], specs["kr_fo_monitor"], specs["kr_fo_reconcile"]
@@ -59,7 +59,7 @@ def test_feature_declares_three_jobs_and_three_queue_kinds():
     assert not any(j.per_market for j in FEATURE.jobs)
     assert (s.body, m.body, r.body) == (jobs.session_job, jobs.monitor_job, jobs.reconcile_job)
     kinds = {q.kind: q for q in FEATURE.queue_kinds}
-    assert list(kinds) == ["fo_session", "fo_reevaluate", "fo_close"]
+    assert list(kinds) == ["fo_session", "fo_reevaluate", "fo_close", "fo_reconcile"]
     got = {k: (q.params_model, q.label, q.lane, q.priority, q.trading, q.restart_requeue, q.body)
            for k, q in kinds.items()}  # fmt: skip
     assert got == {
@@ -68,6 +68,8 @@ def test_feature_declares_three_jobs_and_three_queue_kinds():
                           jobs.reevaluate_request),
         "fo_close": (jobs.FoCloseParams, "파생 청산", "fast", 10, True, False,
                      jobs.close_request),
+        "fo_reconcile": (jobs.EmptyParams, "파생 대사", "fast", 0, False, True,
+                         jobs.reconcile_request),
     }  # fmt: skip
 
 
@@ -266,6 +268,14 @@ def test_reconcile_job_syncs_reconciles_and_refreshes(conn):
     n = conn.execute("SELECT COUNT(*) FROM fo_nav_snapshot WHERE account_id = ?",
                      (ACCT,)).fetchone()[0]  # fmt: skip
     assert n == 1
+
+
+def test_reconcile_request_shares_job_body(conn):
+    """큐 kind `fo_reconcile`(catch_up="queue" 의 대상)은 잡과 같은 대조를 돈다."""
+    assert jobs.reconcile_request(daemon_deps(at(16, 40), accounts=[]), {}, None) == {
+        "skipped": "파생 계좌 없음"}
+    out = jobs.reconcile_request(daemon_deps(at(16, 40)), {}, None)
+    assert out["accounts"][ACCT]["snapshot"] is True
 
 
 def test_fo_ctx_master_failure_is_empty(conn, monkeypatch):

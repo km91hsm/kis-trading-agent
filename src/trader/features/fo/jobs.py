@@ -1,4 +1,4 @@
-"""fo 데몬 잡 3개·큐 kind 3개와 본문(A5, 옛 `daemon.py` 의 `kr_fo_session`·`kr_fo_monitor` 등록과
+"""fo 데몬 잡 3개·큐 kind 4개와 본문(A5, 옛 `daemon.py` 의 `kr_fo_session`·`kr_fo_monitor` 등록과
 `_fo_session_body`·`_fo_monitor_job`·`_fo_reevaluate_request`·`_fo_close_request`·
 `_release_fo_trigger`, 옛 `jobs.py` 의 `FoReevaluateParams`·`FoCloseParams`).
 
@@ -295,6 +295,11 @@ def close_request(deps: Any, params: dict, progress: Any) -> dict:
         conn.close()
 
 
+def reconcile_request(deps: Any, params: dict, progress: Any) -> dict:
+    """큐 `fo_reconcile`(`kr_fo_reconcile` 의 `catch_up="queue"` 대상): 잡과 같은 대조 본문."""
+    return reconcile_job(deps, None)
+
+
 # --- 선언 -----------------------------------------------------------------------------------
 
 FO_SESSION = JobSpec(
@@ -319,4 +324,5 @@ QUEUE_KINDS = (
     QueueKind("fo_reevaluate", FoReevaluateParams, "파생 재평가", "reeval", 10, True, False,
               reevaluate_request),  # fmt: skip
     QueueKind("fo_close", FoCloseParams, "파생 청산", "fast", 10, True, False, close_request),
+    QueueKind("fo_reconcile", EmptyParams, "파생 대사", "fast", 0, False, True, reconcile_request),
 )
