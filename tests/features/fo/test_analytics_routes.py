@@ -105,6 +105,9 @@ def test_system_fo_context_triggers_and_flags(project):
         control.set_flag(conn, f"fo_ref_iv:{pos.id}", 0.21)
         control.set_flag(conn, f"fo_pending_entry:{ACCT}", {"date": TODAY.isoformat()})
         control.set_flag(conn, f"fo_replace:{ACCT}:{pos.id}", {"x": 1})
+        # 접두는 정확히(LIKE `_` 와일드카드 없음), 정수 아닌 접미는 건너뛴다
+        control.set_flag(conn, f"foXreplace:{ACCT}:77", {"x": 1})
+        control.set_flag(conn, f"fo_replace:{ACCT}:abc", {"x": 1})
     finally:
         conn.close()
     f = c.get("/api/system/fo").json()["accounts"][0]["flags"]

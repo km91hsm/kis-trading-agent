@@ -35,13 +35,15 @@ def _flags(conn: sqlite3.Connection, a: Any, status: dict, today_iso: str) -> di
         iv = control.get_flag(conn, f"fo_ref_iv:{p.id}")
         if iv is not None:
             ref_iv[str(p.id)] = iv
-    replace = sorted(
-        int(r["key"].rsplit(":", 1)[1])
-        for r in conn.execute(
-            "SELECT key, value FROM control WHERE key LIKE ?", (f"fo_replace:{a.id}:%",)
-        )
-        if json.loads(r["value"]) is not None
-    )
+    prefix = f"fo_replace:{a.id}:"
+    replace = []
+    for r in conn.execute(
+        "SELECT key, value FROM control WHERE substr(key, 1, ?) = ?", (len(prefix), prefix)
+    ):
+        suffix = r["key"][len(prefix):]
+        if suffix.isdigit() and json.loads(r["value"]) is not None:
+            replace.append(int(suffix))
+    replace.sort()
     return {
         "fo_verified": status["verified"],
         "fo_halted": status["halted"],

@@ -3,7 +3,8 @@
 
 from trader.features.saveticker.cli import app
 from trader.features.saveticker.job import JOB
-from trader.features.saveticker.routes import RESTART_FLAG, ROUTERS
+from trader.features.saveticker.restart import RESTART_FLAG
+from trader.features.saveticker.routes import ROUTERS
 from trader.features.saveticker.settings import SECTION
 from trader.kernel.registry.types import Feature, NavItem
 

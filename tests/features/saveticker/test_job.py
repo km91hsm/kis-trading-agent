@@ -223,3 +223,26 @@ def test_extension_restart_uses_popup_instead_of_legacy_reset(project, monkeypat
     assert cleared == [] and _flag(deps) is None
     assert "Chrome" in out["restart"]
     assert any("Chrome" in m for m in deps.notifier.msgs)
+
+
+def test_restart_failure_is_logged_and_flag_still_deleted(project, monkeypatch, caplog):
+    """재시작 행동이 실패해도(예: 파일 권한) 실패를 로그·알림으로 남기고 플래그는 지운다 — 매 틱
+    반복하지 않는다. 행동이 끝나기 전 죽으면 플래그가 남아 다음 틱에 다시 한다
+    (clear_blocks 멱등)."""
+    _patch(monkeypatch)
+    calls = []
+
+    def boom(home):
+        calls.append(home)
+        raise PermissionError("runtime 쓰기 거부")
+
+    monkeypatch.setattr(automation, "clear_blocks", boom)
+    deps = _deps(project)
+    _request_restart(deps)
+    with caplog.at_level("ERROR", logger="trader.saveticker"):
+        out = job.watch(deps, None)
+    assert len(calls) == 1 and _flag(deps) is None
+    assert out["restart"].startswith("실패")
+    assert any("다시 시작" in r.getMessage() and r.exc_info for r in caplog.records)
+    assert any("실패" in m for m in deps.notifier.msgs)
+    assert "restart" not in job.watch(deps, None) and len(calls) == 1

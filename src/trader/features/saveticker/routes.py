@@ -15,13 +15,14 @@ from fastapi import APIRouter, Depends, Request
 
 from trader.features.saveticker import automation
 from trader.features.saveticker.paths import credentials_path, home
+from trader.features.saveticker.restart import EXTENSION_NOTE, RESTART_FLAG
 from trader.kernel.ledger import control
 from trader.kernel.web.auth import actor_of, require_same_origin, require_token
 
 logger = logging.getLogger("trader.saveticker")
 
-RESTART_FLAG = "saveticker_restart_requested"
-EXTENSION_NOTE = "일반 Chrome 확장 수집 모드 — Chrome 확장 아이콘(팝업)에서 재개해 주세요"
+__all__ = ["EXTENSION_NOTE", "RESTART_FLAG", "ROUTERS"]
+
 WRITE = [Depends(require_token), Depends(require_same_origin)]
 
 system_saveticker_router = APIRouter(prefix="/system", tags=["system"])
