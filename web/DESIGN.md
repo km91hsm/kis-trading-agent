@@ -7,6 +7,7 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 - 스타일: 차분한 슬레이트 중립 바탕 + 의미색만 채색(Financial Dashboard 팔레트 계열). 장식·그라데이션·글로우 없음.
 - 테마: 라이트·다크 둘 다 1급. 기본은 OS 설정, 토글로 고정(`localStorage` 키 `trader.theme`, `<html data-theme>`).
 - 글꼴: Pretendard(조사 추천 Fira 는 한글 미지원이라 대체). 기본 16px, 줄 1.5. 숫자는 `.num`(`tabular-nums`, 줄바꿈 없음). 코드·ID 는 `--font-mono`.
+- 글꼴 로딩: `pretendardvariable-dynamic-subset.css`(가변 1벌, unicode-range 조각 woff2 — 쓰는 범위만 받음, 빌드 용량 축소).
 - 아이콘: 인라인 SVG 만. 이모지 아이콘 금지.
 
 ## 색 토큰 (라이트 / 다크) — 글자 대비는 `--bg` 기준(`--bg-elev` 위도 4.5:1 이상)
@@ -21,6 +22,7 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 - 상태 배지 바탕 `--ok-bg`·`--warn-bg`·`--fail-bg` 위 글자 대비: 라이트 6.5/6.4/5.3, 다크 8.6/9.5/5.8.
 - 색만으로 뜻을 전하지 않는다: 상태·등락에는 글자(정상/주의/실패, ▲▼ 또는 +/−)를 함께 쓴다.
 - hex 는 `tokens.css` 에만. 컴포넌트·base.css 는 변수만.
+- 예외: `index.html` 의 `theme-color` 두 값(#F8FAFC/#0B1120)은 `--bg` 라이트/다크를 그대로 옮긴 것 — 함께 바꾼다.
 
 ## 간격·모양·모션
 - 간격 4px 격자: `--space-1/2/3/4/6/8` = 4/8/12/16/24/32px.

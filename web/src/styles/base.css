@@ -1,5 +1,5 @@
 /* 기본 스타일 — 리셋·글꼴·숫자·포커스·모션. 색은 tokens.css 변수만 쓴다. */
-@import "pretendard/dist/web/static/pretendard.css";
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
 *,
 *::before,
