@@ -75,6 +75,19 @@ def test_status_section_declared_and_isolated(conn):
     assert len(bad) == 1 and "조회 실패" in bad[0]
 
 
+def test_status_section_omitted_without_fo_account_or_rows(conn):
+    """fo 계좌도 fo_positions·fo_decisions 행도 없으면 절 생략(빈 목록). 파생 계좌가 원장
+    `accounts` 에 있으면 행이 없어도 절을 보인다(M10 최종 리뷰 M1)."""
+    from tests.features.fo._support import account
+    from trader.features.accounts import modes
+
+    sec = status.STATUS_SECTION
+    ctx = SimpleNamespace(conn=conn, now=lambda: at(10))
+    assert sec.render(ctx) == []
+    modes.sync_accounts(conn, [account()])  # 파생 계좌를 원장 accounts 에 동기화
+    assert sec.render(ctx) == ["- 보유 없음", "- 오늘 결정: 없음"]
+
+
 def test_telegram_fo_status_line(conn):
     assert parse_command("/fo") == ("fo", None)
     _held_position(conn, make_ctx(conn, now=at(10)), qty=2)

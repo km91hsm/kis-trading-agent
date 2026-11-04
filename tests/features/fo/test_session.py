@@ -78,7 +78,8 @@ def _real_fo_session(conn, at):
 
 def test_fo_session_cap_blocks(project, conn):
     """A6: `extra_cap_key=None` 이라 커널은 fo 상한을 모른다 — fo `session.run` 이 세션을 띄우기
-    전에 오늘 `runs.kind='fo'` 세션 수 ≥ `fo.session_cap` 이면 커널 `PipelineError`(러너 0회)."""
+    전에 오늘 `runs.kind='fo'` 세션 수 ≥ `fo.session_cap` 이면 세션을 띄우지 않고 `skipped` 사유
+    (`check_cap` 의 `PipelineError` 문구)를 돌려준다(러너 0회, M10 최종 리뷰 I1)."""
     seen: list = []
 
     def runner(*a, **kw):
@@ -88,8 +89,10 @@ def test_fo_session_cap_blocks(project, conn):
     deps = _deps(conn, session_cap=2)
     for _ in range(2):
         _real_fo_session(conn, NOW)
+    out = fo_session.run(**deps, session_runner=runner)
+    assert "상한" in out["skipped"] and out["session"] is None and out["inputs_path"] is None
     with pytest.raises(PipelineError, match="상한"):
-        fo_session.run(**deps, session_runner=runner)
+        fo_session.check_cap(deps["settings"], conn, NOW)
     assert seen == []
     assert "_fo_decision" not in list_checkpoints(market_dir(D, "KR"))
     # 다른 종류 세션은 fo 상한에 세지 않는다

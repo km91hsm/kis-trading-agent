@@ -355,6 +355,18 @@ def record_only(ctx: FoExecContext, mode: str, paused: bool) -> str | None:
     return None
 
 
+# accounts `modes.REAL_FO_OFF_NOTE` 와 같은 문구(fo 는 accounts 를 import 하지 않는다 — 경계 규칙)
+REAL_FO_OFF_NOTE = "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)"
+
+
+def real_guard(account: Any, hold: str | None) -> str | None:
+    """실전 파생 계좌면 포트 정책이 어긋나(auto) 있어도 기록만(`hold or "mode=off"`) — `run_leg`
+    의 env 가드와 같은 2중 방어(M10 최종 리뷰 I3). 모의 계좌는 `hold` 그대로."""
+    if account.env != "paper":
+        return hold or "mode=off"
+    return hold
+
+
 def _today(ctx: FoExecContext) -> tuple[datetime, date]:
     now = ctx.now()
     return now, now.astimezone(KST).date()
@@ -386,6 +398,18 @@ def _transmit(
     알림. 응답 없음은 unknown 으로 남긴다(주문이 살아 있을 수 있다)."""
     conn = ctx.conn
     legs, key = LegStore(conn), leg_key(leg_id)
+    if account.env != "paper":
+        # 2중 방어(I3): 실전 파생 계좌는 보내지 않는다 — 예약된 다리는 전송 전 취소로 되돌린다
+        with store.tx(conn):
+            store.cancel_prepared(conn, leg_id)
+            if is_entry(intent):
+                store.release_if_empty(conn, position_id, REAL_FO_OFF_NOTE)
+        result = {
+            "leg_id": leg_id, "position_id": position_id, "intent": intent, "status": "recorded",
+            "record_only": "mode=off", "note": REAL_FO_OFF_NOTE, "mode": mode, **extra,
+        }  # fmt: skip
+        _ckpt(ctx, today, stage, result)
+        return result
     multiplier = ctx.settings.fo.product_cfg().multiplier
     sent_at = ctx.now().isoformat()
     claimed = legs.claim(key, now=sent_at)
@@ -973,7 +997,7 @@ def recall_entries(
     if not legs:
         return rr
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = record_only(ctx, mode, _paused(ctx))
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
     if hold is not None:
         rr.pending = len(legs)
         rr.errors.append(f"회수 보류({hold})")
@@ -1113,7 +1137,7 @@ def reduce(
     _, today = _today(ctx)
     stage = stage or f"_fo_order_{account.id}_{intent.lower()}_{pos.id}"
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = record_only(ctx, mode, _paused(ctx))
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
     if hold is not None:
         r = {"position_id": pos.id, "intent": intent, "status": "recorded", "record_only": hold,
              "reason": reason}  # fmt: skip
@@ -1290,7 +1314,7 @@ def continue_reduce(
         return {"position_id": pos.id, "status": "missing"}
     leg = store.get_leg(conn, cur.active_reduce_leg_id) if cur.active_reduce_leg_id else None
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = record_only(ctx, mode, _paused(ctx))
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
     if leg is None or not leg.live:
         if hold is not None:
             return finalize(ctx, cur)

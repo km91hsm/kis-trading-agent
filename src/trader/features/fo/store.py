@@ -83,7 +83,8 @@ def tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     try:
         yield conn
     except BaseException:
-        conn.execute("ROLLBACK")
+        if conn.in_transaction:  # SQLite 가 이미 자동 롤백했으면 ROLLBACK 이 원래 예외를 가린다
+            conn.execute("ROLLBACK")
         raise
     else:
         conn.execute("COMMIT")

@@ -292,6 +292,30 @@ def test_session_dry_run_fake(project, install, monkeypatch):
     assert out["session"]["fake"] is True and out["decision"]["decision"]["intent"] == "HOLD"
 
 
+def test_session_cap_reached_prints_skipped(project, install, monkeypatch):
+    """세션 상한에 닿으면 트레이스백 없이 `{"skipped": …}` JSON 한 줄·exit 0(M10 최종 리뷰 I1)."""
+    from trader.kernel.ledger import runs
+    from trader.kernel.session import calls
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    (project / "config" / "settings.yaml").write_text(
+        "fo:\n  enabled: true\n  session_cap: 1\n", encoding="utf-8"
+    )
+    install(Env())
+    conn = db.connect()
+    db.init_schema(conn, all_migrations(discover()))
+    run_id = runs.start(conn, "fo", "KR")  # 오늘(실제 시계) fo 세션 1건 — FAKE 아님
+    calls.start_call(conn, run_id, agent="orchestrator", model="sonnet", ticker="", market="KR",
+                     session_id="s1", now=datetime.now(UTC))  # fmt: skip
+    runs.finish(conn, run_id, "error", error=None)
+    conn.close()
+    r = _run("session", "--dry-run")
+    assert r.exit_code == 0, r.stdout + (r.stderr or "")
+    assert r.exception is None
+    out = _last_json(r)
+    assert "상한" in out["skipped"] and out["session"] is None
+
+
 def test_monitor_once_dry_run_ticks(project, install, monkeypatch):
     install(Env())
     seen = {}

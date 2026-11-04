@@ -76,9 +76,10 @@ def run(
     asof: datetime | None = None,
 ) -> dict:
     """{date, inputs_path, session, decision, skipped, dry_run, forced_dry_run}. `skipped` 가 있으면
-    세션을 띄우지 않은 사유(오늘 결정 있음·계좌 없음·enabled=false∧보유 없음). 상한은
-    `PipelineError`(A6). 운영일 `date` 는 생략하면 `asof`(없으면 now)의 KST 날짜
-    (`run_store.run_date_for`). `session_runner` 는 커널 `run_session` 과 같은 서명(테스트 주입)."""
+    세션을 띄우지 않은 사유(오늘 결정 있음·계좌 없음·enabled=false∧보유 없음·세션 상한 — 상한은
+    `check_cap` 의 `PipelineError` 를 잡아 사유로 돌려준다, A6). 운영일 `date` 는 생략하면
+    `asof`(없으면 now)의 KST 날짜(`run_store.run_date_for`). `session_runner` 는 커널
+    `run_session` 과 같은 서명(테스트 주입)."""
     at = asof or now()
     date = date or run_store.run_date_for(MARKET, at)
     out: dict[str, Any] = {
@@ -98,7 +99,12 @@ def run(
     if not settings.fo.enabled and not any(store.open_positions(conn, a.id) for a in accounts):
         out["skipped"] = "fo.enabled=false ∧ 보유 포지션 없음(세션 생략)"
         return out
-    check_cap(settings, conn, now())
+    try:
+        check_cap(settings, conn, now())
+    except PipelineError as e:  # 커널 러너의 PipelineError 분기와 대칭(M10 최종 리뷰 I1)
+        log.warning("파생 세션 생략: %s", e)
+        out["skipped"] = str(e)
+        return out
     ctx = FoExecContext(
         settings=settings, accounts=accounts, conn=conn, brokers=dict(acc.fo_brokers()),
         market_client=acc.market_client(), master=master, state=state, now=now,

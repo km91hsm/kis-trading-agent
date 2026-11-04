@@ -32,7 +32,7 @@ from trader.features.accounts import modes
 from trader.features.fo import executor, positions, store
 from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
 from trader.kernel.broker.fake import FakeFoBroker, FakeMarket
-from trader.kernel.broker.models import FoFill, FoOrderable, OrderResult
+from trader.kernel.broker.models import FoFill, FoOrderable, FoOrderRequest, OrderResult
 from trader.kernel.execution import ledger
 from trader.kernel.execution.types import OrderBookkeepingError
 from trader.kernel.ledger import control
@@ -383,6 +383,7 @@ def test_real_fo_account_records_only(conn):
     out = executor.run_leg(ctx, real, env())
     broker = ctx.brokers[real.id]
     assert out[0]["status"] == "recorded" and out[0]["record_only"] == "mode=off"
+    assert out[0]["mode"] == "off"  # 대체값(`hold or "mode=off"`)이 아니라 포트 정책 자체가 off
     assert broker.orders == [] and broker.cancelled == []
     assert ckpt("_fo_risk_check_real-fo")["data"]["record_only"] == "mode=off"
     assert store.open_positions(conn, real.id) == []
@@ -431,6 +432,85 @@ def test_transmit_reflects_leg_and_order_atomically(conn, monkeypatch):
     assert (leg.status, leg.order_id, leg.order_no) == ("sending", None, "FAKE-1")
     assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
     assert not conn.in_transaction
+
+
+def test_transmit_rolls_back_order_when_bind_fails(conn, monkeypatch):
+    """`insert_order` 는 성공했는데 그 뒤 `LegStore.bind` 가 실패하면 같은 `store.tx` 가 통째로
+    되돌아간다 — orders 0행, 다리는 sending·`order_id` 없음, `OrderBookkeepingError`. 접수번호는
+    롤백 뒤 복구용으로 다리에 다시 남긴다(옛 동작, 단계 5 리뷰)."""
+    from trader.features.fo.legstore import LegStore
+
+    ctx = make_ctx(conn)
+    inserted: list[int] = []
+    real_insert = ledger.insert_order
+
+    def spy(*a, **k):
+        oid = real_insert(*a, **k)
+        inserted.append(oid)
+        return oid
+
+    def boom(self, key, **kw):
+        raise RuntimeError("bind")
+
+    monkeypatch.setattr(ledger, "insert_order", spy)
+    monkeypatch.setattr(LegStore, "bind", boom)
+    with pytest.raises(OrderBookkeepingError) as ei:
+        executor.run_leg(ctx, account(), env())
+    assert inserted and ei.value.order_no == "FAKE-1"
+    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    pos = store.open_positions(conn, ACCT)[0]
+    leg = store.legs_of(conn, pos.id)[0]
+    assert (leg.status, leg.order_id) == ("sending", None)
+    assert leg.order_no == "FAKE-1"  # 롤백 뒤 except 경로가 번호만 다시 기록
+    assert not conn.in_transaction
+
+
+def test_real_fo_account_never_transmits_even_if_policy_auto(conn):
+    """2중 방어(M10 최종 리뷰 I3): 포트 정책이 잘못 auto 를 돌려줘도 실전 파생 계좌는
+    `reduce`·`recall_entries`·`continue_reduce`·`_transmit` 모두 브로커 주문·취소 없이 기록만."""
+    real = account(env="real", mode="auto")
+    ctx = make_ctx(conn, acct=real)
+    ctx.ports["accounts"].policy = lambda c, a: ("auto", None)
+    broker = ctx.brokers[real.id]
+    with store.tx(conn):
+        pid = store.insert_position(
+            conn, account_id=real.id, code="105W11", kind="FUTURES", contract_side="LONG",
+            direction="LONG", vehicle="FUTURES", status="resizing", qty_target=4, qty_held=2,
+            leverage_used=0.35, stop_pt=Decimal("345"), nav_at_open=NAV,
+            decision_date=TODAY.isoformat(),
+        )  # fmt: skip
+        entry = store.insert_leg(conn, position_id=pid, account_id=real.id, intent="RESIZE_UP",
+                                 round=0, attempt=1, qty=2, price=Decimal("350.5"),
+                                 order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, entry, status="accepted", order_no="E1")
+    broker.balance = balance([holding(qty=2)])
+    pos = store.get_position(conn, pid)
+    r = executor.reduce(ctx, real, pos, intent="STOP", qty=None, reason="손절")
+    assert (r["status"], r["record_only"]) == ("recorded", "mode=off")
+    rr = executor.recall_entries(ctx, real, pid, reason="t")
+    assert rr.pending == 1 and rr.cancelled == 0 and "회수 보류(mode=off)" in rr.errors
+    with store.tx(conn):
+        red = store.insert_leg(conn, position_id=pid, account_id=real.id, intent="CLOSE",
+                               round=0, attempt=1, qty=2, price=None, order_type="MARKET")
+        store.set_leg(conn, red, status="accepted", order_no="R1")
+        cur = store.get_position(conn, pid)
+        store.transition(conn, pid, expected_version=cur.version, active_reduce_leg_id=red)
+    c = executor.continue_reduce(ctx, real, store.get_position(conn, pid))
+    assert (c["status"], c["record_only"]) == ("recorded", "mode=off")
+    with store.tx(conn):
+        prep = store.insert_leg(conn, position_id=pid, account_id=real.id, intent="CLOSE",
+                                round=1, attempt=1, qty=2, price=None, order_type="MARKET")
+    t = executor._transmit(
+        ctx, real, leg_id=prep, position_id=pid,
+        req=FoOrderRequest(code="105W11", side="SELL", qty=2, order_type="MARKET", price=None),
+        ref_price=Decimal("350"), mode="auto", stage="_fo_order_real-fo_t", today=TODAY,
+        intent="CLOSE", extra={},
+    )  # fmt: skip
+    assert (t["status"], t["record_only"]) == ("recorded", "mode=off")
+    assert store.get_leg(conn, prep).status == "cancelled"
+    assert broker.orders == [] and broker.cancelled == []
+    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    assert {x.status for x in store.legs_of(conn, pid) if x.id in (entry, red)} == {"accepted"}
 
 
 # --- 포트 배선(M10 ruling 2) ----------------------------------------------------------------

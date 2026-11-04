@@ -85,9 +85,24 @@ def lines(conn: sqlite3.Connection, now: datetime) -> list[str]:
     return out
 
 
+def has_fo(conn: sqlite3.Connection) -> bool:
+    """파생 계좌(`accounts.asset='fo'`)나 fo_positions·fo_decisions 행이 하나라도 있으면 True."""
+    return any(
+        conn.execute(sql).fetchone() is not None
+        for sql in (
+            "SELECT 1 FROM accounts WHERE asset = 'fo' LIMIT 1",
+            "SELECT 1 FROM fo_positions LIMIT 1",
+            "SELECT 1 FROM fo_decisions LIMIT 1",
+        )
+    )
+
+
 def render(ctx: Any) -> list[str]:
-    """`/status` 절 본문. 조회가 깨져도 /status 는 계속된다(오류 한 줄)."""
+    """`/status` 절 본문. 파생 계좌도 fo 원장 행도 없으면 빈 목록(절 생략, M10 최종 리뷰 M1).
+    조회가 깨져도 /status 는 계속된다(오류 한 줄)."""
     try:
+        if not has_fo(ctx.conn):
+            return []
         return lines(ctx.conn, ctx.now())
     except Exception as e:  # noqa: BLE001 - 상태 조회는 실패해도 /status 는 계속
         logger.exception("파생 상태 조회 실패")
