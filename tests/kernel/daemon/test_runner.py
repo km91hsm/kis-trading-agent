@@ -22,7 +22,7 @@ from trader.kernel.registry import discover
 from trader.kernel.registry.contracts import all_migrations
 from trader.kernel.registry.types import Feature, JobSpec
 
-BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup")
+BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup", "ops_check")
 NOW = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
 

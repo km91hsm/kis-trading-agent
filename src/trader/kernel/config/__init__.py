@@ -11,6 +11,7 @@ from trader.kernel.config.loader import load, memo_load
 from trader.kernel.config.secrets import Secrets, account_prefix, load_secrets
 from trader.kernel.config.sections import ConfigFile, Section, SectionRegistry
 from trader.kernel.config.time import KST
+from trader.kernel.ops.settings import OpsCheckSchedule
 
 Env = Literal["paper", "real"]
 
@@ -115,6 +116,7 @@ KERNEL_SECTIONS: tuple[Section, ...] = (
     Section("settings", "anonymize", bool, lambda: False),
     Section("schedule", "job_queue", JobQueueSchedule, JobQueueSchedule),
     Section("schedule", "telegram_poll", TelegramPollSchedule, TelegramPollSchedule),
+    Section("schedule", "ops_check", OpsCheckSchedule, OpsCheckSchedule),
     Section("schedule", "ledger_backup", str, lambda: "17:10"),
 )
 

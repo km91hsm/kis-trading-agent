@@ -216,3 +216,12 @@ def test_contracts_reject_duplicate_or_misnamed_area():
     assert "health 영역 key 중복: alpha" in msgs
     ok = [a2, replace(beta, health_areas=(HealthArea("beta", f),))]
     assert contracts.check(ok, roots=[OK_ROOT]) == []
+
+
+def test_contracts_reject_kernel_reserved_area_key():
+    """기능 영역 key 가 커널 내장 영역(jobs·llm·orders)과 겹치면 오류."""
+    alpha, beta = _ok()
+    f = lambda ctx: []  # noqa: E731
+    clash = replace(alpha, id="orders", health_areas=(HealthArea("orders", f),))
+    msgs = contracts.check([clash, beta], roots=[OK_ROOT])
+    assert "기능 orders 의 health 영역 key 'orders' 는 커널 예약 key 입니다" in msgs

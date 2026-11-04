@@ -153,12 +153,14 @@ def test_orders_area_unknown_stale_approvals_rate_limiter(conn, make_ctx, monkey
     conn.commit()
     got = _keys(areas.check_orders(make_ctx(ports=ports)))
     assert got["orders.unknown"].level == "warning" and got["orders.unknown"].count == 1
-    assert got["orders.unknown"].link == "/orders?status=unknown"
+    assert got["orders.unknown"].link == "/"
     assert got["orders.stale"].level == "watch" and got["orders.stale"].count == 1
     assert got["orders.approvals_expired"].level == "watch"
     assert got["orders.approvals_expired"].count == 1
     assert got["orders.approvals_pending"].level == "watch"
     assert got["orders.approvals_pending"].count == 1
+    assert {got[k].link for k in ("orders.stale", "orders.approvals_expired",
+                                  "orders.approvals_pending")} == {"/"}  # fmt: skip
     assert "orders.rate_limiter" not in got
 
     no_port = _keys(areas.check_orders(make_ctx()))
@@ -172,6 +174,7 @@ def test_orders_area_unknown_stale_approvals_rate_limiter(conn, make_ctx, monkey
     got = _keys(areas.check_orders(make_ctx()))
     hit = got["orders.rate_limiter"]
     assert hit.level == "warning" and "real" in hit.text
+    assert hit.link == "/system"
 
 
 def test_orders_stale_today_after_close(conn, make_ctx):

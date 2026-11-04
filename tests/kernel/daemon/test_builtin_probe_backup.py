@@ -18,7 +18,8 @@ def _settings(**probe):
 
 def test_builtin_jobs_include_probe_and_backup():
     by_id = {j.id: j for j in bj.BUILTIN_JOBS}
-    assert set(by_id) == {"telegram_poll", "usage_probe", "ledger_backup"}
+    assert set(by_id) == {"telegram_poll", "usage_probe", "ledger_backup", "ops_check"}
+    assert by_id["ops_check"].schedule_key == "ops_check.interval_s"
     assert by_id["usage_probe"].interval_s == 1800
     assert by_id["ledger_backup"].schedule_key == "ledger_backup"
     assert by_id["ledger_backup"].trigger == "cron"

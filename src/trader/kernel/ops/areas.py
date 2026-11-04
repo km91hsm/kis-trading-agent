@@ -12,7 +12,7 @@ from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon.heartbeat import read_status
 from trader.kernel.execution.ledger import day_bounds, pending_approvals
 from trader.kernel.execution.types import dead_status_sql
-from trader.kernel.ops.health import Item, OpsContext
+from trader.kernel.ops.types import Item, OpsContext
 from trader.kernel.registry.types import HealthArea
 from trader.kernel.session import usage
 from trader.kernel.session.calls import FAKE_MODEL, ORCHESTRATOR, sessions_today
@@ -26,7 +26,7 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
     out: list[Item] = []
     st = read_status(ctx.state, ctx.now, list(ctx.jobs))
     if not st["alive"]:
-        text = "데몬이 꺼져 있음 (daemon.lock 없음·pid 사망)"
+        text = "데몬이 꺼져 있어요 (daemon.lock 없음·pid 사망)"
         out.append(Item("jobs.daemon", "critical", text, link="/system"))
     elif st["stale"]:
         out.append(
@@ -149,6 +149,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 f"KIS 교차 프로세스 레이트리미터 꺼짐({d['env']}, {d['error']}) — 데몬과 "
                 "분석 도구가 초당 한도를 나누지 못해 EGW00201 이 날 수 있음. "
                 "state/kis_rate.db 권한·디스크 확인",
+                link="/system",
             )
         )
     n_unknown = int(
@@ -162,7 +163,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.unknown",
                 "warning",
                 f"응답 없는 주문(unknown) {n_unknown}건 — 체결 동기화가 확정하지 못함, KIS 앱 확인",
-                link="/orders?status=unknown",
+                link="/",
                 count=n_unknown,
             )
         )
@@ -173,7 +174,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.stale",
                 "watch",
                 f"마감 뒤에도 정리되지 않은 주문 {stale}건 (체결 동기화·대조 확인)",
-                link="/orders",
+                link="/",
                 count=stale,
             )
         )
@@ -189,7 +190,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.approvals_expired",
                 "watch",
                 f"24시간 안에 만료된 승인 요청 {n_exp}건 (응답 없이 지나감)",
-                link="/account",
+                link="/",
                 count=n_exp,
             )
         )
@@ -200,7 +201,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.approvals_pending",
                 "watch",
                 f"승인 대기 {len(pending)}건 (30분 안에 승인·거부)",
-                link="/account",
+                link="/",
                 count=len(pending),
             )
         )

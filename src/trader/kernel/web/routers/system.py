@@ -50,8 +50,9 @@ def _deps(request: Request) -> Any:
 
 
 @router.get("/health")
-def health_view(request: Request) -> dict:
-    return health.evaluate(_deps(request))
+def health_view(request: Request, live: int = Query(0, ge=0, le=1)) -> dict:
+    """운영 점검 결과. 기본은 데몬 캐시(신선할 때), `?live=1` 이면 지금 직접 판정."""
+    return health.evaluate(_deps(request), live=bool(live))
 
 
 @router.get("/status")

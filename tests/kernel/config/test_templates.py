@@ -33,3 +33,13 @@ def test_accounts_template_is_placeholder_only():
     text = (templates_dir() / "config" / "accounts.yaml").read_text(encoding="utf-8")
     code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     assert '"00000000"' in code and "env: real" not in code  # 자리표시자만, 실전 계좌 없음
+
+
+def test_schedule_template_has_ops_check():
+    """`ops_check` 내장 잡 주기는 schedule.yaml 이 정한다(템플릿에 키가 있어야 한다)."""
+    from trader.kernel.ops.settings import OpsCheckSchedule
+
+    path = templates_dir() / "config" / "schedule.yaml"
+    assert "ops_check:" in path.read_text(encoding="utf-8")
+    cfg = load("schedule", build_registry(discover()), path=path)
+    assert isinstance(cfg.ops_check, OpsCheckSchedule) and cfg.ops_check.interval_s == 1800

@@ -3,6 +3,8 @@ job_queue:
   interval_s: 10     # 큐 틱(job_queue·fast·reeval·info) 주기(초)
 telegram_poll:
   interval_s: 30     # 텔레그램 명령 폴링·알림 재전송 주기(초)
+ops_check:
+  interval_s: 1800   # 운영 점검 주기(초, 60 이상): 결과는 웹 헬스·텔레그램 격상 알림
 ledger_backup: "17:10"   # 원장 백업(KST, 매일): 14일치 일별 + 8주치 월요일 보관
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)

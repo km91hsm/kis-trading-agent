@@ -31,6 +31,31 @@ def test_check_isolates_failing_area(make_ctx):
     assert list(r["areas"]) == ["jobs", "llm", "orders", "boom"]
 
 
+def test_check_isolates_bad_return_values(make_ctx):
+    """영역이 Item 이 아닌 값을 주거나 단계가 LEVELS 밖이면 그 영역만 `{key}.error` warning."""
+    junk = Feature(id="junk", tier="service", health_areas=(HealthArea("junk", lambda ctx: [1]),))
+    odd = Feature(
+        id="odd",
+        tier="service",
+        health_areas=(HealthArea("odd", lambda ctx: [Item("odd.x", "boom", "이상한 단계")]),),
+    )
+    scalar = Feature(id="sc", tier="service", health_areas=(HealthArea("sc", lambda ctx: 3),))
+    r = health.check(make_ctx(features=[junk, odd, scalar]))
+    by = {i["key"]: i for i in r["items"]}
+    for key in ("junk", "odd", "sc"):
+        assert by[f"{key}.error"]["level"] == "warning" and r["areas"][key] == "warning"
+    assert "odd.x" not in by
+    assert r["areas"]["jobs"] == "critical" and r["level"] == "critical"
+
+
+def test_kernel_areas_match_reserved_keys():
+    from trader.kernel.ops.areas import KERNEL_AREAS
+    from trader.kernel.ops.types import RESERVED_AREA_KEYS
+
+    assert health.KERNEL_AREAS is KERNEL_AREAS
+    assert {a.key for a in KERNEL_AREAS} == set(RESERVED_AREA_KEYS) == {"jobs", "llm", "orders"}
+
+
 def test_check_prefixes_foreign_keys(make_ctx, caplog):
     x = Feature(
         id="x",

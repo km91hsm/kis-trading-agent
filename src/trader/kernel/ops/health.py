@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Iterable, Sequence
+from dataclasses import asdict
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from trader.kernel.config.time import KST
 from trader.kernel.ledger.control import get_flag, set_flag
 from trader.kernel.notify import messages
-from trader.kernel.registry.types import Feature
+from trader.kernel.ops.areas import KERNEL_AREAS
+from trader.kernel.ops.types import Item, OpsContext
 
 logger = logging.getLogger("trader.ops")
 
@@ -32,29 +32,6 @@ RESULT_FLAG = "ops_result"  # 마지막 점검 결과 전체(웹·텔레그램·
 ALERT_FROM = "warning"  # 이 단계 이상 항목은 새로 생기면 단계가 같아도 알린다
 
 
-@dataclass
-class Item:
-    key: str  # 영역.세부 (예: orders.unknown)
-    level: str
-    text: str
-    link: str | None = None  # 웹 경로 (조치 필요 행이 가리킨다)
-    count: int | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class OpsContext:
-    """영역 check 함수가 받는 읽기 전용 문맥. ports 는 부트가 조립한 포트(`accounts` 등)."""
-
-    conn: sqlite3.Connection
-    settings: Any
-    state: Path
-    now: datetime
-    ports: Mapping[str, Any]
-    jobs: Sequence[Any]
-    features: Sequence[Feature]
-
-
 def worst(levels: Iterable[str]) -> str:
     return max(levels, key=LEVELS.index, default="ok")
 
@@ -65,6 +42,15 @@ def _run_area(area: Any, ctx: OpsContext) -> list[Item]:
     except Exception as e:  # noqa: BLE001 - 영역 하나가 점검 전체를 막지 않는다
         logger.warning("점검 영역 %s 실패", area.key, exc_info=True)
         return [Item(f"{area.key}.error", "warning", f"점검 실패: {type(e).__name__}: {e}")]
+    bad = [
+        it
+        for it in got
+        if not isinstance(it, Item) or it.level not in LEVELS or not isinstance(it.key, str)
+    ]
+    if bad:
+        logger.warning("점검 영역 %s 가 잘못된 항목을 돌려줌: %r", area.key, bad[:3])
+        text = f"점검 실패: 잘못된 항목 {len(bad)}건 ({type(bad[0]).__name__})"
+        return [Item(f"{area.key}.error", "warning", text)]
     prefix = f"{area.key}."
     for it in got:
         if not it.key.startswith(prefix):
@@ -76,8 +62,6 @@ def _run_area(area: Any, ctx: OpsContext) -> list[Item]:
 def check(ctx: OpsContext) -> dict:
     """{level, label, at, areas:{영역: level}, items:[비-ok Item], actions:[link 있는 비-ok]}.
     영역 순서는 커널 내장 영역 뒤 `ctx.features` 순서의 `health_areas`."""
-    from trader.kernel.ops.areas import KERNEL_AREAS  # areas 가 Item 을 import 한다(순환 회피)
-
     items: list[Item] = []
     areas: dict[str, str] = {}
     for area in (*KERNEL_AREAS, *(a for f in ctx.features for a in f.health_areas)):
