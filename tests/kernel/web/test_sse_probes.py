@@ -57,6 +57,21 @@ def test_control_probe_ignores_cursor_like_keys_and_same_value(project):
         conn.close()
 
 
+def test_control_probe_ignores_fx_cache_record(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    try:
+        set_flag(conn, "regime:KR", {"state": "bear"})
+        s0 = sse.KERNEL_PROBES["control"](deps)
+        set_flag(conn, "fx_cache:USDKRW", {"rate": "1300.5", "fail_at": NOW.isoformat()})
+        set_flag(conn, "fx_cache:USDKRW", {"rate": "1301.0", "fail_at": "2026-11-02T00:05:00Z"})
+        assert sse.KERNEL_PROBES["control"](deps) == s0
+        set_flag(conn, "regime:KR", {"state": "bull"})  # 일반 키는 여전히 지문을 바꾼다
+        assert sse.KERNEL_PROBES["control"](deps) != s0
+    finally:
+        conn.close()
+
+
 def test_jobs_probe_sees_new_request_and_status_change(project):
     deps = ledger_deps(project)
     s0 = sse.KERNEL_PROBES["jobs"](deps)

@@ -52,7 +52,7 @@ def _q(deps: WebDeps, sql: str) -> str:
 
 
 # 화면이 읽지 않는 내부 커서·TTL 플래그(매 수집·60초마다 값이 바뀐다) — control 지문에서 뺀다
-CONTROL_CURSOR_LIKE = ("telegram_offset", "news_trigger_at:%", "ws_session_busy:%")
+CONTROL_CURSOR_LIKE = ("telegram_offset", "news_trigger_at:%", "ws_session_busy:%", "fx_cache:%")
 _CONTROL_WHERE = " AND ".join(f"key NOT LIKE {p!r}" for p in CONTROL_CURSOR_LIKE)
 
 
