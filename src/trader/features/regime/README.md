@@ -31,7 +31,7 @@
 
 ## 웹 (M11, `routes.py`)
 
-- `GET /system/regime?market=`(옛 `system.regime_status`, 토큰 없음): 헤지 설정 요약(enabled·max/min_weight_pct·leverage·bear_min_signals·market_session·instruments) + `regime.summary`(시장별 state·signals·values·오늘 시장 판단 `view`·적중률 `scorecard`, 오늘 = `deps.now()` 의 KST 날짜) + 킬스위치 `{on, reason, source, accounts, at}`(옛 응답에 없던 것). market 을 주면 그 시장만(운영하지 않는 시장은 400). nav `system/regime`(국면).
+- `GET /system/regime?market=`(옛 `system.regime_status`, 토큰 없음): 헤지 설정 요약(enabled·max/min_weight_pct·leverage·bear_min_signals·market_session·instruments) + `regime.summary`(시장별 state·signals·values·오늘 시장 판단 `view`·적중률 `scorecard`, 오늘 = `deps.now()` 의 KST 날짜) + 킬스위치 `{on, reason, source, accounts, at}`(옛 응답에 없던 것). market 을 주면 그 시장만(운영하지 않는 시장은 400). nav `system/regime`(국면). SSE 키는 evaluation 의 `market_views` 가 시장 판단 변화를 알린다(regime 자체 키 없음).
 
 ## 공개면 (`api.py`)
 

@@ -17,6 +17,7 @@
 - `GET /accounts/{id}/tax-lots?market=&year=&format=csv`(옛 `portfolio.lots_router`, 표시 전용). 현물 계좌만(그 외 404).
 - 「성과」(`analytics_routes.py`, 모양은 `analytics_view.py`, 토큰 없음): `GET /analytics/performance?account_id=&market=&days=`(옛 `/performance`, `cached_report` — 입력 버전에 `account_nav`/`fo_nav_snapshot` 을 더했다: 새 원장은 NAV 를 positions_snapshot 이 아니라 그쪽에 둔다)·`/analytics/performance/compare?days=`(계좌·**시장**마다 한 행 `{account_id, env, lane, market, currency, metrics|null}`; lane 은 asset fo → fo, 그 외 spot — 단타 계좌는 여기서 구분할 수 없어 spot 으로 보인다; NAV 이력이 없으면 `metrics: null`)·`/analytics/shadow?market=`·`/analytics/calibration?limit=`(`calibration_runs` 최근 — 첫 독자)·`/analytics/memory?q=&limit=1..200`(q = 종목: 그 종목의 최근 엔트리 상황 벡터·시장으로 `store.retrieve`, 없으면 최근 엔트리; 상황 벡터는 내보내지 않는다)·`/analytics/rl/experiments[/{version}]`·`/rl/shadow`·`/rl/report`(옛 `rl.py`). 계좌는 `ports["accounts"]`(현물 + 파생, 모르면 400).
 - SSE `market_views`·`shadow`·`memory`(옛 `sse.py` `_q` 지문, noisy 아님). nav `performance/performance-overview`(성과)·`performance/memory`(복기).
+- 웹 알려진 차이: nav id 는 플랜의 `overview` 가 아니라 `performance-overview`(accounts 가 `overview` 를 가져 전역 유일 규칙, T11-R4). 비교 행은 (계좌, 시장)마다(T11-R5). `/analytics/memory` 의 `q` 는 종목 코드다(자유 텍스트 검색 없음, T11-R6). 스펙 §2.5 의 `/rl/*` 는 `/analytics/rl/*` 이고 `/ml/*` 는 ml 기능이 그대로 `/ml/models` 로 낸다.
 
 ## 알려진 차이
 

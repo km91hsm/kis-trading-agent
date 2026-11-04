@@ -10,7 +10,7 @@
 - 잡·큐(`jobs.py`): 잡 `ml_train`(주간 재학습, heavy)·`universe_members`(매일 06:40 KST 기록)·`features_snapshot`(매일 06:30 KST 피처 스토어 스냅샷, heavy), 큐 kind `features_backfill`·`features_snapshot`·`features_derive`·`ml_train`(전부 slow 레인), 훅 `daemon.bootstrap` → 시세 클라이언트가 있는데 피처 스토어가 비어 있으면 `features_backfill`(3년)+`ml_train` 을 큐에 넣는다(백필이 24시간 안에 실패했으면 다시 넣지 않음, 어떤 오류도 올리지 않음).
 - 포트(`ports.py`): `ports["ml"]` = `MlPortImpl`(커널 `MlPort` — 피처 행·퀀트 리포트·피어 중앙값 `peer_medians`·모델 상태). 다른 기능은 `api.py` 만 import 한다.
 - CLI(`cli.py`, `uv run trader ml --help`): `ml train|tune|models|promote|demote`, `ml features snapshot|backfill|derive`.
-- 웹 자원(`routes.py`, 토큰 없음, `ml.api` 이름만 사용): `GET /features/latest?market=` → `{market, asof, columns, rows}`(종목별 최신 행 + `sectors.yaml` 섹터, NaN → null, 깨진 sectors.yaml 은 섹터만 비움), `GET /features/history?market=&ticker=&days=120`(5~1000, 유니버스에 없는 종목 404), `GET /ml/models` → `{models: [요약], active, note}`, `GET /ml/models/{version}`(`YYYYMMDD_HHMMSS` 아니면 400, 없으면 404) → 메타 전체. SSE 키 없음. 메뉴 `data/features "지표·모델"`. `api.ticker_history` 를 공개면에 더했다.
+- 웹 자원(`routes.py`, 토큰 없음, `ml.api` 이름만 사용): `GET /features/latest?market=` → `{market, asof, columns, rows}`(종목별 최신 행 + `sectors.yaml` 섹터, NaN → null, 깨진 sectors.yaml 은 섹터만 비움), `GET /features/history?market=&ticker=&days=120`(5~1000, 유니버스에 없는 종목 404), `GET /ml/models` → `{models: [요약], active, note}`, `GET /ml/models/{version}`(`YYYYMMDD_HHMMSS` 아니면 400, 없으면 404) → 메타 전체. SSE 키 없음. 메뉴 `data/features "지표·모델"`. 스펙 §2.5 는 `/ml/*` 를 analytics 아래에 묶었으나 경로는 `/ml/models` 그대로다(자원 대응은 `tests/kernel/web/test_endpoint_map.py` 의 별칭표). `api.ticker_history` 를 공개면에 더했다.
 
 ## 규약
 

@@ -36,6 +36,7 @@
 | `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl {train\|models\|report\|promote\|demote}` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL 사이저 (`reflect` 는 `FAKE_CLAUDE=1` 없이 금지, `rl promote\|demote` 는 사용자 전용) |
 | `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/daily` 일일 리포트·`/watch add\|remove\|list` 관심종목 포함) |
 | `uv run trader dev gen-sse-keys [--check]` | `web/src/generated/sse-keys.ts` 재생성 / 최신 여부 검사 |
+| `uv run trader dev gen-nav [--check]` | `web/src/generated/nav.ts`(기능 `nav` 메뉴) 재생성 / 최신 여부 검사 |
 | `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build` | 프런트 검증 (CI 와 같음) |
 
 ## 아키텍처 불변식
@@ -47,7 +48,7 @@
 - **기능 등록은 한 곳**: `features/<x>/feature.py` 의 `FEATURE`. 잡·라우터·CLI·설정 섹션·마이그레이션·SSE 키는 모두 거기서 선언하고 커널이 수집한다. (`registry.contracts.check`)
 - **마이그레이션**: 기능별 파일에 두되 버전은 전역 오름차순, 추가만(기존 항목 수정·삭제·중간 삽입 금지). 위반은 `ledger.migrations.check` 가 막는다.
 - **설정 섹션**: yaml 키는 `config` 의 섹션 레지스트리에 등록한 pydantic 모델(`extra="forbid"`)로만 읽는다. yaml 키를 더하면 모델과 `templates/config/*.yaml` 을 같이 바꾼다(`tests/kernel/config/test_templates.py` 가 강제).
-- **SSE 키**: `web/src/generated/sse-keys.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
+- **생성 파일**: `web/src/generated/sse-keys.ts`·`nav.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys`·`dev gen-nav` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file`·`test_gen_nav_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
 - **데몬 잡 설정**: 잡 시각은 `schedule.yaml` 의 점 경로 키(`JobSpec.schedule_key`)로 가리킨다. 시각을 코드에 박지 않는다.
 - **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (스펙 §2.3)
 - **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. 예외 하나: 파생(fo)은 다리 상태·`orders` 한 트랜잭션 때문에 자체 실행기(`features/fo/executor.py`, `LegStore`)를 쓴다. (스펙 §2.1, `features/fo/README.md` A1)
@@ -55,6 +56,7 @@
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
 - **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (피처 `latest_rows(asof)`·유니버스 PIT·라벨 엠바고)
 - **paused**: `control` 의 `paused` 가 켜지면 신규 주문 경로는 모두 멈춘다.
+- **웹은 원장 + 큐만**: 웹 라우터는 브로커·알림을 쥐지 않고(주문 집행 포트는 `build_web_deps` 가 뺀다) 쓰기는 원장·`job_requests` 뿐, 집행은 데몬이 한다. 예외는 `quotes` 시세 조회. 실전 쓰기는 `confirm == 계좌 id`. (`docs/architecture.md` web)
 
 ## 금지사항
 
@@ -82,7 +84,7 @@
 
 ## 기능을 더하는 법
 
-`features/<x>/` 에 `feature.py settings.py migrations.py cli.py routes.py jobs.py messages.py health.py README.md api.py` 골격을 두고(필요한 것만), `feature.py` 의 `FEATURE` 한 곳에서 선언한다. 다른 파일을 고칠 필요가 없어야 하며(예외 둘: 새 설정 키는 `templates/config/*.yaml` 에 더하고, SSE 키를 더하면 `dev gen-sse-keys` 로 `web/src/generated/sse-keys.ts` 를 다시 만든다), 고쳐야 한다면 커널 결함으로 본다(커널을 고치거나 이슈로 올린다). 다른 기능이 쓸 공개면은 `api.py` 에만 둔다.
+`features/<x>/` 에 `feature.py settings.py migrations.py cli.py routes.py jobs.py messages.py health.py README.md api.py` 골격을 두고(필요한 것만), `feature.py` 의 `FEATURE` 한 곳에서 선언한다. 다른 파일을 고칠 필요가 없어야 하며(예외 둘: 새 설정 키는 `templates/config/*.yaml` 에 더하고, SSE 키·nav 를 더하면 `dev gen-sse-keys`·`dev gen-nav` 로 `web/src/generated/` 를 다시 만든다), 고쳐야 한다면 커널 결함으로 본다(커널을 고치거나 이슈로 올린다). 다른 기능이 쓸 공개면은 `api.py` 에만 둔다.
 
 ## 포인터
 

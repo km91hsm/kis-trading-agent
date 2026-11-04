@@ -11,7 +11,7 @@
 
 - `GET /system/saveticker`(옛 `system.saveticker_status`, 토큰 없음): `configured`(계정 파일 유무, 확장 모드는 계정 불필요) + `automation.status`. 계정·값은 돌려주지 않는다.
 - `POST /system/saveticker/restart`(토큰 + 같은 출처, T11-R2): control `saveticker_restart_requested = {at, actor}` 를 세우고 `control_log`(channel web)에 남길 뿐 수집 프로세스·파일은 건드리지 않는다. 확장 모드면 응답 `note` 로 Chrome 확장 팝업 재개를 안내한다. 데몬 잡 `watch` 가 다음 틱에 `consume_restart` 로 소비한다: 확장 백엔드는 정지 기록을 지우지 않고 안내 알림만(옛 409 "popup instead of legacy reset"), 그 외는 `automation.clear_blocks` 후 같은 틱에 띄우기 판정. 플래그는 행동 뒤에 지운다 — 행동 중 죽으면 남아 다음 틱에 다시(`clear_blocks` 멱등), 예외로 실패하면 로그·알림 뒤 지운다(수집이 꺼져 있으면 남아 있다가 켜진 뒤 소비). 상수는 `restart.py`(데몬 잡이 라우터 모듈을 import 하지 않게).
-- 제어 네임스페이스 `saveticker_restart_requested`, nav `system/saveticker`(저장소).
+- 제어 네임스페이스 `saveticker_restart_requested`, nav `system/saveticker`(저장소), SSE 키 없음.
 - 옛 재시작은 `require_direct_local`(이 PC 직접 접속)이었으나 이제 토큰 + 같은 출처다(웹이 직접 실행하지 않고 요청만 남기므로).
 
 ## 공개면 (`api.py`)

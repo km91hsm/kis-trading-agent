@@ -39,4 +39,6 @@
 
 `tests/features/quotes/`: `test_hub.py`(옛 허브 18건 + 세션 양보 2건, 가짜 연결·시계), `test_routes.py`(옛 자원 13건 + poll·파생·키 없음), `test_fx.py`(kis→macro→404·하루 캐시·FRED), `test_names_charts.py`(종목명·검색·일봉 마커·선·분봉 락·캐시). 네트워크 없음.
 
+웹 알려진 차이: KIS 환율 원천은 주입점 `fx.kis_fx` 뿐이라 운영 환율은 FRED(`FRED_API_KEY` 있을 때)에서 온다(T9-R5, KIS TR 확인 뒤 연결). 미국 시세 전용 경로(`/quotes/us`)는 없다 — `GET /quotes?market=US`(R4). 웹 프로세스에서 KIS 클라이언트를 쥐는 유일한 예외(표시 전용, 앱키·토큰 캐시 공유 `TRADER_KIS_SHARED_DIR`).
+
 옛 대비: `/names` 는 캐시 적중을 원장 `ticker_names` 에 쓰지 않는다(웹은 읽기 전용). 차트는 계좌 필터(`account_id`)·결정·트리거 마커를 빼고 체결 마커 + 손절·목표 선으로 바꿨다.
