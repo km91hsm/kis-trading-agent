@@ -7,7 +7,7 @@ import { Empty } from "../../components/Empty";
 import { fmtPct } from "../../lib/format";
 import { navSeries } from "../accounts/positions.ts";
 import { actionLabel } from "../decision/decision.ts";
-import { benchmarkLines, type Days, type FilterAccount, type Filters, type Perf } from "./performance.ts";
+import { benchmarkLines, normalizeNav, type Days, type FilterAccount, type Filters, type Perf } from "./performance.ts";
 
 const PERIODS: Days[] = ["30", "90", "365"];
 
@@ -48,8 +48,9 @@ export function FilterBar({ accounts, filters, onChange }: { accounts: FilterAcc
 }
 
 export function OverviewBody({ perf }: { perf: Perf }) {
-  const nav = useMemo(() => navSeries(perf), [perf]);
   const extra = useMemo(() => benchmarkLines(perf).map((b) => ({ label: b.label, data: b.series })), [perf]);
+  // 벤치마크는 시작=1.0 지수라 NAV(금액)도 같은 기준으로 정규화해 겹친다. 벤치마크가 없으면 금액 그대로.
+  const nav = useMemo(() => (extra.length ? normalizeNav(navSeries(perf)) : navSeries(perf)), [perf, extra]);
   const m = perf.metrics;
   const stats: [string, string][] = [
     ["수익률", fmtPct(m?.return ?? null)],
@@ -69,7 +70,7 @@ export function OverviewBody({ perf }: { perf: Perf }) {
         ))}
       </div>
       {nav.length ? <Chart series={nav} extra={extra} /> : <Empty title="NAV 기록 없음" />}
-      {extra.length ? <p className="perf-legend">벤치마크: {extra.map((x) => x.label).join(" · ")}</p> : null}
+      {extra.length ? <p className="perf-legend">NAV·벤치마크 (시작=1.0): {extra.map((x) => x.label).join(" · ")}</p> : null}
       <p className="perf-dist">
         판정 분포{" "}
         <span className="chips">

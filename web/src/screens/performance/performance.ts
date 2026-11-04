@@ -145,6 +145,13 @@ export function memoryRows(mem: MemoryResp): MemoryRow[] {
   }));
 }
 
+/** 첫 값 기준 성장 지수(시작=1.0) — 벤치마크(시작=1.0)와 같은 축에 겹치기 위해. 첫 값이 0·없음이면 빈 배열. */
+export function normalizeNav(series: { time: string; value: number }[]): { time: string; value: number }[] {
+  const base = series[0]?.value;
+  if (!base) return [];
+  return series.map((p) => ({ time: p.time, value: p.value / base }));
+}
+
 const BENCH: [keyof Perf["benchmarks"], string][] = [
   ["one_over_n", "1/N 균등"],
   ["buy_and_hold", "매수 후 보유"],

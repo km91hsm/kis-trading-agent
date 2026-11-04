@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { fixtureCalibration, fixtureCompare, fixtureMemory, fixturePerfAccounts, fixturePerformance, fixtureShadow } from "../../test/fixtures/performance";
-import { benchmarkLines, calibrationBins, compareRows, defaultFilters, memoryRows, shadowRows, type Compare, type Calibration, type MemoryResp, type Perf, type Shadow } from "./performance.ts";
+import { benchmarkLines, calibrationBins, normalizeNav, compareRows, defaultFilters, memoryRows, shadowRows, type Compare, type Calibration, type MemoryResp, type Perf, type Shadow } from "./performance.ts";
 
 describe("성과 순수 함수", () => {
   test("defaultFilters: 첫 계좌·그 첫 시장·30일, 계좌 없으면 빈 값", () => {
@@ -44,5 +44,11 @@ describe("성과 순수 함수", () => {
     const rows = shadowRows(fixtureShadow() as Shadow);
     expect(rows[0]).toMatchObject({ key: "candidates_1n", label: "같은 후보 균등(1/N)", n: 25, mean: "0.40%", ci: "0.10% ~ 0.70%", note: "" });
     expect(rows[1]).toMatchObject({ key: "quant_topn", n: 5, ci: "—", note: "표본 부족(n < 20)" });
+  });
+
+  test("normalizeNav: 첫 값 기준 1.0, 첫 값 0·빈 입력은 빈 배열", () => {
+    expect(normalizeNav([{ time: "2026-11-04", value: 10_000_000 }, { time: "2026-11-05", value: 10_500_000 }]).map((p) => p.value)).toEqual([1, 1.05]);
+    expect(normalizeNav([])).toEqual([]);
+    expect(normalizeNav([{ time: "2026-11-04", value: 0 }, { time: "2026-11-05", value: 5 }])).toEqual([]);
   });
 });

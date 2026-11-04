@@ -107,10 +107,19 @@ describe("성과 화면", () => {
     expect(overview.textContent).toContain("75.00%");
     // 본 NAV 1개 + 벤치마크 2개(quant null 은 건너뜀)
     expect(m.chart.addSeries).toHaveBeenCalledTimes(3);
+    // 벤치마크가 있으면 NAV 를 시작=1.0 으로 정규화해 같은 축에(첫 setData 가 본선)
+    const navData = (m.series.setData.mock.calls[0] as unknown[])[0] as { value: number }[];
+    expect(navData[0].value).toBe(1);
+    expect(navData.at(-1)!.value).toBeCloseTo(1.0523);
+    expect(overview.textContent).toContain("시작=1.0");
     expect(section("compare")!.textContent).toContain("NAV 없음");
     expect(section("calibration")!.textContent).toContain("표본 부족");
     expect(section("shadow")!.textContent).toContain("표본 부족(n < 20)");
     expect(section("rl")!.textContent).toContain("rl-007");
+    // realized_*_sum 은 weight × price_return 합(분수 수익률) → 퍼센트
+    expect(section("rl")!.textContent).toContain("실현 합 RL 2.10% · LLM 1.50%");
+    // bias 는 signal 평균 − realized_sign 평균(차이값, 퍼센트 아님)
+    expect(section("calibration")!.textContent).toContain("+0.12");
     const perf = callsTo("/analytics/performance")[0];
     expect(perf.search).toBe("?account_id=paper-1&market=KR&days=30");
   });
@@ -154,6 +163,14 @@ describe("성과 화면", () => {
     expect(last.searchParams.get("q")).toBe("005930");
     expect(mem.textContent).toContain("워밍업");
     expect(mem.textContent).toContain("임베딩 장애");
+  });
+
+  test("벤치마크가 없으면 NAV 는 금액 그대로", async () => {
+    const none = { one_over_n: { return: null, series: [] }, buy_and_hold: { return: null, series: [] }, quant: null, benchmark_universe: [] };
+    await mount(routes({ "GET /api/analytics/performance": fixturePerformance({ benchmarks: none }) }));
+    expect(m.chart.addSeries).toHaveBeenCalledTimes(1);
+    const navData = (m.series.setData.mock.calls[0] as unknown[])[0] as { value: number }[];
+    expect(navData[0].value).toBe(10_000_000);
   });
 
   test("fo 계좌가 없으면 파생 scorecard 절을 숨기고 부르지 않는다", async () => {
