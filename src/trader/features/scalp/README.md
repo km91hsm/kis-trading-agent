@@ -59,6 +59,12 @@
 - 판정자 md 의 `# 공통 규칙` 6줄은 괄호 앞 접두만 briefing 과 같다(괄호 보충은 scalp 스키마 용어) — 저장소 규약(`test_agents_contract.py`).
 - 커널 `core.cancel` 은 잔량(`qty − SUM(fills.qty)`)으로 취소한다(T6-R1). 잔량 0 이면 브로커를 부르지 않고 `ok False`·"남은 수량 없음(전량 체결)".
 
+## M10 에서 고친 것 (M9 F3·F4)
+
+- F3 `adopt_entry_orders` SQL 이 `origin = 'scalp'` 로 한정한다 — 다른 origin 의 진입 주문을 단타 보유로 흡수하지 않는다.
+- F4 `scalp_body` 는 `ctx.gates["monitor"]` 가 없으면 틱을 건너뛴다(`{"skipped": "monitor 게이트 없음"}`, fail-closed). 판정자 `judge_for` 의 단일체 생성은 `threading.Lock` 안에서 한다.
+- F1(`skip_accounts` 에 `policy != "auto"` 추가)은 검토 후 **보존**했다 — approve 모의 계좌는 사용자가 의도한 승인 모드다. 틱 단위 브로커·시세 캐시는 M12.
+
 ## 보존한 옛 결함
 
 고치지 않고 옛 동작 그대로 둔 것(플랜 Global Constraints):
@@ -66,7 +72,7 @@
 - 판정자 `pending()` 은 죽은 코드라 이식하지 않았다(동작 차이 없음).
 - `hedge.enabled` 가 꺼져 있으면 bear 국면 게이트·전략가 제안 게이트가 함께 무력하다.
 - 마감 청산은 익절·손절 평가 뒤에 본다.
-- `adopt_entry_orders` 는 계좌로 필터하지 않는다.
+- `adopt_entry_orders` 는 계좌로 필터하지 않는다(origin 만 필터 — 위 F3).
 - `scalp.enabled=false` 로 끄면 `scalp_body` 가 tick 전에 돌아가 열린 포지션의 청산·이월이 멈추고, 다음 날부터 `open_tickers` 에도 보이지 않아 리밸런스 제외에서 빠진다(옛 `_scalp_body` 동일). 끄기 전에 포지션을 비워야 한다.
 - `approve` 모드 모의 계좌: `skip_accounts` 는 env·시장만 보고 모드는 보지 않으므로 단타 진입이 승인 요청으로 쌓이고, 사람이 승인하면 scalp 가 추적하지 않는 매수가 생긴다(옛 동일). 수정 후보 `skip_accounts` 에 `policy != "auto"` → M10 이연.
 - `adopt_entry_orders`·`adopt_exit_orders` 는 `origin='scalp'` 로 거르지 않아 같은 계좌·종목의 결정 없는 다른 주문(rebalance·stop·hedge)을 흡수할 수 있다(플랜 "옛 SQL 그대로"). 원장 `origin` 열로 한 줄 필터 가능 → M10 이연.

@@ -23,6 +23,7 @@ def test_selfcheck_json_has_version_and_features(project):
         "accounts",
         "briefing",
         "evaluation",
+        "fo",
         "ingest",
         "ml",
         "regime",

@@ -29,7 +29,9 @@ def scalp_body(ctx: Any, job: Any) -> dict:
     if acc is None:
         return {"error": "accounts 포트 없음"}
     gate = (getattr(ctx, "gates", None) or {}).get("monitor")
-    reason = gate(job) if gate else None
+    if gate is None:  # 창·휴장을 거를 수 없으면 틱을 돌리지 않는다(fail-closed)
+        return {"skipped": "monitor 게이트 없음"}
+    reason = gate(job)
     if reason:
         return {"skipped": reason}
     conn = ctx.conn_factory()

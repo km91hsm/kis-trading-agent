@@ -6,18 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from trader.features.evaluation import tools
-
-FAKE_MODEL = "fake"
-
-
-def _call(agent: str) -> dict:
-    return {
-        "agent": agent,
-        "model": FAKE_MODEL,
-        "session_id": "fake",
-        "cost_usd": 0.0,
-        "duration_ms": 0,
-    }
+from trader.kernel.session.fake import fake_call
 
 
 def run_fake_reflect(lane_ctx: Any, spec: Any) -> list[str]:
@@ -43,7 +32,7 @@ def run_fake_reflect(lane_ctx: Any, spec: Any) -> list[str]:
         market=spec.market,
         date=spec.date,
         payload=payload,
-        call_meta=_call("reflector"),
+        call_meta=fake_call("reflector"),
     )
     if not r["ok"]:
         raise RuntimeError(r["error"])

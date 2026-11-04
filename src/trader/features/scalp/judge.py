@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -268,42 +269,44 @@ def judge_summary(
 # --- 데몬 단일체 -------------------------------------------------------------------------
 
 _JUDGE: ScalpJudge | None = None
+_LOCK = threading.Lock()
 
 
 def judge_for(deps: Any) -> ScalpJudge:
     """판정자 스레드 풀은 데몬 수명 동안 하나(재시작이면 제출 중 판정은 버려진다 = 진입 안 함).
     판정 스레드는 원장 연결을 따로 연다(SQLite 연결은 스레드 사이에 공유하지 않는다)."""
     global _JUDGE
-    if _JUDGE is None:
-        cfg = deps.settings.scalp
+    with _LOCK:
+        if _JUDGE is None:
+            cfg = deps.settings.scalp
 
-        def ask(payload: dict, schema: type) -> Any:
-            if deps.stop_event.is_set():  # 종료 중: 대기열에 남은 판정은 띄우지 않는다
-                return None
-            conn = deps.conn_factory()
-            try:
-                ok, reason = usage.session_allowance(
-                    conn, deps.settings, kind="scalp_judge", now=deps.now()
-                )
-                if not ok:
-                    logger.info("단타 판정 생략: %s", reason)
+            def ask(payload: dict, schema: type) -> Any:
+                if deps.stop_event.is_set():  # 종료 중: 대기열에 남은 판정은 띄우지 않는다
                     return None
-                return quick.ask_json(
-                    deps.settings,
-                    conn,
-                    agent=AGENT,
-                    payload=payload,
-                    schema=schema,
-                    cap=cfg.judge_daily_cap,
-                    timeout_s=cfg.judge_timeout_s,
-                    now=deps.now,
-                    cancel=deps.stop_event,  # 종료 요청이면 실행 중인 claude 도 정리
-                    fake=lambda: FAKE_VERDICT if schema is ScalpVerdict else FAKE_ADVICE,
-                )
-            finally:
-                conn.close()
+                conn = deps.conn_factory()
+                try:
+                    ok, reason = usage.session_allowance(
+                        conn, deps.settings, kind="scalp_judge", now=deps.now()
+                    )
+                    if not ok:
+                        logger.info("단타 판정 생략: %s", reason)
+                        return None
+                    return quick.ask_json(
+                        deps.settings,
+                        conn,
+                        agent=AGENT,
+                        payload=payload,
+                        schema=schema,
+                        cap=cfg.judge_daily_cap,
+                        timeout_s=cfg.judge_timeout_s,
+                        now=deps.now,
+                        cancel=deps.stop_event,  # 종료 요청이면 실행 중인 claude 도 정리
+                        fake=lambda: FAKE_VERDICT if schema is ScalpVerdict else FAKE_ADVICE,
+                    )
+                finally:
+                    conn.close()
 
-        _JUDGE = ScalpJudge(ask)
+            _JUDGE = ScalpJudge(ask)
     return _JUDGE
 
 

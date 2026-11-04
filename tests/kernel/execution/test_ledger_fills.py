@@ -101,3 +101,16 @@ def test_open_limit_orders_today_excludes_dead(conn):
     assert all(isinstance(r, dict) for r in rows)
     rows = L.open_limit_orders_today(conn, ACCT, "KR", D, exclude_origins=())
     assert len(rows) == 4
+
+
+def test_insert_fill_commit_false_leaves_transaction_open(conn):
+    """`commit=False` 는 호출자 트랜잭션 안에서 쓴다 — 적재 뒤에도 트랜잭션이 열려 있고 rollback
+    하면 행이 사라진다(파생 체결 동기화가 다리 갱신과 한 트랜잭션으로 묶는다)."""
+    oid = _order(conn, created_at="2026-11-02T01:00:00+00:00")
+    fid = L.insert_fill(
+        conn, order_id=oid, account_id=ACCT, market="KR", ticker="005930", side="BUY", qty=2,
+        price=Decimal("100"), filled_at="2026-11-02T01:05:00+00:00", order_no="1", commit=False,
+    )  # fmt: skip
+    assert isinstance(fid, int) and conn.in_transaction
+    conn.rollback()
+    assert conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0] == 0

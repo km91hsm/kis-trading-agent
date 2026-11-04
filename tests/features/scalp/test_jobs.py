@@ -101,6 +101,13 @@ def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings,
     assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "일시정지"}
 
 
+def test_scalp_body_skips_when_monitor_gate_missing(make_deps):
+    """monitor 게이트가 없으면 창·휴장을 거를 수 없다 — 통과가 아니라 fail-closed."""
+    deps = make_deps()
+    deps.gates.pop("monitor")
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "monitor 게이트 없음"}
+
+
 def test_scalp_job_flushes_queued_digest_when_tick_is_skipped(make_deps, conn, project):
     """Codex 리뷰(T3): 묶음 알림이 outbox 에 남은 채 단타를 끄거나 창 밖·일시정지면 tick 이 돌지
     않아 영영 안 간다 → 잡이 건너뛸 때 그날 묶음만 보낸다."""

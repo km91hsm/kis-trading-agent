@@ -2,3 +2,4 @@
 # (계좌 전용 키를 쓰면 KIS_<ID>_CANO) 에 둔다. 실전 계좌는 mode: "off" 로 두고 CLI 로만 올린다.
 accounts:
   - {id: paper-main, env: paper, cano: "00000000", acnt_prdt_cd: "01", markets: [KR, US], mode: auto}
+# - {id: paper-fo, env: paper, cano: "00000000", acnt_prdt_cd: "03", markets: [KR], mode: auto, asset: fo}

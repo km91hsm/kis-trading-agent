@@ -17,12 +17,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from trader.features.regime.schemas import AnalystReport, DebateTurn, HedgeProposal
 from trader.kernel.ledger import control
 from trader.kernel.platform import paths
-from trader.kernel.session import debate, tooling
+from trader.kernel.session import tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import market_dir, read_checkpoint, write_checkpoint
 
@@ -58,36 +56,6 @@ def _bad_market(market: str) -> dict | None:
 
 def _market_turns(d: Path) -> dict[int, dict[str, DebateTurn]]:
     return tooling.load_turns(d, _MARKET_DEBATE_RE)
-
-
-def _schema_error(model: type, e: ValidationError) -> dict:
-    msgs = "; ".join(f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors())
-    return {"ok": False, "error": f"스키마 검증 실패({model.__name__}): {msgs}"}
-
-
-def _validate_payload(model: type, payload: dict) -> tuple[Any, dict | None]:
-    """pydantic 검증(HTML 엔티티 되돌림 포함). 실패면 (None, {"ok": False, "error"})."""
-    try:
-        return model.model_validate(tooling.unescape(payload)), None  # type: ignore[attr-defined]
-    except ValidationError as e:
-        return None, _schema_error(model, e)
-
-
-def _summarize_turns(d: Path, out_stage: str, pattern: re.Pattern[str]) -> dict:
-    """토론 턴 → 연구 요약(수렴 감시 포함) 체크포인트."""
-    turns = tooling.load_turns(d, pattern)
-    if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
-        return {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
-    final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
-    try:
-        summ = debate.research_summary(turns[0], turns[final_round], rounds=final_round)
-    except ValueError as e:
-        return {"ok": False, "error": str(e)}
-    path = write_checkpoint(d, out_stage, _wrap(summ, None))
-    return {
-        "ok": True, "path": str(path), "rounds": final_round,
-        "sycophantic": summ["sycophantic"], "preferred": summ["preferred"],
-    }  # fmt: skip
 
 
 def _market_report(d: Path) -> dict | None:
@@ -202,7 +170,7 @@ def market_write(
             "ok": False,
             "error": f"쓸 수 없는 단계: {stage} (허용: {', '.join(_MARKET_WRITABLE)})",
         }
-    v, err = _validate_payload(model, payload)
+    v, err = tooling.validate_payload(model, payload)
     if err:
         return err
     if m and (v.round != int(m.group(1)) or v.side != m.group(2)):
@@ -225,7 +193,7 @@ def market_summarize(ctx: MarketToolContext, *, market: str, date: date) -> dict
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
-    return _summarize_turns(d, "_market_summary", _MARKET_DEBATE_RE)
+    return tooling.summarize_turns(d, "_market_summary", _MARKET_DEBATE_RE)
 
 
 def submit_market_view(
@@ -247,7 +215,7 @@ def submit_market_view(
             "ok": False,
             "error": "_market_analyst 와 _market_summary 가 있어야 제출할 수 있습니다",
         }
-    view, err = _validate_payload(HedgeProposal, payload)
+    view, err = tooling.validate_payload(HedgeProposal, payload)
     if err:
         return err
     if view.market != market:

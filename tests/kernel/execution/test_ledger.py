@@ -295,6 +295,19 @@ def test_insert_and_get_trigger_roundtrip(conn):
     assert row["price"] == "71500" and row["handled_at"] is None
 
 
+def test_mark_and_get_trigger_promoted_for_fo(conn):
+    """`get_trigger`·`mark_trigger_handled` 는 커널(spot·fo 공용, M10 T7) — spot 은 재export."""
+    tid = ledger.insert_trigger(
+        conn, market="KR", ticker="105W11", kind="fo:move", detail={"position_id": 1},
+        price=None, decision_id=None, account_id="paper-fo", created_at="2026-10-27T01:00:00+00:00",
+    )  # fmt: skip
+    assert ledger.get_trigger(conn, tid)["detail"] == {"position_id": 1}
+    ledger.mark_trigger_handled(conn, tid, "보류: 일시정지", handled_at="2026-10-27T01:01:00+00:00")
+    got = ledger.get_trigger(conn, tid)
+    assert got["handled_at"] == "2026-10-27T01:01:00+00:00"
+    assert ledger.get_trigger(conn, 999) is None
+
+
 def test_decision_id_and_latest_decision_hydrate(conn):
     d1, d2 = date(2026, 10, 8), date(2026, 10, 9)
     _decision_row(conn, d1, w=1)

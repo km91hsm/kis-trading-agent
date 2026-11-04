@@ -30,3 +30,16 @@ def test_latest_positions_returns_latest_snapshot_rows(conn):
         ("000002", 2),
     ]
     assert latest_positions(conn, "acct-a", "US") is None
+
+
+def test_latest_positions_filters_asset(conn):
+    for asset, ticker in (("stock", "005930"), ("fo", "A0565")):
+        xledger.snapshot_positions(
+            conn, account_id="paper-main", d=date(2026, 10, 2), market="KR",
+            nav=Decimal("100"), cash=Decimal("10"), asset=asset,
+            positions=[{"ticker": ticker, "market": "KR", "qty": 1}],
+        )  # fmt: skip
+    stock = latest_positions(conn, "paper-main", "KR")
+    assert [p["ticker"] for p in stock["positions"]] == ["005930"]
+    fo = latest_positions(conn, "paper-main", "KR", asset="fo")
+    assert [p["ticker"] for p in fo["positions"]] == ["A0565"]

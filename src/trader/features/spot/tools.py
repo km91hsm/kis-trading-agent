@@ -217,40 +217,6 @@ def _mode_of(ctx: ToolContext, account: Any) -> str | None:
     return getattr(account, "mode", None)
 
 
-def _latest_positions(conn: sqlite3.Connection, account_id: str, market: str) -> dict | None:
-    """계좌·시장의 최신 positions_snapshot 날짜 포지션 + 그날 NAV·현금 (없으면 None)."""
-    row = conn.execute(
-        "SELECT MAX(date) AS d FROM positions_snapshot WHERE account_id=? AND market=? "
-        "AND asset='stock'",
-        (account_id, market),
-    ).fetchone()
-    day = row["d"] if row else None
-    nav_row = conn.execute(
-        "SELECT date, nav, cash FROM account_nav WHERE account_id=? AND market=? "
-        "ORDER BY date DESC, id DESC LIMIT 1",
-        (account_id, market),
-    ).fetchone()
-    if day is None and nav_row is None:
-        return None
-    positions: list[dict] = []
-    if day is not None:
-        positions = [
-            dict(r)
-            for r in conn.execute(
-                "SELECT ticker, market, qty, avg_price, current_price, eval_amount "
-                "FROM positions_snapshot WHERE account_id=? AND market=? AND asset='stock' "
-                "AND date=? AND ticker NOT LIKE '\\_CASH%' ESCAPE '\\' ORDER BY ticker",
-                (account_id, market, day),
-            ).fetchall()
-        ]
-    return {
-        "date": (nav_row["date"] if nav_row else day),
-        "nav": nav_row["nav"] if nav_row else None,
-        "cash": nav_row["cash"] if nav_row else None,
-        "positions": positions,
-    }
-
-
 def portfolio_context(ctx: ToolContext, market: str, d: date) -> dict | None:
     """계좌별 {env, mode, date, nav, cash, positions} (최신 스냅샷). 원장이 없으면 None.
     스냅샷은 마지막 관측값이라 `d` 로 자르지 않는다(US 운영일과 스냅샷 날짜가 어긋날 수 있다)."""
@@ -260,7 +226,7 @@ def portfolio_context(ctx: ToolContext, market: str, d: date) -> dict | None:
     for a in ctx.accounts:
         if market not in a.markets:
             continue
-        snap = _latest_positions(ctx.conn, a.id, market) or {}
+        snap = exec_ledger.latest_positions(ctx.conn, a.id, market) or {}
         out[a.id] = {
             "env": a.env,
             "mode": _mode_of(ctx, a),

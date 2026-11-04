@@ -216,11 +216,13 @@ def adopt_exit_orders(ctx: Any, pos: dict, acct: str, leg: dict) -> None:
 
 def adopt_entry_orders(ctx: Any, pos: dict) -> None:
     """임시 포지션(entering)의 진입 주문을 원장에서 찾아 다리로 만든다(진입 뒤 결정 없는 BUY).
+    `origin='scalp'` 주문만 흡수한다(같은 종목의 rebalance·stop 등 다른 BUY 는 제외).
     계좌로 거르지 않는다(옛 결함 보존)."""
     out: dict[str, dict] = {}
     for r in ctx.conn.execute(
         "SELECT id, account_id, qty FROM orders WHERE ticker=? AND side='BUY' "
-        "AND decision_id IS NULL AND mode != 'external' AND created_at >= ? ORDER BY id",
+        "AND decision_id IS NULL AND mode != 'external' AND origin = 'scalp' "
+        "AND created_at >= ? ORDER BY id",
         (pos["ticker"], pos["entry_at"]),
     ):
         leg = out.setdefault(r["account_id"], {"req": 0, "buy": [], "sell": []})

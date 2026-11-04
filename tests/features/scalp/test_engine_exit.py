@@ -318,6 +318,23 @@ def test_entering_position_adopts_ledger_buy_after_crash(scalp_ctx, market, brok
     assert len(brokers["paper-main"].orders) == 1  # 다시 사지 않았다
 
 
+def test_adopt_entry_orders_ignores_other_origins(scalp_ctx, market, brokers, conn, project):
+    """진입 흡수는 origin='scalp' 주문만 — 같은 종목의 결정 없는 다른 BUY(rebalance 등)는 제외."""
+    ctx = _ctx(scalp_ctx, market)
+    pos = _enter(ctx, project)
+    scalp_id = pos["legs"]["paper-main"]["buy"][0]
+    other = xledger.insert_order(
+        conn, decision_id=None, account_id="paper-main", ticker=T, market="KR", side="BUY",
+        qty=7, order_type="MARKET", price=None, status="accepted", order_no="OTHER-1",
+        message="", mode="auto", created_at=ctx.now().isoformat(), origin="rebalance",
+    )  # fmt: skip
+    assert other != scalp_id
+    entering = {"ticker": T, "entry_at": pos["entry_at"], "status": "entering"}
+    exits.adopt_entry_orders(ctx, entering)
+    assert entering["legs"]["paper-main"]["buy"] == [scalp_id]
+    assert entering["qty"] == {"paper-main": pos["legs"]["paper-main"]["req"]}
+
+
 def test_failed_fill_query_keeps_recheck(scalp_ctx, market, brokers, project):
     """취소 뒤 체결 조회가 실패하면 재확인을 지우지 않는다(실패를 '체결 없음' 으로 보지 않음)."""
     ctx = _ctx(scalp_ctx, market)

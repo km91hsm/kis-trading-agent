@@ -11,8 +11,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from trader.kernel.session.debate import signal_direction
-from trader.kernel.session.run_store import list_checkpoints, read_checkpoint
+from pydantic import ValidationError
+
+from trader.kernel.session.debate import research_summary, signal_direction
+from trader.kernel.session.run_store import (
+    checkpoint_payload,
+    list_checkpoints,
+    read_checkpoint,
+    write_checkpoint,
+)
 from trader.kernel.session.schemas import CallMeta, DebateTurn
 
 DEBATE_RE = re.compile(r"^20_debate_r(\d+)_(bull|bear)$")
@@ -74,6 +81,38 @@ def load_turns(d: Path, pattern: re.Pattern[str] = DEBATE_RE) -> dict[int, dict[
             data["data"]
         )
     return turns
+
+
+def schema_error(model: type, e: ValidationError) -> dict:
+    """pydantic 검증 실패 → `{"ok": False, "error": "스키마 검증 실패(<모델>): <loc>: <msg>"}`
+    (항목은 `; ` 로 잇는다)."""
+    msgs = "; ".join(f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors())
+    return {"ok": False, "error": f"스키마 검증 실패({model.__name__}): {msgs}"}
+
+
+def validate_payload(model: type, payload: dict) -> tuple[Any, dict | None]:
+    """pydantic 검증(HTML 엔티티 되돌림 포함). 실패면 (None, {"ok": False, "error"})."""
+    try:
+        return model.model_validate(unescape(payload)), None  # type: ignore[attr-defined]
+    except ValidationError as e:
+        return None, schema_error(model, e)
+
+
+def summarize_turns(d: Path, out_stage: str, pattern: re.Pattern[str]) -> dict:
+    """토론 턴 → 연구 요약(수렴 감시 포함) 체크포인트(시장·파생 세션 공용, 패턴만 다르다)."""
+    turns = load_turns(d, pattern)
+    if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
+        return {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
+    final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
+    try:
+        summ = research_summary(turns[0], turns[final_round], rounds=final_round)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    path = write_checkpoint(d, out_stage, checkpoint_payload(summ, None))
+    return {
+        "ok": True, "path": str(path), "rounds": final_round,
+        "sycophantic": summ["sycophantic"], "preferred": summ["preferred"],
+    }  # fmt: skip
 
 
 def reports(d: Path) -> list[dict]:

@@ -1,10 +1,14 @@
 import logging
 from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
 
 from tests.features.accounts.conftest import make_account
 from trader.features.accounts import api
 from trader.features.accounts.ports import AccountsPortImpl
 from trader.kernel.broker.fake import FakeMarket
+from trader.kernel.broker.fo import KisFoBroker
+from trader.kernel.broker.models import FoProduct
 from trader.kernel.config import Secrets
 
 
@@ -63,3 +67,42 @@ def test_holiday_fn_kr_uses_market_client_and_us_uses_calendar(monkeypatch, capl
     assert any("휴장일" in r.message for r in caplog.records)
     monkeypatch.setattr(port, "market_client", lambda: None)
     assert port.holiday_fn()("KR", date(2026, 10, 9)) is False
+
+
+_FO_PRODUCT = FoProduct(
+    futures_prefix=("A05",),
+    call_prefix=("B05",),
+    put_prefix=("C05",),
+    multiplier=50000,
+    futures_tick=Decimal("0.02"),
+    option_ticks=[("3", "0.01"), ("10", "0.02"), ("inf", "0.05")],
+    name="미니코스피200",
+)
+_FO_SECRETS = {
+    "KIS_PAPER_FO_APP_KEY": "k1",
+    "KIS_PAPER_FO_APP_SECRET": "s1",
+    "KIS_PAPER_MAIN_APP_KEY": "k2",
+    "KIS_PAPER_MAIN_APP_SECRET": "s2",
+}
+
+
+def test_port_splits_fo_accounts_and_builds_fo_brokers():
+    stock = make_account("paper-main", "paper", "auto")
+    fo = make_account("paper-fo", "paper", "auto", asset="fo")
+    settings = SimpleNamespace(fo=SimpleNamespace(product_cfg=lambda: _FO_PRODUCT))
+    port = AccountsPortImpl([stock, fo], Secrets(**_FO_SECRETS), settings)
+    assert [a.id for a in port.accounts()] == ["paper-main"]
+    assert [a.id for a in port.fo_accounts()] == ["paper-fo"]
+    brokers = port.fo_brokers()
+    assert set(brokers) == {"paper-fo"}
+    assert isinstance(brokers["paper-fo"], KisFoBroker)
+    assert all(b.account.id != "paper-fo" for b in port.brokers())  # 현물 접근자는 fo 제외
+
+
+def test_port_fo_brokers_empty_without_fo_settings(caplog):
+    fo = make_account("paper-fo", "paper", "auto", asset="fo")
+    port = AccountsPortImpl([fo], Secrets(**_FO_SECRETS), SimpleNamespace())
+    with caplog.at_level(logging.WARNING, logger="trader.accounts"):
+        assert port.fo_brokers() == {}
+    assert any("settings.fo 없음" in r.message for r in caplog.records)
+    assert AccountsPortImpl([fo], Secrets(**_FO_SECRETS)).fo_brokers() == {}  # settings 자체가 없다

@@ -27,13 +27,8 @@ def yml(tmp_path):
 
 @pytest.fixture
 def db(conn):
-    """orders·approvals·positions_snapshot 은 v5 실제 스키마, fo_positions 만 최소 스키마(M10)."""
-    conn.executescript(
-        """
-        CREATE TABLE fo_positions(account_id TEXT, code TEXT, kind TEXT, contract_side TEXT,
-            direction TEXT, vehicle TEXT, status TEXT, created_at TEXT);
-        """
-    )
+    """orders·approvals·positions_snapshot·fo_positions 모두 실제 스키마(fo_positions 는 fo
+    마이그레이션 14 — `conn` 이 발견된 마이그레이션 전부로 `init_schema` 한다)."""
     return conn
 
 

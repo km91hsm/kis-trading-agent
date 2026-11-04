@@ -11,46 +11,13 @@ from datetime import date
 
 from trader.features.spot import tools
 from trader.kernel.lane.types import LaneContext
+from trader.kernel.session.fake import fake_call, fake_report, fake_turn
 from trader.kernel.session.run_store import list_checkpoints, read_checkpoint, run_dir
 from trader.kernel.session.runner import SessionSpec
 
 logger = logging.getLogger("trader.spot")
 
 ANALYST_ROLES = ("technical", "fundamental", "news_macro", "sentiment")
-FAKE_MODEL = "fake"
-
-
-def fake_report(ticker: str, asof: str, role: str) -> dict:
-    return {
-        "ticker": ticker,
-        "asof": asof,
-        "role": role,
-        "summary": f"FAKE {role} 리포트",
-        "bullets": ["FAKE 근거"],
-        "signal": "NEUTRAL",
-        "score": 0.0,
-        "confidence": 0.5,
-        "horizon": "short",
-        "key_risks": [],
-        "counter_evidence": [],
-        "evidence": [{"claim": "FAKE", "source_id": f"{role}"}],
-        "data_gaps": ["FAKE 모드"],
-    }
-
-
-def fake_turn(side: str, round_no: int) -> dict:
-    bull = side == "bull"
-    return {
-        "side": side,
-        "round": round_no,
-        "stance": "BULLISH" if bull else "BEARISH",
-        "valuation_view": "UNDERVALUED" if bull else "OVERVALUED",
-        "arguments": [f"FAKE {side} 논거"],
-        "rebuttals": [f"FAKE 반박 r{round_no}"] if round_no > 0 else [],
-        "timing": {"action": "WAIT", "condition": None, "price_zone": None},
-        "conviction": 0.7 if bull else 0.6,
-        "what_would_change_my_mind": ["FAKE"],
-    }
 
 
 def fake_decision(ticker: str) -> dict:
@@ -67,16 +34,6 @@ def fake_decision(ticker: str) -> dict:
         "rationale": "FAKE 모드: 기본값 HOLD",
         "invalidation_conditions": [],
         "memory_ids_used": [],
-    }
-
-
-def _call(agent: str) -> dict:
-    return {
-        "agent": agent,
-        "model": FAKE_MODEL,
-        "session_id": "fake",
-        "cost_usd": 0.0,
-        "duration_ms": 0,
     }
 
 
@@ -109,7 +66,7 @@ def run_fake_ticker(
             stage=stage,
             payload=payload,
             agent=agent,
-            call_meta=_call(agent),
+            call_meta=fake_call(agent),
         )
         if not r["ok"]:
             raise tools.ToolError(r["error"])
@@ -152,7 +109,7 @@ def run_fake_ticker(
             date=d,
             payload=fake_decision(ticker),
             agent="trader",
-            call_meta=_call("trader"),
+            call_meta=fake_call("trader"),
             stage=stage,
         )
         if not r["ok"]:
@@ -166,7 +123,7 @@ def run_fake_ticker(
             date=d,
             payload=fake_decision(ticker),
             agent="trader",
-            call_meta=_call("trader"),
+            call_meta=fake_call("trader"),
         )
         if not r["ok"]:
             raise tools.ToolError(r["error"])
@@ -215,7 +172,6 @@ def run_fake_resume(lane_ctx: LaneContext, spec: SessionSpec) -> list[str]:
 
 __all__ = [
     "ANALYST_ROLES",
-    "FAKE_MODEL",
     "fake_decision",
     "fake_report",
     "fake_turn",

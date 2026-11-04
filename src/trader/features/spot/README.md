@@ -68,6 +68,13 @@ CLI(`uv run trader spot --help` 로 확인):
 
 `tests/features/spot/` — 설정·스키마·원장·기능 등록·포트 조립, 리스크 규칙·tradability·summary, 도구·`StageRule`, executor·승인 지문·`exec-key`·`approvals` CLI·텔레그램·잡, FAKE 세션·analyze CLI, 골든 회귀(`test_regression.py`, `stock_regression_v1.json` 로 1회 재기준). 커널 쪽은 `tests/kernel/{session,execution,lane}/`. 포트 구현체 테스트는 `tests/features/accounts/test_ports.py`, `tests/features/ingest/test_ports.py`.
 
+## 커널로 이동한 것 (M10)
+
+- `rule_hit(rule, quote, closes)` 는 커널 `execution/monitor_rules.py` 로 승격됐고 `monitor_rules.py` 는 재노출한다(fo `triggers` 도 쓴다).
+- `latest_positions(conn, account_id, market, *, asset="stock")` 는 커널 `execution/ledger.py` 의 asset 필터 판이고 spot 의 자체 구현(`tools._latest_positions`)은 없앴다 — fo 행이 시장 세션 입력에 섞이지 않는다. 시장 세션 입력의 NAV 선택 기준이 최신 NAV 행에서 `MAX(snapshot, nav)` 날짜 행으로 바뀌었다(`account_nav` 에 asset 열 없음).
+- `get_trigger`/`mark_trigger_handled` 도 커널 `execution/ledger.py` 로 옮겼고 `ledger.py` 가 재export 한다(fo 재평가 공용).
+- FAKE 헬퍼(`fake_call`·`ensure_ok`·`FakeSessionError`·`fake_report`·`fake_turn`)는 커널 `session/fake.py` 를 import 한다. 파생(`fo`) 계좌 분기는 `features/fo`(`fills.sync`·`balance`)가 소유하며 spot 은 현물 계좌만 다룬다.
+
 ## 알려진 차이 (옛 저장소 대비)
 
 CLI·명령
