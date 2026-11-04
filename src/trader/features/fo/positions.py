@@ -152,9 +152,8 @@ def recover(
     now: datetime,
 ) -> RecoveryReport:
     """재시작·첫 틱 복구. 다리 확정·unknown 표시는 짧은 트랜잭션으로 그때그때 commit 하고(브로커
-    조회 중 쓰기 잠금을 쥐지 않게), 나머지 쓰기는 호출자가 commit 한다. `store.tx` 는 열린
-    트랜잭션에 합류만 하므로 호출자가 연 트랜잭션은 시작할 때 먼저 commit 한다 — 그러지 않으면
-    다리 확정 tx 가 바깥에 합류해 브로커 조회가 쓰기 잠금 안에서 돈다(S2-12)."""
+    조회 중 쓰기 잠금을 쥐지 않게), 나머지 쓰기는 호출자가 commit 한다. 첫 브로커 조회가 첫
+    `store.tx` 보다 먼저 올 수 있어 호출자가 남긴 암묵 트랜잭션은 시작할 때 commit 한다(S2-12)."""
     if conn.in_transaction:
         conn.commit()
     rep = RecoveryReport()

@@ -230,3 +230,27 @@ def test_resize_down_retry_exhaustion_escalates_to_exit_failed(conn):
     out = executor.continue_reduce(ctx, account(), cur)
     assert out["status"] == "held", out
     assert store.get_position(conn, pos.id).qty_held == 1
+
+
+def test_recall_after_uncommitted_claim_ends_with_clean_connection(conn):
+    """G2-2 회귀(Task 5 리뷰): 호출자가 `claim_leg` 를 commit 없이 남겨도 회수의 `store.tx` 가
+    먼저 commit 하고 자기 경계로 돌아, 끝난 뒤 열린 트랜잭션이 없다."""
+    ctx = make_ctx(conn)
+    broker = ctx.brokers[ACCT]
+    with store.tx(conn):
+        pid = store.insert_position(
+            conn, account_id=ACCT, code="105W11", kind="FUTURES", contract_side="LONG",
+            direction="LONG", vehicle="FUTURES", status="entering", qty_target=2, qty_held=0,
+            nav_at_open=Decimal("100000000"),
+        )  # fmt: skip
+    pos = store.get_position(conn, pid)
+    lid = _entry_leg(conn, pos, qty=2, order_no="E1")
+    other = _entry_leg(conn, pos, qty=1, attempt=2, status="prepared")
+    assert store.claim_leg(conn, other)  # commit 없음 → 암묵 tx 열림
+    assert conn.in_transaction
+    broker.states["E1"] = state("E1", order_qty=2, filled=0, remaining=0, cancelled=2,
+                                terminal=True, st="cancelled")  # fmt: skip
+    executor.recall_entries(ctx, account(), pos.id, reason="t")
+    assert conn.in_transaction is False
+    assert store.get_leg(conn, lid).status == "cancelled"
+    assert store.get_leg(conn, other).status == "sending"

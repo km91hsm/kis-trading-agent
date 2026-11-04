@@ -146,18 +146,37 @@ def test_reserve_budget_uses_existing_planned_loss(conn):
     assert not r.ok and any("수명 손실 예산" in s for s in r.reasons)
 
 
-def test_tx_joins_outer_transaction(conn):
-    """이미 열린 트랜잭션 안에서는 합류한다 — commit·rollback 은 바깥 몫(옛 구현은 먼저 commit)."""
-    conn.execute("BEGIN")
-    store.insert_position(conn, **{
+def _pos_row() -> dict:
+    return {
         "account_id": ACCT, "code": "105W11", "kind": "FUTURES", "contract_side": "LONG",
         "direction": "LONG", "vehicle": "FUTURES", "status": "entering",
-    })  # fmt: skip
-    with store.tx(conn):
-        assert conn.in_transaction
-    assert conn.in_transaction  # 합류한 tx 는 commit 하지 않는다
-    conn.rollback()
+    }  # fmt: skip
+
+
+def test_tx_nested_joins_outer_store_tx(conn):
+    """`store.tx` 안의 `store.tx` 는 합류만 한다 — 안쪽이 끝나도 commit 하지 않고, 바깥이
+    rollback 하면 두 쓰기가 함께 사라진다."""
+    with pytest.raises(RuntimeError), store.tx(conn):
+        store.insert_position(conn, **_pos_row())
+        with store.tx(conn):
+            store.insert_position(conn, **{**_pos_row(), "code": "105W12"})
+        assert conn.in_transaction  # 안쪽 종료가 commit 하지 않았다
+        raise RuntimeError("바깥 실패")
+    assert not conn.in_transaction
     assert store.open_positions(conn, ACCT) == []
+
+
+def test_tx_commits_stray_implicit_transaction_first(conn):
+    """호출자가 commit 하지 않은 암묵 트랜잭션은 `store.tx` 가 BEGIN IMMEDIATE 전에 먼저 commit
+    한다(옛 동작) — 이어지는 tx 가 rollback 돼도 앞선 쓰기는 남는다."""
+    conn.commit()
+    store.insert_position(conn, **_pos_row())  # 암묵 BEGIN, commit 없음
+    assert conn.in_transaction
+    with pytest.raises(RuntimeError), store.tx(conn):
+        store.insert_position(conn, **{**_pos_row(), "code": "105W12"})
+        raise RuntimeError("실패")
+    assert not conn.in_transaction
+    assert [p.code for p in store.open_positions(conn, ACCT)] == ["105W11"]
 
 
 # --- 복구 -------------------------------------------------------------------------------
@@ -205,8 +224,8 @@ def test_recover_releases_lock_between_broker_queries(conn):
 
 
 def test_recover_commits_open_transaction_before_broker_queries(conn):
-    """호출자가 암묵 트랜잭션을 연 채로 불러도(`store.tx` 는 합류만 한다) 복구가 먼저 commit 해
-    브로커 조회가 쓰기 잠금 밖에서 돈다(S2-12 회귀 방지)."""
+    """호출자가 암묵 트랜잭션을 연 채로 불러도 복구가 먼저 commit 해 브로커 조회가 쓰기 잠금
+    밖에서 돈다 — 첫 조회가 첫 `store.tx` 보다 앞서므로 `recover` 의 가드가 필요하다(S2-12)."""
     pos, leg = _open(conn)
     with store.tx(conn):
         store.set_leg(conn, leg.id, status="unknown", order_no="A1")

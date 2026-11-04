@@ -109,15 +109,15 @@ def test_recover_uses_injected_clock(conn):
     assert rep.legs_fixed == 1
 
 
-def test_legstore_joins_open_transaction(conn):
-    """바깥 트랜잭션 안에서 부르면 합류만 한다(commit 은 바깥 몫) — 실행기 `_transmit` 이 orders
-    행 INSERT 와 `bind` 를 한 `store.tx` 로 묶는다(A1). 밖에서 부르면 스스로 commit 한다."""
+def test_legstore_joins_enclosing_store_tx(conn):
+    """`store.tx` 안에서 부르면 합류만 한다(commit 은 바깥 몫) — 실행기 `_transmit` 이 orders
+    행 INSERT 와 `bind` 를 한 `store.tx` 로 묶는다(A1). 단독으로 부르면 스스로 commit 한다."""
     _pos, leg = _open(conn)
     ls = LegStore(conn)
-    conn.execute("BEGIN")
-    ls.bind(f"leg:{leg.id}", order_id=7, at=ISO)
-    assert conn.in_transaction
-    conn.rollback()
+    with pytest.raises(RuntimeError), store.tx(conn):
+        ls.bind(f"leg:{leg.id}", order_id=7, at=ISO)
+        assert conn.in_transaction
+        raise RuntimeError("바깥 실패")
     assert store.get_leg(conn, leg.id).order_id is None
     ls.bind(f"leg:{leg.id}", order_id=7, at=ISO)
     assert not conn.in_transaction and store.get_leg(conn, leg.id).order_id == 7

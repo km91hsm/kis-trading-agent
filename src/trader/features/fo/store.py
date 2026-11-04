@@ -62,22 +62,33 @@ def _s(v: Any) -> Any:
     return str(v) if isinstance(v, Decimal) else v
 
 
+# `store.tx` 가 지금 열려 있는 연결(`id(conn)`) — 중첩 호출만 합류시키는 표식
+_OPEN: set[int] = set()
+
+
 @contextmanager
 def tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """쓰기 트랜잭션. 안에서 예외가 나면 rollback 하고 다시 던진다. 커널 `db.connect` 는 sqlite3
-    기본 `isolation_level` 이라 DML 앞에 암묵 BEGIN 이 붙는다 — 이미 트랜잭션 안(`in_transaction`)
-    이면 `BEGIN IMMEDIATE` 를 새로 열지 않고 **바깥 트랜잭션에 합류**한다(열지 않은 트랜잭션을
-    commit·rollback 하지 않는다; 바깥이 책임진다). 밖이면 `BEGIN IMMEDIATE` … commit/rollback."""
-    if conn.in_transaction:
+    """쓰기 트랜잭션(`BEGIN IMMEDIATE` … commit, 예외면 rollback 후 다시 던짐). **자기 중첩만
+    합류**한다 — 같은 연결의 `store.tx` 안에서 다시 부르면 경계를 바깥에 맡기고, 호출자가 남긴
+    암묵 트랜잭션(커널 `db.connect` 는 기본 `isolation_level` 이라 DML 앞에 암묵 BEGIN)은 열기
+    전에 먼저 commit 한다(옛 동작)."""
+    key = id(conn)
+    if key in _OPEN:
         yield conn
         return
+    if conn.in_transaction:
+        conn.commit()
     conn.execute("BEGIN IMMEDIATE")
+    _OPEN.add(key)
     try:
         yield conn
     except BaseException:
         conn.execute("ROLLBACK")
         raise
-    conn.execute("COMMIT")
+    else:
+        conn.execute("COMMIT")
+    finally:
+        _OPEN.discard(key)
 
 
 # --- 포지션 --------------------------------------------------------------------------

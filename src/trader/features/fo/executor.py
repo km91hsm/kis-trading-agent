@@ -388,10 +388,6 @@ def _transmit(
     legs, key = LegStore(conn), leg_key(leg_id)
     multiplier = ctx.settings.fo.product_cfg().multiplier
     sent_at = ctx.now().isoformat()
-    # 선점(sending)은 전송 전에 반드시 commit 돼야 한다 — `store.tx` 는 열린 트랜잭션에 합류만
-    # 하므로 호출자가 연 암묵 트랜잭션을 먼저 닫는다(크래시 뒤 복구가 sending 을 보게)
-    if conn.in_transaction:
-        conn.commit()
     claimed = legs.claim(key, now=sent_at)
     if not claimed:
         cur = store.get_leg(conn, leg_id)

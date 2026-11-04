@@ -29,9 +29,9 @@ def leg_id_of(key: str) -> int:
 
 
 class LegStore:
-    """`IdemStore` 의 fo 구현. 각 메서드는 `store.tx` 로 쓴다 — 밖에서 부르면 짧은 쓰기 뒤 commit
-    (`ExecKeyStore` 와 같다), 이미 열린 트랜잭션 안이면 합류만 한다(실행기 `_transmit` 이 orders 행
-    INSERT 와 `bind` 를 한 트랜잭션으로 묶는다, A1)."""
+    """`IdemStore` 의 fo 구현. 각 메서드는 `store.tx` 로 쓴다 — 단독으로 부르면 자기 경계(짧은
+    쓰기 뒤 commit, `ExecKeyStore` 와 같다), `store.tx` 안에서 부르면 합류한다(실행기 `_transmit`
+    이 orders 행 INSERT 와 `bind` 를 한 트랜잭션으로 묶는다, A1)."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
