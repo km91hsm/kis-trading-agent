@@ -242,7 +242,7 @@ describe("계좌별 화면", () => {
     expect(orders.url).toContain("account_id=paper-1");
   });
 
-  test("리스크 카드: limits 가 있으면 「한도 대비」 막대(한도 초과는 강조), 자료 부족이어도 한도는 그린다", async () => {
+  test("리스크 카드: limits 가 있으면 「한도 대비」 막대(한도 초과는 강조)와 기여 상위 3 을 함께, 자료 부족이어도 한도는 그린다", async () => {
     const limits = { max_position_pct: 0.25, max_positions: 5, max_sector_pct: 0.4, min_cash_pct: 0.1, daily_loss_stop_pct: -0.05 };
     const usage = { position_pct_max: 0.3, positions: 3, sector_pct_max: 0.2, cash_pct: 0.05, daily_loss_pct: null };
     const first = await mount(routes({ "GET /api/positions/risk": fixtureRisk({ limits, usage }) }));
@@ -250,7 +250,8 @@ describe("계좌별 화면", () => {
     expect(risk.textContent).toContain("한도 대비");
     const rows = Array.from(risk.querySelectorAll("li.risk-limit")) as HTMLElement[];
     expect(rows).toHaveLength(5);
-    expect(risk.querySelector(".risk-contrib")).toBeNull(); // 한도가 있으면 기여 상위 3 대신
+    expect(risk.querySelectorAll(".risk-contrib li")).toHaveLength(3); // 한도 막대와 기여 상위 3 을 함께(T16-R2)
+    expect(risk.querySelectorAll(".risk-bar")).toHaveLength(5 + 3);
     const over = rows.filter((r) => r.classList.contains("over")).map((r) => r.querySelector(".risk-ticker")!.textContent);
     expect(over).toEqual(["최대 종목 비중", "현금 비중"]); // 30% > 25%, 현금 5% < 최소 10%
     expect(rows[0].textContent).toContain("30.00% / 25.00%");

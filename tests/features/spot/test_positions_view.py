@@ -275,18 +275,23 @@ def test_portfolio_risk_card_from_close_table(client, ledger, ml):
 
 def test_risk_card_limits_and_usage(project, accounts, ml):
     """`/positions/risk` 에 설정 한도(`limits`)와 지금 사용량(`usage`)을 싣는다 — 종가가 부족한
-    `insufficient` 분기에서도. 섹터는 `ports["scan"]`, 일일 손익은 직전 NAV 대비."""
+    `insufficient` 분기에서도. 섹터는 `ports["scan"]`, 일일 손익은 직전 NAV 대비. 헤지 ETF(게이트가
+    빼는 `excluded_tickers`)는 종목 수·최대 비중·섹터에서 빠지고 현금으로도 치지 않는다."""
     sectors = {"AAA": "반도체", "BBB": "반도체", "CCC": "금융"}
     scan = SimpleNamespace(sector_of=lambda m: sectors.get)
-    ports = {"accounts": AccountsPortImpl(accounts, Secrets()), "ml": ml, "scan": scan}
+    regime = SimpleNamespace(hedge_tickers=lambda m: frozenset({"HEDGE"}) if m == "KR" else set())
+    ports = {
+        "accounts": AccountsPortImpl(accounts, Secrets()), "ml": ml, "scan": scan, "regime": regime,
+    }  # fmt: skip
     client = make_web_client(project, [SPOT], ports=ports, now=NOW)
     c = db.connect(project / "state" / "trader.db")
     try:
         _nav(c, "paper-main", "1100000", "1100000", d="2026-11-03")
-        _nav(c, "paper-main", "1000000", "250000")
+        _nav(c, "paper-main", "1000000", "100000")
         _pos(c, "paper-main", "AAA", 1, "300000", "300000", "300000")
-        _pos(c, "paper-main", "BBB", 1, "250000", "250000", "250000")
-        _pos(c, "paper-main", "CCC", 1, "200000", "200000", "200000")
+        _pos(c, "paper-main", "BBB", 1, "150000", "150000", "150000")
+        _pos(c, "paper-main", "CCC", 1, "100000", "100000", "100000")
+        _pos(c, "paper-main", "HEDGE", 1, "350000", "350000", "350000")  # 제외 — 가장 커도
     finally:
         c.close()
     risk = client.app.state.deps.settings.risk
@@ -300,7 +305,7 @@ def test_risk_card_limits_and_usage(project, accounts, ml):
     assert card["limits"] == want_limits
     u = card["usage"]
     assert u["position_pct_max"] == pytest.approx(0.30) and u["positions"] == 3
-    assert u["sector_pct_max"] == pytest.approx(0.55) and u["cash_pct"] == pytest.approx(0.25)
+    assert u["sector_pct_max"] == pytest.approx(0.45) and u["cash_pct"] == pytest.approx(0.10)
     assert u["daily_loss_pct"] == pytest.approx(1000000 / 1100000 - 1)
     # 스냅샷이 없어도 한도는 있고 사용량은 모름(None)
     empty = client.get("/api/positions/risk", params={"account_id": "paper-two"}).json()

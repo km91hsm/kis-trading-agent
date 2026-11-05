@@ -82,7 +82,7 @@ CLI(`uv run trader spot --help` 로 확인):
 - 승인 취소 선점 해제(M12): 대기 중 `approve_execute` 를 `DELETE /jobs/{id}` 로 취소하면 `QueueKind.on_cancel` 이 `approvals.release` 로 선점을 푼다. 집행 요청이 중복(`DuplicateRequest`)이라 못 들어가도 선점을 풀고 409.
 - 웹 거부 알림(M12): `PATCH {action: reject}` 는 원장 결정 뒤 큐 `approval_notice` 를 넣고 데몬이 텔레그램 `[거부]` 를 보낸다(웹은 알림을 쥐지 않는다). 큐 등록이 실패해도 거부 결과는 그대로(로그만).
 - 승인 행 통화(M12): `market`(주문 시장, 없으면 계좌의 유일한 시장, 모르면 null)·`currency`(시장 기준 KR→KRW·US→USD — 원화 계좌로 산 미국 주식도 USD).
-- 리스크 한도(M12): `/positions/risk` 는 `limits`(설정 `risk` 의 `max_position_pct`·`max_positions`·`max_sector_pct`·`min_cash_pct`·`daily_loss_stop_pct`)와 `usage`(`position_pct_max`·`positions`·`sector_pct_max`(`ports["scan"]` 섹터, 없으면 null)·`cash_pct`·`daily_loss_pct`(직전 NAV 대비, 없으면 null))를 `insufficient` 카드에도 싣는다.
+- 리스크 한도(M12): `/positions/risk` 는 `limits`(설정 `risk` 의 `max_position_pct`·`max_positions`·`max_sector_pct`·`min_cash_pct`·`daily_loss_stop_pct`)와 `usage`(`position_pct_max`·`positions`·`sector_pct_max`(`ports["scan"]` 섹터, 맵에 없는 종목은 '기타', 포트 없으면 null)·`cash_pct`(브로커 현금/NAV)·`daily_loss_pct`(직전 NAV 대비, 없으면 null))를 `insufficient` 카드에도 싣는다. 게이트와 같이 `excluded_tickers`(헤지·현금 운용 ETF)는 사용량에서 뺀다.
 - `positions_router`(조회만): `GET /positions/overview?market=`(현물 계좌 시장·환경별 합산, 파생 제외), `GET /positions/risk?account_id=&market=`(위험 카드 — 종가는 `ports["ml"].close_table`).
 - `decisions_router`(조회만, `decisions_view.py`): `GET /decisions/spot/{id}`·`/trace`·`/outcomes`·`/checkpoints/{stage}`·`GET /decisions/spot/news-refs`, `GET /markets/{market}/today`(옛 `/today`·`/market-checkpoint`), `GET /risk-checks?date=`.
 - `RESOURCES` 의 `/decisions`·`/orders` 현물 조각(단타 행 포함, `format=csv` 는 merge 가 처리).

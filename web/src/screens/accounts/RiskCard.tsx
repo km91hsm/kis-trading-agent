@@ -1,5 +1,5 @@
-// 리스크 카드(현물 계좌만) — VaR95·CVaR95·베타. 서버가 설정 한도(limits)를 주면 「한도 대비」 막대(사용량/한도, 초과는 강조),
-// 없으면 위험 기여 상위 3종목 막대. 자료가 모자라면 서버 사유 한 줄(한도 막대는 그래도 그린다).
+// 리스크 카드(현물 계좌만) — VaR95·CVaR95·베타, 서버가 설정 한도(limits)를 주면 「한도 대비」 막대(사용량/한도, 초과는 강조),
+// 그리고 위험 기여 상위 3종목 막대(둘 다, T16-R2). 자료가 모자라면 서버 사유 한 줄(한도 막대는 그래도 그린다).
 import { Card } from "../../components/Card";
 import { fmtPct } from "../../lib/format";
 
@@ -113,20 +113,20 @@ export function RiskCard({ risk }: { risk: Risk }) {
           <dd>{risk.beta === null || risk.beta === undefined ? "—" : risk.beta.toFixed(2)}</dd>
         </div>
       </dl>
-      {limits ??
-        (top.length ? (
-          <ul className="risk-contrib">
-            {top.map((c) => (
-              <li key={c.ticker}>
-                <span className="risk-ticker">{c.ticker}</span>
-                <div className="risk-bar">
-                  <div className="risk-bar-fill" style={{ width: `${Math.max(0, Math.min(100, c.contribution * 100))}%` }} />
-                </div>
-                <span className="risk-pct">{fmtPct(c.contribution)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null)}
+      {limits}
+      {top.length ? (
+        <ul className="risk-contrib">
+          {top.map((c) => (
+            <li key={c.ticker}>
+              <span className="risk-ticker">{c.ticker}</span>
+              <div className="risk-bar">
+                <div className="risk-bar-fill" style={{ width: `${Math.max(0, Math.min(100, c.contribution * 100))}%` }} />
+              </div>
+              <span className="risk-pct">{fmtPct(c.contribution)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Card>
   );
 }

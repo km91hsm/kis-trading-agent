@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from trader.features.spot import approvals, decisions_view, positions_view, risk_view
+from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.executor import sector_of_for
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
@@ -130,8 +131,8 @@ def positions_risk(
     request: Request, account_id: str = Query(...), market: str | None = None
 ) -> dict:
     """위험 카드: VaR·CVaR 95%·베타·상관·위험 기여 + 설정 한도(`limits`)·사용량(`usage`, 섹터는
-    `ports["scan"]`). 종가는 ml 포트, 표시 전용. 현물 계좌만(그 외 400), market 생략은 계좌 첫
-    시장."""
+    `ports["scan"]`, 헤지·현금 운용 ETF 는 `excluded_tickers` 로 뺀다). 종가는 ml 포트, 표시
+    전용. 현물 계좌만(그 외 400), market 생략은 계좌 첫 시장."""
     deps = request.app.state.deps
     acct = next((a for a in _accounts(deps) if a.id == account_id), None)
     if acct is None:
@@ -144,6 +145,7 @@ def positions_risk(
             conn, (deps.ports or {}).get("ml"), account_id=acct.id, market=m,
             today=run_date_for(m, deps.now()), limits=deps.settings.risk,
             sector_of=sector_of_for(deps.ports, m),
+            exclude=excluded_tickers(deps.settings, (deps.ports or {}).get("regime"), m),
         )  # fmt: skip
     return {"account_id": acct.id, "market": m, **card}
 
