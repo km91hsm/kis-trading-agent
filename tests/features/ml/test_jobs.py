@@ -1,5 +1,6 @@
 """ml 잡·큐 kind·부트스트랩 훅 (옛 test_daemon/test_daemon_queue/test_daemon_stock_lessons 이식)."""
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -209,7 +210,7 @@ def test_features_snapshot_body_covers_all_markets(project, settings, monkeypatc
     monkeypatch.setattr(features, "snapshot", fake_snapshot)
     monkeypatch.setattr(ingest_api, "build_dart", lambda s: "dart")
     monkeypatch.setattr(ingest_api, "build_edgar", lambda *a: "edgar")
-    monkeypatch.setattr(ingest_api, "load_sources", lambda r: None)
+    monkeypatch.setattr(ingest_api, "load_sources", lambda *a, **kw: None)
     monkeypatch.setattr(ingest_api, "load_universe", lambda: "uni")
     deps = _deps(project, settings, client=object())
     assert ml_jobs.features_snapshot_body(deps, None) == {"rows": 3}
@@ -253,3 +254,23 @@ def test_bootstrap(project, settings, has_files, market, recent_fail, expected):
 def test_bootstrap_without_accounts_port_is_noop(project, settings):
     deps = make_deps(project, settings=settings, ports={}, queue=_kinds())
     assert ml_jobs.bootstrap(deps=deps) == {"queued": []}
+
+
+def test_features_action_passes_registry_as_keyword(project, settings, monkeypatch):
+    """`load_sources(path=None, *, registry=...)` — registry 를 위치 인자로 넘기면 path 로 묶여
+    `SectionRegistry.resolve` AttributeError 가 난다(리허설 데몬 features_snapshot 실패 재현)."""
+    reg = object()
+    seen = {}
+
+    def spy_load_sources(path=None, *, registry=None):
+        seen["path"], seen["registry"] = path, registry
+        return "src"
+
+    monkeypatch.setattr(ingest_api, "load_sources", spy_load_sources)
+    monkeypatch.setattr(ingest_api, "build_dart", lambda s: "dart")
+    monkeypatch.setattr(ingest_api, "build_edgar", lambda src, s: src)
+    monkeypatch.setattr(features, "snapshot", lambda **kw: 1)
+    deps = _deps(project, settings, client=object())
+    deps = dataclasses.replace(deps, registry=reg)
+    assert ml_jobs.features_action(deps, "snapshot", {}, lambda *_a, **_k: None) == {"rows": 1}
+    assert seen == {"path": None, "registry": reg}

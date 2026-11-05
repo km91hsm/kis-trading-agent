@@ -67,3 +67,24 @@ def test_snapshot_requires_market_client(project, settings):
     port = MlPortImpl(settings, None, {"accounts": SimpleNamespace(market_client=lambda: None)})
     with pytest.raises(RuntimeError, match="시세 클라이언트"):
         port.snapshot(["KR"])
+
+
+def test_port_snapshot_passes_registry_as_keyword(project, settings, monkeypatch):
+    """ports.snapshot 도 jobs 와 같은 호출 — registry 는 키워드로만 넘긴다."""
+    from trader.features.ingest import api as ingest_api
+
+    reg = object()
+    seen = {}
+
+    def spy_load_sources(path=None, *, registry=None):
+        seen["path"], seen["registry"] = path, registry
+        return "src"
+
+    monkeypatch.setattr(ingest_api, "load_sources", spy_load_sources)
+    monkeypatch.setattr(ingest_api, "build_dart", lambda s: "dart")
+    monkeypatch.setattr(ingest_api, "build_edgar", lambda src, s: src)
+    monkeypatch.setattr(ingest_api, "load_universe", lambda: None)
+    monkeypatch.setattr(features, "snapshot", lambda **kw: 2)
+    port = MlPortImpl(settings, reg, {"accounts": SimpleNamespace(market_client=lambda: object())})
+    assert port.snapshot(["KR"]) == 2
+    assert seen == {"path": None, "registry": reg}

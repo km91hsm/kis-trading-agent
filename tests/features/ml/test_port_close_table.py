@@ -33,7 +33,7 @@ def test_port_snapshot_passes_extra_targets(project, settings, monkeypatch):
     monkeypatch.setattr(features, "snapshot", lambda **kw: seen.update(kw) or 3)
     monkeypatch.setattr(ports.ingest_api, "build_dart", lambda s: None)
     monkeypatch.setattr(ports.ingest_api, "build_edgar", lambda *a: None)
-    monkeypatch.setattr(ports.ingest_api, "load_sources", lambda r: None)
+    monkeypatch.setattr(ports.ingest_api, "load_sources", lambda *a, **kw: None)
     monkeypatch.setattr(ports.ingest_api, "load_universe", lambda: None)
     acc = SimpleNamespace(market_client=lambda: object())
     port = MlPortImpl(settings, None, {"accounts": acc})

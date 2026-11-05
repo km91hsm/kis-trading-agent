@@ -110,7 +110,7 @@ class MlPortImpl:
         return features.snapshot(
             market_client=market_client,
             dart=ingest_api.build_dart(secrets),
-            edgar=ingest_api.build_edgar(ingest_api.load_sources(self._registry), secrets),
+            edgar=ingest_api.build_edgar(ingest_api.load_sources(registry=self._registry), secrets),
             universe=ingest_api.load_universe(),
             markets=markets,  # type: ignore[arg-type]
             tickers=tickers,
