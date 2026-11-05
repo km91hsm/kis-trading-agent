@@ -12,6 +12,7 @@ from trader.features.ml.migrations import MIGRATIONS
 from trader.features.ml.ports import PORT
 from trader.features.ml.routes import ROUTERS
 from trader.features.ml.settings import SCHEDULE_SECTIONS, SECTIONS
+from trader.features.ml.status import STATUS_SECTION
 from trader.kernel.registry.types import Feature, Hook, NavItem
 
 FEATURE = Feature(
@@ -25,5 +26,6 @@ FEATURE = Feature(
     hooks=(Hook("daemon.bootstrap", bootstrap),),
     ports=(PORT,),
     routes=ROUTERS,
+    status_sections=(STATUS_SECTION,),
     nav=(NavItem("data", "features", "지표·모델", 30),),
 )

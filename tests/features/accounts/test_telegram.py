@@ -86,7 +86,8 @@ def test_real_auto_via_telegram_rejected(project, conn):
     assert modes.get_account_mode(conn, _acct("real-main")) == "off"
 
 
-def test_status_shows_effective_mode(project, conn):
+def test_status_shows_effective_mode_for_unconfirmed_real_auto(project, conn):
+    """실전 auto + 확인 기록 없음 → 실효 off(`effective_mode`) — 설정→실효(사유) 로 보인다."""
     _write(project)
     sent = Sent()
     ctx = _ctx(conn, sent)
@@ -94,12 +95,9 @@ def test_status_shows_effective_mode(project, conn):
     conn.commit()
     commands.poll_once(ctx, Recv(["/status"]))
     msg = sent.msgs[-1]
-    assert (
-        "real-main(실전) 끔" in msg
-        and "강등" in msg
-        and "real-main(실전) 자동" not in msg
-        and "실행 중" in msg
-    )
+    assert "- 실행 중" in msg
+    assert "- paper-main · paper · KR · auto" in msg
+    assert "- real-main · real · KR · auto→off(LIVE 미확인)" in msg
 
 
 def test_mode_and_status_reach_fo_accounts(project, conn):
@@ -135,6 +133,5 @@ def test_mode_and_status_reach_fo_accounts(project, conn):
     )
     commands.poll_once(ctx, Recv(["/status"]))
     msg = sent.msgs[-1]
-    assert (
-        "paper-fo(모의) 끔" in msg and "real-fo(실전) 끔" in msg and "real-fo(실전) 승인" not in msg
-    )
+    assert "- paper-fo · paper · KR · off" in msg
+    assert "- real-fo · real · KR · approve→off(실전 파생)" in msg

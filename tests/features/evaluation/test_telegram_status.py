@@ -118,3 +118,36 @@ def test_daily_report_body_and_paper_review_body(project):
     assert sent.msgs[-1].startswith("[일일 리포트]")
     jobs.paper_review_body(deps)
     assert sent.msgs[-1].startswith("[모의 체결 점검]")
+
+
+def _decision(conn, d, ticker, action):
+    conn.execute(
+        "INSERT INTO decisions(date, market, ticker, action, data_json, created_at) "
+        "VALUES (?, 'KR', ?, ?, '{}', 't')",
+        (d, ticker, action),
+    )
+
+
+def _turn(conn, ticker, side, stance, conviction):
+    conn.execute(
+        "INSERT INTO debate_turns(decision_date, market, ticker, round, side, stance, conviction, "
+        "data_json, created_at) VALUES ('2026-10-26', 'KR', ?, 0, ?, ?, ?, '{}', 't')",
+        (ticker, side, stance, conviction),
+    )
+
+
+def test_status_shows_distribution(conn):
+    ctx = _ctx(conn, Sent())
+    assert [s.title for s in FEATURE.status_sections] == ["성과", "결정 분포(30일)"]
+    assert status.distribution_lines(ctx) == []
+    for i, action in enumerate(["BUY", "BUY", "HOLD", "SELL"]):
+        _decision(conn, "2026-10-26", f"00593{i}", action)
+    _decision(conn, "2026-09-01", "000660", "BUY")  # 30일 밖
+    conn.commit()
+    assert status.distribution_lines(ctx) == ["- BUY 2 · HOLD 1 · SELL 1"]
+    _turn(conn, "005930", "bull", "BULLISH", 0.6)
+    _turn(conn, "005930", "bear", "BULLISH", 0.5)  # 수렴
+    _turn(conn, "005931", "bull", "BULLISH", 0.9)
+    _turn(conn, "005931", "bear", "BEARISH", 0.9)  # 불수렴
+    conn.commit()
+    assert status.distribution_lines(ctx) == ["- BUY 2 · HOLD 1 · SELL 1 · 수렴율 50%"]

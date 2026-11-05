@@ -9,12 +9,17 @@ from trader.features.accounts.settings import Account, load_accounts
 from trader.kernel.notify import messages
 from trader.kernel.registry.types import StatusSection, TelegramCommand
 
+# 강등 사유(`modes` 의 note) → /status 의 짧은 표기
+_NOTE_SHORT = {modes.LIVE_UNCONFIRMED_NOTE: "LIVE 미확인", modes.REAL_FO_OFF_NOTE: "실전 파생"}
+
 
 def _mode_label(conn, account: Account) -> str:
-    """STATUS·웹과 같은 실효 모드 (실전 auto + 확인 기록 없음 = off, 실전 파생 = off, 강등 표시)."""
+    """STATUS·웹과 같은 실효 모드. 강등되면 '설정→실효(사유)' — 실전 auto + 확인 기록 없음은
+    `auto→off(LIVE 미확인)`, 실전 파생은 `…→off(실전 파생)`."""
     mode, note = modes.account_mode(conn, account)
-    env = messages.ENV.get(account.env, account.env)
-    return f"{account.id}({env}) {messages.MODE.get(mode, mode)}" + (" · 강등" if note else "")
+    if not note:
+        return mode
+    return f"{modes.get_account_mode(conn, account)}→{mode}({_NOTE_SHORT.get(note, note)})"
 
 
 def pause(ctx: Any, arg: str | None) -> str:
@@ -50,9 +55,12 @@ def mode(ctx: Any, arg: str | None) -> str:
 
 
 def render(ctx: Any) -> list[str]:
+    """'- 실행 중' + 계좌마다 '- paper-main · paper · KR,US · auto'."""
     paused = "일시정지" if modes.is_paused(ctx.conn) else "실행 중"
-    labels = ", ".join(_mode_label(ctx.conn, a) for a in load_accounts())
-    return [f"{paused} · 계좌 모드: {labels}"]
+    return [f"- {paused}"] + [
+        f"- {a.id} · {a.env} · {','.join(a.markets)} · {_mode_label(ctx.conn, a)}"
+        for a in load_accounts()
+    ]
 
 
 TELEGRAM_COMMANDS = (

@@ -1,5 +1,6 @@
 """kernel/ops/status: STATUS.md·텔레그램 /status 커널 절 렌더."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from trader.kernel.ledger import runs
@@ -126,3 +127,28 @@ def test_telegram_lines_have_kernel_first(conn, project):
     assert lines[2] == "실행 중 · 계좌 모드: p 자동"
     assert lines[3].startswith("- B: 조회 실패(ZeroDivisionError")
     assert len(lines) == 4  # 빈 절 생략, 마지막 실행·LLM 호출 절은 텔레그램에 없음
+
+
+def test_markdown_includes_feature_sections(conn, project):
+    """discover() 전체 기능의 절이 예외 없이 STATUS.md 에 들어간다(빈 원장·빈 state)."""
+    import yaml
+
+    from trader.kernel.cli.boot import build_registry
+    from trader.kernel.config.loader import load
+    from trader.kernel.registry import discover
+
+    (project / "config" / "accounts.yaml").write_text(
+        yaml.safe_dump({"accounts": [
+            {"id": "paper-main", "env": "paper", "cano": "0", "markets": ["KR"], "mode": "auto"},
+        ]}),
+        encoding="utf-8",
+    )  # fmt: skip
+    features = discover()
+    settings = load("settings", build_registry(features), path=project / "config" / "settings.yaml")
+    ctx = replace(_ctx(conn, project, features), settings=settings)
+    text = status.render_markdown(ctx, todo_path=None)
+    assert "조회 실패" not in text
+    for head in ("## 최근 결정", "## 오늘 스캔", "## ML 모델", "## 국면", "## 계좌"):
+        assert head in text, head
+    assert "## 미승인 주문" not in text  # 미승인 없음 → 절 생략
+    assert "- paper-main · paper · KR · auto" in text

@@ -18,7 +18,7 @@ from trader.features.evaluation.ports import PORT
 from trader.features.evaluation.routes import ROUTERS
 from trader.features.evaluation.session_kinds import AGENTS, REFLECT
 from trader.features.evaluation.settings import SCHEDULE_SECTIONS, SECTIONS
-from trader.features.evaluation.status import STATUS_SECTION
+from trader.features.evaluation.status import DISTRIBUTION_SECTION, STATUS_SECTION
 from trader.features.evaluation.telegram import DAILY
 from trader.features.evaluation.tool_cli import TOOLS
 from trader.kernel.registry.types import Feature, Hook, NavItem
@@ -41,7 +41,7 @@ FEATURE = Feature(
     agents=AGENTS,
     tools=TOOLS,
     telegram_commands=(DAILY,),
-    status_sections=(STATUS_SECTION,),
+    status_sections=(STATUS_SECTION, DISTRIBUTION_SECTION),
     hooks=(Hook("scan_analyze.post", shadow_record_hook),),
     health_areas=(HEALTH,),
 )
