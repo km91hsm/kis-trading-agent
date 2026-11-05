@@ -74,3 +74,15 @@ def test_hook_truncates_at_10000(tmp_path: Path) -> None:
     out = _hook().main(root=tmp_path)
     assert len(out) <= 10_000
     assert "할 일 9" in out and "할 일 10" not in out  # 열린 항목은 최대 10개
+
+
+def test_hook_tolerates_non_utf8_status(tmp_path: Path) -> None:
+    """STATUS.md 에 UTF-8 이 아닌 바이트가 섞여도 훅이 죽지 않는다(M-6)."""
+    path = tmp_path / "state" / "STATUS.md"
+    path.parent.mkdir(parents=True)
+    head = "# 상태\n\n## 운영 점검\n- 정상 ".encode()
+    path.write_bytes(head + b"\xff\xfe\n\n" + "## 데몬\n- pid 7\n".encode())
+    _write(tmp_path / "docs" / "TODO.md", TODO)
+    out = _hook().main(root=tmp_path)
+    assert "## 운영 점검" in out and "pid 7" in out
+    assert "열린 일 하나" in out

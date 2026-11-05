@@ -1,9 +1,10 @@
 """SessionStart 훅: `state/STATUS.md` 의 「운영 점검」·「데몬」 절과 `docs/TODO.md` 열린
 항목을 출력한다.
 
-`.claude/settings.json` 이 세션 시작 때 `uv run python tools/session_start.py` 로 부른다.
-표준 라이브러리만 쓰고 macOS·Windows 공용이다. 출력은 UTF-8, 전체 10 000자 상한.
-STATUS.md 는 `trader status` 가 만든다(절 제목은 `kernel/ops/status.py::KERNEL_SECTIONS`).
+`.claude/settings.json` 이 세션 시작 때 `uv run --no-project python tools/session_start.py`
+로 부른다(프로젝트 동기화 없이). 표준 라이브러리만 쓰고 macOS·Windows 공용이다. 출력은
+UTF-8, 전체 10 000자 상한. STATUS.md 는 `trader status` 가 만든다(절 제목은
+`kernel/ops/status.py::KERNEL_STATUS_SECTIONS`).
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ def _root() -> Path:
 
 def _read(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        # 깨진 바이트가 섞여도 훅이 죽지 않게 치환한다(UnicodeDecodeError 방지)
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
 

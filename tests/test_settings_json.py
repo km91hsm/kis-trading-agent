@@ -22,9 +22,12 @@ USER_ONLY = (
     "fo session",
     "saveticker run",
     "saveticker service",
+    "saveticker monitor",
     "saveticker install-browser",
+    "accounts ping",
     "spot exec-key release",
-    "regime killswitch",
+    "regime killswitch on",
+    "regime killswitch off",
     "ml promote",
     "ml demote",
     "evaluation rl promote",
@@ -35,6 +38,22 @@ USER_ONLY = (
 def _bash_denied(deny: list[str], cmd: str) -> bool:
     pats = [d[len("Bash(") : -1] for d in deny if d.startswith("Bash(") and d.endswith(")")]
     return any(fnmatchcase(cmd, p) for p in pats)
+
+
+def _read_denied(deny: list[str], path: str) -> bool:
+    """Read 도구 규칙(gitignore 식 — `**` 는 경로 구분자도 넘는다)을 fnmatch 로 근사한다."""
+    pats = [d[len("Read(") : -1] for d in deny if d.startswith("Read(") and d.endswith(")")]
+    rel = path if path.startswith("./") else f"./{path}"
+    return any(fnmatchcase(rel, p) for p in pats)
+
+
+ALLOWED = (
+    "uv run trader status",
+    "uv run pytest -q",
+    "uv run trader selfcheck",
+    "uv run trader regime killswitch show",
+    "uv run trader ml models",
+)
 
 
 def test_settings_json_denies_user_only_commands_and_secrets() -> None:
@@ -55,21 +74,32 @@ def test_settings_json_denies_user_only_commands_and_secrets() -> None:
         "sed -n 1p /home/user/project/secrets/.env",
     ):
         assert _bash_denied(deny, cmd), f"{cmd} 미거부"
-    # .env.example 은 키 이름 템플릿이라 막지 않는다
+    # accounts secrets import 가 만드는 백업(secrets/.env.bak-<시각>, 앱키 원문)도 막는다(FR-3)
     for cmd in (
-        "cat secrets/.env.example",
-        "cat templates/secrets/.env.example",
-        "cat /home/user/project/secrets/.env.example",
-        'head "$PWD/secrets/.env.example"',
+        "cat secrets/.env.bak-20260101_000000",
+        "cat /a/b/secrets/.env.bak-20260101_000000",
+        "head -3 ./secrets/.env.bak-20260101_000000",
+        'grep KIS "$PWD/secrets/.env.bak-20260101_000000"',
     ):
+        assert _bash_denied(deny, cmd), f"{cmd} 미거부"
+    assert _read_denied(deny, "secrets/.env.bak-20260101_000000")
+    assert _read_denied(deny, "./secrets/.env")
+    # 템플릿 예시는 Read 도구로 읽힌다(Bash 읽기는 과차단 수용, FR-3)
+    assert not _read_denied(deny, "templates/secrets/.env.example")
+    # 허용 명령은 막지 않는다
+    for cmd in ALLOWED:
         assert not _bash_denied(deny, cmd), f"{cmd} 가 거부됨"
-    assert not any(".env.example" in d for d in deny)
-    # 사용자 전용 명령: uv run · python -m 두 형태
+    # 사용자 전용 명령: uv run · python -m · uv run python -m 세 형태
     for cmd in USER_ONLY:
         assert f"Bash(uv run trader {cmd}*)" in deny, cmd
         assert f"Bash(python -m trader {cmd}*)" in deny, cmd
+        assert f"Bash(uv run python -m trader {cmd}*)" in deny, cmd
+        assert _bash_denied(deny, f"uv run python -m trader {cmd} --x"), cmd
     # 세션 시작 훅은 파이썬
     hooks = data["hooks"]["SessionStart"]
     commands = [h["command"] for entry in hooks for h in entry["hooks"]]
-    assert any("uv run python" in c and "tools/session_start.py" in c for c in commands)
+    # 훅은 표준 라이브러리만 쓴다 — 프로젝트 동기화 없이 돈다(M-6)
+    assert any(
+        "uv run --no-project python" in c and "tools/session_start.py" in c for c in commands
+    )
     assert not any(c.endswith((".sh", ".bat", ".ps1")) for c in commands)
