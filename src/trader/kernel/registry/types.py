@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
-from fastapi import APIRouter
 
 from trader.kernel.config.sections import Section
 from trader.kernel.ledger.migrations import Migration
 
-if TYPE_CHECKING:  # 순환 import 방지: 둘 다 이 모듈을 import 한다
+if TYPE_CHECKING:  # 순환 import 방지(notify·web 이 이 모듈을 import), fastapi 는 경량 기동(P19)
+    from fastapi import APIRouter
+
     from trader.kernel.notify.commands import CommandContext
     from trader.kernel.web.deps import WebDeps
 
