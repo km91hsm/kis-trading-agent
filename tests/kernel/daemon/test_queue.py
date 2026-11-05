@@ -130,6 +130,42 @@ def test_cancel_only_queued(conn):
     assert queue.cancel(conn, rid2) is False
 
 
+def test_cancel_calls_on_cancel_hook(conn, caplog):
+    """취소에 성공하면 그 kind 의 `on_cancel(conn, params)` 를 부른다. 실행 중(취소 실패)이면 안
+    부르고, 훅 예외는 로그만 — 취소 결과는 그대로 True."""
+    calls: list[dict] = []
+
+    def hook(c, params):
+        calls.append(params)
+
+    def boom(c, params):
+        raise RuntimeError("훅 실패")
+
+    kinds = {
+        "plain": QueueKind(
+            "plain", PlainParams, "일반 작업", "slow", 0, False, False, _body, on_cancel=hook
+        ),
+        "reeval": QueueKind(
+            "reeval", ReevalParams, "재평가", "reeval", 10, True, False, _body, on_cancel=boom
+        ),
+    }
+    rid = queue.enqueue(conn, kinds, "plain", {"market": "KR"}, source="web", now=NOW)
+    assert queue.cancel(conn, rid, now=NOW, kinds=kinds) is True
+    assert calls == [{"market": "KR"}]
+    rid2 = queue.enqueue(conn, kinds, "plain", {"market": "US"}, source="web", now=NOW)
+    queue.claim_next(conn, now=NOW, kinds=ALL)
+    assert queue.cancel(conn, rid2, now=NOW, kinds=kinds) is False and len(calls) == 1
+    rid3 = queue.enqueue(
+        conn, kinds, "reeval", {"market": "KR", "ticker": "AAA"}, source="web", now=NOW
+    )
+    with caplog.at_level("WARNING", logger="trader.daemon"):
+        assert queue.cancel(conn, rid3, now=NOW, kinds=kinds) is True
+    assert "훅 실패" in caplog.text
+    # kinds 를 안 주면 훅 없이 취소만(옛 호출 호환)
+    rid4 = queue.enqueue(conn, kinds, "plain", {"market": None}, source="web", now=NOW)
+    assert queue.cancel(conn, rid4, now=NOW) is True and len(calls) == 1
+
+
 def test_mark_stale_running_and_expire_queued(conn):
     old = NOW - timedelta(hours=7)
     a = enq(conn, "plain", {"market": "KR"}, now=old)

@@ -241,7 +241,8 @@
 .risk-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
 .risk-stats dd { font-variant-numeric: tabular-nums; }
 .risk-insufficient { color: var(--fg-muted); }
-.risk-contrib li {
+.risk-contrib li,
+.risk-limits li {
   display: grid;
   grid-template-columns: 6em 1fr 5em;
   align-items: center;
@@ -251,6 +252,10 @@
 .risk-bar { height: var(--space-2); background: var(--bg-sunken); border-radius: var(--radius); overflow: hidden; }
 .risk-bar-fill { height: 100%; background: var(--accent); }
 .risk-pct { text-align: right; font-variant-numeric: tabular-nums; }
+.risk-limits-title { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); color: var(--fg-muted); font-weight: normal; }
+.risk-limits li { grid-template-columns: 7em 1fr 9em; }
+.risk-limit.over .risk-bar-fill { background: var(--down); }
+.risk-limit.over .risk-pct, .risk-limit.over .risk-ticker { color: var(--down); font-weight: 600; }
 .mode-switch select { min-height: var(--touch); }
 .mode-switch .btn { min-height: var(--touch); }
 .mode-note { margin-top: var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); }

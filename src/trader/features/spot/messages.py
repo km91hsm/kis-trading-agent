@@ -6,6 +6,7 @@ from typing import Any
 
 from trader.features.spot import labels
 from trader.kernel.notify import messages
+from trader.kernel.notify.telegram import Message
 
 
 def approval_line(a: dict, env: str | None = None) -> str:
@@ -19,6 +20,14 @@ def approval_line(a: dict, env: str | None = None) -> str:
     return (
         f"#{a['id']} {who} {side} {shown} {o.get('qty')}주 {price} · "
         f"{messages.kst_hhmm(a.get('expires_at'))} 만료"
+    )
+
+
+def reject_notice(a: dict, env: str | None = None) -> Message:
+    """승인 거부 알림 '[거부]' + 승인 줄(kind approval) — 텔레그램 `/reject` 와 웹 거부 큐
+    (`approval_notice`)가 같은 문구를 쓴다."""
+    return Message(
+        messages.event("거부", approval_line(a, env)), kind="approval", account_id=a["account_id"]
     )
 
 

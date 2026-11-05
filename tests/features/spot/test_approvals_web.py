@@ -215,7 +215,9 @@ def test_patch_reject_marks_rejected(web_client, pending_approval, conn, brokers
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     a = _approval(conn, pending_approval)
     assert (a["status"], a["decided_channel"]) == ("rejected", "web")
-    assert _requests(conn) == [] and brokers["paper-main"].orders == []
+    # 거부 알림은 데몬이 보낸다(웹은 알림을 쥐지 않는다) — 큐에는 approval_notice 만
+    assert [r["kind"] for r in _requests(conn)] == ["approval_notice"]
+    assert brokers["paper-main"].orders == []
 
 
 def test_patch_expired_is_409(web_client, expired_approval, conn):
@@ -237,6 +239,74 @@ def test_patch_approve_when_daemon_down_is_409_without_decision(
     r = _patch(web_client, pending_approval, {"action": "approve"})
     assert r.status_code == 409 and "데몬" in r.json()["detail"]
     assert _approval(conn, pending_approval)["decided_by"] is None and _requests(conn) == []
+
+
+def test_cancel_queued_approve_execute_releases_claim(web_client, pending_approval, conn):
+    """웹에서 대기 중인 `approve_execute` 를 취소하면 그 승인의 선점이 풀린다(P14) — 다시 결정할
+    수 있다."""
+    r = _patch(web_client, pending_approval, {"action": "approve"})
+    assert r.status_code == 202
+    rid = r.json()["request_id"]
+    assert _approval(conn, pending_approval)["decided_channel"] == "web"
+    assert web_client.delete(f"/api/jobs/{rid}", headers=AUTH).status_code == 204
+    a = _approval(conn, pending_approval)
+    assert (a["status"], a["decided_by"], a["decided_channel"]) == ("pending", None, None)
+    assert _patch(web_client, pending_approval, {"action": "approve"}).status_code == 202
+
+
+def test_duplicate_enqueue_releases_claim(web_client, pending_approval, conn, monkeypatch):
+    """`approve_execute` 를 못 넣으면(중복) 집행 없는 선점이 남지 않게 풀고 409 를 유지한다."""
+
+    def dup(*a, **kw):
+        raise jobq.DuplicateRequest("같은 요청이 이미 대기 중")
+
+    monkeypatch.setattr(jobq, "enqueue", dup)
+    r = _patch(web_client, pending_approval, {"action": "approve"})
+    assert r.status_code == 409 and r.json()["detail"]["status"] == "duplicate"
+    a = _approval(conn, pending_approval)
+    assert (a["status"], a["decided_by"], a["decided_channel"]) == ("pending", None, None)
+
+
+def test_reject_enqueues_approval_notice(web_client, pending_approval, conn, monkeypatch):
+    """웹 거부 → 원장 결정 뒤 큐 `approval_notice`(P15). 큐 등록이 실패해도 거부 결과는 그대로."""
+    r = _patch(web_client, pending_approval, {"action": "reject"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    (req,) = _requests(conn)
+    assert (req["kind"], req["source"], req["status"]) == ("approval_notice", "web", "queued")
+    params = json.loads(req["params"])
+    assert (params["approval_id"], params["action"], params["channel"]) == (
+        pending_approval, "reject", "web",
+    )  # fmt: skip
+    assert len(params["actor"]) == 8
+
+    def boom(*a, **kw):
+        raise RuntimeError("원장 잠김")
+
+    monkeypatch.setattr(jobq, "enqueue", boom)
+    # 같은 결정이 만든 실전 계좌 승인 요청 — 실전 거부는 confirm 불필요
+    (real,) = [a["id"] for a in xledger.pending_approvals(conn) if a["account_id"] == "real-main"]
+    r = _patch(web_client, real, {"action": "reject"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    assert _approval(conn, real)["status"] == "rejected" and len(_requests(conn)) == 1
+
+
+def test_approval_rows_have_market_and_currency(web_client, pending_approval, conn, accounts):
+    """승인 행에 주문 시장·통화(시장 기준 KR→KRW, US→USD). 주문에 시장이 없으면 계좌의 유일한
+    시장으로, 그것도 모르면 None."""
+    from trader.features.spot import approvals
+
+    rows = web_client.get("/api/approvals").json()["approvals"]
+    row = next(x for x in rows if x["id"] == pending_approval)
+    assert (row["market"], row["currency"]) == ("KR", "KRW")
+    a = _approval(conn, pending_approval)
+    us = {**a, "order": {**a["order"], "market": "US", "ticker": "AAPL"}}
+    assert (approvals.row_of(conn, us, accounts)["market"],
+            approvals.row_of(conn, us, accounts)["currency"]) == ("US", "USD")  # fmt: skip
+    bare = {**a, "order": {k: v for k, v in a["order"].items() if k != "market"}}
+    assert approvals.row_of(conn, bare, accounts)["currency"] == "KRW"  # paper-main 은 KR 만
+    gone = {**bare, "account_id": "nobody"}
+    assert (approvals.row_of(conn, gone, accounts)["market"],
+            approvals.row_of(conn, gone, accounts)["currency"]) == (None, None)  # fmt: skip
 
 
 # --- approve_execute 큐 본문 ----------------------------------------------------------------

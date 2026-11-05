@@ -271,3 +271,38 @@ def test_portfolio_risk_card_from_close_table(client, ledger, ml):
     assert card["n_obs"] == 60 and card["missing"] == [] and card["partial"] is False
     assert sum(c["contribution"] for c in card["contributions"]) == pytest.approx(1.0)
     assert card["corr"]["tickers"] == ["AAA", "BBB"] and card["account_id"] == "paper-main"
+
+
+def test_risk_card_limits_and_usage(project, accounts, ml):
+    """`/positions/risk` 에 설정 한도(`limits`)와 지금 사용량(`usage`)을 싣는다 — 종가가 부족한
+    `insufficient` 분기에서도. 섹터는 `ports["scan"]`, 일일 손익은 직전 NAV 대비."""
+    sectors = {"AAA": "반도체", "BBB": "반도체", "CCC": "금융"}
+    scan = SimpleNamespace(sector_of=lambda m: sectors.get)
+    ports = {"accounts": AccountsPortImpl(accounts, Secrets()), "ml": ml, "scan": scan}
+    client = make_web_client(project, [SPOT], ports=ports, now=NOW)
+    c = db.connect(project / "state" / "trader.db")
+    try:
+        _nav(c, "paper-main", "1100000", "1100000", d="2026-11-03")
+        _nav(c, "paper-main", "1000000", "250000")
+        _pos(c, "paper-main", "AAA", 1, "300000", "300000", "300000")
+        _pos(c, "paper-main", "BBB", 1, "250000", "250000", "250000")
+        _pos(c, "paper-main", "CCC", 1, "200000", "200000", "200000")
+    finally:
+        c.close()
+    risk = client.app.state.deps.settings.risk
+    want_limits = {
+        "max_position_pct": risk.max_position_pct, "max_positions": risk.max_positions,
+        "max_sector_pct": risk.max_sector_pct, "min_cash_pct": risk.min_cash_pct,
+        "daily_loss_stop_pct": risk.daily_loss_stop_pct,
+    }  # fmt: skip
+    card = client.get("/api/positions/risk", params={"account_id": "paper-main"}).json()
+    assert card["insufficient"].startswith("종가 부족")  # ml 종가표가 비었다
+    assert card["limits"] == want_limits
+    u = card["usage"]
+    assert u["position_pct_max"] == pytest.approx(0.30) and u["positions"] == 3
+    assert u["sector_pct_max"] == pytest.approx(0.55) and u["cash_pct"] == pytest.approx(0.25)
+    assert u["daily_loss_pct"] == pytest.approx(1000000 / 1100000 - 1)
+    # 스냅샷이 없어도 한도는 있고 사용량은 모름(None)
+    empty = client.get("/api/positions/risk", params={"account_id": "paper-two"}).json()
+    assert empty["insufficient"] == "잔고 스냅샷 없음" and empty["limits"] == want_limits
+    assert set(empty["usage"]) == set(u) and all(v is None for v in empty["usage"].values())

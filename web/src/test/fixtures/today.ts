@@ -35,6 +35,8 @@ export function fixtureApproval(over: Over = {}) {
     env: "paper",
     decision: { asset: "spot", id: 7 },
     ticker: "005930",
+    market: "KR",
+    currency: "KRW",
     side: "BUY",
     qty: 3,
     amount: "210000",
@@ -47,9 +49,9 @@ export function fixtureApproval(over: Over = {}) {
   };
 }
 
-/** 달러 계좌(paper-us, currency USD)의 미국 종목 승인 — 금액 통화 표기용. 결정 id 없음(링크 없음). */
+/** paper-us 계좌의 미국 종목 승인(market US·currency USD — 통화는 계좌가 아니라 주문 시장 기준) — 금액 통화 표기용. 결정 id 없음(링크 없음). */
 export function fixtureUsApproval(over: Over = {}) {
-  return fixtureApproval({ id: 13, account_id: "paper-us", ticker: "AAPL", qty: 2, amount: "461.0", decision: { asset: "spot", id: null }, ...over });
+  return fixtureApproval({ id: 13, account_id: "paper-us", ticker: "AAPL", market: "US", currency: "USD", qty: 2, amount: "461.0", decision: { asset: "spot", id: null }, ...over });
 }
 
 export function fixtureSpotDecision(over: Over = {}) {

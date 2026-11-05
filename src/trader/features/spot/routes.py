@@ -2,8 +2,10 @@
 
 `approvals_router`: `GET /approvals?status=pending|all`, `PATCH /approvals/{id} {action, confirm?}`.
 웹 프로세스는 주문을 내지 않는다 — 승인은 `approvals.decide` 선점 + `approve_execute` 큐
-요청(202)까지, 집행은 데몬 큐 틱. 데몬이 꺼져 있으면 승인을 받지 않는다(선점이 집행 없이 남지
-않게). 계좌는 `deps.ports["accounts"]`(없으면 계좌 없음 → 모든 승인이 실전 확인 필요).
+요청(202)까지, 집행은 데몬 큐 틱(요청을 못 넣거나 대기 중에 취소되면 선점을 푼다). 거부는 원장
+결정 뒤 `approval_notice` 큐 요청 — 텔레그램 알림은 데몬이 보낸다. 데몬이 꺼져 있으면 승인을
+받지 않는다(선점이 집행 없이 남지 않게). 계좌는 `deps.ports["accounts"]`(없으면 계좌 없음 →
+모든 승인이 실전 확인 필요). 승인 행은 주문 시장·통화(`market`·`currency`)를 싣는다.
 
 `positions_router`(조회만): `GET /positions/overview?market=`(현물 전체 합산),
 `GET /positions/risk?account_id=&market=`(위험 카드). `RESOURCES`: `/accounts/{id}/positions`
@@ -16,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import closing
 from typing import Any, Literal
 
@@ -23,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from trader.features.spot import approvals, decisions_view, positions_view, risk_view
+from trader.features.spot.executor import sector_of_for
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
 from trader.kernel.registry.types import ResourcePart, SseKey
@@ -31,6 +35,7 @@ from trader.kernel.web.auth import actor_of, require_same_origin, require_token
 from trader.kernel.web.routers import jobs as jobs_router
 
 WRITE = [Depends(require_token), Depends(require_same_origin)]
+logger = logging.getLogger("trader.spot")
 
 approvals_router = APIRouter(tags=["approvals"])
 positions_router = APIRouter(tags=["positions"])
@@ -72,15 +77,17 @@ def decide_approval(
         if not d["ok"]:
             code = 400 if d["status"] == "confirm_required" else 409
             raise HTTPException(status_code=code, detail=d)
-        if body.action == "reject":
-            return d
         kinds = jobq.kinds_of(with_kernel(deps.features))
+        if body.action == "reject":
+            _notice_reject(conn, kinds, approval_id, actor, deps.now())
+            return d
         try:
             rid = jobq.enqueue(
                 conn, kinds, "approve_execute", {"approval_id": approval_id, "actor": actor},
                 source="web", now=deps.now(),
             )  # fmt: skip
-        except jobq.DuplicateRequest as e:  # 같은 집행이 이미 대기·실행 중 — 선점은 그쪽 몫
+        except jobq.DuplicateRequest as e:  # 집행 요청을 못 넣었다 — 이 결정의 선점은 푼다
+            approvals.release(conn, approval_id)
             raise HTTPException(
                 status_code=409, detail={"ok": False, "status": "duplicate", "error": str(e)}
             ) from e
@@ -89,6 +96,17 @@ def decide_approval(
             raise
     response.status_code = 202
     return {"status": "accepted", "request_id": rid}
+
+
+def _notice_reject(conn: Any, kinds: jobq.Kinds, approval_id: int, actor: str | None,
+                   now: Any) -> None:  # fmt: skip
+    """거부 알림 요청(`approval_notice`)을 큐에 넣는다 — 보내기는 데몬(웹은 알림을 쥐지 않는다).
+    못 넣어도 이미 확정된 거부를 뒤집지 않는다(로그만)."""
+    params = {"approval_id": approval_id, "action": "reject", "actor": actor, "channel": "web"}
+    try:
+        jobq.enqueue(conn, kinds, "approval_notice", params, source="web", now=now)
+    except Exception as e:  # noqa: BLE001 - 알림 요청 실패가 거부 결과를 바꾸지 않는다
+        logger.warning("거부 알림 요청 실패 #%s: %s", approval_id, e)
 
 
 def _market(value: str | None) -> str | None:
@@ -111,8 +129,9 @@ def positions_overview(request: Request, market: str | None = None) -> dict:
 def positions_risk(
     request: Request, account_id: str = Query(...), market: str | None = None
 ) -> dict:
-    """위험 카드: VaR·CVaR 95%·베타·상관·위험 기여. 종가는 ml 포트, 표시 전용. 현물 계좌만(그 외
-    400), market 생략은 계좌 첫 시장."""
+    """위험 카드: VaR·CVaR 95%·베타·상관·위험 기여 + 설정 한도(`limits`)·사용량(`usage`, 섹터는
+    `ports["scan"]`). 종가는 ml 포트, 표시 전용. 현물 계좌만(그 외 400), market 생략은 계좌 첫
+    시장."""
     deps = request.app.state.deps
     acct = next((a for a in _accounts(deps) if a.id == account_id), None)
     if acct is None:
@@ -123,7 +142,8 @@ def positions_risk(
     with closing(deps.conn_factory()) as conn:
         card = risk_view.risk_card(
             conn, (deps.ports or {}).get("ml"), account_id=acct.id, market=m,
-            today=run_date_for(m, deps.now()),
+            today=run_date_for(m, deps.now()), limits=deps.settings.risk,
+            sector_of=sector_of_for(deps.ports, m),
         )  # fmt: skip
     return {"account_id": acct.id, "market": m, **card}
 

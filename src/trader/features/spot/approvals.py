@@ -17,6 +17,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from trader.features.spot import executor
+from trader.features.spot.positions_view import CURRENCY
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.ledger import control
 
@@ -73,15 +74,27 @@ def _amount(order: dict) -> str | None:
         return None
 
 
+def _market_of(order: dict, accounts: Iterable[Any], account_id: str) -> str | None:
+    """주문 시장. 주문에 없으면 계좌가 시장 하나뿐일 때 그것, 아니면 None."""
+    if order.get("market"):
+        return str(order["market"]).upper()
+    acct = next((x for x in accounts if getattr(x, "id", None) == account_id), None)
+    markets = list(getattr(acct, "markets", None) or [])
+    return markets[0] if len(markets) == 1 else None
+
+
 def row_of(conn: sqlite3.Connection, a: dict, accounts: Iterable[Any]) -> dict:
-    """웹 목록 행."""
-    o = a["order"]
+    """웹 목록 행. 통화는 계좌가 아니라 주문 시장 기준(KR→KRW, US→USD)."""
+    o, accounts = a["order"], list(accounts)
+    market = _market_of(o, accounts, a["account_id"])
     return {
         "id": a["id"],
         "account_id": a["account_id"],
         "env": env_of(accounts, a["account_id"]),
         "decision": {"asset": "spot", "id": a["decision_id"] or None},
         "ticker": o.get("ticker"),
+        "market": market,
+        "currency": CURRENCY.get(market) if market else None,
         "side": o.get("side"),
         "qty": o.get("qty"),
         "amount": _amount(o),

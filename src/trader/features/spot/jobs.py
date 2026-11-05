@@ -1,4 +1,5 @@
-"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·큐 `approve_execute`(결정된 승인 집행)·
+"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·큐 `approve_execute`(결정된 승인 집행,
+취소하면 선점 해제)·`approval_notice`(웹 거부 알림)·
 `fills_sync`(체결 동기화)·`balance_refresh`·`{market}_reconcile`(야간 대사)·
 `{market}_rebalance`(주간 리밸런스)·`{market}_monitor`(장중 감시)·`notice_listener`(체결통보)."""
 
@@ -28,6 +29,7 @@ from trader.features.spot import (
     resume,
 )
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.messages import reject_notice
 from trader.features.spot.scan_analyze import QUEUE_KINDS_SCAN
 from trader.kernel.broker import factory
 from trader.kernel.config.market_hours import REGULAR, session_over
@@ -39,7 +41,7 @@ from trader.kernel.execution import ledger as xledger
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.notify import messages
-from trader.kernel.notify.telegram import NullNotifier
+from trader.kernel.notify.telegram import NullNotifier, send
 from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session import calls
 from trader.kernel.session.run_store import run_date_for
@@ -568,11 +570,49 @@ def approve_execute_body(deps, params: dict, progress) -> dict:
         conn.close()
 
 
+class ApprovalNoticeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: int
+    action: Literal["reject"]
+    actor: str | None
+    channel: str
+
+
+def approval_notice_body(deps, params: dict, progress) -> dict:
+    """큐 `approval_notice`: 웹 거부 뒤 텔레그램 `[거부]` 알림(spot `messages.reject_notice` —
+    `/reject` 와 같은 문구)을 보낸다. 웹은 알림을 쥐지 않아 데몬이 보낸다(P15). 알림기가 없으면
+    건너뛴다."""
+    aid = int(params["approval_id"])
+    if deps.notifier is None:
+        return {"approval_id": aid, "skipped": "알림기 없음"}
+    conn = deps.conn_factory()
+    try:
+        a = xledger.get_approval(conn, aid)
+    finally:
+        conn.close()
+    if a is None:
+        return {"approval_id": aid, "skipped": f"승인 요청 #{aid} 없음"}
+    port = (deps.ports or {}).get("accounts")
+    acct = next((x for x in port.accounts() if x.id == a["account_id"]), None) if port else None
+    ok = send(deps.notifier, reject_notice(a, acct.env if acct is not None else None))
+    return {"approval_id": aid, "sent": bool(ok)}
+
+
+APPROVE_EXECUTE = QueueKind(
+    "approve_execute", ApproveExecuteParams, "승인 집행", "fast", 0, True, False,
+    approve_execute_body,
+    # 대기 중 집행 요청을 취소하면 그 승인의 선점을 푼다(P14) — 다시 결정할 수 있게
+    on_cancel=lambda conn, p: approvals.release(conn, int(p["approval_id"])),
+)  # fmt: skip
+APPROVAL_NOTICE = QueueKind(
+    "approval_notice", ApprovalNoticeParams, "승인 결정 알림", "info", 0, False, False,
+    approval_notice_body,
+)  # fmt: skip
+
 QUEUE_KINDS = (
-    QueueKind(
-        "approve_execute", ApproveExecuteParams, "승인 집행", "fast", 0, True, False,
-        approve_execute_body,
-    ),
+    APPROVE_EXECUTE,
+    APPROVAL_NOTICE,
     QueueKind(
         "fills_sync", EmptyParams, "체결 동기화", "fast", 0, False, True, fills_then_balance
     ),

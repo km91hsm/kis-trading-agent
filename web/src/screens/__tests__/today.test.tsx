@@ -96,11 +96,12 @@ describe("오늘 화면", () => {
     expect(button(ap, "거절")).toBeTruthy();
   });
 
-  test("대기 승인 행·확인 본문에 금액(계좌 통화)과 결정 상세 링크", async () => {
+  test("대기 승인 행·확인 본문에 금액(주문 시장 통화 row.currency)과 결정 상세 링크", async () => {
     await mount(
       routes({
         "GET /api/approvals": { approvals: [fixtureApproval(), fixtureUsApproval()] },
-        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-us", currency: "USD", markets: ["US"] })],
+        // 원화 계좌로 미국 주식을 사도 주문 통화는 USD — 계좌 currency 가 아니라 row.currency 를 쓴다
+        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-us", currency: "KRW", markets: ["KR", "US"] })],
       }),
     );
     const ap = section("approvals");

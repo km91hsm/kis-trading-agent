@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +60,8 @@ class QueueKind:
     trading: bool
     restart_requeue: bool
     body: Callable[..., Any]
+    # 대기 중 요청을 취소했을 때 부르는 훅 `(conn, params)` — 요청이 쥔 선점 등을 푼다(P14)
+    on_cancel: Callable[[sqlite3.Connection, dict], None] | None = None
 
 
 @dataclass(frozen=True)
