@@ -135,3 +135,20 @@ def test_first_run_init_copies_missing_only(tmp_path, monkeypatch):
     (exe_dir / "_internal" / "docs").mkdir()
     (exe_dir / "_internal" / "docs" / "guide.md").write_text("# g\n", encoding="utf-8")
     assert bundle.first_run_init(root) == ["docs/guide.md"]
+
+
+def test_spec_exe_names_differ_case_insensitively():
+    """spec 의 EXE 둘(`trader` 콘솔·`TraderApp` 창 없음)은 대소문자를 무시해도 달라야 한다 —
+    macOS·Windows 의 대소문자 무시 파일시스템에서 같은 폴더에 놓이면 서로 덮어쓴다."""
+    import re
+    from pathlib import Path
+
+    spec = Path(__file__).resolve().parents[3] / "packaging" / "trader.spec"
+    text = spec.read_text(encoding="utf-8")
+    blocks = re.findall(r"\bEXE\((.*?)\n\)", text, re.S)
+    names = [re.search(r'name="([^"]+)"', b).group(1) for b in blocks]
+    assert len(names) == 2
+    assert len({n.lower() for n in names}) == 2
+    # __main__ 은 실행파일명이 traderapp* 일 때만 트레이로 분기한다
+    assert any(n.lower().startswith("traderapp") for n in names)
+    assert "trader" in names
