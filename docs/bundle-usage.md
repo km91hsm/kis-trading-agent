@@ -14,7 +14,7 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
   _internal/           ← Windows 전용. 런타임·라이브러리·에이전트 프롬프트·웹·템플릿 (macOS 는 .app 안에 있다)
   README.md            ← 이 문서
   config/              ← settings·accounts·universe·schedule·sources·ml 등 .yaml (첫 실행 때 생성)
-  secrets/.env         ← API 키 (첫 실행 때 .env.example 만 생김 → 복사해서 채운다)
+  secrets/.env         ← API 키 (첫 실행 때 WEB_TOKEN 만 든 채로 생김 → 키를 덧붙여 채운다)
   state/               ← 원장 DB·runs·logs·features·models (실행하며 생김, 백업 대상)
   docs/                ← 이 문서 (첫 실행 때 복사)
 ```
@@ -41,10 +41,12 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
      (없으면 홈 폴더)에 남긴 뒤 종료합니다.
    - Windows: SmartScreen 경고("Windows의 PC 보호")에서 **추가 정보 → 실행** 을 한 번 누릅니다.
 2. **더블클릭**: `Trader.app`(macOS) 또는 `TraderApp.exe`(Windows). 메뉴바(작업표시줄)에 ▲ 아이콘이 뜨고,
-   처음에는 `config/`·`secrets/.env.example`·`docs/` 가 만들어지며 **웹 UI**(http://127.0.0.1:8787)가 열립니다.
+   처음에는 `config/`·`secrets/.env.example`·`docs/` 가 만들어지고 `secrets/.env` 에 웹 쓰기 토큰 `WEB_TOKEN` 이
+   자동으로 들어간 뒤 **웹 UI**(http://127.0.0.1:8787)가 열립니다.
    키가 없으면 수집·세션은 실패하지만 UI 는 뜹니다. 터미널에서 같은 초기화만 하려면 `./trader init`
    (Windows: `trader.exe init`) — 이미 있는 파일은 건드리지 않습니다.
-3. **키 넣기**: `secrets/.env.example` 을 `secrets/.env` 로 복사해 값을 채웁니다. 다른 프로젝트의 `.env` 가 있으면
+3. **키 넣기**: 첫 실행이 만든 `secrets/.env` 에 `secrets/.env.example` 의 키 이름대로 줄을 덧붙여 값을 채웁니다
+   (`WEB_TOKEN` 줄은 자동 생성이니 그대로 둡니다 — `.env.example` 을 복사해 덮어쓰면 토큰이 사라집니다). 다른 프로젝트의 `.env` 가 있으면
    `./trader accounts secrets import --from <그 파일>` 로 이름 매핑 복사(값은 출력되지 않음).
 4. **계좌**: `config/accounts.yaml` 의 `cano` 자리표시자(`00000000`)를 본인 계좌번호로 바꿉니다(모의는 `auto`,
    실전은 `off` 로 시작). `config/sources.yaml` 의 `edgar.user_agent`(또는 `.env` 의 `EDGAR_USER_AGENT`)에
@@ -64,8 +66,9 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
 - 터미널에서 창과 함께 보고 싶으면 `./trader app`(트레이 없음, Ctrl+C 로 종료).
 - 데몬 로그는 `state/logs/`. 외부 감시 1회는 `./trader watchdog`.
 - 텔레그램: 알림 수신, `/approve <id>`·`/reject <id>`·`/status`·`/mode <계좌> <auto|approve|off>` 등.
-- 웹 UI 제어(일시정지·승인·모드·작업 실행)는 `secrets/.env` 의 `WEB_TOKEN` 을 설정 페이지에 넣어야 됩니다.
-  토큰이 없으면 조회 전용입니다.
+- 웹 UI 제어(일시정지·승인·모드·작업 실행)는 쓰기 토큰(`secrets/.env` 의 `WEB_TOKEN`, 첫 실행 때 자동 생성)이 필요합니다.
+  이 PC 에서 연 브라우저는 시스템 화면의 「이 PC 에서 받기」로 토큰을 받고, 폰·tailnet 에서는 그 값을 직접 붙여 넣습니다.
+  토큰을 넣기 전의 브라우저는 조회만 됩니다(`WEB_TOKEN` 이 아예 없으면 서버가 쓰기를 모두 거부 — `trader web` 만 쓸 때).
 - 작업은 터미널 없이 웹 대시보드에서, 또는 `./trader jobs run <작업>` 으로 데몬 큐에 넣을 수 있습니다
   (데몬이 켜져 있어야 함 — `./trader jobs kinds` 로 종류 확인).
 - **세이브티커 Chrome 수집기 설치**: `./trader saveticker extension prepare --destination <새 패키지 경로>` 로

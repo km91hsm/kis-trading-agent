@@ -46,7 +46,8 @@ CLI: `trader accounts show | mode | pause | resume | ping | order-test | add | r
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
 11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 커널 `notify.messages` 에 이식하지 않았다 — `SCALP_EXIT` 는 M9 에서 scalp `messages.py` 로 이식됐다(`carry_over` 추가), `DecisionBrief` 는 spot 몫.
-12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다).
+12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다). M12 부터 커널 `ops.status` 가 절을 모으고(텔레그램은 절마다 `[제목]` 줄, `trader status` 는 STATUS.md `## 계좌`), 「계좌」 절은 `- 실행 중|일시정지` + 계좌마다 `id · env · 시장 · 실효 모드`(확인 없는 실전 auto 는 `auto→off(LIVE 미확인)`, T7-R3).
+13. health(M12): accounts 는 점검 영역을 두지 않는다 — 계좌 손실·주문 상태는 커널 `orders`·기능 `regime`·`spot` 영역이 본다. 트레이 일시정지 토글은 포트 `set_paused(..., channel="tray")` 로 `control_log` 에 남는다.
 13. `notify.enabled=false` 와 토큰 없음이 `telegram poll|loop` 에서 같은 토큰 오류 문구로 나온다(원인 구분 없음).
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.

@@ -25,14 +25,16 @@
 - A1/A2: RL 사이저는 evaluation `rl/`(ml→evaluation 순환 방지), 레인 접점은 `ports["evaluation"]`(`EvaluationPort`) 하나. 옛 `ml/rl` 과 `trader rl` 은 없다.
 - RL pickle 클래스 경로는 `trader.features.evaluation.rl.policy.LinearPolicy` 다. 옛 `state/models/rl_sizer/*` 는 로드되지 않으니 `trader evaluation rl train` 으로 다시 학습한다. 승격·강등(`rl promote|demote`)은 사용자만.
 - A5: `round_trip_bp` 는 커널 `execution/costs.py` 로 승격(M7 `ROUND_TRIP_BP` 중복 해소). A6: `MonitorContext.close_table` 주입이 살아 있다.
-- A7: `features_snapshot` 06:30 cron 을 유지하고 reflect 도 다시 스냅샷한다(중복 스냅샷). A8: `retention.prune` 은 reflect 에 없다(M12), fills 선동기화 없음.
-- A10: `usage_probe` 는 커널 내장 잡이며 간격이 1800s 고정이다(설정 `llm.usage_probe.interval_min` 이 남아 있어도 읽지 않는다 — 바꿔도 효과 없음, 반영은 M12). A13: CLI 는 `trader evaluation …` 만(최상위 별칭은 M12). A15: `test_performance_fo` 6건과 fo `nav_series` 는 M10 에서 해소 — `nav_series(asset="fo")` 가 `fo_nav_snapshot`(NAV 있는 행, 마지막 날짜 기준 `days`, 평일만)을 raw SQL 로 읽는다(레인 테이블 읽기는 허용, import 아님). `views.account_summary` 의존 2건은 이식하지 않았다(M11).
+- A7: `features_snapshot` 06:30 cron 을 유지하고 reflect 도 다시 스냅샷한다(중복 스냅샷). A8: `retention.prune` 은 reflect 에 없다 — M12 에서 커널 내장 cron 잡 `retention`(17:20 KST, `ops.retention_days`)으로 해소(P5), fills 선동기화 없음.
+- A10(M12 해소, P13): `usage_probe` 는 커널 내장 잡이고 간격은 `JobSpec.interval_from` 으로 설정 `llm.usage_probe.interval_min`×60 초를 따른다. A13(M12 해소, P8): 최상위 별칭은 두지 않는다 — CLI 는 `trader evaluation …` 만, 정본은 CLAUDE.md 명령표. A15: `test_performance_fo` 6건과 fo `nav_series` 는 M10 에서 해소 — `nav_series(asset="fo")` 가 `fo_nav_snapshot`(NAV 있는 행, 마지막 날짜 기준 `days`, 평일만)을 raw SQL 로 읽는다(레인 테이블 읽기는 허용, import 아님). `views.account_summary` 의존 2건은 이식하지 않았다(M11).
 - `quick.ask_json` 은 `agents.with_schema` 를 재사용한다(T2-R1; md 가 스키마를 이미 품으면 덧붙이지 않는다). `readiness.interval_kinds_of` 는 interval 잡의 `kind` 를 모은다(T9-R2, T9-R1 을 뒤집음; 데몬은 `runs.kind=job.kind` 로 쓰고 `runs_kind="monitor"` 세션은 없다). 대상은 discover 된 기능 + 커널 `QUEUE_FEATURE`·`BUILTIN_FEATURE`.
 - `store.held_at` 은 `account_nav` 만 있는 날을 "보유 없음"으로 본다. 집행 브레이커는 계좌 자신의 30일 NAV 를 쓴다(옛 paper 합산 아님; paper 계좌가 둘 이상이면 마지막 것이 이긴다).
 - `convergence_rate` 는 `debate_turns.decision_date`, `signal_hits`/`pending` 은 `analyst_reports.decision_date` 와 조인한다. `open_window._exchanges` 는 spot 소유 `ticker_exchanges` 테이블을 SQL 로 읽는다.
 - `ports._decided_at` 은 US 백필(운영일이 지금이 아닐 때)에도 `MARKET_CLOSE["KR"]`(15:30 KST)를 쓴다 — 플랜 Task 5 결정(Ruling F2).
 - 미국 일일 리포트(16:20 ET)는 07:10 KST `fills_sync` 보다 먼저 돌아 `realized_5d` 가 하루 늦을 수 있다.
-- 이연: `metrics.pending_approvals/account_stance/stance_by_market`; M12 status/health 보정 재점검.
+- health(M12): 영역 `evaluation` 하나 — `evaluation.calibration_review`(watch: 만기 결정이 `ml.yaml calibration.min_decisions` 에 닿았는데 `inject` 가 꺼져 있음).
+- status(M12): `/status`·STATUS.md 절 「성과」(계좌×시장 최근 30일 수익률·MDD + RL 사이저 줄)·「결정 분포(N일)」(빈 데이터면 생략).
+- 옛 `metrics.pending_approvals/account_stance/stance_by_market` 은 이식하지 않는다 — 상태 절은 커널 `execution.ledger.pending_approvals` 와 spot `stance.decide` 를 쓴다(M12 T7).
 - `theme.mature`/`mature_views` 는 reflect 가 부른다(M6 이연 회수).
 
 ### 보존한 옛 결함 (고치지 않음)

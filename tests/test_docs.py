@@ -20,3 +20,44 @@ def test_todo_has_milestone_checklist() -> None:
     m0 = re.split(r"^#+\s*M1\b", text, maxsplit=1, flags=re.M)[0]
     m0 = m0.split("M0", 1)[1]
     assert re.search(r"^- \[[ x]\]", m0, re.M)
+
+
+def _cmd_name(info) -> str:
+    """typer 명령 이름(이름이 없으면 typer 규칙대로 함수 이름에서)."""
+    return info.name or info.callback.__name__.lower().replace("_", "-")
+
+
+def _leaves(typer_app) -> list[str]:
+    """숨김이 아닌 하위 명령·그룹 이름을 재귀로 모은다."""
+    out = [_cmd_name(c) for c in typer_app.registered_commands if not c.hidden]
+    for g in typer_app.registered_groups:
+        out.append(g.name)
+        out += _leaves(g.typer_instance)
+    return out
+
+
+def test_claude_md_lists_every_cli_command() -> None:
+    """루트 명령과 그룹(기능 포함)의 리프 명령이 CLAUDE.md 「실행 명령」 표에 있다.
+    `tool` 은 LLM 전용이라 「`trader tool …`」 한 행만 둔다."""
+    from trader.kernel.cli.main import build_app
+    from trader.kernel.registry import discover
+
+    text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    section = text.split("## 실행 명령", 1)[1].split("\n## ", 1)[0]
+    rows = [line for line in section.splitlines() if line.startswith("|")]
+    root = build_app(discover())
+    missing: list[str] = []
+    for c in root.registered_commands:
+        if not c.hidden and f"trader {_cmd_name(c)}" not in section:
+            missing.append(_cmd_name(c))
+    for g in root.registered_groups:
+        mine = " ".join(r for r in rows if f"trader {g.name}" in r)
+        if not mine:
+            missing.append(g.name)
+            continue
+        if g.name == "tool":
+            continue
+        for leaf in _leaves(g.typer_instance):
+            if not re.search(rf"(?<![\w-]){re.escape(leaf)}(?![\w-])", mine):
+                missing.append(f"{g.name} {leaf}")
+    assert not missing, f"CLAUDE.md 명령표에 없는 명령: {missing}"

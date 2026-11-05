@@ -33,6 +33,11 @@
 - `GET /charts/minute?market=&ticker=&exchange=&count=120`(1~390, US 는 최대 120) → `{ticker, market, interval: "1m", tz, session_date, candles: [{time: UTC epoch…}], markers}`. 60초 캐시, 캐시 미스는 키별 락 안에서 다시 확인해 동시 요청도 KIS 1회. 마커는 session_date(시장 현지) 하루의 체결(UTC 경계를 SQL 로), 분 단위로 내린 epoch + 현지 `HH:MM` 텍스트.
 - US 거래소는 `NAS|NYS|AMS`, 안 주면 유니버스 → 없으면 NAS. 테스트용 캐시 비우기 `charts.reset()`.
 
+## 운영 점검·상태 (M12)
+
+- health 영역 `quotes`: `quotes.session_busy.<env>`(watch) — 체결통보 리스너가 KIS 웹소켓 세션을 쥔 동안(control `ws_session_busy:<env>` until 이 미래) 시세 허브가 양보 중. 옛 웹 임시 판정의 busy 사유를 옮긴 것(PF-1).
+- status 절은 없다(`/status`·STATUS.md 에 quotes 절 없음).
+
 ## 규약
 
 - **허브**: 41칸 중 `max_tickers`(40) = 지수 2 + 호가 1 + 체결가 37(최근 요청 순), 임차 `lease_s` 30초(호가 `book_lease_s` 10초), `idle_s` 60초 무요청·장 밖이면 스레드 종료(스레드 하나 `kis-ws-quotes`, 연결은 그 스레드만). 접속 실패·끊김·접속키 거절은 지수 백오프(최대 30초), 거절 종목은 10분 제외, 10초 넘은 틱은 REST 로 보완. 표시 전용 — 신호·주문·게이트는 읽지 않는다.

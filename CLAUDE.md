@@ -10,10 +10,14 @@
 | `uv run pytest -q` | 파이썬 테스트 전체 |
 | `uv run ruff check src tests` | 린트 |
 | `uv run trader init` | `config/ secrets/ state/ docs/` 생성, 템플릿 중 없는 파일만 `config/` 로 복사 |
-| `uv run trader selfcheck` | 환경·원장 버전·기능 목록을 JSON 1줄로 출력 (세션 시작 때 먼저 실행) |
+| `uv run trader selfcheck` | 환경·원장 버전(DB 는 만들지 않음)·기능·웹 dist·무거운 모듈 import·Playwright 드라이버를 JSON 1줄로 (실패 있으면 exit 1) |
+| `uv run trader status` | `state/STATUS.md` 생성(운영 점검·데몬·최근 실행·오늘 LLM 호출·기능 절·TODO 진행도). 세션 시작 훅이 그 앞 두 절을 읽는다 |
+| `uv run trader watchdog [--quiet]` | 외부 감시 1회(데몬 생존·하트비트·운영 점검, 주의 이상이면 텔레그램 — `--quiet` 은 판정만). JSON 1줄 |
 | `uv run trader daemon [--dry-run]` | 스케줄러 데몬 (사용자 전용 — 금지사항 참고) |
 | `uv run trader web [--host] [--port]` | 웹 UI·API 서버 |
-| `uv run trader accounts show\|mode\|pause\|resume\|ping\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·추가삭제·키 가져오기 (모드 변경·`ping` 은 사용자 전용) |
+| `uv run trader app [--tray --no-browser --dry-run]` | 번들 진입점: 첫 실행 초기화·`WEB_TOKEN` 생성 → 데몬 + 웹 UI 한 프로세스 → 브라우저 또는 트레이 (사용자 전용) |
+| `uv run trader install [--uninstall --watchdog --dry-run]` | 로그온 시 데몬(`--watchdog` 이면 5분 감시) 자동 시작 등록·해제 (사용자 전용) |
+| `uv run trader accounts show\|mode\|pause\|resume\|ping\|order-test --account …\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·모의 주문 연결 점검(1주 접수→즉시 취소)·추가삭제·키 가져오기 (모드 변경·`ping`·`order-test` 는 사용자 전용) |
 | `uv run trader ingest collect --ticker … [--market KR\|US --exchange … --asof … --force]` | 종목 수집 1회(공시·뉴스·거시 등, 절별 오류 격리) |
 | `uv run trader spot analyze --ticker … [--market KR\|US --exchange … --asof … --dry-run --skip-collect]` | 종목 1개 분석 세션 → `30_decision` (`FAKE_CLAUDE=1` 없이 금지 — 금지사항) |
 | `uv run trader spot approvals list\|approve\|reject` | 승인 대기 조회·승인·거부 (`approve` 는 사용자 전용) |
@@ -31,7 +35,7 @@
 | `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
-| `uv run trader saveticker status\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
+| `uv run trader saveticker status\|import-capture <파일>\|query\|export\|run\|service\|monitor\|install-browser\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 수집·조회·Chrome 확장 (`run`·`service`·`install-browser` 는 사용자 전용) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
 | `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl {train\|models\|report\|promote\|demote}` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL 사이저 (`reflect` 는 `FAKE_CLAUDE=1` 없이 금지, `rl promote\|demote` 는 사용자 전용) |
 | `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/daily` 일일 리포트·`/watch add\|remove\|list` 관심종목 포함) |
@@ -52,7 +56,7 @@
 - **생성 파일**: `web/src/generated/sse-keys.ts`·`nav.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys`·`dev gen-nav` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file`·`test_gen_nav_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
 - **데몬 잡 설정**: 잡 시각은 `schedule.yaml` 의 점 경로 키(`JobSpec.schedule_key`)로 가리킨다. 시각을 코드에 박지 않는다.
 - **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (스펙 §2.3)
-- **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. 예외 하나: 파생(fo)은 다리 상태·`orders` 한 트랜잭션 때문에 자체 실행기(`features/fo/executor.py`, `LegStore`)를 쓴다. (스펙 §2.1, `features/fo/README.md` A1)
+- **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. 예외 둘: 파생(fo)은 다리 상태·`orders` 한 트랜잭션 때문에 자체 실행기(`features/fo/executor.py`, `LegStore`)를 쓰고, 모의 전용 연결 점검 `features/accounts/order_test.py`(`accounts order-test`, 원장 기록 없음)는 브로커로 직접 접수·취소한다. (스펙 §2.1, `features/fo/README.md` A1, `tests/kernel/registry/test_order_paths.py` `ALLOWED`)
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (스펙 §2.6)
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
 - **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (피처 `latest_rows(asof)`·유니버스 PIT·라벨 엠바고)
@@ -61,7 +65,7 @@
 
 ## 금지사항
 
-- 실전 주문을 수동으로 실행하지 않는다. 자동 주문·로그온 등록 경로(`daemon` 의 실기 기동, `kis order *`, `approvals approve`, `install` 등)는 사용자만 실행한다. 실기 검증이 필요하면 사용자에게 요청한다.
+- 실전 주문을 수동으로 실행하지 않는다. 자동 주문·로그온 등록 경로(`daemon` 의 실기 기동, `app`, `install`, `accounts order-test`, `spot approvals approve` 등)는 사용자만 실행한다. 실기 검증이 필요하면 사용자에게 요청한다.
 - `secrets/` 를 커밋하지 않는다. 읽지도 않는다(`cat` 같은 Bash 읽기 명령 포함, 다른 명령과 묶지 않는다). `config/accounts.yaml` 에는 실제 계좌번호가 있으므로 값을 출력·인용하지 않는다.
 - 계좌 모드(`control`/`account_modes`)를 임의로 변경하지 않는다. 모드 변경은 사용자가 한다.
 - `FAKE_CLAUDE=1` 없이 `uv run trader spot analyze`·`uv run trader evaluation reflect` 를 돌리지 않는다(구독 호출 발생). 사용자 요청 없이 실제 세션을 띄우지 않는다.
@@ -93,4 +97,6 @@
 - 구현 플랜: `docs/superpowers/plans/` (마일스톤별 1개)
 - 커널 모듈 규약: `docs/architecture.md`
 - 진행 체크리스트: `docs/TODO.md`
+- 전환 리허설·되돌리기: `docs/runbook-transition.md` · 번들 사용법: `docs/bundle-usage.md`
+- Claude Code 권한·세션 훅: `.claude/settings.json`(deny = 이 금지사항) · `tools/session_start.py`(STATUS 두 절 + 열린 TODO)
 - SDD 작업 기록(로컬 전용, gitignore): `.superpowers/sdd/<날짜>-<마일스톤>/progress.md`

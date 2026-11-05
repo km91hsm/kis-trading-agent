@@ -4,13 +4,15 @@
 
 ## platform
 
-- 책임: OS 분기가 허용되는 유일한 계층. 경로·파일락·프로세스·로깅·번들 판별.
-- 공개면: `paths`(`project_root`·`config_dir`·`state_dir`·`secrets_path`·`docs_dir`·`web_dist`·`agents_dir`), `bundle`(`is_frozen`·`bundle_root`·`resource_dir`·`templates_dir`·`tool_command`·`cli_argv`), `procs`(`pid_alive`·`same_process`·`spawn_detached`·`stop_tree`), `filelock`(`locked`·`try_hold`), `logging_setup`(`configure`·`file_handler`·`quiet_httpx`).
+- 책임: OS 분기가 허용되는 유일한 계층. 경로·파일락·프로세스·로깅·번들 판별·로그온 등록·OS 알림·트레이.
+- 공개면: `paths`(`project_root`·`config_dir`·`state_dir`·`secrets_path`·`docs_dir`·`web_dist`·`playwright_browsers_dir`), `bundle`(`is_frozen`·`bundle_root`·`resource_dir`·`templates_dir`·`tool_command`·`tool_bin_dir`·`cli_argv`·`daemon_argv`·`watchdog_argv`·`icons_dir`·`first_run_init`), `procs`(`pid_alive`·`same_process`·`spawn_detached`·`stop_tree`·`open_folder`), `filelock`(`locked`·`try_hold`), `logging_setup`(`configure`·`file_handler`·`quiet_httpx`), `installer`(`install`·`uninstall`·`render` — launchd plist / 작업 스케줄러 XML, `kind` = `daemon`|`watchdog`), `notify_os`(`alert` — 창 없는 실행의 OS 알림), `tray`(`run_tray`·`TrayUnavailable`·`TrayState`·`menu_model`·`read_state`·`toggle_pause`·`watch_signals` — pystray 는 `run_tray` 안에서만 import), `claude_bin`(`find_claude`).
 - 규약:
   - 루트 탐색은 `TRADER_HOME`(절대경로로 resolve) → 없으면 cwd 에서 위로 `pyproject.toml`. 못 찾으면 `ProjectRootNotFound`.
   - `templates_dir()` 는 `bundle` 에만 둔다(`paths` 에 두지 않는다). 소스 실행 시 저장소 `templates/` 를 가리키므로 `TRADER_HOME` 이 저장소 밖이어도 `init` 이 동작한다.
   - 로그 파일은 `trader.log` / `trader-<name>.log`, 로거는 `trader.platform`. 회전 핸들러는 프로세스 간 공유 가능.
   - OS 분기(`sys.platform`)는 이 모듈 안에서만.
+  - `first_run_init(root)` 는 `config/ secrets/ state/ docs/` 를 만들고 템플릿 중 없는 파일만 복사한다(`.env` 는 만들지 않는다 — `trader app` 이 `config.secrets.ensure_web_token` 으로 `WEB_TOKEN` 만 넣는다). 에이전트 md 는 기능 폴더(`features/<x>/agents/`)에 있고 옛 `paths.agents_dir` 는 없다.
+  - 설치기 label 은 옛 저장소와 같다(`com.trader.daemon`·`com.trader.watchdog`, Windows `trader-daemon`·`trader-watchdog`) — 새 `install` 은 옛 등록을 덮으므로 전환 때 옛 쪽을 먼저 해제한다(`docs/runbook-transition.md`).
 - 테스트: `tests/kernel/platform/`
 
 ## config
@@ -186,7 +188,7 @@
     | settings | `/settings`, `/settings/{paused,watchlist,usage-throttle,secrets}` | accounts·scan·커널 |
     | system | `/system/{health,status,usage,daemon,notices,control-log,regime,saveticker,scalp,fo}`, `POST /system/{bootstrap-token,saveticker/restart,usage/ensure-fresh}` | 커널·regime·saveticker·scalp·fo |
     | analytics | `/analytics/performance*`, `/analytics/{shadow,calibration,memory}`, `/analytics/rl/*`, `/analytics/fo/*` | evaluation·fo |
-  - **스펙 §2.5 대비 알려진 차이**: `/decisions/{id}` → `/decisions/spot/{id}`·`/decisions/fo/{id}`; `/tax-lots` → `/accounts/{id}/tax-lots`; `/rl/*` → `/analytics/rl/*`; `/fo/{scorecard,report,summary}` → `/analytics/fo/*`(`/fo/summary` 도 남김); `/ml/*`·`/names*`·`/charts*`·`/features*`·`/markets/{m}/today`·`/risk-checks`·`/fo/legs|today` 는 자기 첫 세그먼트를 유지(별칭표로 자원에 묶음); `/system/ops` → `/system/health`(임시 판정, M12 `kernel/ops` 로 교체); 옛 `/fo/account` → `/system/fo`; `/quotes/us` 없음(`/quotes?market=US`); 플랜 추가 `GET /accounts/overview`·`/system/notices`·`/system/control-log`·`/quotes/fx`·`/quotes/fo`; 스펙 밖 추가 `/news/labels`·`GET /news/manual`·`/decisions/spot/news-refs`·`POST /system/usage/ensure-fresh`(같은 출처만, 토큰 없음 — R1). 자원별 세부 차이는 각 기능 README 「웹」 절.
+  - **스펙 §2.5 대비 알려진 차이**: `/decisions/{id}` → `/decisions/spot/{id}`·`/decisions/fo/{id}`; `/tax-lots` → `/accounts/{id}/tax-lots`; `/rl/*` → `/analytics/rl/*`; `/fo/{scorecard,report,summary}` → `/analytics/fo/*`(`/fo/summary` 도 남김); `/ml/*`·`/names*`·`/charts*`·`/features*`·`/markets/{m}/today`·`/risk-checks`·`/fo/legs|today` 는 자기 첫 세그먼트를 유지(별칭표로 자원에 묶음); `/system/ops` → `/system/health`(판정은 `ops` 절); 옛 `/fo/account` → `/system/fo`; `/quotes/us` 없음(`/quotes?market=US`); 플랜 추가 `GET /accounts/overview`·`/system/notices`·`/system/control-log`·`/quotes/fx`·`/quotes/fo`; 스펙 밖 추가 `/news/labels`·`GET /news/manual`·`/decisions/spot/news-refs`·`POST /system/usage/ensure-fresh`(같은 출처만, 토큰 없음 — R1). 자원별 세부 차이는 각 기능 README 「웹」 절.
 - 테스트: `tests/kernel/web/` (+ `web/` vitest)
 
 ### 프런트(web/)
@@ -199,15 +201,31 @@ M11b(플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`). React 19 + Vite
 - 실전 확인: 실전 계좌 쓰기(모드 변경·승인·재개·trading 큐 kind)는 `Confirm` 의 `live={{ accountId }}` 로 계좌 id 를 다시 입력해야 확인되고, 그 값이 본문 `confirm`(= 계좌 id, 백엔드 `require_confirm`)으로 간다. 대상 계좌 없는 trading kind 는 `RunJobButton` 의 실전 계좌 드롭다운으로 고른 뒤 그 id 를 같은 방식으로 재입력하고, 그 값이 `confirm`. 「오늘」 기본 날짜는 `useKstDate()` 로 KST 자정에 넘어가고, 전역 일시정지는 합계 조회 실패와 무관하게 늘 보인다. 실전 표식은 `--live` 주황 + 글자 「실전」(`Confirm live`).
 - 생성 파일: `src/generated/sse-keys.ts`(`SSE_KEYS`·`NOISY_KEYS`)·`nav.ts`(`NAV`)는 손대지 않고 `trader dev gen-sse-keys`·`gen-nav` 로 만든다(`--check`·CI 동기 테스트). 검증: `cd web && npm ci && npm run typecheck && npm test -- --run && npm run build`.
 
+## ops
+
+- 책임: 운영 점검(health)·결과 보관·격상 알림, 보존 정리(retention), 시스템 상태 렌더(status), 데몬 밖 외부 감시(watchdog). 기능 이름은 모르고 `Feature.health_areas`·`status_sections` 로만 기능을 만난다(M12).
+- 공개면: `kernel.ops`(PEP 562 지연 재노출 — `config`·`registry.contracts` 와의 순환을 피한다) `check`·`latest`·`store`·`escalate`·`headline`·`to_web`·`worst`·`LEVELS`·`LABEL`·`WEB_LEVEL`·`KERNEL_AREAS`·`Item`·`OpsContext`, `ops.jobs`(`OPS_CHECK`·`RETENTION`·`build_context`·`schedule_jobs`·`CACHE_MAX_AGE_FACTOR`), `ops.retention`(`prune`·`old_date`·`PERSISTENT_PREFIXES`), `ops.status`(`render_markdown`·`write_status`·`telegram_lines`·`sections`·`KERNEL_SECTIONS`·`TELEGRAM_KERNEL_SECTIONS`·`todo_progress`·`next_todos`), `ops.watchdog`(`run_once`·`should_notify`·`load`·`save`), 설정 `ops.settings`(`OpsSettings` = settings.yaml `ops.retention_days` 120(30~3650), `OpsCheckSchedule` = schedule.yaml `ops_check.interval_s` 1800(≥60)). CLI `trader status`·`trader watchdog [--quiet]`.
+- 규약:
+  - **영역 계약**: `HealthArea(key, check)`, `check(OpsContext) -> list[Item]`(`Item(key, level, text, link, count, extra)`). 커널 내장 영역 `jobs`(데몬 생존·하트비트·놓친 잡·24h 오류)·`llm`(세션 상한·구독 사용률·실패율)·`orders`(레이트리미터·unknown·마감 뒤 미정리·승인 만료·대기 — 현물만, 파생은 fo 영역)은 예약 key(`RESERVED_AREA_KEYS`). 기능 영역은 기능당 하나, key = feature id(지금 spot·fo·regime·ingest·evaluation·quotes·saveticker; 계약 검사가 중복·불일치를 막는다). 항목 key 는 `"{영역}.{세부}"` — 접두가 없으면 러너가 붙이고 경고 로그. 영역이 예외를 던지면 그 영역만 `"{key}.error"` warning 1건, 나머지는 그대로.
+  - **단계 어휘**: 내부 `ok < watch < warning < critical`(라벨 정상·관심·주의·경보), 머리 단계는 항목 중 최악. 웹 변환 `to_web`: critical→`fail`·warning→`warn`, watch 는 reasons 에 `info` 로만(머리 단계 미반영), ok 항목은 빼고 응답 모양 `{level, reasons, checked_at, version, features}` 는 M11 그대로.
+  - **`ops_check` 잡**(커널 내장 interval, 기본 1800초): `check` → control `ops_result` 에 보관(`store`) → `escalate` 가 control `ops_level` 과 비교해 단계가 나빠졌거나 경고 이상 **새 항목**이 생겼을 때만 텔레그램 「점검 격상」 1건(상태 기반 dedup, 시간 쿨다운 없음).
+  - **`/system/health` 원천**(`kernel/web/health.py`): 데몬이 적은 `ops_result` 의 `at` 이 `CACHE_MAX_AGE_FACTOR(2) × ops_check 간격` 안이고 데몬이 살아 있으며 하트비트가 멈추지 않았으면 그것, 아니면(`?live=1` 포함) 웹 프로세스가 직접 `check()`(결과는 적지 않음, 잡 표 없이 — 놓친 잡 항목은 데몬 결과에만). 원장을 못 읽으면 데몬 생존만 보고 `ledger` warn 사유.
+  - **retention**(커널 내장 cron `retention`, schedule.yaml `retention` 기본 17:20 KST, misfire idempotent): KST 오늘 − `ops.retention_days` 이전의 `state/runs/<날짜>`, 날짜 세그먼트가 든 control 운영일 플래그(첫 세그먼트가 영구 접두 `paused·watchlist·telegram_offset·memory_breaker` 면 남김), 끝난 `job_requests`, 세션이 없는 `runs`, `llm_rate_limits`·`notices`·`control_log` 를 지운다. 결정·주문·체결·메모리 같은 원장 사실은 지우지 않는다. 멱등.
+  - **status**: 절은 `StatusSection(title, lines)` 한 모양. 커널 절 4개(`운영 점검`·`데몬`·`마지막 실행`·`오늘 LLM 호출`) + 기능 `status_sections`. `trader status` 는 `## 제목` Markdown 에 구현 진행도·다음 할 일(`docs/TODO.md` 체크박스)을 더해 `state/STATUS.md`(≤ 8 000자)로 쓰고, 텔레그램 `/status`·웹 `/system/status` 는 커널 앞 2절 + 기능 절을 비어 있지 않은 절마다 `[제목]` 줄을 앞세워 잇는다. 절 하나의 실패는 `- 제목: 조회 실패(…)` 한 줄. 세션 시작 훅 `tools/session_start.py` 가 STATUS 의 「운영 점검」·「데몬」 절을 읽는다.
+  - **watchdog**: 데몬 밖 프로세스(`trader install --watchdog` 이 5분 간격 등록)가 1회 `check` 를 지금 판정해 JSON 1줄 `{level, items, notified}` 을 내고 `state/watchdog.json` 에 기록한다. 데몬이 죽었거나 멈췄으면(`jobs.daemon`·`jobs.stale`) 단계 격상은 즉시·같은 단계는 1시간(`RENOTIFY`)마다, 데몬이 살아 있으면 새 경고 항목에만 알린다(나머지는 데몬 `ops_check` 몫). 정상으로 돌아오면 재알림 시각을 지운다. schedule 설정 오류여도 잡 표 없이 판정을 계속한다.
+- 테스트: `tests/kernel/ops/` (+ 기능 영역은 `tests/features/<x>/test_health.py`)
+
 ## cli
 
-- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`daemon`·`web`·`dev`·`notify-test`·`telegram` 과 `tool` 루트를 둔다.
-- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `dev`(`gen-sse-keys`·`gen-nav`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`).
+- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`status`·`watchdog`·`install`·`daemon`·`web`·`app`·`notify-test` 과 그룹 `telegram`·`dev`·`tool`·`jobs` 를 둔다.
+- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `status_cmd`, `watchdog_cmd`, `install_cmd`, `app_cmd`(`run_app`·`WebThread`·`wait_for_port`), `dev`(`gen-sse-keys`·`gen-nav`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`), `jobs_cmd`.
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
   - 설정 오류는 `config_errors` 데코레이터가 사용자용 메시지로 바꾼다.
   - cli 는 `features` 를 정적 import 하지 않는다. 기능은 `discover()` 를 거쳐 sub-app 으로 마운트된다.
-  - `selfcheck` 는 JSON 1줄(파이썬 버전·루트·원장 버전·기능 목록·웹 dist 유무). `init` 은 템플릿 중 없는 파일만 복사한다.
+  - `selfcheck` 는 JSON 1줄 — 키 `ok python root frozen ledger_version features web_dist modules failed optional playwright_driver`. 원장 DB 를 만들지 않고(파일이 없으면 `ledger_version: null`), `HEAVY_MODULES` import 실패가 있으면 exit 1(`optional` 의 lightgbm·stable_baselines3 는 없어도 ok). `init` 은 템플릿 중 없는 파일만 복사한다.
+  - `app`(번들 더블클릭 진입점)은 한 프로세스: `Daemon.start(install_signals=False)`(잡은 스케줄러 스레드) + 웹 `uvicorn.Server`(`trader-web` 스레드, `build_web_deps` 그대로) + 메인 스레드 트레이(`--tray`) 또는 대기. 종료는 웹 `should_exit` → `Daemon.shutdown(wait=True)`. 잠금 실패면 exit 1.
+  - 경량 기동: `uvicorn`·`create_app` 은 명령 안에서 지연 import 한다. `trader --help` 는 아직 fastapi·pandas 를 올린다(기능 `routes` 모듈 수준 `APIRouter`·briefing→evaluation→ml 체인 — `docs/TODO.md` 「M12 이후」).
   - 콘솔 UTF-8 강제는 `TraderApp` 진입점에서 한다.
   - `trader tool` 루트(`tool_cmd`): 기능이 선언한 `ToolCommand` 를 모아 단 하나의 그룹으로 마운트한다(이름 중복은 `RegistryError`). 출력은 JSON 1줄뿐이고 `emit` 은 `ok: false` 면 종료 코드 1, `run_tool` 은 예외를 `{"ok": false, "error": "<Type>: <msg>"}` 로 바꾼다. 세션의 허용 명령은 `bundle.tool_command()`(번들 `trader tool` / 개발 `python -m trader tool`)와 같은 문자열이고, 세션 PATH 앞에 `bundle.tool_bin_dir()`(`platform.bundle`, 번들은 실행파일 폴더·개발은 venv bin)를 둔다. claude 실행파일 탐색은 `platform.claude_bin`(`find_claude`·`child_path`·`ClaudeNotFound`).
   - `boot(ports=True, …)` 는 settings·secrets·conn 을 함의하고 모든 `Feature.ports` 를 이름으로 조립해 `Boot.ports` 에 담는다. 텔레그램 `CommandContext.ports` 도 같은 맵이라 핸들러(`/approve` 등)가 `ctx.ports["accounts"]` 로 계좌·브로커·정책을 받는다.
