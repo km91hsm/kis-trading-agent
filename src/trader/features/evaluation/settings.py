@@ -8,8 +8,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from trader.kernel.config.sections import Section
+from trader.kernel.config.time import HM_PATTERN
 
-_HM = r"^([01]\d|2[0-3]):[0-5]\d$"
+_HM = HM_PATTERN.pattern
 
 
 class HalfLives(BaseModel):

@@ -34,7 +34,6 @@ from trader.kernel.config.market_hours import REGULAR, session_over
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
-from trader.kernel.daemon.runner import STALE_SESSION_AGE
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.lane.types import LaneContext
@@ -414,20 +413,6 @@ class ReevaluateParams(BaseModel):
     trigger_ids: list[int] = []
 
 
-def _close_stale_sessions(deps) -> int:
-    """1시간 넘게 running 인 세션 행을 error 로 닫는다(세션이 중간에 죽으면 남는다)."""
-    conn = deps.conn_factory()
-    try:
-        n = calls.close_stale_running(
-            conn, older_than=(deps.now() - STALE_SESSION_AGE).isoformat()
-        )
-    finally:
-        conn.close()
-    if n:
-        logger.warning("stale running 세션 %d건을 error 로 정리", n)
-    return n
-
-
 def _recollect(deps, market: str, ticker: str, exchange: str | None) -> None:
     """뉴스 재평가: 입력을 강제 재수집한다. 포트가 없거나 실패하면 기존 입력으로 재평가."""
     inputs = deps.ports.get("inputs")
@@ -460,7 +445,11 @@ def reevaluate_request(deps, params: dict, progress) -> dict:
     """큐 `reevaluate` 1건: 트리거 행을 읽어 `resume.reevaluate` 세션을 돈다. 이미 처리된
     트리거·장 마감(장 없는 날 포함)·종료 중이면 세션 없이 건너뛴다. 세션은 같은 종목 분석과
     겹치지 않게 종목 락(`locks.lock_for`) 안에서 돌고, 끝나면 형제 트리거도 같은 표시로 닫는다."""
-    _close_stale_sessions(deps)
+    conn = deps.conn_factory()
+    try:  # 세션 전에 stale running(1시간 초과) 세션 행을 error 로 닫는다
+        calls.close_stale(conn, now=deps.now())
+    finally:
+        conn.close()
     market, ticker = params["market"], params["ticker"]
     exchange = params.get("exchange")
     trigger_id = int(params["trigger_id"])

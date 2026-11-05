@@ -10,7 +10,7 @@ from datetime import date
 from typing import Any
 
 from trader.features.regime import tools
-from trader.kernel.session.fake import ensure_ok, fake_call
+from trader.kernel.session.fake import ensure_ok, fake_call, fake_turn
 from trader.kernel.session.run_store import market_dir, read_checkpoint
 
 
@@ -29,21 +29,6 @@ def _report(ticker: str, asof: str) -> dict:
         "counter_evidence": [],
         "evidence": [{"claim": "FAKE", "source_id": "news_macro"}],
         "data_gaps": ["FAKE 모드"],
-    }
-
-
-def _turn(side: str, round_no: int) -> dict:
-    bull = side == "bull"
-    return {
-        "side": side,
-        "round": round_no,
-        "stance": "BULLISH" if bull else "BEARISH",
-        "valuation_view": "UNDERVALUED" if bull else "OVERVALUED",
-        "arguments": [f"FAKE {side} 논거"],
-        "rebuttals": [f"FAKE 반박 r{round_no}"] if round_no > 0 else [],
-        "timing": {"action": "WAIT", "condition": None, "price_zone": None},
-        "conviction": 0.7 if bull else 0.6,
-        "what_would_change_my_mind": ["FAKE"],
     }
 
 
@@ -76,7 +61,7 @@ def write_fake_market(
                     market=market,
                     date=date,
                     stage=f"_market_debate_r{rnd}_{side}",
-                    payload=_turn(side, rnd),
+                    payload=fake_turn(side, rnd),
                     agent=agent,
                     call_meta=fake_call(agent),
                 )

@@ -26,7 +26,7 @@ from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry import hooks
 from trader.kernel.registry.types import JobSpec, QueueKind
-from trader.kernel.session import usage
+from trader.kernel.session import calls, usage
 from trader.kernel.session.agents import by_name
 from trader.kernel.session.run_store import market_dir, read_checkpoint, run_date_for
 from trader.kernel.session.runner import SessionSpec, ThrottleBlocked, is_fake, run_session
@@ -281,9 +281,12 @@ def scan_analyze_body(deps, job) -> dict:
 
 
 def _close_stale(deps) -> None:
-    from trader.features.spot import jobs as spot_jobs  # jobs 가 이 모듈을 import 한다(순환)
-
-    spot_jobs._close_stale_sessions(deps)
+    """세션 전에 stale running(1시간 초과) 세션 행을 error 로 닫는다(커널 `calls.close_stale`)."""
+    conn = deps.conn_factory()
+    try:
+        calls.close_stale(conn, now=deps.now())
+    finally:
+        conn.close()
 
 
 def _scan_analyze(deps, market: str) -> dict:

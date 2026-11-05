@@ -43,6 +43,8 @@ class JobSpec:
     teardown: Callable[..., None] | None = None
     # cron 요일 제한(APScheduler day_of_week 표기, 예: "mon-sat"). None 이면 매일
     days: str | None = None
+    # interval 잡 주기(초)를 settings 에서 읽는 함수(schedule_key 가 None 이면 interval_s 보다 우선)
+    interval_from: Callable[[Any], int] | None = None
 
 
 @dataclass(frozen=True)

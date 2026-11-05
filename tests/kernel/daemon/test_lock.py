@@ -114,3 +114,17 @@ def test_link_unsupported_falls_back_to_o_excl(tmp_path, monkeypatch):
     assert lock.acquire() is True
     assert json.loads(p.read_text(encoding="utf-8"))["pid"] == os.getpid()
     lock.release()
+
+
+def test_lock_uses_injected_clock(tmp_path):
+    """내용 없는 잠금의 신선도는 주입한 시계로 판정한다(기본은 지금 시각이라 거부)."""
+    from datetime import UTC, datetime
+
+    p = tmp_path / "daemon.lock"
+    p.write_text("", encoding="utf-8")
+    later = datetime.fromtimestamp(p.stat().st_mtime + 3600, UTC)
+    assert Lock(p).acquire() is False
+    lock = Lock(p, now=lambda: later)
+    assert lock.acquire() is True
+    assert json.loads(p.read_text(encoding="utf-8"))["started_at"] == later.isoformat()
+    lock.release()

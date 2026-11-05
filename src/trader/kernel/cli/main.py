@@ -136,19 +136,18 @@ def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 
     """스케줄러 데몬을 시작하고 종료 신호까지 기다린다."""
     b = boot(ports=True, schedule=True, log_name="daemon")
     d = Daemon(b.features, build_daemon_deps(b, dry_run=dry_run))
+    started = False
     try:
         if not d.start():
             typer.echo("다른 데몬이 실행 중입니다", err=True)
             raise typer.Exit(code=1)
-    except BaseException:
-        b.conn.close()
-        raise
-    try:
+        started = True
         # 타임아웃 없는 wait 는 Windows 에서 SIGINT 로 깨지 않는다
         while not d.deps.stop_event.wait(1.0):
             pass
     finally:
-        d.shutdown()
+        if started:  # 기동 실패는 start 가 스스로 정리한다(teardown 은 돌리지 않는다)
+            d.shutdown()
         b.conn.close()
 
 

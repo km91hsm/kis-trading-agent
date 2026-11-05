@@ -68,3 +68,16 @@ def test_usage_probe_queue_kind_shared_by_daemon_cli_web(project, monkeypatch):
     seen = {}
     monkeypatch.setattr(bj, "usage_probe_body", lambda d, force=False: seen.update(f=force) or {})
     assert q.body(None, {"force": True}, None) == {} and seen == {"f": True}
+
+
+def test_usage_probe_interval_follows_settings():
+    from trader.kernel.daemon.jobs import build
+    from trader.kernel.registry.types import Feature
+
+    feat = Feature(id="k", tier="lane", jobs=(bj.USAGE_PROBE,))
+    for minutes in (30, 45):
+        (job,) = build(
+            [feat], schedule=SimpleNamespace(), settings=_settings(enabled=True,
+            interval_min=minutes), markets=["KR"], ctx=SimpleNamespace(gates={}),
+        )  # fmt: skip
+        assert job.trigger_kwargs == {"seconds": minutes * 60}

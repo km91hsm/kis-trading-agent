@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from trader.kernel.config import Market
 from trader.kernel.config.sections import Section
+from trader.kernel.config.time import HM_PATTERN
 
 
 class HedgeInstrument(BaseModel):
@@ -134,7 +135,7 @@ SECTIONS = (
 )
 
 
-_HM = r"^([01]\d|2[0-3]):([0-5]\d)$"
+_HM = HM_PATTERN.pattern
 
 
 class AtTime(BaseModel):

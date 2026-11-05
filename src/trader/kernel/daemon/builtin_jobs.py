@@ -119,7 +119,7 @@ USAGE_PROBE = JobSpec(
     id="usage_probe", kind="usage_probe", trigger="interval", per_market=False,
     schedule_key=None, interval_s=1800, enabled=lambda s: bool(s.llm.usage_probe.enabled),
     gate="none", heavy=False, misfire="default", catch_up="none", start_soon_s=60,
-    body=usage_probe_body,
+    body=usage_probe_body, interval_from=lambda s: s.llm.usage_probe.interval_min * 60,
 )  # fmt: skip
 LEDGER_BACKUP = JobSpec(
     id="ledger_backup", kind="ledger_backup", trigger="cron", per_market=False,

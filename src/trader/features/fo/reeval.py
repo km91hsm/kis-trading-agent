@@ -10,7 +10,7 @@
 
 M10: 세션은 커널 `run_session(spec, FO_RESUME, lane_ctx, agents=agents_for_runner())`(실행기
 컨텍스트는 `LaneContext.ext["fo"]`, 포지션·트리거는 `spec.extra`). 트리거 조회·처리 표시는 커널
-`execution.ledger`. `handled_marker` 는 spot `resume.py` 소유라(커널에 없음) 여기 사본을 둔다."""
+`execution.ledger`, 처리 표시 값은 커널 `session.markers.handled_marker`."""
 
 from __future__ import annotations
 
@@ -30,8 +30,9 @@ from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.platform import paths
+from trader.kernel.session.markers import handled_marker
 from trader.kernel.session.run_store import market_dir, read_checkpoint
-from trader.kernel.session.runner import PipelineError, SessionResult, SessionSpec, run_session
+from trader.kernel.session.runner import PipelineError, SessionSpec, run_session
 
 log = logging.getLogger("trader.fo.reeval")
 
@@ -41,15 +42,6 @@ MARKET = "KR"
 
 def replace_key(account_id: str, position_id: int) -> str:
     return f"{REPLACE_FLAG}{account_id}:{position_id}"
-
-
-def handled_marker(res: SessionResult) -> str | None:
-    """triggers.session_id 에 남길 값. 세션이 떴어도 실패(타임아웃·예산·오류)면 '실패:' 접두사를
-    붙여 운영일 1회 제한에서 빼고 다음 간격에 다시 시도할 수 있게 한다(spot `resume.handled_marker`
-    사본 — 레인은 spot 을 import 하지 않는다)."""
-    if res.ok:
-        return res.session_id
-    return f"실패: {res.error or 'unknown'} ({res.session_id or '-'})"[:200]
 
 
 def _tool_ctx(ctx: FoExecContext):

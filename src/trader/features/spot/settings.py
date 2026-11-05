@@ -4,13 +4,13 @@ yaml 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다."""
 
 from __future__ import annotations
 
-import re
 from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from trader.kernel.config.sections import Section
+from trader.kernel.config.time import HM_PATTERN, check_hm
 
 
 class HorizonProfile(BaseModel):
@@ -163,12 +163,11 @@ class FillsSyncSchedule(BaseModel):
     @classmethod
     def _hhmm(cls, v: list[str]) -> list[str]:
         for t in v:
-            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
-                raise ValueError(f"HH:MM 형식이어야 합니다: {t!r}")
+            check_hm(t)
         return v
 
 
-_HM = r"^([01]\d|2[0-3]):[0-5]\d$"
+_HM = HM_PATTERN.pattern
 
 
 class ReconcileAt(BaseModel):

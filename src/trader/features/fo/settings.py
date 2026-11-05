@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date
 from decimal import Decimal
 from typing import Literal
@@ -15,18 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from trader.kernel.broker.models import FoProduct
 from trader.kernel.config.sections import Section
+from trader.kernel.config.time import check_hm
 
 FoVehicle = Literal["FUTURES", "OPTION_BUY", "OPTION_SELL"]
 Regime = Literal["bull", "neutral", "bear"]
-
-_HM_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
-
-
-def _check_hm(value: str) -> str:
-    if not _HM_RE.match(value):
-        raise ValueError(f"시각은 HH:MM 형식이어야 합니다: {value!r}")
-    return value
-
 
 class FoEntryWindowCfg(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -37,7 +28,7 @@ class FoEntryWindowCfg(BaseModel):
     @field_validator("start", "cutoff")
     @classmethod
     def _v(cls, v: str) -> str:
-        return _check_hm(v)
+        return check_hm(v)
 
 
 class FoStressCfg(BaseModel):
@@ -198,7 +189,7 @@ class FoMonitorWindow(BaseModel):
     @field_validator("start", "end")
     @classmethod
     def _v(cls, v: str) -> str:
-        return _check_hm(v)
+        return check_hm(v)
 
 
 class FoMarketSchedule(BaseModel):
@@ -214,7 +205,7 @@ class FoMarketSchedule(BaseModel):
     @field_validator("session")
     @classmethod
     def _v(cls, v: str) -> str:
-        return _check_hm(v)
+        return check_hm(v)
 
 
 class FoSchedule(BaseModel):
