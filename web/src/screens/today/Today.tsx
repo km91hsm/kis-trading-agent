@@ -75,15 +75,17 @@ export function Today() {
         )}
       </section>
 
-      <section id="orders-timeline" className="screen-section">
-        <h2>주문·체결</h2>
-        <OrdersTimeline data={orders.data} error={orders.error} />
-      </section>
+      <div className="section-pair">
+        <section id="orders-timeline" className="screen-section">
+          <h2>주문·체결</h2>
+          <OrdersTimeline data={orders.data} error={orders.error} />
+        </section>
 
-      <section id="notices" className="screen-section">
-        <h2>알림</h2>
-        <NoticesFeed data={notices.data} error={notices.error} kind={noticeKind} onKind={setNoticeKind} />
-      </section>
+        <section id="notices" className="screen-section">
+          <h2>알림</h2>
+          <NoticesFeed data={notices.data} error={notices.error} kind={noticeKind} onKind={setNoticeKind} />
+        </section>
+      </div>
 
       <section id="next-jobs" className="screen-section">
         <h2>다음 할 일</h2>

@@ -245,3 +245,14 @@ describe("오늘 화면", () => {
     expect(dec.querySelector('a[href="/decisions/spot/7"]')).not.toBeNull();
   });
 });
+
+describe("배치", () => {
+  test("주문·체결과 알림은 한 묶음(.section-pair)으로 나란히 선다", async () => {
+    const { container } = await mount(routes());
+    const pair = container.querySelector(".section-pair") as HTMLElement;
+    expect(pair).not.toBeNull();
+    expect(pair.querySelector("#orders-timeline")).not.toBeNull();
+    expect(pair.querySelector("#notices")).not.toBeNull();
+    expect(pair.querySelector("#decisions")).toBeNull();
+  });
+});

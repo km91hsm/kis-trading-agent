@@ -143,15 +143,38 @@ describe("계좌·보유 통합 화면", () => {
     expect(ov.querySelector('[role="alert"]')!.textContent).toContain("확인이 필요합니다");
   });
 
-  test("계좌 카드가 /accounts/{id} 로 연결된다", async () => {
+  test("계좌 표: 행의 계좌 id 가 /accounts/{id} 로 연결되고 환경·모드·당일·승인 대기를 보인다", async () => {
     const { container } = await mount(routes());
-    const hrefs = Array.from(container.querySelectorAll("a.account-card")).map((a) => a.getAttribute("href"));
-    expect(hrefs).toEqual(["/accounts/paper-1", "/accounts/real-1"]);
-    const real = container.querySelector('a[href="/accounts/real-1"]') as HTMLElement;
-    expect(real.textContent).toContain("실전");
-    expect(real.textContent).toContain("자동");
-    expect(real.textContent).toContain("-45,000");
-    expect(real.querySelector('.chip[data-tone="warn"]')!.textContent).toContain("2");
+    const links = Array.from(container.querySelectorAll("#overview [data-account-row]")) as HTMLAnchorElement[];
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/accounts/paper-1", "/accounts/real-1"]);
+    expect(container.querySelector("#overview a.account-card")).toBeNull();
+    const row = links[1].closest("tr, .row-card") as HTMLElement;
+    expect(row.textContent).toContain("실전");
+    expect(row.textContent).toContain("자동");
+    expect(row.textContent).toContain("-45,000");
+    expect(row.querySelector('.chip[data-tone="warn"]')!.textContent).toContain("2");
+  });
+
+  test("좁은 폭(390) 행 카드에서는 계좌 이름이 제목 줄(.row-card-title)이다", async () => {
+    const orig = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      const { container } = await mount(routes());
+      const titles = Array.from(container.querySelectorAll("#overview .row-card .row-card-title")).map((t) => t.textContent);
+      expect(titles[0]).toContain("paper-1");
+      expect(titles[1]).toContain("real-1");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: orig });
+    }
+  });
+
+  test("합계 띠는 원화·달러·참고(환율·환산 합계) 세 칸 한 묶음", async () => {
+    const { container } = await mount(routes());
+    const cells = Array.from(container.querySelectorAll("#overview .kpi-strip [data-kpi]"));
+    expect(cells.map((c) => c.getAttribute("data-kpi"))).toEqual(["krw", "usd", "fx"]);
+    expect(cells[0].textContent).toContain("원화 합계");
+    expect(cells[1].textContent).toContain("달러 합계");
+    expect(cells[2].textContent).toContain("환율");
   });
 
   test("파생 계좌는 #fo-positions 카드 묶음 — 모의 칩·모드·NAV/현금·「계좌별 화면 ›」 링크", async () => {

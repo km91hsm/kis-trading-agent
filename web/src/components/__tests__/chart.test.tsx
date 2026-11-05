@@ -115,3 +115,20 @@ describe("Chart", () => {
     expect(m.series.createPriceLine).toHaveBeenCalledWith(expect.objectContaining({ price: 99, title: "손절" }));
   });
 });
+
+describe("빈 자료", () => {
+  test("점이 없으면 차트를 만들지 않고 같은 높이의 빈 틀에 「자료 없음」을 쓴다", () => {
+    const { container } = render(<Chart series={[]} height={200} />);
+    expect(m.createChart).not.toHaveBeenCalled();
+    const empty = container.querySelector("[data-chart-empty]") as HTMLElement;
+    expect(empty).not.toBeNull();
+    expect(empty.textContent).toContain("자료 없음");
+    expect(empty.style.height).toBe("200px");
+  });
+
+  test("캔들이 빈 배열이어도 같다", () => {
+    const { container } = render(<Chart candles={[]} />);
+    expect(m.createChart).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-chart-empty]")).not.toBeNull();
+  });
+});

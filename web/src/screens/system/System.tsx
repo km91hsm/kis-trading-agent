@@ -1,5 +1,5 @@
 // 「시스템」 화면 — `/system`. 사용량·헬스·데몬·잡 큐·runs/calls·설정·연결 키·쓰기 토큰·조작 이력·기능 상태(국면·저장소·단타·파생).
-// 절 컨테이너와 목차는 데이터 전에 바로 그리고(메뉴 앵커 regime·saveticker), 절마다 로딩·오류를 따로 보인다.
+// 절 컨테이너는 데이터 전에 바로 그리고(절 id = generated nav.ts 의 system 항목 — 왼쪽 메뉴가 목차), 절마다 로딩·오류를 따로 보인다.
 import { useState, type ReactNode } from "react";
 import { Chip } from "../../components/Chip";
 import { Table, type Column } from "../../components/Table";
@@ -160,13 +160,6 @@ export function System() {
   return (
     <div className="screen" data-screen="system">
       <h1 className="screen-title">시스템</h1>
-      <nav aria-label="목차" className="sys-toc">
-        {SECTIONS.map((s) => (
-          <a key={s.id} href={`#${s.id}`}>
-            {s.label}
-          </a>
-        ))}
-      </nav>
       {SECTIONS.map((s) => (
         <section key={s.id} id={s.id} className="screen-section">
           <h2>{s.label}</h2>

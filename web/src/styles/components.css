@@ -14,6 +14,7 @@
   white-space: nowrap;
   transition: background-color var(--motion), border-color var(--motion);
 }
+.btn { font-size: var(--text-sm); font-weight: 500; }
 .btn:hover:not(:disabled) { border-color: var(--fg); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary {
@@ -28,7 +29,7 @@
   padding: var(--space-4);
   background: var(--bg-elev);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   min-width: 0;
 }
 .card-head {
@@ -40,26 +41,28 @@
 }
 .card-title { font-size: var(--text-md); font-weight: 600; }
 
-/* 배지·칩 */
+/* 배지·칩 — 테두리 없는 알약. 뜻은 글자가 전하고 색은 바탕 틴트로만 */
 .badge,
 .chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--fg-muted);
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
-  line-height: 1.6;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 22px;
   white-space: nowrap;
   color: var(--fg-muted);
+  background: var(--bg-sunken);
 }
 .badge { font-weight: 600; }
 .chip .icon { width: 1em; height: 1em; }
-.badge[data-tone="ok"], .chip[data-tone="ok"] { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
-.badge[data-tone="warn"], .chip[data-tone="warn"] { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
-.badge[data-tone="fail"], .chip[data-tone="fail"] { color: var(--fail); background: var(--fail-bg); border-color: var(--fail); }
-.badge[data-tone="live"], .chip[data-tone="live"] { color: var(--live); background: var(--live-bg); border-color: var(--live); }
+.badge[data-tone="ok"], .chip[data-tone="ok"] { color: var(--ok); background: var(--ok-bg); }
+.badge[data-tone="warn"], .chip[data-tone="warn"] { color: var(--warn); background: var(--warn-bg); }
+.badge[data-tone="fail"], .chip[data-tone="fail"] { color: var(--fail); background: var(--fail-bg); }
+.badge[data-tone="live"], .chip[data-tone="live"] { color: var(--live); background: var(--live-bg); }
 .chips { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
 
 /* 표 */
@@ -92,7 +95,7 @@
   text-align: left;
   vertical-align: middle;
 }
-.table th { color: var(--fg-muted); font-weight: 600; white-space: nowrap; }
+.table th { color: var(--fg-muted); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
 .table .cell-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -112,8 +115,9 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  background: var(--bg-elev);
+  background: var(--bg);
 }
+.card .table .cell-first { background: var(--bg-elev); }
 .table-expand > td { background: var(--bg-sunken); }
 .row-toggle {
   min-width: var(--touch);
@@ -137,7 +141,7 @@
   padding: var(--space-3);
   background: var(--bg-elev);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   min-width: 0;
 }
 .row-card-meta {
@@ -179,7 +183,7 @@
   padding: var(--space-6);
   background: var(--bg-elev);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
 }
 .confirm[data-live] { border-color: var(--live); }
@@ -216,3 +220,13 @@
 }
 .sparkline { display: inline-block; vertical-align: middle; color: var(--accent); }
 .chart { width: 100%; min-width: 0; }
+/* 자료 없는 차트 — 빈 축을 그리지 않고 같은 높이의 자리만 남긴다 */
+.chart-empty {
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  background: var(--bg-sunken);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}

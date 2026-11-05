@@ -13,5 +13,6 @@ from trader.kernel.registry.types import Feature, NavItem
 FEATURE = Feature(
     id="scalp", tier="lane", sections=SECTIONS, agents=(AGENT,), jobs=(SCALP_TICK,),
     ports=(PORT,), cli=scalp_app, status_sections=(STATUS_SECTION,), resources=RESOURCES,
-    routes=ROUTERS, sse_keys=SSE_KEYS, nav=(NavItem("today", "scalp-lane", "단타", 20),),
+    routes=ROUTERS, sse_keys=SSE_KEYS,
+    nav=(NavItem("today", "scalp-lane", "단타", 20), NavItem("system", "scalp", "단타", 50)),
 )  # fmt: skip
