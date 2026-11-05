@@ -137,7 +137,7 @@ def features_action(deps, action: str, p: dict, progress) -> dict:
     n = fn(
         market_client=market_client,
         dart=ingest_api.build_dart(deps.secrets),
-        edgar=ingest_api.build_edgar(ingest_api.load_sources(deps.registry), deps.secrets),
+        edgar=ingest_api.build_edgar(ingest_api.load_sources(registry=deps.registry), deps.secrets),
         universe=ingest_api.load_universe(),
         markets=markets,  # type: ignore[arg-type]
         progress=progress,
