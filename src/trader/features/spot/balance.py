@@ -80,7 +80,7 @@ def refresh(
     try:
         out: dict = {"refreshed": [], "skipped": [], "errors": {}}
         keep = excluded_tickers(settings, regime, market)
-        held: set[str] = set()
+        held: dict[str, str | None] = {}  # 보유 종목 → 거래소(US 업종 조회용)
         for a in accounts:
             if market not in a.markets or a.id not in brokers:
                 continue
@@ -106,13 +106,14 @@ def refresh(
                     notifier=notifier,
                 )
                 out["refreshed"].append(a.id)
-                held.update(pf.positions)
+                held.update({t: p.exchange for t, p in pf.positions.items()})
             except (KisApiError, ValueError) as e:
                 out["errors"][a.id] = f"{type(e).__name__}: {e}"
                 logger.warning("잔고 갱신 실패 %s %s: %s", a.id, market, e)
         if scan is not None and held:
             try:
-                scan.classify(conn, market, sorted(held))
+                exchanges = {t: ex for t, ex in held.items() if ex}
+                scan.classify(conn, market, sorted(held), exchanges=exchanges or None)
             except Exception as e:  # noqa: BLE001 - 섹터 자동 분류는 표시 보조, 잔고 갱신은 지킨다
                 logger.warning("섹터 자동 분류 실패 %s: %s", market, e)
         return out

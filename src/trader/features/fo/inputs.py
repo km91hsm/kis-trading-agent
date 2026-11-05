@@ -482,13 +482,14 @@ def build_inputs(
 
 
 def _news_macro(ctx: FoExecContext, *, asof: datetime) -> tuple[dict | None, str | None]:
-    """시장 뉴스(`ports["inputs"].recent`, asof 이전 최근 `NEWS_LOOKBACK`). (data, 오류)."""
+    """종목 태그 없는 시장·거시 뉴스(`ports["inputs"].recent`, asof 이전 최근 `NEWS_LOOKBACK`).
+    (data, 오류)."""
     port = ctx.ports.get("inputs")
     if port is None:
         return None, NEWS_MACRO_DEFERRED
     try:
         rows = port.recent(ctx.conn, MARKET, tickers=None, since=asof - NEWS_LOOKBACK,
-                           limit=NEWS_LIMIT, asof=asof)  # fmt: skip
+                           limit=NEWS_LIMIT, asof=asof, untagged_only=True)  # fmt: skip
     except Exception as e:  # noqa: BLE001 - 절 단위 격리
         return None, f"{type(e).__name__}: {e}"
     keys = ("title", "source", "published_at", "tickers")

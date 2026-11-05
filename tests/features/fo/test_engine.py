@@ -274,17 +274,18 @@ def test_tick_commits_open_transaction_before_broker_calls(conn):
 
 
 def test_novel_news_reads_through_inputs_port(conn):
-    """`ports["inputs"]` 가 있으면 `_novel_news` 는 raw SQL 대신 `inputs.recent`(novel_only, 종목
-    무관)로 읽고 종목 태그 없는 시장·거시 뉴스만 센다."""
+    """`ports["inputs"]` 가 있으면 `_novel_news` 는 raw SQL 대신 `inputs.recent`(novel_only·
+    untagged_only — 종목 태그 없는 시장·거시 뉴스)로 읽어 센다."""
     from datetime import UTC, datetime, timedelta
 
     now = datetime(2026, 10, 27, 1, 30, tzinfo=UTC)
     calls: list = []
 
     class Inputs:
-        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None):
-            calls.append((market, tickers, since, novel_only, asof))
-            return [{"tickers": []}, {"tickers": ["005930"]}, {"tickers": []}]
+        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None,
+                   untagged_only=False):  # fmt: skip
+            calls.append((market, tickers, since, novel_only, untagged_only, asof))
+            return [{"tickers": []}, {"tickers": []}]
 
     assert engine._novel_news(conn, now, 30, Inputs()) == 2
-    assert calls == [("KR", None, now - timedelta(minutes=30), True, now)]
+    assert calls == [("KR", None, now - timedelta(minutes=30), True, True, now)]

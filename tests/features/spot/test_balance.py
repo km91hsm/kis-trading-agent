@@ -196,7 +196,7 @@ def test_refresh_classifies_held_tickers_outside_yaml(project, conn, settings):
     calls: list = []
 
     class Scan:
-        def classify(self, conn, market, tickers):
+        def classify(self, conn, market, tickers, *, exchanges=None):
             calls.append((market, sorted(tickers)))
 
     deps = _deps(settings, accounts, brokers, lambda: MON_OPEN)
@@ -205,8 +205,34 @@ def test_refresh_classifies_held_tickers_outside_yaml(project, conn, settings):
     assert calls == [("KR", ["005930", "999990"])]
 
     class Broken:
-        def classify(self, conn, market, tickers):
+        def classify(self, conn, market, tickers, *, exchanges=None):
             raise RuntimeError("업종 조회 불가")
 
     deps.ports["scan"] = Broken()
     assert spot_jobs.balance_refresh(deps, force=True)["KR"]["refreshed"] == ["paper-main"]
+
+
+def test_refresh_passes_position_exchanges_to_classify(project, conn, settings):
+    """US 보유 종목은 잔고의 거래소(`Position.exchange`)를 classify 에 넘긴다(NAS 추정 금지)."""
+    from trader.kernel.broker.models import Cash
+
+    a = make_account("paper-us", "paper", "off", ["US"])
+    brokers = fake_brokers([a])
+    b = brokers["paper-us"]
+    b.cash["US"] = Cash(currency="USD", available=Decimal("10000"), total=Decimal("10000"))
+    b.positions = [
+        Position(
+            ticker="JPM", market="US", qty=1, avg_price=Decimal("100"), exchange="NYS",
+            current_price=Decimal("100"), eval_amount=Decimal("100"), pnl_pct=0.0,
+        )
+    ]  # fmt: skip
+    seen: list = []
+
+    class Scan:
+        def classify(self, conn, market, tickers, *, exchanges=None):
+            seen.append((market, sorted(tickers), exchanges))
+
+    out = balance.refresh(conn, accounts=[a], brokers=brokers, market="US", settings=settings,
+                          now=MON_OPEN, scan=Scan())  # fmt: skip
+    assert out["refreshed"] == ["paper-us"]
+    assert seen == [("US", ["JPM"], {"JPM": "NYS"})]

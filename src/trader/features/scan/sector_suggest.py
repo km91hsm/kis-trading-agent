@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 from trader.features.ingest.api import SectorMap, Universe, load_sectors
-from trader.kernel.config import ConfigError
+from trader.kernel.config import KST, ConfigError
 from trader.kernel.platform import paths
 from trader.kernel.platform.fsutil import atomic_replace
 
@@ -194,6 +194,20 @@ def load_auto(state: Path | None = None) -> dict[str, dict[str, dict]]:
     return data if isinstance(data, dict) else {}
 
 
+def _failed_key(market: str) -> str:
+    """음성 캐시 키(같은 파일, 시장 키와 겹치지 않음) — 조회 실패·불확실 종목의 마지막 시도 시각."""
+    return f"_failed:{market}"
+
+
+def _tried_today(entry: dict | None, now: datetime) -> bool:
+    """음성 캐시 항목이 오늘(KST) 시도한 것이면 True — 같은 날은 다시 묻지 않는다."""
+    try:
+        at = datetime.fromisoformat((entry or {})["at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return at.astimezone(KST).date() == now.astimezone(KST).date()
+
+
 def auto_classify(
     sectors: SectorMap,
     market_client: Any,
@@ -201,17 +215,26 @@ def auto_classify(
     market: str,
     tickers: Iterable[str],
     state: Path | None = None,
-    exchanges: dict[str, str] | None = None,
+    exchanges: Mapping[str, str | None] | None = None,
     names: dict[str, str] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, str]:
     """yaml·캐시에 없는 종목만 업종을 조회해 캐시에 적는다. 새로 대분류된 {종목: 섹터}.
     업종 표에 없는데 이름이 ETF 상표면(`names`) 'ETF' 로 묶는다. US 는 거래소를 모르면(`exchanges`
-    에 없음) NAS 로 조회하되 업종이 비면 캐시하지 않는다(다른 거래소일 수 있어 다음에 다시)."""
-    seen_before = load_auto(state).get(market, {})
+    에 없음) NAS 로 조회하되 업종이 비면 양성 캐시에 굳히지 않는다(다른 거래소일 수 있음).
+    조회 실패·그 불확실한 빈 결과는 음성 캐시(`_failed:<시장>`)에 시각을 남겨 같은 날(KST)은
+    다시 조회하지 않는다 — 잔고 갱신 틱마다 같은 종목으로 KIS 를 부르지 않게."""
+    now = now or datetime.now(UTC)
+    cache = load_auto(state)
+    seen_before = cache.get(market, {})
+    failed_before = cache.get(_failed_key(market), {})
     new: dict[str, dict] = {}
+    failed: dict[str, dict] = {}
     got: dict[str, str] = {}
     for t in dict.fromkeys(str(x) for x in tickers):
         if sectors.sector_of(t, market) is not None or t in seen_before:  # type: ignore[arg-type]
+            continue
+        if _tried_today(failed_before.get(t), now):
             continue
         exchange = (exchanges or {}).get(t)
         try:
@@ -220,19 +243,24 @@ def auto_classify(
                 if market == "KR"
                 else market_client.get_industry_us(t, exchange or "NAS")
             )
-        except Exception as e:  # noqa: BLE001 - 종목 단위 격리, 다음 관측 때 다시
+        except Exception as e:  # noqa: BLE001 - 종목 단위 격리, 다음 날 다시
             logger.info("업종 조회 실패 %s %s: %s", market, t, e)
+            failed[t] = {"at": now.isoformat(), "error": type(e).__name__}
             continue
         sector = sectors.classify(industry, market)  # type: ignore[arg-type]
         if sector is None and _etf_by_name((names or {}).get(t)):
             sector = ETF_SECTOR
         if sector is None and market == "US" and not exchange and not industry:
-            continue  # 거래소 추정(NAS)이 틀렸을 수 있다 — 빈 결과는 굳히지 않는다
-        new[t] = {"sector": sector, "industry": industry, "at": datetime.now(UTC).isoformat()}
+            # 거래소 추정(NAS)이 틀렸을 수 있다 — 빈 결과는 굳히지 않고 음성 캐시만
+            failed[t] = {"at": now.isoformat(), "error": "empty (exchange unknown)"}
+            continue
+        new[t] = {"sector": sector, "industry": industry, "at": now.isoformat()}
         if sector:
             got[t] = sector
     if new:
         _merge_auto(state, market, new)
+    if failed:
+        _merge_auto(state, _failed_key(market), failed)
     return got
 
 

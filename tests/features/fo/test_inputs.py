@@ -97,8 +97,9 @@ def test_news_macro_reads_market_news_through_inputs_port(conn):
     calls: list = []
 
     class Inputs:
-        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None):
-            calls.append((market, tickers, since, asof))
+        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None,
+                   untagged_only=False):  # fmt: skip
+            calls.append((market, tickers, since, asof, untagged_only))
             return [{"id": 1, "title": "합성 거시", "source": "s", "published_at": "p",
                      "received_at": "r", "tickers": [], "novel": True}]  # fmt: skip
 
@@ -107,7 +108,7 @@ def test_news_macro_reads_market_news_through_inputs_port(conn):
     inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
     assert inp["news_macro"]["error"] is None and "news_macro" not in inp["errors"]
     assert inp["news_macro"]["data"]["news"][0]["title"] == "합성 거시"
-    assert calls == [("KR", None, NOW - inputs.NEWS_LOOKBACK, NOW)]
+    assert calls == [("KR", None, NOW - inputs.NEWS_LOOKBACK, NOW, True)]
     b = inputs.bundle(inp, kind="analyst", role="news_macro")
     assert b["news"][0]["title"] == "합성 거시" and b["error"] is None
 

@@ -66,10 +66,18 @@ class ScanPortImpl:
         """런타임 관심종목(`/watch`·웹). market 을 주면 그 시장 종목만 접두사 없이."""
         return watchlist.get_watchlist(conn, market)
 
-    def classify(self, conn: sqlite3.Connection, market: str, tickers: Iterable[str]) -> None:
+    def classify(
+        self,
+        conn: sqlite3.Connection,
+        market: str,
+        tickers: Iterable[str],
+        *,
+        exchanges: Mapping[str, str | None] | None = None,
+    ) -> None:
         """yaml·자동 캐시에 없는 종목만 KIS 업종으로 대분류해 `state/cache/sector_auto.json` 에
-        적는다(`sector_suggest.auto_classify`). 종목명(`ticker_names`)으로 ETF 상표를 묶는다.
-        시세 클라이언트(accounts 포트)가 없으면 건너뛴다."""
+        적는다(`sector_suggest.auto_classify` — 실패는 같은 날 재조회 없음). 종목명(`ticker_names`)
+        으로 ETF 상표를 묶고, US 는 `exchanges`(잔고의 거래소)로 조회한다. 시세 클라이언트(accounts
+        포트)가 없으면 건너뛴다."""
         acc = self._ports.get("accounts")
         mc = acc.market_client() if acc is not None else None
         if mc is None:
@@ -82,6 +90,7 @@ class ScanPortImpl:
             tickers=tickers,
             state=paths.state_dir(),
             names=theme._ticker_names(conn, market),
+            exchanges=exchanges,
         )
 
 

@@ -130,4 +130,6 @@ def test_recent_filters_by_tickers_and_since(project, conn):
     assert [r["title"] for r in port.recent(conn, "KR", tickers=None, since=since, asof=now,
                                             novel_only=True)] == ["macro", "b"]  # fmt: skip
     assert len(port.recent(conn, "KR", tickers=None, since=since, asof=now, limit=1)) == 1
+    untagged = port.recent(conn, "KR", tickers=None, since=since, asof=now, untagged_only=True)
+    assert [r["title"] for r in untagged] == ["macro"]  # 종목 태그 없는 시장·거시 뉴스만
     assert port.recent(conn, "US", tickers=None, since=since, asof=now) == []

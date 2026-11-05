@@ -367,8 +367,9 @@ def _novel_news(
     있으면 `recent` 로, 없으면 옛 SQL 로 센다."""
     if inputs is not None:
         rows = inputs.recent(conn, "KR", tickers=None, since=now - timedelta(minutes=minutes),
-                             limit=NOVEL_NEWS_LIMIT, novel_only=True, asof=now)  # fmt: skip
-        return sum(1 for r in rows if not r.get("tickers"))
+                             limit=NOVEL_NEWS_LIMIT, novel_only=True, untagged_only=True,
+                             asof=now)  # fmt: skip
+        return len(rows)
     since = (now - timedelta(minutes=minutes)).isoformat()
     row = conn.execute(
         "SELECT COUNT(*) FROM news_items WHERE market = 'KR' AND novel = 1 AND received_at >= ? "

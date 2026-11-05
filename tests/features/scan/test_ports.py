@@ -106,3 +106,31 @@ def test_classify_fills_auto_cache(conn, settings, project):
     assert auto["357870"]["sector"] == "반도체" and auto["069500"]["sector"] == "ETF"
     assert "005930" not in auto and m.calls.count("get_industry_kr") == 2  # yaml 종목은 조회 없음
     assert port.sector_of("KR")("357870") == "반도체"
+
+
+def test_classify_uses_exchanges_and_skips_same_day_failures(conn, settings, project):
+    """US 는 넘겨받은 거래소(NYS)로 조회해 캐시하고, 조회가 실패한 종목은 음성 캐시로 같은 날
+    두 번째 호출에서 다시 조회하지 않는다(잔고 갱신 틱마다 KIS 호출이 반복되지 않게)."""
+    from trader.features.scan import sector_suggest
+    from trader.kernel.broker.fake import FakeMarket
+
+    (project / "config" / "sectors.yaml").write_text(
+        'sectors: [금융, 기타]\nus_industry_to_sector:\n  "610": 금융\n', encoding="utf-8"
+    )
+    asked: list = []
+
+    class Market(FakeMarket):
+        def get_industry_us(self, symbol, exchange):
+            asked.append((symbol, exchange))
+            if symbol == "BAD":
+                raise RuntimeError("KIS 503")
+            return "610" if exchange == "NYS" else ""
+
+    accounts = SimpleNamespace(market_client=lambda: Market())
+    port = ports.build_port(SimpleNamespace(settings=settings, ports={"accounts": accounts}))
+    port.classify(conn, "US", ["JPM", "BAD"], exchanges={"JPM": "NYS", "BAD": "NYS"})
+    assert sorted(asked) == [("BAD", "NYS"), ("JPM", "NYS")]
+    assert sector_suggest.load_auto(project / "state")["US"]["JPM"]["sector"] == "금융"
+    port.classify(conn, "US", ["JPM", "BAD"], exchanges={"JPM": "NYS", "BAD": "NYS"})
+    assert len(asked) == 2  # JPM 은 양성 캐시, BAD 는 같은 날 음성 캐시 — 재조회 없음
+    assert "BAD" not in sector_suggest.load_auto(project / "state").get("US", {})

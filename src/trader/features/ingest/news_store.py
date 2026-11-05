@@ -215,11 +215,13 @@ def received_since(
     asof: datetime,
     tickers: Iterable[str] | None = None,
     novel_only: bool = False,
+    untagged_only: bool = False,
     limit: int = 20,
 ) -> list[dict]:
     """`since` 이후 수신한 뉴스(수신 최신순) — 레인이 `InputsPort.recent` 로 읽는다. 창은 수신
     시각 기준이고(주기 수집이라 '새로 들어온 것'), asof 뒤에 발행·수신된 항목은 보이지 않는다.
-    `tickers` 를 주면 그중 하나라도 태그된 것만(빈 목록이면 없음), `novel` 은 bool 로 돌려준다."""
+    `tickers` 를 주면 그중 하나라도 태그된 것만(빈 목록이면 없음), `untagged_only` 면 종목 태그
+    없는 시장·거시 뉴스만, `novel` 은 bool 로 돌려준다."""
     cutoff = asof.astimezone(UTC).isoformat()
     sql = (
         "SELECT id, market, source, query, title, url, url_hash, published_at, received_at, "
@@ -238,6 +240,8 @@ def received_since(
         args += want
     if novel_only:
         sql += " AND novel = 1"
+    if untagged_only:
+        sql += " AND (tickers_json IS NULL OR tickers_json IN ('', '[]'))"
     sql += " ORDER BY received_at DESC, id DESC LIMIT ?"
     args.append(limit)
     out = []

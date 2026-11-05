@@ -71,10 +71,12 @@ class InputsPort(Protocol):
         limit: int = 20,
         novel_only: bool = False,
         asof: datetime | None = None,
+        untagged_only: bool = False,
     ) -> list[dict]:
         """`since` 이후·`asof`(없으면 지금) 이전에 수신한 시장 뉴스(최신순, 최대 `limit`). 행은
         `id·title·published_at·received_at·tickers(list[str])·novel(bool)·source` 를 담는다.
-        `tickers` 를 주면 그중 하나라도 태그된 뉴스만, `novel_only` 면 유사 중복이 아닌 것만."""
+        `tickers` 를 주면 그중 하나라도 태그된 뉴스만, `novel_only` 면 유사 중복이 아닌 것만,
+        `untagged_only` 면 종목 태그 없는 시장·거시 뉴스만."""
         ...
 
 
@@ -159,9 +161,17 @@ class ScanPort(Protocol):
         """런타임 관심종목. market 을 주면 그 시장 종목만 접두사 없이."""
         ...
 
-    def classify(self, conn: sqlite3.Connection, market: str, tickers: Iterable[str]) -> None:
+    def classify(
+        self,
+        conn: sqlite3.Connection,
+        market: str,
+        tickers: Iterable[str],
+        *,
+        exchanges: Mapping[str, str | None] | None = None,
+    ) -> None:
         """sectors.yaml·자동 캐시에 없는 종목을 KIS 업종으로 대분류해 자동 캐시에 적는다
-        (`sector_of` 가 읽는다). 시세 클라이언트가 없으면 아무것도 하지 않는다."""
+        (`sector_of` 가 읽는다). `exchanges` 는 US 종목 → 거래소(NAS|NYS|AMS). 조회 실패는 같은
+        날 다시 묻지 않는다. 시세 클라이언트가 없으면 아무것도 하지 않는다."""
         ...
 
 

@@ -73,6 +73,7 @@ class InputsPortImpl:
         limit: int = 20,
         novel_only: bool = False,
         asof: datetime | None = None,
+        untagged_only: bool = False,
     ) -> list[dict]:
         """since 이후·asof(없으면 지금) 이전 수신 뉴스(`news_store.received_since`)."""
         return news_store.received_since(
@@ -82,6 +83,7 @@ class InputsPortImpl:
             asof=asof or datetime.now(UTC),
             tickers=tickers,
             novel_only=novel_only,
+            untagged_only=untagged_only,
             limit=limit,
         )
 
