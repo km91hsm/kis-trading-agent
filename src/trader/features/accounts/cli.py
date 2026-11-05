@@ -1,15 +1,18 @@
-"""`trader accounts` — 계좌 모드·일시정지 조회/변경과 KIS 연결 점검."""
+"""`trader accounts` — 계좌 모드·일시정지 조회/변경과 KIS 연결 점검(`ping`·모의 `order-test`)."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
+from typing import NoReturn
 
 import typer
 
 from trader.features.accounts import accounts_io, modes, secrets_io
+from trader.features.accounts import order_test as order_test_mod
 from trader.features.accounts.brokers import build_brokers, build_market
-from trader.features.accounts.settings import load_accounts, to_broker_account
+from trader.features.accounts.settings import load_accounts, split_accounts, to_broker_account
 from trader.kernel.broker.ping import failures, run_checks
 from trader.kernel.cli.boot import boot, config_errors
 from trader.kernel.config import ConfigError
@@ -102,9 +105,9 @@ def resume() -> None:
 def ping(
     account: str | None = typer.Option(None, "--account", help="특정 계좌 id 만 점검"),
 ) -> None:
-    """KIS 시세(005930·AAPL)·휴장일·계좌별 현금(파생 계좌는 잔고)을 점검한다.
-    실패가 있으면 exit 1."""
-    b = boot(secrets=True)
+    """KIS 시세(005930·AAPL)·휴장일·계좌별 현금(파생 계좌는 `settings.fo` 상품으로 조립한 브로커의
+    잔고 줄)을 점검한다. 실패가 있으면 exit 1."""
+    b = boot(settings=True, secrets=True)
     accounts = load_accounts(secrets=b.secrets)
     if account:
         accounts = [a for a in accounts if a.id == account]
@@ -116,7 +119,11 @@ def ping(
         market = build_market(b.secrets, accounts)
     except Exception as e:  # noqa: BLE001 - 점검 도구는 모든 실패를 보고한다
         market_error = e
-    brokers = build_brokers(b.secrets, accounts)
+    stock, fo = split_accounts(accounts)
+    brokers = build_brokers(b.secrets, stock)
+    fo_cfg = getattr(b.settings, "fo", None)  # 덕 타이핑 — accounts 는 fo 를 import 하지 않는다
+    if fo and fo_cfg is not None:
+        brokers += build_brokers(b.secrets, fo, fo_product=fo_cfg.product_cfg())
     checks = run_checks(
         market,
         brokers,
@@ -129,6 +136,50 @@ def ping(
     n = failures(checks)
     typer.echo(f"실패 {n}건")
     if n:
+        raise typer.Exit(code=1)
+
+
+def _fail(msg: str) -> NoReturn:
+    typer.echo(f"오류: {msg}", err=True)
+    raise typer.Exit(code=1)
+
+
+@accounts_app.command("order-test")
+@config_errors
+def order_test(
+    account: str = typer.Option(..., "--account", help="모의 현물 계좌 id"),
+    ticker: str | None = typer.Option(
+        None, "--ticker", help="종목(기본 KR 005930, US AAPL — 시장은 계좌 markets 첫 항목)"
+    ),
+    exchange: str = typer.Option("NAS", "--exchange", help="US 거래소 코드"),
+) -> None:
+    """현물 주문 연결 점검(모의 전용): 1주 지정가 매수(현재가 −10%, 호가단위 정렬)를 접수하고
+    즉시 취소한다. 결과 JSON 1줄 — 취소 실패도 담고 exit 0, 접수 실패는 exit 1. 실전 계좌는 거부."""
+    b = boot(secrets=True)
+    accounts = load_accounts(secrets=b.secrets)
+    acct = next((a for a in accounts if a.id == account), None)
+    if acct is None:
+        _fail(f"계좌 id 를 찾을 수 없습니다: {account}")
+    if acct.env != "paper":
+        _fail(f"주문 점검은 모의 계좌에서만 실행합니다: {account} ({acct.env})")
+    if acct.asset != "stock":
+        _fail(f"현물 계좌만 점검합니다(파생은 `trader fo order-test`): {account}")
+    market = acct.markets[0]
+    ticker = ticker or order_test_mod.DEFAULT_TICKER[market]
+    exch = exchange if market == "US" else None
+    try:
+        client = build_market(b.secrets, accounts)  # 시세 키 폴백은 전체 계좌 기준(ping 과 같음)
+        quote = client.get_price_kr(ticker) if market == "KR" else client.get_price_us(ticker, exch)
+    except Exception as e:  # noqa: BLE001 - 점검 도구는 모든 실패를 보고한다
+        _fail(f"현재가 조회 실패: {type(e).__name__}: {e}")
+    brokers = build_brokers(b.secrets, [acct])
+    if not brokers:
+        _fail(f"{acct.env} 앱키·시크릿이 없어 점검하지 못했습니다: {account}")
+    out = order_test_mod.run(
+        brokers[0], quote.price, account=account, market=market, ticker=ticker, exchange=exch
+    )
+    typer.echo(json.dumps(out, ensure_ascii=False))
+    if not out["placed"]:
         raise typer.Exit(code=1)
 
 

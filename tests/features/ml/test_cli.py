@@ -113,3 +113,40 @@ def test_cli_features_derive_without_market_client(project, monkeypatch):
     r = CliRunner().invoke(app, ["ml", "features", "derive"])
     assert r.exit_code == 0, r.output
     assert "derive: " in r.output and "개 파일 갱신" in r.output
+
+
+def _features_universe(project, monkeypatch):
+    """KR 1·US 1 유니버스 + DART·EDGAR 없음(네트워크 없음). 옛 `test_cli_features.py` 의
+    `_universe`·`_build_dart`/`_build_edgar` monkeypatch 치환."""
+    from trader.features.ml import cli as ml_cli
+
+    (project / "config" / "universe.yaml").write_text(
+        "kr: ['005930']\nus: [{symbol: AAPL, exchange: NAS}]\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(ml_cli.ingest_api, "build_dart", lambda *a, **k: None)
+    monkeypatch.setattr(ml_cli.ingest_api, "build_edgar", lambda *a, **k: None)
+    return ml_cli
+
+
+def test_cli_features_snapshot_prints_rows(project, monkeypatch):
+    """옛 `test_cli_features_snapshot`: 유니버스 2종목의 오늘 행을 저장하고 행 수를 출력한다."""
+    from tests.features.ingest.helpers import FakeMarket
+
+    ml_cli = _features_universe(project, monkeypatch)
+    monkeypatch.setattr(ml_cli, "_market_client", lambda b: FakeMarket())
+    r = CliRunner().invoke(app, ["ml", "features", "snapshot"])
+    assert r.exit_code == 0, r.output
+    assert "snapshot: 2행 저장" in r.output
+
+
+def test_cli_features_market_build_failure_exit1(project, monkeypatch):
+    """시세 클라이언트 생성 실패는 한 줄 오류 + exit 1(Traceback 없음)."""
+    ml_cli = _features_universe(project, monkeypatch)
+
+    def boom(b):
+        raise RuntimeError("키 없음")
+
+    monkeypatch.setattr(ml_cli, "_market_client", boom)
+    r = CliRunner().invoke(app, ["ml", "features", "snapshot"])
+    assert r.exit_code == 1
+    assert "RuntimeError: 키 없음" in r.output and "Traceback" not in r.output

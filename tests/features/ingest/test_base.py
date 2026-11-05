@@ -41,3 +41,10 @@ def test_owned_client_keeps_injected_and_closes_created():
     with base.owned_client(None, timeout=1) as created:
         assert isinstance(created, httpx.Client) and not created.is_closed
     assert created.is_closed
+
+
+def test_strip_tags_unescapes_twice():
+    """RSS 는 태그를 이스케이프해서 준다 — unescape → 태그 제거 → unescape(`&amp;amp;` → `&`)."""
+    assert base.strip_tags("&lt;b&gt;삼성&lt;/b&gt; &amp;amp; 전자") == "삼성 & 전자"
+    assert base.strip_tags("<p>a\xa0b</p>") == "a b" and base.strip_tags(None) == ""
+    assert base.utc_now().tzinfo is not None

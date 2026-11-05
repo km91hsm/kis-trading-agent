@@ -3,7 +3,8 @@
 `broker.place_order` 는 `kernel.execution.core.transmit`, `broker.cancel_order` 는
 `kernel.execution.core.cancel` 만 부른다(스펙 §2.1, M5 Global Constraints).
 예외 `ALLOWED`: fo 실행기는 다리 상태와 `orders` 행을 한 트랜잭션에 묶는 자체 전송기다(M10 A1).
-그 밖의 fo 모듈은 `executor.run_leg/reduce/recall_entries` 를 거친다."""
+그 밖의 fo 모듈은 `executor.run_leg/reduce/recall_entries` 를 거친다. 연결 점검 도구
+`fo/order_test.py`·`accounts/order_test.py`(모의 전용, 원장 기록 없음 — M12 P16)도 예외다."""
 
 import re
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 import trader
 
 FEATURES = Path(trader.__file__).parent / "features"
-ALLOWED = frozenset({"fo/executor.py", "fo/order_test.py"})
+ALLOWED = frozenset({"fo/executor.py", "fo/order_test.py", "accounts/order_test.py"})
 
 
 def _call_sites(name: str) -> list[str]:

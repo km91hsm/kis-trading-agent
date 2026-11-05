@@ -9,6 +9,8 @@ ledger_backup: "17:10"   # 원장 백업(KST, 매일): 14일치 일별 + 8주치
 retention: "17:20"   # 보존 정리(KST, 매일): settings ops.retention_days 보다 오래된 산출물·기록 삭제
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
+names_fill:
+  interval_s: 3600   # 이름 없는 보유·주문 종목을 KIS 종목 기본정보로 채우는 주기(초, 60 이상)
 kr:
   monitor:
     interval_s: 60     # 장중 감시 주기(초)

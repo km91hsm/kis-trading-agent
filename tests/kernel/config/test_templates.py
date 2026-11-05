@@ -65,3 +65,14 @@ def test_env_example_lists_all_secret_fields():
     assert {k for k, _ in pairs} == set(Secrets.model_fields)
     assert len(pairs) == len(Secrets.model_fields)
     assert all(v == "" for _, v in pairs)
+
+
+def test_templates_have_names_fill_and_instrument_names():
+    """quotes `names_fill` 잡 주기(schedule.yaml)와 고정 종목명(settings.yaml `quotes`)은 템플릿에
+    키가 있어야 한다(M12 T18)."""
+    reg = build_registry(discover())
+    root = templates_dir() / "config"
+    assert "names_fill:" in (root / "schedule.yaml").read_text(encoding="utf-8")
+    assert "instrument_names:" in (root / "settings.yaml").read_text(encoding="utf-8")
+    assert load("schedule", reg, path=root / "schedule.yaml").names_fill.interval_s == 3600
+    assert load("settings", reg, path=root / "settings.yaml").quotes.instrument_names == {}
