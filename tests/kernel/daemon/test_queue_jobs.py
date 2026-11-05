@@ -13,6 +13,7 @@
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -595,8 +596,10 @@ def test_queued_heavy_yields_lock_to_waiting_cron(project, monkeypatch):
     t_q.start()
     assert progress_seen.wait(2)
     t_c = run_in_thread(env, env.job("kr_scan"))
-    t_c.join(0.2)
     q = env.deps.queue
+    deadline = time.monotonic() + 2
+    while not q.heavy_wanted.is_set() and time.monotonic() < deadline:
+        time.sleep(0.02)
     assert t_c.is_alive() and q.heavy_wanted.is_set()
     cron_started.set()
     t_c.join(3)

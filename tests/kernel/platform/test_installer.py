@@ -1,6 +1,6 @@
 """로그온 시 데몬·watchdog 자동 시작 등록(launchd·작업 스케줄러). 실제 등록 명령은 `run=` 주입."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -188,7 +188,7 @@ def test_install_defaults_program_to_bundle_service_argv(tmp_path, monkeypatch):
     from trader.kernel.platform import bundle
 
     monkeypatch.setattr(bundle, "is_frozen", lambda: True)
-    monkeypatch.setattr(bundle, "cli_executable", lambda: Path("/dist/trader/trader"))
+    monkeypatch.setattr(bundle, "cli_executable", lambda: PurePosixPath("/dist/trader/trader"))
     r = installer.install(dry_run=True, platform="darwin", home=tmp_path, project_root=tmp_path)
     assert "<string>/dist/trader/trader</string>" in r["content"]
     assert "<string>app</string>\n    <string>--no-browser</string>" in r["content"]
