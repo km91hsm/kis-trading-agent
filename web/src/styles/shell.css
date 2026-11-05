@@ -198,17 +198,41 @@
   font-weight: 600;
 }
 
-/* ≥1280: 왼쪽 메뉴 240px, 하위 목차 한 줄씩 */
+/* 브랜드·푸터는 왼쪽 메뉴(≥1280)에서만 */
+.nav-brand {
+  display: none;
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+.nav-foot {
+  display: none;
+  margin-top: auto;
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+/* ≥1280: 왼쪽 메뉴 240px, 현재 화면의 하위 목차 한 줄씩, 푸터는 바닥에 */
 @media (min-width: 1280px) {
   .nav {
     position: sticky;
     top: calc(var(--touch) + 1px);
+    display: flex;
+    flex-direction: column;
     flex: none;
     width: 240px;
-    max-height: calc(100vh - var(--touch));
+    min-height: calc(100vh - var(--touch) - 1px);
+    max-height: calc(100vh - var(--touch) - 1px);
     overflow-y: auto;
     padding: var(--space-3) var(--space-2);
     border-right: 1px solid var(--line);
+  }
+  .nav-brand,
+  .nav-foot {
+    display: block;
   }
 }
 

@@ -43,3 +43,6 @@ ui-ux-pro-max 조사(design-system · color · ux) 결과에서 고른 방향을
 
 ## 메뉴·앵커
 - 화면 안 섹션 컨테이너는 `id={item.id}`(자동 생성 `generated/nav.ts` 의 id)를 단다 — 하위 목차가 `<path>#<id>` 로 스크롤하고 `IntersectionObserver` 로 현재 섹션을 표시한다.
+- 하위 목차는 현재 화면 것만 펼친다. 화면이 섹션을 `hidden` 으로 숨기면(승인 0건·없는 레인·파생 계좌 없음) 목차에서도 빠진다(`Nav.tsx` 가 본문 DOM 을 MutationObserver 로 본다) — 죽은 앵커를 메뉴에 두지 않는다.
+- 현재 항목은 방금 누른 항목(해시)이 우선이고, 사용자가 스크롤 입력(wheel·touchmove·방향키)을 하면 보이는 가장 위 섹션으로 넘어간다. 같은 항목을 다시 눌러도 스크롤한다(`location.key`).
+- 왼쪽 메뉴(≥1280) 위에 브랜드 「trader」, 바닥에 「데몬 정상 · v0.2.0」 푸터(`/system/health`).

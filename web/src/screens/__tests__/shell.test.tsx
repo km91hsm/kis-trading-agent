@@ -9,6 +9,7 @@ import { noteServerTime } from "../../lib/clock";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { fixtureHealth, fixtureUsage } from "../../test/fixtures";
+import { fixtureAccount } from "../../test/fixtures/today";
 import { flush, render } from "../../test/render";
 
 let fake: FakeFetch | null = null;
@@ -53,18 +54,102 @@ test("상태 띠는 health level 과 첫 사유, 사용률 칩 2개를 그린다
   expect(chips[1].getAttribute("data-level")).toBe("ok"); // 70% 미만 = 정상(초록)
 });
 
-test("PC 폭에서 왼쪽 메뉴가 하위 목차를 한 줄씩 펼친다 (data-nav-item 수 = NAV items 합)", async () => {
+test("PC 폭에서 왼쪽 메뉴는 현재 화면의 하위 목차만 한 줄씩 펼친다 (data-nav-item = 그 화면의 NAV items)", async () => {
   fake = installFakeFetch(ok);
   const { container } = app();
   await flush();
-  const total = Object.values(NAV).reduce((n, s) => n + s.items.length, 0);
-  const items = container.querySelectorAll("[data-nav-item]");
-  expect(items).toHaveLength(total);
+  // 승인·계좌 응답이 404(오류)라 오늘 화면의 섹션 4개가 모두 보인다 → 항목 4개, 다른 화면 항목은 없다
+  const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
+  expect(items).toEqual(NAV.today.items.map((i) => i.id));
   const first = container.querySelector('[data-nav-item="approvals"]') as HTMLAnchorElement;
   expect(first.getAttribute("href")).toBe("/#approvals");
-  expect(container.querySelector('[data-nav-item="regime"]')?.getAttribute("href")).toBe("/system#regime");
+  expect(container.querySelector('[data-nav-item="regime"]')).toBeNull();
   // 오늘 화면의 섹션 컨테이너가 id 로 달려 있다(앵커 계약)
   for (const it of NAV.today.items) expect(container.querySelector(`#${it.id}`)).not.toBeNull();
+});
+
+describe("왼쪽 메뉴 2단", () => {
+  let origScroll: typeof Element.prototype.scrollIntoView;
+  const scroll = vi.fn();
+  beforeEach(() => {
+    origScroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    scroll.mockClear();
+  });
+  afterEach(() => {
+    Element.prototype.scrollIntoView = origScroll;
+  });
+
+  test("숨긴 섹션(승인 0건·없는 레인)의 항목은 메뉴에서 뺀다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/approvals": { approvals: [] }, "GET /api/accounts": [fixtureAccount()] });
+    const { container } = app();
+    await flush();
+    const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
+    expect(items).toEqual(["spot-lane"]);
+    expect((container.querySelector("#fo-lane") as HTMLElement).hidden).toBe(true);
+  });
+
+  test("하위 목차를 누르면 그 항목이 현재가 되고, 같은 항목을 다시 눌러도 스크롤한다", async () => {
+    fake = installFakeFetch(ok);
+    const { container } = app("/system");
+    await flush();
+    const link = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+    expect(link.getAttribute("aria-current")).toBeNull();
+    act(() => link.click());
+    expect(link.getAttribute("aria-current")).toBe("location");
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect((scroll.mock.instances[0] as Element).id).toBe("saveticker");
+    act(() => link.click());
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(link.getAttribute("aria-current")).toBe("location");
+  });
+
+  test("스크롤 입력(wheel)이 오면 눌렀던 항목 대신 보이는 가장 위 섹션을 현재로 표시한다", async () => {
+    const OrigIO = globalThis.IntersectionObserver;
+    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = regime
+    globalThis.IntersectionObserver = class {
+      cb: IntersectionObserverCallback;
+      constructor(cb: IntersectionObserverCallback) {
+        this.cb = cb;
+      }
+      observe(el: Element) {
+        this.cb([{ target: el, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+    try {
+      fake = installFakeFetch(ok);
+      const { container } = app("/system");
+      await flush();
+      const regime = container.querySelector('[data-nav-item="regime"]') as HTMLAnchorElement;
+      const save = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+      expect(regime.getAttribute("aria-current")).toBe("location");
+      act(() => save.click());
+      expect(save.getAttribute("aria-current")).toBe("location");
+      expect(regime.getAttribute("aria-current")).toBeNull();
+      act(() => {
+        window.dispatchEvent(new Event("wheel"));
+      });
+      expect(regime.getAttribute("aria-current")).toBe("location");
+      expect(save.getAttribute("aria-current")).toBeNull();
+    } finally {
+      globalThis.IntersectionObserver = OrigIO;
+    }
+  });
+
+  test("메뉴 푸터에 데몬 상태와 버전을 쓰고, health 는 상태 띠와 한 번만 부른다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/system/health": fixtureHealth({ version: "0.2.0" }) });
+    const { container } = app();
+    await flush();
+    const foot = container.querySelector("[data-nav-foot]");
+    expect(foot?.textContent).toContain("데몬 정상");
+    expect(foot?.textContent).toContain("v0.2.0");
+    expect(fake.calls.filter((c) => c.url.includes("/system/health"))).toHaveLength(1);
+  });
 });
 
 test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", async () => {
