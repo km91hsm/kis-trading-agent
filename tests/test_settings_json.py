@@ -23,6 +23,12 @@ USER_ONLY = (
     "saveticker run",
     "saveticker service",
     "saveticker install-browser",
+    "spot exec-key release",
+    "regime killswitch",
+    "ml promote",
+    "ml demote",
+    "evaluation rl promote",
+    "evaluation rl demote",
 )
 
 
@@ -40,8 +46,22 @@ def test_settings_json_denies_user_only_commands_and_secrets() -> None:
         for path in ("secrets/.env", "./secrets/.env"):
             assert _bash_denied(deny, f"{reader} {path}"), f"{reader} {path} 미거부"
     assert _bash_denied(deny, "grep KIS secrets/.env")
+    # 절대경로·$PWD 형태도 막는다
+    for cmd in (
+        "cat /home/user/project/secrets/.env",
+        'head -5 "$PWD/secrets/.env"',
+        "tail -n 3 /home/user/project/secrets/.env",
+        "grep KIS /home/user/project/secrets/.env",
+        "sed -n 1p /home/user/project/secrets/.env",
+    ):
+        assert _bash_denied(deny, cmd), f"{cmd} 미거부"
     # .env.example 은 키 이름 템플릿이라 막지 않는다
-    for cmd in ("cat secrets/.env.example", "cat templates/secrets/.env.example"):
+    for cmd in (
+        "cat secrets/.env.example",
+        "cat templates/secrets/.env.example",
+        "cat /home/user/project/secrets/.env.example",
+        'head "$PWD/secrets/.env.example"',
+    ):
         assert not _bash_denied(deny, cmd), f"{cmd} 가 거부됨"
     assert not any(".env.example" in d for d in deny)
     # 사용자 전용 명령: uv run · python -m 두 형태
