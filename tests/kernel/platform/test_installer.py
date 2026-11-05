@@ -1,0 +1,227 @@
+"""로그온 시 데몬·watchdog 자동 시작 등록(launchd·작업 스케줄러). 실제 등록 명령은 `run=` 주입."""
+
+from pathlib import Path
+
+import pytest
+
+from trader.kernel.config import ConfigError
+from trader.kernel.platform import installer
+
+PY = ["/venv/bin/python", "-m", "trader", "daemon"]
+WIN_PY = [r"C:\venv\Scripts\python.exe", "-m", "trader", "daemon"]
+EXE = ["/dist/trader/trader", "daemon"]
+
+
+def test_render_plist_contains_python_and_cwd(tmp_path):
+    text = installer.render("darwin", program=PY, project_root=tmp_path)
+    assert "<string>/venv/bin/python</string>" in text and "<string>-m</string>" in text
+    assert "<string>trader</string>" in text and "<string>daemon</string>" in text
+    assert f"<string>{tmp_path}</string>" in text and "RunAtLoad" in text and "KeepAlive" in text
+    # 정상 종료(잠금이 이미 잡혀 있음 등)면 다시 띄우지 않는다 — 10초마다 무한 재기동 방지
+    assert "<key>SuccessfulExit</key><false/>" in text and "ThrottleInterval" in text
+    assert str(tmp_path / "state" / "logs" / "daemon.out") in text
+    assert "com.trader.daemon" in text
+
+
+def test_render_schtasks_xml_logon_trigger(tmp_path):
+    text = installer.render("win32", program=WIN_PY, project_root=tmp_path)
+    assert "<LogonTrigger>" in text and "<Command>C:\\venv\\Scripts\\python.exe</Command>" in text
+    assert "<Arguments>-m trader daemon</Arguments>" in text
+    assert f"<WorkingDirectory>{tmp_path}</WorkingDirectory>" in text
+
+
+def test_install_dry_run_writes_nothing_and_prints_command(tmp_path):
+    calls = []
+    r = installer.install(
+        dry_run=True,
+        run=lambda cmd, **kw: calls.append(cmd),
+        platform="darwin",
+        home=tmp_path,
+        program=PY,
+        project_root=tmp_path / "proj",
+    )
+    assert r["written"] is False and calls == []
+    assert r["path"] == tmp_path / "Library" / "LaunchAgents" / "com.trader.daemon.plist"
+    assert r["command"][:2] == ["launchctl", "load"]
+
+
+def test_install_darwin_writes_and_calls_launchctl(tmp_path):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return R()
+
+    r = installer.install(
+        dry_run=False,
+        run=run,
+        platform="darwin",
+        home=tmp_path,
+        program=PY,
+        project_root=tmp_path / "proj",
+    )
+    assert r["written"] is True and r["path"].exists()
+    assert calls[-1] == ["launchctl", "load", "-w", str(r["path"])]
+    installer.uninstall(run=run, platform="darwin", home=tmp_path)
+    assert calls[-1] == ["launchctl", "unload", "-w", str(r["path"])] and not r["path"].exists()
+
+
+def test_uninstall_win32_calls_schtasks_delete(tmp_path):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return R()
+
+    r = installer.install(
+        dry_run=False,
+        run=run,
+        platform="win32",
+        home=tmp_path,
+        program=WIN_PY,
+        project_root=tmp_path / "proj",
+    )
+    assert (
+        calls[0][:3] == ["schtasks", "/Create", "/TN"] and "/XML" in calls[0] and "/F" in calls[0]
+    )
+    assert r["path"].suffix == ".xml"
+    installer.uninstall(run=run, platform="win32", home=tmp_path)
+    assert calls[-1] == ["schtasks", "/Delete", "/TN", "trader-daemon", "/F"]
+
+
+def test_unsupported_platform_rejected(tmp_path):
+    with pytest.raises(ConfigError):
+        installer.install(
+            dry_run=True, platform="linux", home=tmp_path, program=PY, project_root=tmp_path
+        )
+
+
+def test_install_failure_is_error(tmp_path):
+    def run(cmd, **kw):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "boom"
+
+        return R()
+
+    with pytest.raises(ConfigError, match="boom"):
+        installer.install(
+            dry_run=False,
+            run=run,
+            platform="darwin",
+            home=tmp_path,
+            program=["/p", "-m", "trader", "daemon"],
+            project_root=tmp_path,
+        )
+
+
+def test_render_plist_includes_path_with_claude_dir(tmp_path):
+    text = installer.render(
+        "darwin",
+        program=PY,
+        project_root=tmp_path,
+        extra_paths=[Path("/opt/homebrew/bin")],
+    )
+    assert (
+        "<key>PATH</key>" in text
+        and "/opt/homebrew/bin:/venv/bin:/usr/local/bin:/usr/bin:/bin" in text
+    )
+
+
+def test_install_darwin_unloads_before_load(tmp_path):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return R()
+
+    installer.install(
+        dry_run=False,
+        run=run,
+        platform="darwin",
+        home=tmp_path,
+        program=PY,
+        project_root=tmp_path / "proj",
+    )
+    assert calls[0][:2] == ["launchctl", "unload"] and calls[1][:2] == ["launchctl", "load"]
+
+
+def test_render_plist_exit_timeout_covers_session(tmp_path):
+    """SIGTERM 뒤 shutdown(wait=True) 가 analyze 세션(llm.timeout_s)을 기다리므로 launchd 가
+    기본 20초 뒤 SIGKILL 하지 않도록 ExitTimeOut 을 세션 타임아웃보다 길게 둔다."""
+    text = installer.render("darwin", program=PY, project_root=tmp_path, exit_timeout_s=660)
+    assert "<key>ExitTimeOut</key><integer>660</integer>" in text
+
+
+def test_render_uses_program_argv_for_bundle(tmp_path):
+    """번들 실행파일은 `python -m trader` 가 아니라 `<exe> daemon` 으로 등록돼야 한다."""
+    text = installer.render("darwin", program=EXE, project_root=tmp_path)
+    assert "<string>/dist/trader/trader</string>" in text and "<string>daemon</string>" in text
+    assert "<string>-m</string>" not in text
+    xml = installer.render(
+        "win32", program=[r"C:\trader\trader.exe", "daemon"], project_root=tmp_path
+    )
+    assert "<Command>C:\\trader\\trader.exe</Command>" in xml
+    assert "<Arguments>daemon</Arguments>" in xml
+
+
+def test_install_defaults_program_to_bundle_daemon_argv(tmp_path, monkeypatch):
+    from trader.kernel.platform import bundle
+
+    monkeypatch.setattr(bundle, "daemon_argv", lambda: ["/dist/trader/trader", "daemon"])
+    r = installer.install(dry_run=True, platform="darwin", home=tmp_path, project_root=tmp_path)
+    assert "<string>/dist/trader/trader</string>" in r["content"]
+
+
+def test_render_watchdog_variants_use_interval_not_keepalive(tmp_path):
+    """Phase 23 C: watchdog 등록은 상시(KeepAlive)가 아니라 5분 간격 1회 실행."""
+    plist = installer.render(
+        "darwin",
+        program=["/py", "-m", "trader", "watchdog"],
+        project_root=tmp_path,
+        label=installer.WATCHDOG_LABEL,
+        interval_s=300,
+    )
+    assert "<key>StartInterval</key><integer>300</integer>" in plist
+    assert "KeepAlive" not in plist and "com.trader.watchdog" in plist and "watchdog.out" in plist
+    xml = installer.render(
+        "win32",
+        program=["C:\\py.exe", "-m", "trader", "watchdog"],
+        project_root=tmp_path,
+        interval_s=300,
+    )
+    assert "<Interval>PT5M</Interval>" in xml and "LogonTrigger" not in xml
+    calls = []
+    r = installer.install(
+        dry_run=True,
+        run=lambda cmd, **kw: calls.append(cmd),
+        platform="win32",
+        home=tmp_path,
+        program=["C:\\py.exe", "-m", "trader", "watchdog"],
+        project_root=tmp_path / "proj",
+        kind="watchdog",
+    )
+    assert r["path"] == tmp_path / "trader-watchdog.xml" and "trader-watchdog" in r["command"]
+    r2 = installer.uninstall(
+        run=lambda cmd, **kw: calls.append(cmd), platform="darwin", home=tmp_path, kind="watchdog"
+    )
+    assert r2["path"].name == "com.trader.watchdog.plist"

@@ -60,3 +60,18 @@ def test_spawn_detached_and_stop_tree(tmp_path):
             proc.kill()
             proc.wait()
     assert log.parent.is_dir()
+
+
+def test_open_folder_dispatches_by_platform(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    popen: list[list[str]] = []
+    started: list[str] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: popen.append(argv))
+    monkeypatch.setattr(os, "startfile", lambda p: started.append(p), raising=False)
+    for plat in ("darwin", "linux", "win32"):
+        monkeypatch.setattr(procs.sys, "platform", plat)
+        procs.open_folder(tmp_path)
+    assert popen == [["open", str(tmp_path)], ["xdg-open", str(tmp_path)]]
+    assert started == [str(tmp_path)]

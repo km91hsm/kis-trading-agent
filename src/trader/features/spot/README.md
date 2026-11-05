@@ -101,7 +101,7 @@ CLI·명령
 - `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view·quant 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None; `quant` 는 M7 부터 `05_quant` 리포트 요약). M8 부터 `memory`·`memory_status`(`ports["evaluation"].memory_context` — 포트·원장이 없으면 `[]`·`{warmup: true, breaker: null}`)와 `calibration`(`35_calibration` 체크포인트, `ml.yaml calibration.enabled ∧ inject` 일 때만, 아니면 None)도 싣는다. theme 컨텍스트는 주입하지 않는다. `35_calibration` 은 `ensure_calibration` 이 `ensure_quant` 와 같은 세 지점(`scan_analyze`·`tool collect`(결과 `calibration`)·`spot analyze`)에서 쓴다.
 - `AnalystRole` 은 4종을 유지한다(`ANALYST_ROLES` 와 일치). `05_quant` 는 `QuantReport.role="quant"` 로 별도 스키마다(Ruling M7-K1).
 - `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
-- `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
+- 에이전트 md 는 `features/spot/agents/` 에 있다(옛 `paths.agents_dir()` 는 M12 에서 삭제).
 - `common_rules`(커널 `session.agents`) 는 옛 정규화(끝 마침표 제거)를 복원했다 — 옛 md 간 마침표 위치 차이를 계약 테스트가 허용하기 위함.
 
 장중 감시(`monitor.py`)

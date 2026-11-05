@@ -20,7 +20,7 @@ def test_help_lists_core_commands():
     assert r.exit_code == 0
     names = (
         "init", "selfcheck", "status", "daemon", "web", "dev", "notify-test", "telegram",
-        "accounts", "watchdog",
+        "accounts", "watchdog", "install",
     )  # fmt: skip
     assert all(c in r.stdout for c in names)
 

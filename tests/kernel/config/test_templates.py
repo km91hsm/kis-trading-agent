@@ -53,3 +53,15 @@ def test_templates_have_ops_retention():
     schedule = load("schedule", reg, path=root / "schedule.yaml")
     assert settings.ops.retention_days == 120
     assert schedule.retention == "17:20"
+
+
+def test_env_example_lists_all_secret_fields():
+    """`.env.example` 키 = `Secrets` 필드 전부, 값은 모두 비어 있다(자리표시자만)."""
+    from trader.kernel.config.secrets import Secrets
+
+    text = (templates_dir() / "secrets" / ".env.example").read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    pairs = [ln.split("=", 1) for ln in lines]
+    assert {k for k, _ in pairs} == set(Secrets.model_fields)
+    assert len(pairs) == len(Secrets.model_fields)
+    assert all(v == "" for _, v in pairs)

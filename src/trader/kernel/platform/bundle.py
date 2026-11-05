@@ -2,7 +2,7 @@
 
 - 실행파일 폴더(macOS `.app` 은 그 부모 폴더)가 TRADER_HOME 이다 (config/ secrets/ state/ docs/
   하위 폴더, 폴더째 이동 가능).
-- 런타임 리소스(에이전트 md·웹 dist·설정 템플릿)는 `_internal/`(sys._MEIPASS) 아래에 있다.
+- 런타임 리소스(웹 dist·설정 템플릿·아이콘·docs)는 `_internal/`(sys._MEIPASS) 아래에 있다.
 - 세션의 도구 명령: frozen 이면 `trader tool`, 개발 환경이면 `python -m trader tool`.
 """
 
@@ -84,6 +84,25 @@ def cli_argv() -> list[str]:
     return [sys.executable, "-m", "trader"]
 
 
+def daemon_argv() -> list[str]:
+    """데몬 등록(launchd·작업 스케줄러)에 쓰는 argv."""
+    return [*cli_argv(), "daemon"]
+
+
+def watchdog_argv() -> list[str]:
+    """watchdog 등록(5분 간격 1회 실행)에 쓰는 argv."""
+    return [*cli_argv(), "watchdog"]
+
+
+def icons_dir() -> Path:
+    """트레이 아이콘 PNG 폴더: 번들 `_internal/icons`, 개발 `<project_root>/packaging/icons`."""
+    if is_frozen():
+        return resource_dir() / "icons"
+    from trader.kernel.platform import paths
+
+    return paths.project_root() / "packaging" / "icons"
+
+
 def templates_dir() -> Path:
     """첫 실행 템플릿(config yaml·.env.example).
 
@@ -91,3 +110,30 @@ def templates_dir() -> Path:
     if is_frozen():
         return resource_dir() / "templates"
     return Path(__file__).resolve().parents[4] / "templates"
+
+
+def first_run_init(root: Path) -> list[str]:
+    """`config/ secrets/ state/ docs/` 를 만들고 템플릿 중 **없는 파일만** 복사한다(기존 불변).
+
+    템플릿은 `config/*.yaml`·`secrets/.env.example` 이다(`.env` 는 만들지 않는다). frozen 이면
+    번들 `_internal/docs/*` 도 `docs/` 로 복사한다. 반환은 새로 만든 파일의 상대경로(posix)."""
+    import shutil
+
+    created: list[str] = []
+    for d in ("config", "secrets", "state", "docs"):
+        (root / d).mkdir(parents=True, exist_ok=True)
+    sources = [(templates_dir(), root)]
+    bundled_docs = resource_dir() / "docs"
+    if is_frozen() and bundled_docs.is_dir():
+        sources.append((bundled_docs, root / "docs"))
+    for src_root, dst_root in sources:
+        if not src_root.is_dir():
+            continue
+        for src in sorted(p for p in src_root.rglob("*") if p.is_file()):
+            dst = dst_root / src.relative_to(src_root)
+            if dst.exists():
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            created.append(dst.relative_to(root).as_posix())
+    return created

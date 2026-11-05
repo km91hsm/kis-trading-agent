@@ -25,7 +25,6 @@ def test_not_frozen_defaults(project):
     assert bundle.templates_dir().joinpath("config", "settings.yaml").is_file()
     assert bundle.templates_dir() != project / "templates"
     assert paths.web_dist() == project / "web" / "dist"
-    assert paths.agents_dir() == project / ".claude" / "agents"
 
 
 def test_frozen_root_is_executable_dir(tmp_path, monkeypatch):
@@ -38,7 +37,6 @@ def test_frozen_root_is_executable_dir(tmp_path, monkeypatch):
     assert bundle.tool_command() == "trader tool"
     assert bundle.tool_bin_dir() == exe_dir.resolve()
     assert paths.web_dist() == exe_dir / "_internal" / "web" / "dist"
-    assert paths.agents_dir() == exe_dir / "_internal" / "agents"
     assert bundle.templates_dir() == exe_dir.resolve() / "_internal" / "templates"
     assert bundle.cli_argv() == [str(exe_dir / "trader")]
 
@@ -95,3 +93,45 @@ def test_bundle_root_windows_flat_layout_unchanged(tmp_path, monkeypatch):
 
 def test_app_bundle_dir_is_public():
     assert hasattr(bundle, "app_bundle_dir")
+
+
+def test_daemon_and_watchdog_argv(tmp_path, monkeypatch):
+    assert bundle.daemon_argv() == [sys.executable, "-m", "trader", "daemon"]
+    assert bundle.watchdog_argv() == [sys.executable, "-m", "trader", "watchdog"]
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    assert bundle.daemon_argv() == [str(exe_dir / "trader"), "daemon"]
+    assert bundle.watchdog_argv() == [str(exe_dir / "trader"), "watchdog"]
+
+
+def test_icons_dir_dev_and_frozen(project, tmp_path, monkeypatch):
+    assert bundle.icons_dir() == project / "packaging" / "icons"
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    assert bundle.icons_dir() == exe_dir.resolve() / "_internal" / "icons"
+
+
+def test_first_run_init_copies_missing_only(tmp_path, monkeypatch):
+    """폴더 4개를 만들고 템플릿 중 없는 파일만 복사한다(기존 파일 불변).
+    frozen 이면 번들 docs 도."""
+    tpl = tmp_path / "tpl"
+    (tpl / "config").mkdir(parents=True)
+    (tpl / "secrets").mkdir()
+    (tpl / "config" / "settings.yaml").write_text("a: 1\n", encoding="utf-8")
+    (tpl / "secrets" / ".env.example").write_text("WEB_TOKEN=\n", encoding="utf-8")
+    monkeypatch.setattr(bundle, "templates_dir", lambda: tpl)
+    root = tmp_path / "home"
+    root.mkdir()
+    (root / "config").mkdir()
+    (root / "config" / "settings.yaml").write_text("mine: 1\n", encoding="utf-8")
+    created = bundle.first_run_init(root)
+    assert created == ["secrets/.env.example"]
+    assert all((root / d).is_dir() for d in ("config", "secrets", "state", "docs"))
+    assert (root / "config" / "settings.yaml").read_text(encoding="utf-8") == "mine: 1\n"
+    assert not (root / "secrets" / ".env").exists()
+    assert bundle.first_run_init(root) == []
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    (exe_dir / "_internal" / "docs").mkdir()
+    (exe_dir / "_internal" / "docs" / "guide.md").write_text("# g\n", encoding="utf-8")
+    assert bundle.first_run_init(root) == ["docs/guide.md"]
