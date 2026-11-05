@@ -1,5 +1,6 @@
 """secrets/.env 읽고 쓰기 — 다른 프로젝트 .env 가져오기(`import_env`)와 설정 화면의 키 입력
-(`catalog`·`status`·`update`), 웹 토큰 자동 생성(`ensure_web_token`).
+(`catalog`·`status`·`update`). `.env` 편집 helper 와 웹 토큰 자동 생성(`ensure_web_token`)은 커널
+`config.secrets` 로 승격했고 여기서는 다시 내보낸다.
 
 값은 로그·stdout·반환값 어디에도 넣지 않는다 (키 이름과 '설정됨' 여부만). 기존 줄·주석은 그대로
 두고 새 키는 끝에 붙이며, 바꾸기 전 파일은 `.env.bak-<YYYYMMDD_HHMMSS>` 로 남긴다.
@@ -7,22 +8,23 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
-import threading
-import uuid
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dotenv import dotenv_values
-
 from trader.features.accounts.settings import Account
 from trader.kernel.config import ConfigError
-from trader.kernel.config.secrets import CRED_SUFFIXES, Secrets, account_prefix, load_secrets
-from trader.kernel.platform.filelock import locked
-from trader.kernel.platform.fsutil import atomic_replace
+from trader.kernel.config.secrets import (
+    CRED_SUFFIXES,
+    Secrets,
+    account_prefix,
+    load_secrets,
+)
+from trader.kernel.config.secrets import editing_env as _editing
+from trader.kernel.config.secrets import ensure_web_token as ensure_web_token
+from trader.kernel.config.secrets import read_env_file as _read
+from trader.kernel.config.secrets import write_env as _write
 
 # 원본 키 이름 → 이 저장소 키 이름. 같은 이름은 그대로 (Secrets 필드 전부가 대상).
 NAME_MAP: dict[str, str] = {
@@ -33,16 +35,6 @@ NAME_MAP: dict[str, str] = {
     "KIS_CANO": "KIS_PAPER_CANO",
     "KIS_LIVE_CANO": "KIS_REAL_CANO",
 }
-
-
-def _read(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    try:
-        raw = dotenv_values(path, encoding="utf-8")
-    except UnicodeDecodeError as e:
-        raise ConfigError(f"{path.name} 은 UTF-8 로 저장해야 합니다: {e}") from e
-    return {k: (v or "").strip() for k, v in raw.items()}
 
 
 def import_env(
@@ -92,18 +84,6 @@ def import_env(
     }
 
 
-_THREAD_LOCK = threading.Lock()
-
-
-@contextlib.contextmanager
-def _editing(dst: Path) -> Iterator[None]:
-    """백업·읽기·고치기·바꿔 넣기 전체를 한 번에 하나만(같은 프로세스의 웹 요청 스레드 둘, 데몬과
-    CLI 처럼 다른 프로세스 둘이 동시에 저장해도 한쪽 변경이 사라지지 않게)."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with _THREAD_LOCK, locked(dst.with_name(dst.name + ".lock"), timeout=10.0):
-        yield
-
-
 def _backup(dst: Path) -> str | None:
     """되돌릴 수 있게 바꾸기 전 파일을 남긴다 (파일명에 ':' 금지 → YYYYMMDD_HHMMSS)."""
     if not dst.exists():
@@ -120,37 +100,6 @@ def _backup(dst: Path) -> str | None:
     except OSError:
         pass
     return bak.name
-
-
-def _write(dst: Path, values: dict[str, str], remove: set[str] | frozenset = frozenset()) -> None:
-    """있는 줄은 자리에서 바꾸고 없는 키는 끝에 붙인다(주석·순서 보존), remove 의 키 줄은 뺀다.
-    임시 파일에 쓴 뒤 바꿔 넣고(쓰다 끊겨도 원본이 남는다) 파일 권한은 0600."""
-    lines = dst.read_text(encoding="utf-8").splitlines() if dst.exists() else []
-    seen: set[str] = set()
-    out: list[str] = []
-    for line in lines:
-        is_kv = "=" in line and not line.lstrip().startswith("#")
-        key = line.split("=", 1)[0].strip() if is_kv else None
-        if key is not None and key.startswith("export "):
-            key = key[len("export ") :].strip()
-        if key in remove:
-            continue
-        if key in values:
-            out.append(f"{key}={values[key]}")
-            seen.add(key)
-        else:
-            out.append(line)
-    for k, v in values.items():
-        if k not in seen:
-            out.append(f"{k}={v}")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(f"{dst.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
-    tmp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
-    try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    atomic_replace(tmp, dst)
 
 
 # --- 설정 화면의 키 입력 -----------------------------------------------------
@@ -268,20 +217,3 @@ def update(
         # 환경변수가 덮어쓰는 이름 — 파일은 바뀌었지만 재시작해도 환경변수 값이 쓰인다
         "env_overridden": _env_overrides(sorted(set(values) | clear_set)),
     }
-
-
-def ensure_web_token(path: Path) -> tuple[str, bool]:
-    """WEB_TOKEN 이 없으면 만들어 .env 에 넣는다(첫 실행에 제어 API 가 통째로 닫히지 않게).
-    (토큰, 새로 만들었는가). 값은 반환만 하고 로그에 남기지 않는다."""
-    import secrets as _secrets
-
-    env = (os.environ.get("WEB_TOKEN") or "").strip()
-    if env:
-        return env, False
-    with _editing(path):
-        current = _read(path).get("WEB_TOKEN")
-        if current:
-            return current, False
-        token = _secrets.token_urlsafe(24)
-        _write(path, {"WEB_TOKEN": token})
-    return token, True

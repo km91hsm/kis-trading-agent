@@ -106,3 +106,15 @@ def test_port_fo_brokers_empty_without_fo_settings(caplog):
         assert port.fo_brokers() == {}
     assert any("settings.fo 없음" in r.message for r in caplog.records)
     assert AccountsPortImpl([fo], Secrets(**_FO_SECRETS)).fo_brokers() == {}  # settings 자체가 없다
+
+
+def test_set_paused_delegates_to_modes_with_channel(conn):
+    port = AccountsPortImpl([], Secrets())
+    port.set_paused(conn, True, channel="tray")
+    assert port.paused(conn) is True
+    row = conn.execute(
+        "SELECT channel, key FROM control_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert tuple(row) == ("tray", "paused")
+    port.set_paused(conn, False)
+    assert port.paused(conn) is False

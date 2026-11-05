@@ -39,7 +39,7 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 5. `exec-key list|release` 는 M4.
 6. `accounts_io.blockers` 는 테이블이 없으면 그 사유를 생략한다. 끝난 주문 상태 목록은 커널 `execution.types.dead_status_sql` 을 쓴다(M9). `test_accounts_io.py` 의 `db` fixture 는 M4 전까지 최소 스탠드인 테이블을 CREATE 한다.
 7. 체결통보 리스너(`_notice_listeners`)는 M5.
-8. `ensure_web_token`(`secrets_io`)은 아직 어디에도 연결되지 않았다. 연결 키 웹 라우트는 `GET|POST /settings/secrets`(옛 `POST /control/secrets/status` → GET). 계좌 삭제는 옛 `POST /control/accounts/remove` → `DELETE /accounts/{id}`, 모드는 옛 `POST /control/mode`(실전 auto confirm=LIVE) → `PATCH /accounts/{id}`(confirm=계좌 id + 기존 LIVE 기록).
+8. `ensure_web_token`(`secrets_io`)은 커널 `config.secrets.ensure_web_token` 으로 승격했고(`.env` 편집 helper 포함, `secrets_io` 는 다시 내보냄), `trader app` 이 첫 실행에 호출한다. 연결 키 웹 라우트는 `GET|POST /settings/secrets`(옛 `POST /control/secrets/status` → GET). 계좌 삭제는 옛 `POST /control/accounts/remove` → `DELETE /accounts/{id}`, 모드는 옛 `POST /control/mode`(실전 auto confirm=LIVE) → `PATCH /accounts/{id}`(confirm=계좌 id + 기존 LIVE 기록).
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
 11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 커널 `notify.messages` 에 이식하지 않았다 — `SCALP_EXIT` 는 M9 에서 scalp `messages.py` 로 이식됐다(`carry_over` 추가), `DecisionBrief` 는 spot 몫.

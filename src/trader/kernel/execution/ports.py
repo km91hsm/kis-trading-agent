@@ -28,6 +28,12 @@ class AccountsPort(Protocol):
 
     def paused(self, conn: Any) -> bool: ...
 
+    def set_paused(
+        self, conn: Any, value: bool, *, channel: str = "cli", actor: str | None = None
+    ) -> None:
+        """원장 `paused` 플래그를 쓰고 바뀌었으면 control_log 에 남긴다(트레이 등 커널 진입점용)."""
+        ...
+
     def holiday_fn(self) -> Callable[[str, date], bool] | None: ...
 
     def fo_accounts(self) -> list[Any]:

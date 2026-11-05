@@ -80,3 +80,24 @@ def test_env_var_overrides_account_key(project, monkeypatch):
 def test_get_returns_none_for_blank_and_unknown():
     s = Secrets.model_validate({"DART_API_KEY": "  ", "KIS_X_APP_KEY": "v"})
     assert s.get("DART_API_KEY") is None and s.get("KIS_X_APP_KEY") == "v" and s.get("NOPE") is None
+
+
+def test_ensure_web_token_creates_once(project):
+    from trader.kernel.config.secrets import ensure_web_token
+
+    p = project / "secrets" / ".env"
+    p.write_text("# 주석\nDART_API_KEY=x\n", encoding="utf-8")
+    t1, made1 = ensure_web_token()  # 경로 생략 → paths.secrets_path()
+    t2, made2 = ensure_web_token(p)
+    assert made1 and not made2 and t1 == t2 and len(t1) >= 24
+    text = p.read_text(encoding="utf-8")
+    assert text.startswith("# 주석\nDART_API_KEY=x\n") and f"WEB_TOKEN={t1}" in text
+    assert load_secrets(p).WEB_TOKEN == t1
+
+
+def test_ensure_web_token_prefers_env(project, monkeypatch):
+    from trader.kernel.config.secrets import ensure_web_token
+
+    monkeypatch.setenv("WEB_TOKEN", "from-env")
+    assert ensure_web_token() == ("from-env", False)
+    assert not (project / "secrets" / ".env").exists()

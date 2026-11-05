@@ -1,11 +1,16 @@
-"""`secrets/.env` 로더: `Secrets` 모델과 계좌별 KIS 자격증명 선택.
+"""`secrets/.env` 로더: `Secrets` 모델과 계좌별 KIS 자격증명 선택, `.env` 안전 편집(잠금·임시
+파일 바꿔 넣기·0600)과 웹 토큰 자동 생성(`ensure_web_token`).
 
 시크릿 값은 로그·예외 메시지에 넣지 않는다(이름만)."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+import threading
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from trader.kernel.config.errors import ConfigError
 from trader.kernel.config.loader import _describe
 from trader.kernel.platform import paths
+from trader.kernel.platform.filelock import locked
+from trader.kernel.platform.fsutil import atomic_replace
 
 if TYPE_CHECKING:
     from trader.kernel.broker.creds import KisCreds
@@ -118,3 +125,81 @@ def load_secrets(path: Path | None = None) -> Secrets:
         return Secrets.model_validate(cleaned)
     except ValidationError as e:
         raise ConfigError(f"{p.name} 검증 실패: {_describe(e)}") from e
+
+
+# --- .env 편집 (accounts `secrets_io` 도 이것을 쓴다) ---------------------------
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    """`.env` 의 키 → 값(앞뒤 공백 제거). 파일이 없으면 빈 dict."""
+    if not path.exists():
+        return {}
+    try:
+        raw = dotenv_values(path, encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ConfigError(f"{path.name} 은 UTF-8 로 저장해야 합니다: {e}") from e
+    return {k: (v or "").strip() for k, v in raw.items()}
+
+
+_THREAD_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def editing_env(dst: Path) -> Iterator[None]:
+    """백업·읽기·고치기·바꿔 넣기 전체를 한 번에 하나만(같은 프로세스의 웹 요청 스레드 둘, 데몬과
+    CLI 처럼 다른 프로세스 둘이 동시에 저장해도 한쪽 변경이 사라지지 않게)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with _THREAD_LOCK, locked(dst.with_name(dst.name + ".lock"), timeout=10.0):
+        yield
+
+
+def write_env(
+    dst: Path, values: dict[str, str], remove: set[str] | frozenset = frozenset()
+) -> None:
+    """있는 줄은 자리에서 바꾸고 없는 키는 끝에 붙인다(주석·순서 보존), remove 의 키 줄은 뺀다.
+    임시 파일에 쓴 뒤 바꿔 넣고(쓰다 끊겨도 원본이 남는다) 파일 권한은 0600."""
+    lines = dst.read_text(encoding="utf-8").splitlines() if dst.exists() else []
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        is_kv = "=" in line and not line.lstrip().startswith("#")
+        key = line.split("=", 1)[0].strip() if is_kv else None
+        if key is not None and key.startswith("export "):
+            key = key[len("export ") :].strip()
+        if key in remove:
+            continue
+        if key in values:
+            out.append(f"{key}={values[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for k, v in values.items():
+        if k not in seen:
+            out.append(f"{k}={v}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(f"{dst.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    tmp.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    atomic_replace(tmp, dst)
+
+
+def ensure_web_token(path: Path | None = None) -> tuple[str, bool]:
+    """WEB_TOKEN 이 없으면 만들어 .env 에 넣는다(첫 실행에 제어 API 가 통째로 닫히지 않게 —
+    `trader app` 이 첫 실행에 부른다). (토큰, 새로 만들었는가). 비어 있지 않은 환경변수
+    `WEB_TOKEN` 이 우선이다. 값은 반환만 하고 로그에 남기지 않는다."""
+    import secrets as _secrets
+
+    env = (os.environ.get("WEB_TOKEN") or "").strip()
+    if env:
+        return env, False
+    p = path or paths.secrets_path()
+    with editing_env(p):
+        current = read_env_file(p).get("WEB_TOKEN")
+        if current:
+            return current, False
+        token = _secrets.token_urlsafe(24)
+        write_env(p, {"WEB_TOKEN": token})
+    return token, True

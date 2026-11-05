@@ -279,3 +279,29 @@ def test_cli_prepare_does_not_activate_backend(project):
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["extension_id"] == EXTENSION_ID
     assert not (project / "state/external/saveticker/runtime/bridge-config.json").exists()
+
+
+def test_native_origin_routes_before_cli(monkeypatch):
+    """Chrome 네이티브 메시징은 argv[1] 로 확장 origin 을 준다 — CLI(로깅·typer 출력)를 거치지 않고
+    native_entry 로만 간다(바이너리 프레이밍 보호)."""
+    import sys
+
+    from trader import __main__ as entry
+    from trader.kernel.cli import main as main_mod
+
+    origin = "chrome-extension://" + "a" * 32 + "/"
+    assert bridge_install.is_native_origin(origin)
+    seen = []
+    monkeypatch.setattr(bridge_install, "native_entry", lambda o: seen.append(o) or 0)
+
+    def must_not_run(args=None):
+        raise AssertionError("CLI 를 거치면 안 된다")
+
+    monkeypatch.setattr(main_mod, "app", must_not_run)
+    monkeypatch.setattr(sys, "argv", ["trader", origin])
+    entry.main()
+    assert seen == [origin]
+    monkeypatch.setattr(bridge_install, "native_entry", lambda o: 3)
+    with pytest.raises(SystemExit) as e:
+        entry.main()
+    assert e.value.code == 3

@@ -20,7 +20,7 @@ def test_help_lists_core_commands():
     assert r.exit_code == 0
     names = (
         "init", "selfcheck", "status", "daemon", "web", "dev", "notify-test", "telegram",
-        "accounts", "watchdog", "install",
+        "accounts", "watchdog", "install", "app",
     )  # fmt: skip
     assert all(c in r.stdout for c in names)
 
@@ -240,7 +240,7 @@ def test_daemon_blocks_then_shuts_down(project, monkeypatch):
 
 def test_web_runs_uvicorn_with_options(project, monkeypatch):
     seen = {}
-    monkeypatch.setattr(main_mod.uvicorn, "run", lambda a, **kw: seen.update(app=a, **kw))
+    monkeypatch.setattr("uvicorn.run", lambda a, **kw: seen.update(app=a, **kw))
     r = CliRunner().invoke(app, ["web", "--port", "9999"])
     assert r.exit_code == 0, r.output
     assert seen["host"] == "127.0.0.1" and seen["port"] == 9999
@@ -266,7 +266,7 @@ def test_app_call_forces_utf8(monkeypatch):
 def test_web_uses_settings_web_port_and_flag_wins(project, monkeypatch):
     (project / "config" / "settings.yaml").write_text("web:\n  port: 9999\n", encoding="utf-8")
     seen = {}
-    monkeypatch.setattr(main_mod.uvicorn, "run", lambda a, **kw: seen.update(kw))
+    monkeypatch.setattr("uvicorn.run", lambda a, **kw: seen.update(kw))
     assert CliRunner().invoke(app, ["web"]).exit_code == 0
     assert seen["port"] == 9999 and seen["host"] == "127.0.0.1"
     assert CliRunner().invoke(app, ["web", "--port", "8000"]).exit_code == 0
@@ -315,3 +315,12 @@ def test_boot_secrets(project):
     (project / "secrets" / ".env").write_text("DART_API_KEY=x\n", encoding="utf-8")
     b = boot_mod.boot(secrets=True)
     assert b.secrets is not None and b.secrets.DART_API_KEY == "x"
+
+
+def test_version_flag_prints_version():
+    from trader import __version__
+
+    r = CliRunner().invoke(app, ["--version"])
+    assert r.exit_code == 0, r.output
+    assert r.stdout.strip() == f"trader {__version__}"
+    assert r.stdout.split()[1][0].isdigit()

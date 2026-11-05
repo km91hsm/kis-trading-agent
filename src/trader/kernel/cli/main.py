@@ -9,9 +9,9 @@ import time
 from datetime import UTC, datetime
 
 import typer
-import uvicorn
 
-from trader.kernel.cli import init_cmd, install_cmd, selfcheck, status_cmd, watchdog_cmd
+from trader import __version__
+from trader.kernel.cli import app_cmd, init_cmd, install_cmd, selfcheck, status_cmd, watchdog_cmd
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
@@ -26,7 +26,6 @@ from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover, hooks
 from trader.kernel.registry.types import Feature
-from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
 from trader.kernel.web.deps import WebDeps
 
 logger = logging.getLogger("trader.cli")
@@ -159,6 +158,10 @@ def web(
     port: int | None = typer.Option(None, "--port", help="포트 (기본: settings.web.port)"),
 ) -> None:
     """웹 UI·API 서버를 띄운다."""
+    import uvicorn
+
+    from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
+
     b = boot(ports=True, log_name="web")  # 계좌 env(실전 confirm) 등은 ports 로 본다
     host = host or b.settings.web.bind
     port = port or b.settings.web.port
@@ -244,8 +247,23 @@ telegram_app.command("poll")(telegram_poll)
 telegram_app.command("loop")(telegram_loop)
 
 
+def _version_cb(value: bool) -> None:
+    if value:
+        typer.echo(f"trader {__version__}")
+        raise typer.Exit()
+
+
+def _root(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_cb, is_eager=True, help="버전을 출력하고 끝낸다"
+    ),
+) -> None:
+    """KIS 자동매매 에이전트"""
+
+
 def build_app(features: list[Feature]) -> typer.Typer:
     root = TraderApp(help="KIS 자동매매 에이전트", no_args_is_help=True)
+    root.callback()(_root)
     root.command("init")(init_cmd.init)
     root.command("selfcheck")(selfcheck.selfcheck)
     root.command("status")(status_cmd.status)
@@ -253,6 +271,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root.command("install")(install_cmd.install)
     root.command("daemon")(daemon)
     root.command("web")(web)
+    root.command("app")(app_cmd.app)
     root.command("notify-test")(notify_test)
     root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")
