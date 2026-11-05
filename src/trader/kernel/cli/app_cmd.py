@@ -51,7 +51,8 @@ def wait_for_port(
 
 class WebThread:
     """uvicorn.Server 를 `trader-web` 스레드에서 돌린다. 포트 점유 등으로 서버가 못 뜨면
-    스레드만 조용히 끝나므로 로그로 드러내고 `finished` 를 세운다."""
+    스레드만 조용히 끝나므로 로그로 드러내고 `crashed` 를 세운다. `finished` 는 어떤 이유로든
+    스레드가 끝나면, `crashed` 는 `stop()` 없이 스스로 끝났을 때만 선다(트레이의 '데몬 중단')."""
 
     def __init__(self, app: Any, host: str, port: int) -> None:
         import uvicorn
@@ -73,6 +74,7 @@ class WebThread:
             )
         )
         self.finished = threading.Event()
+        self.crashed = threading.Event()
         self._stopping = False
         self._thread = threading.Thread(target=self._run, name="trader-web", daemon=True)
 
@@ -84,6 +86,7 @@ class WebThread:
         finally:
             if not self._stopping:
                 logger.error("웹 UI 서버가 멈췄습니다 (%s:%s)", self.host, self.port)
+                self.crashed.set()
             self.finished.set()
 
     def start(self) -> None:
@@ -138,20 +141,30 @@ def run_app(
     stop = d.deps.stop_event
     web: WebThread | None = None
     guard = threading.Lock()
-    done = {"down": False}
+    started = {"down": False}
+    completed = threading.Event()
 
     def shutdown() -> None:
-        """멱등: 웹 → 데몬(wait=True). 트레이 종료 메뉴(워커 스레드)·메인 스레드 둘 다 부른다."""
+        """멱등이고 완료까지 기다린다: 웹 → 데몬(wait=True). 트레이 종료 메뉴(데몬 워커 스레드)와
+        메인 스레드 finally 가 둘 다 부른다 — 뒤에 온 쪽은 앞선 shutdown 이 끝날 때까지 막혀,
+        run_app 이 데몬 shutdown 중간에 돌아가(프로세스 종료로 잘리지) 않는다."""
         with guard:
-            if done["down"]:
-                return
-            done["down"] = True
+            first = not started["down"]
+            started["down"] = True
+        if not first:
+            # 타임아웃 없는 wait 는 Windows 에서 SIGINT 로 깨지 않는다 — 1초씩
+            while not completed.wait(1.0):
+                pass
+            return
         stop.set()
         try:
             if web is not None:
                 web.stop()
         finally:
-            d.shutdown(wait=True)
+            try:
+                d.shutdown(wait=True)
+            finally:
+                completed.set()
 
     def on_signal(signum, _frame=None) -> None:
         logger.info("시그널 %s 수신, 웹·데몬을 종료합니다", signum)
@@ -192,7 +205,7 @@ def run_app(
                     on_quit=shutdown,
                     icon_dir=bundle.icons_dir(),
                     stop_event=stop,
-                    finished=web.finished,
+                    finished=web.crashed,  # 정상 web.stop() 으로는 서지 않는다
                 )
             except TrayUnavailable as e:
                 typer.echo(f"트레이 없이 실행합니다 ({e}). 종료는 Ctrl+C.")
@@ -201,9 +214,9 @@ def run_app(
             typer.echo(f"웹 UI: {url}  (종료: Ctrl+C)")
             # 타임아웃 없는 wait 는 Windows 에서 SIGINT 로 깨지 않는다
             while not stop.wait(1.0):
-                if web.finished.is_set():
+                if web.crashed.is_set():
                     break
-        failed = web.finished.is_set() and not web._stopping
+        failed = web.crashed.is_set()
     finally:
         release_watch()
         shutdown()

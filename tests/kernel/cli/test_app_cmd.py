@@ -205,3 +205,79 @@ def test_wait_for_port_returns_when_listening_and_gives_up():
     stop = threading.Event()
     stop.set()
     assert app_cmd.wait_for_port("127.0.0.1", port, timeout_s=5.0, stop=stop) is False
+
+
+def test_app_tray_quit_menu_waits_for_daemon_shutdown(fakes, monkeypatch):
+    """실제 run_tray 처럼 on_quit 은 워커(daemon) 스레드에서 돌고, 트레이는 `finished` 를 보면
+    아이콘을 내린다. 정상 종료(웹 stop) 로는 `finished` 가 서지 않고, run_app 은 데몬
+    shutdown(wait=True) 이 끝난 뒤에야 돌아온다."""
+    calls = fakes
+    shutdown_done = threading.Event()
+
+    class SlowDaemon(_fake_daemon(calls)):
+        def shutdown(self, wait=True):
+            calls.append(("shutdown", wait))
+            threading.Event().wait(0.5)  # 실행 중 잡을 기다리는 동안
+            shutdown_done.set()
+
+    seen = {}
+
+    def fake_tray(**kw):
+        icon_stopped = threading.Event()
+
+        def work():
+            try:
+                kw["on_quit"]()
+            finally:
+                icon_stopped.set()
+
+        threading.Thread(target=work, daemon=True).start()
+        while not icon_stopped.is_set():
+            if kw["finished"].is_set():  # 데몬 스레드 종료로 보고 아이콘을 내림
+                seen["finished_early"] = True
+                return
+            threading.Event().wait(0.01)
+
+    monkeypatch.setattr(app_cmd, "Daemon", SlowDaemon)
+    monkeypatch.setattr(app_cmd, "run_tray", fake_tray)
+    r = CliRunner().invoke(app, ["app", "--tray", "--no-browser"])
+    assert shutdown_done.is_set(), "run_app 이 데몬 shutdown 완료 전에 돌아왔다"
+    assert r.exit_code == 0, r.output
+    assert "finished_early" not in seen
+    assert [c for c in calls if c[0] == "shutdown"] == [("shutdown", True)]
+
+
+class CrashingServer(FakeServer):
+    def run(self):
+        self.ran.set()
+        raise SystemExit(1)  # uvicorn 은 포트 점유 시 sys.exit(1)
+
+
+def test_app_exits_1_when_web_server_dies(fakes, monkeypatch):
+    import uvicorn
+
+    calls = fakes
+    monkeypatch.setattr(uvicorn, "Server", CrashingServer)
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    r = CliRunner().invoke(app, ["app", "--no-browser"])
+    assert r.exit_code == 1
+    assert "웹 UI 서버가 멈췄습니다" in r.stderr
+    assert ("shutdown", True) in calls
+
+
+def test_app_tray_exits_1_when_web_server_dies(fakes, monkeypatch):
+    import uvicorn
+
+    calls = fakes
+    monkeypatch.setattr(uvicorn, "Server", CrashingServer)
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    seen = {}
+
+    def fake_tray(**kw):
+        seen["finished"] = kw["finished"].wait(3)  # 웹 사망 → 아이콘을 내리고 돌아온다
+
+    monkeypatch.setattr(app_cmd, "run_tray", fake_tray)
+    r = CliRunner().invoke(app, ["app", "--tray", "--no-browser"])
+    assert r.exit_code == 1
+    assert seen["finished"] is True
+    assert ("shutdown", True) in calls
