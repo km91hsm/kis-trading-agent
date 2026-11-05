@@ -22,16 +22,17 @@ SCREENS = (
 
 # 시스템 화면의 커널 절(웹 `/system/*` 커널 라우트·ops).
 # 기능 항목(국면 30·저장소 40·단타 50·파생 60)보다 앞에 선다.
+# 시스템 절 순서: 지금 볼 것(0~) → 기능 절(30~60, 각 feature.py) → 관리(70~)
 KERNEL_NAV = (
-    NavItem("system", "usage", "사용량", 0),
-    NavItem("system", "health", "헬스", 1),
-    NavItem("system", "daemon", "데몬", 2),
-    NavItem("system", "jobs", "잡 큐", 3),
-    NavItem("system", "runs", "실행 기록", 4),
-    NavItem("system", "settings", "설정", 5),
-    NavItem("system", "secrets", "연결 키", 6),
-    NavItem("system", "token", "쓰기 토큰", 7),
-    NavItem("system", "control-log", "조작 이력", 8),
+    NavItem("system", "health", "헬스", 0),
+    NavItem("system", "daemon", "데몬", 1),
+    NavItem("system", "jobs", "잡 큐", 2),
+    NavItem("system", "runs", "실행 기록", 3),
+    NavItem("system", "usage", "사용량", 4),
+    NavItem("system", "settings", "설정", 70),
+    NavItem("system", "secrets", "연결 키", 71),
+    NavItem("system", "token", "쓰기 토큰", 72),
+    NavItem("system", "control-log", "조작 이력", 73),
 )
 
 

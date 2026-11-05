@@ -134,9 +134,10 @@ def headline(result: dict | None) -> str:
 
 
 def to_web(result: dict, *, version: str, features: Sequence[str]) -> dict:
-    """`/system/health` 응답 모양 `{level: ok|warn|fail, reasons, checked_at, version, features}`.
-    ok 항목은 빼고, watch 는 info 사유로만 남긴다(머리 단계 미반영). 항목에 `count` 가 있으면
-    사유에도 싣는다(선택 필드, M-3)."""
+    """`/system/health` 응답 모양 `{level: ok|warn|fail, areas, reasons, checked_at, version,
+    features}`. ok 항목은 빼고, watch 는 info 사유로만 남긴다(머리 단계 미반영). 항목에 `count`
+    가 있으면 사유에도 싣는다(선택 필드, M-3). `areas` 는 check() 의 영역별 단계를 웹 단계로
+    옮긴 것(순서 유지) — 헬스 절 영역 격자가 쓴다."""
     reasons = []
     for i in result["items"]:
         if i["level"] == "ok":
@@ -153,6 +154,7 @@ def to_web(result: dict, *, version: str, features: Sequence[str]) -> dict:
         reasons.append(reason)
     return {
         "level": _WEB_HEAD.get(result["level"], "ok"),
+        "areas": {k: WEB_LEVEL.get(v, "warn") for k, v in (result.get("areas") or {}).items()},
         "reasons": reasons,
         "checked_at": result["at"],
         "version": version,

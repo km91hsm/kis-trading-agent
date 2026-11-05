@@ -109,10 +109,29 @@ def test_store_and_latest_roundtrip(conn):
     assert health.latest(conn) == r
 
 
-def _result(*items):
+def _result(*items, areas=None):
     level = health.worst([i["level"] for i in items])
     label = health.LABEL[level]
-    return {"level": level, "label": label, "at": NOW.isoformat(), "items": list(items)}
+    return {
+        "level": level,
+        "label": label,
+        "at": NOW.isoformat(),
+        "areas": dict(areas or {}),
+        "items": list(items),
+    }
+
+
+def test_to_web_carries_areas_as_web_levels():
+    """영역 격자용 `areas` — check() 의 영역별 단계를 웹 단계(ok·info·warn·fail)로, 순서 유지."""
+    areas = {"jobs": "critical", "llm": "watch", "orders": "ok", "regime": "warning"}
+    w = health.to_web(_result(areas=areas), version="v", features=[])
+    assert list(w["areas"].items()) == [
+        ("jobs", "fail"),
+        ("llm", "info"),
+        ("orders", "ok"),
+        ("regime", "warn"),
+    ]
+    assert health.to_web(_result(), version="v", features=[])["areas"] == {}
 
 
 def test_to_web_maps_levels_and_drops_ok():
