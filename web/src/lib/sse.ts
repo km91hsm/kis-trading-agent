@@ -167,7 +167,7 @@ export function createEventsClient(deps: EventsDeps = {}): EventsClient {
         /* 잘못된 이벤트는 무시 */
       }
     });
-    // 지금 서버는 ping 을 SSE 주석으로 보내 EventSource 가 못 본다 — 이름 있는 ping 이 오면 시계만 맞춘다
+    // 서버는 변화가 없으면 이름 있는 ping(event: ping) 을 보낸다 — 시계만 맞춘다
     es.addEventListener("ping", (e) => {
       try {
         noteTime(JSON.parse((e as MessageEvent).data));

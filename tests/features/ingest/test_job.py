@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
+from pydantic import ValidationError
 
 from tests.features.ingest.helpers import load_bytes
 from trader.features.ingest import job, news_store
@@ -165,3 +167,26 @@ def test_post_ingest_hook_failure_does_not_fail_job(project, monkeypatch):
     out = job.news_collect(_deps(project, hooks=hooks), job.JOB)
     assert "ValueError" in out["hooks"][0]["error"]
     assert "error" not in out
+
+
+def test_news_collect_queue_kind_runs_same_body(project, monkeypatch):
+    calls = []
+
+    def fake(ctx, markets):
+        calls.append(list(markets))
+        return {"markets": list(markets)}
+
+    monkeypatch.setattr(job, "_collect", fake)
+    deps = _deps(project)
+    (kind,) = [q for q in FEATURE.queue_kinds if q.kind == "news_collect"]
+    assert (kind.params_model, kind.label, kind.lane, kind.priority) == (
+        job.NewsCollectParams, "뉴스 수집", "info", 0,
+    )  # fmt: skip
+    assert not kind.trading and not kind.restart_requeue and kind.body is job.news_collect_request
+    params = job.NewsCollectParams.model_validate({}).model_dump()
+    assert kind.body(deps, params, lambda _t: None) == {"markets": ["KR", "US"]}
+    assert kind.body(deps, {"market": "US"}, lambda _t: None) == {"markets": ["US"]}
+    assert job.news_collect(deps, job.JOB) == {"markets": ["KR", "US"]}
+    assert calls == [["KR", "US"], ["US"], ["KR", "US"]]
+    with pytest.raises(ValidationError):
+        job.NewsCollectParams.model_validate({"market": "KR", "x": 1})

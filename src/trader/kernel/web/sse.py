@@ -162,7 +162,7 @@ async def stream(
         elif time.monotonic() - last_sent >= ping_s:
             last_sent = time.monotonic()
             stamp = json.dumps({"server_time": deps.now().isoformat()})
-            yield f": ping {stamp}\n\n"
+            yield f"event: ping\ndata: {stamp}\n\n"
         await anyio.sleep(poll_s)
 
 

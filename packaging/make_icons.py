@@ -1,7 +1,8 @@
 """앱 아이콘 생성: 웹 파비콘과 같은 마크(둥근 먹 바탕 + 미색 ▲)를 Pillow 로 직접 그린다.
 
 산출: packaging/icons/trader.ico (Windows), trader.icns (macOS, iconutil 이 있을 때),
-tray-dark.png·tray-light.png (메뉴바/작업표시줄용 44px 단색 ▲, 투명 바탕).
+tray-dark.png·tray-light.png (메뉴바/작업표시줄용 44px 단색 ▲, 투명 바탕),
+web/public/icons/icon-192.png·icon-512.png (PWA 매니페스트용).
 생성물은 커밋한다 — CI 는 다시 만들지 않는다.
 
 사용: uv run --group build python packaging/make_icons.py
@@ -19,6 +20,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "packaging" / "icons"
+WEB_OUT = ROOT / "web" / "public" / "icons"
 INK = (0x17, 0x18, 0x1A, 255)
 PAPER = (0xF6, 0xF4, 0xEE, 255)
 
@@ -78,7 +80,11 @@ def main() -> None:
     render_tray(44, (0x17, 0x18, 0x1A, 255)).save(OUT / "tray-dark.png")
     render_tray(44, (0xF6, 0xF4, 0xEE, 255)).save(OUT / "tray-light.png")
     render_mark(512).save(OUT / "trader-512.png")
-    print(f"ico·png 생성, icns {'생성' if made_icns else '건너뜀(iconutil 없음)'}: {OUT}")
+    WEB_OUT.mkdir(parents=True, exist_ok=True)
+    for s in (192, 512):
+        render_mark(s).save(WEB_OUT / f"icon-{s}.png")
+    icns = "생성" if made_icns else "건너뜀(iconutil 없음)"
+    print(f"ico·png 생성, icns {icns}: {OUT}, {WEB_OUT}")
 
 
 if __name__ == "__main__":

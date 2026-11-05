@@ -23,7 +23,7 @@ vi.mock("lightweight-charts", () => ({
 import { Data } from "../data/Data.tsx";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
-import { setEventsClient, type EventsClient } from "../../lib/sse";
+import { setEventsClient, type EventsCallback, type EventsClient, type EventSnapshot } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { flush, render } from "../../test/render";
 import {
@@ -149,10 +149,19 @@ describe("데이터 화면", () => {
     const link = Array.from(news.querySelectorAll("a")).find((a) => a.textContent === "판정에 쓰임") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/decisions/spot/7");
     expect(news.textContent).toContain("데몬이 주기적으로 수집");
-    expect(button(news, "지금 수집")).toBeUndefined();
+    expect(button(news, "지금 수집")).toBeDefined();
     // 이벤트(공시) — 중요도 칩
     expect(news.textContent).toContain("주요사항보고서(유상증자결정)");
     expect(news.querySelector('.chip[data-tone="fail"]')?.textContent).toBe("critical");
+  });
+
+  test("「지금 수집」: POST /jobs {kind: news_collect, params: {market}}", async () => {
+    tokenStore.set("tok");
+    await mount(routes({ "POST /api/jobs": { id: 9, kind: "news_collect", params: { market: "KR" }, status: "queued", label: "뉴스 수집" } }));
+    act(() => button(section("news"), "지금 수집").click());
+    await act(async () => button(document.querySelector('[role="dialog"]') as HTMLElement, "확인").click());
+    await flush();
+    expect(bodiesTo("/jobs", "POST")).toEqual([{ kind: "news_collect", params: { market: "KR" } }]);
   });
 
   test("수동 입력: POST /news/manual {market, text, url}", async () => {
@@ -253,6 +262,22 @@ describe("데이터 화면", () => {
     expect(f.textContent).toContain("활성 20261101_120000");
     expect(f.textContent).toContain("판정 보조 신호로만 쓴다");
     for (const label of ["지표 스냅샷", "파생 지표 계산", "지표 백필"]) expect(button(f, label)).toBeDefined();
+  });
+
+  test("지표·모델은 SSE features 키로 다시 읽고 market_views 로는 읽지 않는다", async () => {
+    const cbs: EventsCallback[] = [];
+    setEventsClient({ ...stub, subscribe: (cb) => (cbs.push(cb), () => {}) });
+    await mount(routes());
+    act(() => (section("features").querySelector("tbody tr") as HTMLElement).click());
+    await flush();
+    const counts = () => ["/features/latest", "/ml/models", "/features/history"].map((p) => callsTo(p).length);
+    const before = counts();
+    act(() => cbs.forEach((cb) => cb(["market_views"], {} as EventSnapshot)));
+    await flush();
+    expect(counts()).toEqual(before);
+    act(() => cbs.forEach((cb) => cb(["features"], {} as EventSnapshot)));
+    await flush();
+    expect(counts()).toEqual(before.map((n) => n + 1));
   });
 
   test("한 절의 오류는 그 절에 보이고 다른 절은 그대로", async () => {
