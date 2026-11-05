@@ -11,13 +11,13 @@
 | `uv run ruff check src tests` | 린트 |
 | `uv run trader init` | `config/ secrets/ state/ docs/` 생성, 템플릿 중 없는 파일만 `config/` 로 복사 |
 | `uv run trader selfcheck` | 환경·원장 버전(DB 는 만들지 않음)·기능·웹 dist·무거운 모듈 import·Playwright 드라이버를 JSON 1줄로 (실패 있으면 exit 1) |
-| `uv run trader status` | `state/STATUS.md` 생성(운영 점검·데몬·최근 실행·오늘 LLM 호출·기능 절·TODO 진행도). 세션 시작 훅이 그 앞 두 절을 읽는다 |
+| `uv run trader status` | `state/STATUS.md` 생성(운영 점검·데몬·마지막 실행·오늘 LLM 호출·기능 절·TODO 진행도). 세션 시작 훅이 그 앞 두 절을 읽는다 |
 | `uv run trader watchdog [--quiet]` | 외부 감시 1회(데몬 생존·하트비트·운영 점검, 주의 이상이면 텔레그램 — `--quiet` 은 판정만). JSON 1줄 |
-| `uv run trader daemon [--dry-run]` | 스케줄러 데몬 (사용자 전용 — 금지사항 참고) |
-| `uv run trader web [--host] [--port]` | 웹 UI·API 서버 |
-| `uv run trader app [--tray --no-browser --dry-run]` | 번들 진입점: 첫 실행 초기화·`WEB_TOKEN` 생성 → 데몬 + 웹 UI 한 프로세스 → 브라우저 또는 트레이 (사용자 전용) |
-| `uv run trader install [--uninstall --watchdog --dry-run]` | 로그온 시 데몬(`--watchdog` 이면 5분 감시) 자동 시작 등록·해제 (사용자 전용) |
-| `uv run trader accounts show\|mode\|pause\|resume\|ping\|order-test --account …\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·모의 주문 연결 점검(1주 접수→즉시 취소)·추가삭제·키 가져오기 (모드 변경·`ping`·`order-test` 는 사용자 전용) |
+| `uv run trader daemon [--dry-run]` | 스케줄러 데몬. 이미 실행 중이면 안내 후 exit 0 (사용자 전용 — 금지사항 참고) |
+| `uv run trader web [--host] [--port]` | 웹 UI·API 서버(`WEB_TOKEN` 이 없으면 먼저 만든다) |
+| `uv run trader app [--tray --no-browser --browser-delay 1.5 --dry-run]` | 번들 진입점: 첫 실행 초기화·`WEB_TOKEN` 생성 → 데몬 + 웹 UI 한 프로세스 → 브라우저 또는 트레이. 이미 실행 중이면 브라우저만 열고 exit 0 (사용자 전용) |
+| `uv run trader install [--uninstall --watchdog --dry-run]` | 로그온 시 데몬 + 웹 UI(`app --no-browser`, 브라우저는 열지 않음; `--watchdog` 이면 5분 감시) 자동 시작 등록·해제 (사용자 전용) |
+| `uv run trader accounts show\|mode\|pause\|resume\|ping\|order-test --account …\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·모의 주문 연결 점검(1주 접수→즉시 취소)·추가삭제·키 가져오기 (모드 변경·`ping`·`order-test` 는 사용자 전용, `order-test` 는 paused 무관·dry-run 거부) |
 | `uv run trader ingest collect --ticker … [--market KR\|US --exchange … --asof … --force]` | 종목 수집 1회(공시·뉴스·거시 등, 절별 오류 격리) |
 | `uv run trader spot analyze --ticker … [--market KR\|US --exchange … --asof … --dry-run --skip-collect]` | 종목 1개 분석 세션 → `30_decision` (`FAKE_CLAUDE=1` 없이 금지 — 금지사항) |
 | `uv run trader spot approvals list\|approve\|reject` | 승인 대기 조회·승인·거부 (`approve` 는 사용자 전용) |
@@ -30,7 +30,7 @@
 | `uv run trader scan theme show [--market KR\|US --live]\|events show [--market KR\|US]` | 테마 열기·사건 감지 결과 조회 (조회만) |
 | `uv run trader scan run [--market KR\|US --asof … --dry-run]\|backtest\|universe check\|universe sectors` | 정량 필터→screener 세션 스캔(`FAKE_CLAUDE=1` 없이 금지)·후보 백테스트(조회만)·유니버스 시세 점검·섹터 제안 |
 | `uv run trader scalp backtest --ticker … [--market KR\|US --exchange … --days N]\|report [--market KR\|US --days N --live]` | 단타 1분봉 규칙 재현·실적/판정자 사후 비교 JSON (조회만, 주문 없음; 단타는 모의 전용·기본 끔) |
-| `uv run trader fo contracts\|chain\|verify --account …\|session [--dry-run --asof …]\|status\|adopt …` | 파생(선물옵션, 모의 전용·기본 끔) 계약·체인 조회·검증 플래그·아침 판정 세션(`FAKE_CLAUDE=1` 없이 금지)·상태·unknown 포지션 승계. `monitor\|close\|order-test` 는 주문이 나가므로 사용자 전용 |
+| `uv run trader fo contracts\|chain\|verify --account …\|session [--dry-run --asof …]\|status\|adopt …\|monitor\|close\|order-test` | 파생(선물옵션, 모의 전용·기본 끔) 계약·체인 조회·검증 플래그·아침 판정 세션(`FAKE_CLAUDE=1` 없이 금지)·상태·unknown 포지션 승계·장중 감시·청산·주문 점검. `monitor`·`close`·`order-test` 는 주문이 나가므로 사용자 전용 |
 | `uv run trader ml train\|tune\|models\|promote\|demote` | 퀀트 모델 학습·튜닝 리포트·레지스트리 조회·수동 승격/해제 (`promote`·`demote` 는 사용자 전용) |
 | `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |

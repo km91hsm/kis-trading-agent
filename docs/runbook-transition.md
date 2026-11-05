@@ -17,9 +17,9 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 ```
 
 - `config/accounts.yaml` 의 자리표시자 계좌번호를 본인 값으로 바꾼다(모의 `auto`, 실전 `off` 로 시작).
-- **`WEB_TOKEN`**: `secrets/.env` 에 웹 쓰기 토큰을 둔다. `trader app` 은 첫 실행에 없으면 만들어 넣고
-  (`config.secrets.ensure_web_token`), `trader web` 만 쓸 때는 직접 넣어야 쓰기 API 가 열린다
-  (`WEB_TOKEN=<임의의 긴 문자열>`). 이 PC 브라우저는 시스템 화면 「이 PC 에서 받기」로 토큰을 받는다.
+- **`WEB_TOKEN`**: `secrets/.env` 의 웹 쓰기 토큰. `trader app`·`trader web` 모두 기동 전에 없으면 만들어
+  넣는다(`config.secrets.ensure_web_token`, 환경변수 `WEB_TOKEN` 이 있으면 그것이 우선). 이 PC 브라우저는
+  시스템 화면 「이 PC 에서 받기」로 토큰을 받는다.
 - (선택) 모의 주문 연결 점검: `uv run trader accounts order-test --account <모의 계좌 id>` — 1주 지정가
   (현재가 −10%) 접수 → 즉시 취소, 결과 JSON 1줄. 장중에만 의미가 있다.
 
@@ -43,9 +43,18 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
    FAKE_CLAUDE=1 uv run trader daemon --dry-run
    ```
    웹은 다른 터미널에서 `uv run trader web --port 8788`.
+   - **세이브티커 경합**: 새 데몬의 `saveticker` 잡은 계정 파일이 있으면 수집 서비스를 띄워 옛 데몬과 같은
+     계정 세션을 다툴 수 있다. 리허설 동안 새 저장소 `config/sources.yaml` 의 `saveticker.collect: false` 로
+     끄거나(이미 쌓인 데이터는 계속 읽는다), 옛 데몬의 세이브티커 수집을 먼저 멈춘다.
 4. **판정**(하루 뒤, 전부 만족해야 전환):
-   - 웹 `/system`(또는 `GET /api/system/daemon`)의 잡 표에서 **등록 잡 전부**가 1회 이상 실행됐다
-     (`last_start` 가 있음; 시장 게이트로 `skipped` 된 잡은 사유가 휴장·창 밖인지 확인).
+   - 웹 `/system`(또는 `GET /api/system/daemon`)의 잡 표에서 **그날 예정 시각이 지난 잡 전부**가 1회 이상
+     실행됐다(`last_start` 가 있음; 시장 게이트로 `skipped` 된 잡은 사유가 휴장·창 밖인지 확인).
+     주간 잡(`schedule.yaml` 의 `days: fri`·`days: sat` 트리거 — 금 `rebalance`(KR·US), 토 `ml_train`·
+     `paper_review`·`rl_train`)은 평일 리허설에서 제외하고, 대신 1회씩 직접 확인한다:
+     `FAKE_CLAUDE=1 uv run trader jobs run rebalance --param market=KR`(US 도),
+     `FAKE_CLAUDE=1 uv run trader jobs run ml_train`, `FAKE_CLAUDE=1 uv run trader jobs run rl_train`.
+     `paper_review` 는 큐 kind 가 아니므로 `uv run trader evaluation paper-review` 로 확인한다(큐 요청은
+     리허설 데몬이 `--dry-run` 으로 집행하므로 주문은 나가지 않는다).
    - `runs` 오류 0 — 웹 `/system` 최근 실행(`GET /api/runs`)에 `error` 없음.
    - `ops_check` 결과 `ok` — 웹 상태 띠/`GET /api/system/health` 의 `level` 이 `ok`, `uv run trader status` 의
      `state/STATUS.md` 「운영 점검」 절이 「점검 정상」.
@@ -67,13 +76,16 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 3. 로그온 등록:
    ```
    cd <새 저장소>
-   uv run trader install                 # 데몬 (먼저 --dry-run 으로 plist/XML 내용 확인 가능)
+   uv run trader install                 # 데몬 + 웹 UI(`app --no-browser`) (먼저 --dry-run 으로 plist/XML 확인)
    uv run trader install --watchdog      # 데몬 밖 5분 감시
    ```
 4. 확인:
    - `uv run trader notify-test` — 텔레그램 시험 메시지 1건.
    - 텔레그램 `/status` — 「운영 점검」·「데몬」 절과 계좌 절이 나온다.
-   - 웹 `http://127.0.0.1:8787/system` — 데몬 살아 있음·운영 점검 정상·잡 표 다음 예정 시각.
+   - 웹 `http://127.0.0.1:8787/system` — 로그온 등록이 데몬과 웹 UI 를 함께 띄우므로(`app --no-browser`)
+     로그온 뒤 바로 열린다. 데몬 살아 있음·운영 점검 정상·잡 표 다음 예정 시각.
+   - 같은 PC 에서 `trader app`(또는 번들 더블클릭)을 다시 실행하면 「이미 실행 중입니다」 안내 뒤 브라우저만
+     열고 exit 0 — 두 번째 데몬은 뜨지 않는다.
 
 ## 4. 번들 (선택)
 
@@ -81,7 +93,8 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 git tag v0.2.0 && git push origin v0.2.0
 ```
 → GitHub Actions `build.yml`(macOS arm64·x86_64, Windows x86_64)이 테스트·웹 빌드·PyInstaller 번들·zip 을 만들고
-Release 에 올린다. zip 을 풀어 더블클릭(`Trader.app` / `TraderApp.exe`)으로 메뉴바·트레이 아이콘·웹 UI 가 뜨는지는
+Release 에 올린다. 번들의 `./trader install` 도 소스와 같이 `app --no-browser` 를 등록한다(로그온 뒤 웹 UI 포함).
+zip 을 풀어 더블클릭(`Trader.app` / `TraderApp.exe`)으로 메뉴바·트레이 아이콘·웹 UI 가 뜨는지는
 사용자 실기 확인 항목이다(`docs/TODO.md` 「사용자 확인 대기」, 사용법 `docs/bundle-usage.md`).
 
 ## 5. 되돌리기 (언제든)
@@ -93,6 +106,9 @@ uv run trader install --uninstall --watchdog
 cd <옛 저장소>
 uv run trader install                   # 옛 데몬 로그온 등록 복구 (필요하면 --watchdog 도)
 ```
+
+- 새 저장소 `install --uninstall` 은 멱등이다 — 등록돼 있지 않으면(Windows 작업 없음 포함) 오류 없이 끝난다.
+- 새 등록은 데몬과 웹 UI 를 한 프로세스(`app --no-browser`)로 띄우므로, 해제·종료하면 8787 웹도 함께 내려간다.
 
 - 새 데몬이 떠 있으면 먼저 내린다(트레이 「종료」 또는 Ctrl+C — 실행 중 세션을 기다린 뒤 잠금 해제).
 - 두 저장소의 원장(`state/trader.db`)은 별개다. 되돌린 뒤 새 저장소에서 난 주문·체결은 KIS 앱과 대조한다.

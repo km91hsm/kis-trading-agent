@@ -44,11 +44,17 @@ def test_claude_md_lists_every_cli_command() -> None:
 
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     section = text.split("## 실행 명령", 1)[1].split("\n## ", 1)[0]
-    rows = [line for line in section.splitlines() if line.startswith("|")]
+    # 명령 열(첫 번째 열)만 본다 — 용도 열의 언급으로 통과하지 않게(T19). `\|` 는 열 구분이 아님
+    rows = [
+        re.split(r"(?<!\\)\|", line)[1]
+        for line in section.splitlines()
+        if line.startswith("|") and line.count("|") >= 3
+    ]
+    cmds = "\n".join(rows)
     root = build_app(discover())
     missing: list[str] = []
     for c in root.registered_commands:
-        if not c.hidden and f"trader {_cmd_name(c)}" not in section:
+        if not c.hidden and f"trader {_cmd_name(c)}" not in cmds:
             missing.append(_cmd_name(c))
     for g in root.registered_groups:
         mine = " ".join(r for r in rows if f"trader {g.name}" in r)

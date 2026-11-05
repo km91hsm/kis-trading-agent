@@ -95,7 +95,7 @@ CLI(`uv run trader spot --help` 로 확인):
 CLI·명령
 - 최상위 `trader analyze`·`trader collect` 별칭이 없다(기능 sub-app 일관): `trader spot analyze`, `trader ingest collect`. 옛 `approvals` 도 `trader spot approvals`. 스펙 M4 행의 `trader analyze --dry-run` 은 `trader spot analyze --dry-run` 으로 읽는다.
 - `trader status`(M12): STATUS.md·`/status` 의 spot 절은 「최근 결정」(원장 `decisions` 최근 3건, T7-R1)·「미승인 주문」·「성향」(계좌×시장 `stance.decide`).
-- health(M12): 영역 `spot` — `spot.fill_ambiguous`(체결 매칭 모호, warning)·`spot.reconcile.<계좌>.<시장>`(야간 대조 불일치 warning · 현지 평일 예정 시각 + 30분 유예 뒤 미실행 watch — 휴장·건너뜀 제외, KR 휴장은 accounts 포트 `holiday_fn`, 없으면 US 만 `is_us_holiday` 폴백 T4-R1).
+- health(M12): 영역 `spot` — `spot.fill_ambiguous.{market}`(체결 매칭 모호, warning)·`spot.reconcile.<계좌>.<시장>`(야간 대조 불일치 warning · 현지 평일 예정 시각 + 30분 유예 뒤 미실행 watch — 휴장·건너뜀 제외, KR 휴장은 accounts 포트 `holiday_fn`, 없으면 US 만 `is_us_holiday` 폴백 T4-R1).
 - 텔레그램 핸들러는 `CommandContext.ports["accounts"]` 로 계좌·브로커·정책을 받는다(포트가 없으면 안내만, 주문 없음).
 - `approvals_expire` 잡은 `boot` 를 부르지 않고 `ctx.conn_factory()`·`ctx.now`·`ctx.notifier` 로 계좌·브로커 없는 최소 `ExecContext` 를 만든다(만료는 conn+now 만 쓴다).
 - `approval_line` 은 spot `messages.py` 가 소유한다(커널 `notify.messages` 의 ENV·SIDE·`money`·`kst_hhmm` 재사용).

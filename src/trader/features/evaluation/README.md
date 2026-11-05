@@ -32,7 +32,7 @@
 - `convergence_rate` 는 `debate_turns.decision_date`, `signal_hits`/`pending` 은 `analyst_reports.decision_date` 와 조인한다. `open_window._exchanges` 는 spot 소유 `ticker_exchanges` 테이블을 SQL 로 읽는다.
 - `ports._decided_at` 은 US 백필(운영일이 지금이 아닐 때)에도 `MARKET_CLOSE["KR"]`(15:30 KST)를 쓴다 — 플랜 Task 5 결정(Ruling F2).
 - 미국 일일 리포트(16:20 ET)는 07:10 KST `fills_sync` 보다 먼저 돌아 `realized_5d` 가 하루 늦을 수 있다.
-- health(M12): 영역 `evaluation` 하나 — `evaluation.calibration_review`(watch: 만기 결정이 `ml.yaml calibration.min_decisions` 에 닿았는데 `inject` 가 꺼져 있음).
+- health(M12): 영역 `evaluation` 하나 — `evaluation.calibration_review`(watch: `ml.yaml calibration.enabled` 가 켜져 있고 만기 결정이 `calibration.min_decisions` 에 닿았는데 `inject` 가 꺼져 있음). 보정이 꺼져 있으면 빈 결과, 설정·원장 읽기 실패는 러너가 `evaluation.error` warning 으로 격리한다.
 - status(M12): `/status`·STATUS.md 절 「성과」(계좌×시장 최근 30일 수익률·MDD + RL 사이저 줄)·「결정 분포(N일)」(빈 데이터면 생략).
 - 옛 `metrics.pending_approvals/account_stance/stance_by_market` 은 이식하지 않는다 — 상태 절은 커널 `execution.ledger.pending_approvals` 와 spot `stance.decide` 를 쓴다(M12 T7).
 - `theme.mature`/`mature_views` 는 reflect 가 부른다(M6 이연 회수).

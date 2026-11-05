@@ -55,8 +55,9 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
    `./trader selfcheck`(설치 점검 JSON 1줄).
 6. **리허설**(구독 호출 없음) — macOS: `FAKE_CLAUDE=1 ./trader spot analyze --ticker 005930 --dry-run`,
    Windows PowerShell: `$env:FAKE_CLAUDE="1"; .\trader.exe spot analyze --ticker 005930 --dry-run`.
-7. **자동 시작**(선택): `./trader install` 로 로그온 시 데몬 자동 시작을 등록합니다(해제 `--uninstall`,
-   데몬 밖 5분 감시는 `--watchdog`).
+7. **자동 시작**(선택): `./trader install` 로 로그온 시 데몬 + 웹 UI(브라우저는 열지 않음 —
+   `trader app --no-browser`) 자동 시작을 등록합니다(해제 `--uninstall`, 데몬 밖 5분 감시는 `--watchdog`).
+   이미 떠 있는 상태에서 다시 실행하면(더블클릭 포함) 「이미 실행 중입니다」 안내 뒤 브라우저만 엽니다.
 
 ## 4. 평소 운용
 
@@ -68,7 +69,8 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
 - 텔레그램: 알림 수신, `/approve <id>`·`/reject <id>`·`/status`·`/mode <계좌> <auto|approve|off>` 등.
 - 웹 UI 제어(일시정지·승인·모드·작업 실행)는 쓰기 토큰(`secrets/.env` 의 `WEB_TOKEN`, 첫 실행 때 자동 생성)이 필요합니다.
   이 PC 에서 연 브라우저는 시스템 화면의 「이 PC 에서 받기」로 토큰을 받고, 폰·tailnet 에서는 그 값을 직접 붙여 넣습니다.
-  토큰을 넣기 전의 브라우저는 조회만 됩니다(`WEB_TOKEN` 이 아예 없으면 서버가 쓰기를 모두 거부 — `trader web` 만 쓸 때).
+  토큰을 넣기 전의 브라우저는 조회만 됩니다. `trader app`·`trader web` 모두 기동 전에 `WEB_TOKEN` 이 없으면 만들어 넣습니다
+  (환경변수 `WEB_TOKEN` 이 있으면 그것이 우선).
 - 작업은 터미널 없이 웹 대시보드에서, 또는 `./trader jobs run <작업>` 으로 데몬 큐에 넣을 수 있습니다
   (데몬이 켜져 있어야 함 — `./trader jobs kinds` 로 종류 확인).
 - **세이브티커 Chrome 수집기 설치**: `./trader saveticker extension prepare --destination <새 패키지 경로>` 로
