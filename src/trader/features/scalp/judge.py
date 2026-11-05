@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,9 @@ logger = logging.getLogger("trader.scalp")
 
 AGENT = AgentDef("scalp-judge", Path(__file__).parent / "agents" / "scalp-judge.md", ScalpVerdict)
 JUDGE_TTL_S = 1800.0  # 회수되지 않은 판정 제출을 버리는 시간(초)
+NEWS_LOOKBACK = timedelta(hours=24)  # 판정 입력 뉴스 창(수신 기준)
+NEWS_LIMIT = 5  # 판정 입력 뉴스 최대 건수(최신순)
+NEWS_KEYS = ("title", "source", "published_at")  # scalp-judge.md 의 news 모양
 
 
 class ScalpJudge:
@@ -118,9 +121,11 @@ def judge_context(
     ticker: str,
     exchange: str | None,
     today: date,
+    now: datetime | None = None,
 ) -> dict:
-    """판정 입력의 공통 부분: 호가 잔량·국면·오늘 시장 판단 (실패한 절은 None). 뉴스는 레인이
-    수집 기능을 읽지 않으므로 항상 빈 목록(A16)."""
+    """판정 입력의 공통 부분: 호가 잔량·최근 뉴스·국면·오늘 시장 판단 (실패한 절은 None). 뉴스는
+    `ports["inputs"].recent`(종목 태그, 최근 `NEWS_LOOKBACK`, now 이전)로 읽는다 — 포트·now 가
+    없거나 실패하면 빈 목록."""
     book = None
     try:
         ob = (
@@ -146,9 +151,18 @@ def judge_context(
     except Exception as e:  # noqa: BLE001 - 시장 판단은 보조 입력
         logger.debug("단타 시장 판단 실패 %s: %s", market, e)
         view = None
+    news: list[dict] = []
+    inputs = ports.get("inputs")
+    if inputs is not None and now is not None:
+        try:
+            rows = inputs.recent(conn, market, tickers=[ticker], since=now - NEWS_LOOKBACK,
+                                 limit=NEWS_LIMIT, asof=now)  # fmt: skip
+            news = [{k: r.get(k) for k in NEWS_KEYS} for r in rows]
+        except Exception as e:  # noqa: BLE001 - 뉴스는 보조 입력
+            logger.debug("단타 뉴스 실패 %s: %s", ticker, e)
     return {
         "orderbook": book,
-        "news": [],
+        "news": news,
         "regime": reg,
         "market_view": (
             {k: view.get(k) for k in ("stance", "confidence", "scalp_ok")} if view else None

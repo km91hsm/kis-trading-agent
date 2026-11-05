@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
-from datetime import datetime
+from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trader.features.ingest import news_store
 from trader.features.ingest.api import (
     SourcesConfig,
     build_input_deps,
@@ -61,6 +62,28 @@ class InputsPortImpl:
             force=force,
         )
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def recent(
+        self,
+        conn: Any,
+        market: str,
+        *,
+        tickers: Iterable[str] | None,
+        since: datetime,
+        limit: int = 20,
+        novel_only: bool = False,
+        asof: datetime | None = None,
+    ) -> list[dict]:
+        """since 이후·asof(없으면 지금) 이전 수신 뉴스(`news_store.received_since`)."""
+        return news_store.received_since(
+            conn,
+            market,
+            since=since,
+            asof=asof or datetime.now(UTC),
+            tickers=tickers,
+            novel_only=novel_only,
+            limit=limit,
+        )
 
 
 def build_port(boot: Any) -> InputsPortImpl:

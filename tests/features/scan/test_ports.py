@@ -78,3 +78,31 @@ def test_watchlist_port_reads_scan_watchlist(conn, settings):
     watchlist.set_watchlist(conn, ["005930", "000660"])
     port = ports.build_port(SimpleNamespace(settings=settings))
     assert port.watchlist(conn, "KR") == ["005930", "000660"]
+
+
+def test_classify_fills_auto_cache(conn, settings, project):
+    """`classify` 는 yaml 에 없는 종목만 KIS 업종으로 대분류해 자동 캐시에 적는다(시세는 accounts
+    포트, 종목명은 `ticker_names` — ETF 상표는 'ETF')."""
+    from decimal import Decimal
+
+    from trader.features.scan import sector_suggest
+    from trader.kernel.broker.fake import FakeMarket
+
+    (project / "config" / "sectors.yaml").write_text(
+        "sectors: [반도체, 기타]\nkr_industry_to_sector:\n  전기전자: 반도체\n"
+        'kr:\n  "005930": 반도체\n',
+        encoding="utf-8",
+    )
+    conn.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', '069500', 'KODEX 200', 'test', '2026-10-26T00:00:00+00:00')"
+    )
+    conn.commit()
+    m = FakeMarket(prices={"357870": Decimal(1)}, industries={"357870": "전기전자"})
+    accounts = SimpleNamespace(market_client=lambda: m)
+    port = ports.build_port(SimpleNamespace(settings=settings, ports={"accounts": accounts}))
+    port.classify(conn, "KR", ["005930", "357870", "069500"])
+    auto = sector_suggest.load_auto(project / "state")["KR"]
+    assert auto["357870"]["sector"] == "반도체" and auto["069500"]["sector"] == "ETF"
+    assert "005930" not in auto and m.calls.count("get_industry_kr") == 2  # yaml 종목은 조회 없음
+    assert port.sector_of("KR")("357870") == "반도체"

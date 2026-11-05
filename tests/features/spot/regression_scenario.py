@@ -48,7 +48,7 @@ class RegressionPort(AccountsPortImpl):
             "KR": Cash(currency="KRW", available=Decimal("10000000"), total=Decimal("10000000")),
             "US": Cash(currency="USD", available=Decimal("10000"), total=Decimal("10000")),
         }
-        return {a.id: FakeBroker(to_broker_account(a), cash=dict(cash)) for a in self.accounts()}
+        return [FakeBroker(to_broker_account(a), cash=dict(cash)) for a in self.accounts()]
 
     def market_client(self):
         return None

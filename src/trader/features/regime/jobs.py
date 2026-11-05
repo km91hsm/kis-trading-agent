@@ -119,8 +119,7 @@ def market_view_body(deps, market: str) -> dict:
         )
         port = _port(deps)
         accounts: list = list(port.accounts()) if port is not None else []
-        raw = port.brokers() if port is not None else {}
-        brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+        brokers = {b.account.id: b for b in (port.brokers() if port is not None else [])}
         ctx = _lane(deps, conn)
         built = mv.build_inputs(
             ctx,

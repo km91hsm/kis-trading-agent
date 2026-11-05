@@ -177,8 +177,7 @@ def exec_ctx_from(
     paused: Callable[[Any], bool] | None = None
     if accounts_port is not None:
         accounts = list(accounts_port.accounts())
-        raw = accounts_port.brokers()
-        brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+        brokers = {b.account.id: b for b in accounts_port.brokers()}
         market_client = accounts_port.market_client()
         holiday_fn = accounts_port.holiday_fn()
         policy, paused = accounts_port.policy, accounts_port.paused

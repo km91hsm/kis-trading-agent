@@ -56,7 +56,7 @@ class _Port(AccountsPortImpl):
         self._brokers, self._market = brokers, market
 
     def brokers(self):
-        return self._brokers
+        return list(self._brokers.values())
 
     def market_client(self):
         return self._market

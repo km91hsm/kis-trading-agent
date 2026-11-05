@@ -159,8 +159,7 @@ def ctx_from_ports(
     market_client = holiday_fn = policy = paused = None
     if acc is not None:
         accounts = list(acc.accounts())
-        raw = acc.brokers()
-        brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+        brokers = {b.account.id: b for b in acc.brokers()}
         market_client = acc.market_client()
         holiday_fn = acc.holiday_fn()
         policy, paused = acc.policy, acc.paused

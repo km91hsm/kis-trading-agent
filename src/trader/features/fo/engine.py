@@ -21,7 +21,8 @@ M10: 틱 진입부에서 호출자가 남긴 암묵 트랜잭션을 commit 한�
 국면·킬스위치는 `ports["regime"]`, 휴장은 `ports["accounts"].holiday_fn`(`executor.holiday_fn_of`),
 트리거 처리 표시는 커널 `execution.ledger`. 재평가 요청은 커널 큐 `enqueue`(fo 큐 kind 표, 출처
 `REEVAL_SOURCE` — 커널 `auto_gate` 를 거치지 않고 `jobs.reevaluate_request` 가 게이트·트리거 보류를
-직접 맡는다). 시장 뉴스(`news_items`, ingest 소유 테이블)는 옛 SQL 그대로 읽는다(import 없음)."""
+직접 맡는다). 시장 뉴스는 `ports["inputs"].recent` 로 읽고, 포트가 없으면(테스트·CLI) 옛 SQL
+(`news_items`, ingest 소유 테이블)로 폴백한다(import 없음)."""
 
 from __future__ import annotations
 
@@ -356,7 +357,18 @@ def _decision_ref(conn: sqlite3.Connection, pos: FoPositionRow) -> dict[str, Any
     }
 
 
-def _novel_news(conn: sqlite3.Connection, now: datetime, minutes: int) -> int:
+NOVEL_NEWS_LIMIT = 1000  # 재평가 주기 안의 새 뉴스 상한(세기만 하므로 넉넉히)
+
+
+def _novel_news(
+    conn: sqlite3.Connection, now: datetime, minutes: int, inputs: Any | None = None
+) -> int:
+    """최근 `minutes` 분 안에 수신한 새(novel) 시장·거시 뉴스(종목 태그 없음) 수. `inputs` 포트가
+    있으면 `recent` 로, 없으면 옛 SQL 로 센다."""
+    if inputs is not None:
+        rows = inputs.recent(conn, "KR", tickers=None, since=now - timedelta(minutes=minutes),
+                             limit=NOVEL_NEWS_LIMIT, novel_only=True, asof=now)  # fmt: skip
+        return sum(1 for r in rows if not r.get("tickers"))
     since = (now - timedelta(minutes=minutes)).isoformat()
     row = conn.execute(
         "SELECT COUNT(*) FROM news_items WHERE market = 'KR' AND novel = 1 AND received_at >= ? "
@@ -654,9 +666,10 @@ def _trigger_for(ctx: FoExecContext, pos: FoPositionRow, q: FoQuote | None, *,
         )  # fmt: skip
         opinion = triggers.opinion_day_of(force, holiday_fn)
     underlying = index if index is not None else (q.underlying if q is not None else None)
+    novel = _novel_news(ctx.conn, now, cfg.reeval.interval_min, ctx.ports.get("inputs"))
     return triggers.check(
         ctx.conn, position=pos, underlying=underlying, iv=iv, cfg=cfg, profile=profile, now=now,
-        today=today, novel_news=_novel_news(ctx.conn, now, cfg.reeval.interval_min),
+        today=today, novel_news=novel,
         opinion_day=opinion, ref_index=ref.get("ref_index"), ref_iv=ref_iv,
         take_profit_pt=pos.tp_pt, invalidation_rules=ref.get("invalidation"),
     )  # fmt: skip

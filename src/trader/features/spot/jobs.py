@@ -162,6 +162,7 @@ def balance_refresh(ctx, *, force: bool = False) -> dict:
                 cancel_buys=not dry_run and m in open_now,
                 cancel_fn=executor.killswitch_canceller(ectx),
                 notifier=ectx.notifier,
+                scan=ctx.ports.get("scan"),
             )
             for m in markets
         }

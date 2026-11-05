@@ -61,7 +61,7 @@ class _Port(AccountsPortImpl):
         self._brokers, self.market = brokers, market
 
     def brokers(self):
-        return self._brokers
+        return list(self._brokers.values())
 
     def market_client(self):
         return self.market
@@ -96,7 +96,7 @@ def _hedge_deps(project, settings, *, closes, prices=None) -> DaemonDeps:
 
 
 def _broker(deps):
-    return deps.ports["accounts"].brokers()["paper-main"]
+    return next(b for b in deps.ports["accounts"].brokers() if b.account.id == "paper-main")
 
 
 def test_monitor_body_runs_hedge_once_per_day(project, settings, conn, monkeypatch):

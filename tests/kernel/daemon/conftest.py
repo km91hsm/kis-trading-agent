@@ -21,8 +21,8 @@ class FakeAccountsPort:
     def accounts(self) -> list:
         return list(self._accounts)
 
-    def brokers(self) -> dict[str, Any]:
-        return dict(self._brokers)
+    def brokers(self) -> list[Any]:
+        return list(self._brokers.values())
 
     def market_client(self) -> Any:
         return self.market

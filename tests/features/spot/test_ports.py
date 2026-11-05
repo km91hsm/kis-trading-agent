@@ -52,7 +52,7 @@ def exec_ports(ports, broker):
     acct, b = broker
     ports["accounts"] = SimpleNamespace(
         accounts=lambda: [acct],
-        brokers=lambda: {acct.id: b},
+        brokers=lambda: [b],
         market_client=lambda: None,
         policy=accounts_api.effective_mode,
         paused=accounts_api.is_paused,

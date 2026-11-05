@@ -109,9 +109,8 @@ def _inject_fake_broker(monkeypatch):
     from trader.kernel.broker.models import Cash
 
     def brokers(self):
-        out = {}
-        for a in self.accounts():
-            out[a.id] = FakeBroker(
+        return [
+            FakeBroker(
                 to_broker_account(a),
                 cash={
                     "KR": Cash(
@@ -120,7 +119,8 @@ def _inject_fake_broker(monkeypatch):
                     "US": Cash(currency="USD", available=Decimal("10000"), total=Decimal("10000")),
                 },
             )
-        return out
+            for a in self.accounts()
+        ]
 
     monkeypatch.setattr(AccountsPortImpl, "brokers", brokers)
 

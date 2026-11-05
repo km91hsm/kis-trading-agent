@@ -8,9 +8,10 @@ fo-trader md 의 `context`).
 기초지수로 채우지 않는다(N1). 옵션 체인은 ATM ± `CHAIN_STRIKES`(4) 행사가 × 콜·풋 ≤ 18 시세.
 
 M10(A8): 옛 `_news_macro` 는 시장 세션 입력(지금 regime 소유)을 그대로 불렀다. 레인 fo 는 regime 을
-import 할 수 없어 `news_macro` 절은 `error="M11: InputsPort.recent"` 로 비우고 시장 뷰만
-`ports["regime"].view_today` 로 `context.market_view` 에 넣는다. 현물 헤지 보유는
-`ports["regime"].hedge_tickers("KR")` ∩ `ports["accounts"].brokers()` 의 KR 보유. 절 래퍼
+import 할 수 없어 시장 뷰는 `ports["regime"].view_today` 로 `context.market_view` 에 넣는다.
+M12 T17: `news_macro` 절은 `ports["inputs"].recent`(종목 무관 시장 뉴스, asof 이전 최근
+`NEWS_LOOKBACK`)로 채우고, 포트가 없으면 `error="M11: InputsPort.recent"` 로 비운다. 현물 헤지
+보유는 `ports["regime"].hedge_tickers("KR")` ∩ `ports["accounts"].brokers()` 의 KR 보유. 절 래퍼
 (`_run_section`·`_skipped_section`)·`_jsonable` 은 ingest 소유라 fo 사본이고, 지표는 커널
 `broker.indicators` 다.
 """
@@ -45,7 +46,9 @@ PROXY = "KOSPI200"
 CHAIN_STRIKES = 4  # ATM 양쪽 행사가 수 → (2·4+1)·2 = 18 시세
 INPUTS_STAGE = "_fo_inputs"
 INDEX_PROXY_TICKER = "069500"  # 수급 절의 지수 proxy ETF(KODEX 200) — 선물 수급 TR 미확정
-NEWS_MACRO_DEFERRED = "M11: InputsPort.recent"  # A8: 뉴스·거시 절은 M11 입력 포트 이연
+NEWS_MACRO_DEFERRED = "M11: InputsPort.recent"  # A8: inputs 포트가 없을 때의 news_macro 오류
+NEWS_LOOKBACK = timedelta(hours=24)  # news_macro 시장 뉴스 창(수신 기준)
+NEWS_LIMIT = 20  # news_macro 시장 뉴스 최대 건수(최신순)
 DEFAULT_DAILY_DAYS = 260  # `sources.yaml kis.daily_days` 기본값(지표 워밍업 260봉)
 
 BundleKind = Literal["analyst", "researcher", "trader"]
@@ -408,7 +411,9 @@ def build_inputs(
     if sent["investor_flow"]["error"]:
         errors["sentiment.investor_flow"] = sent["investor_flow"]["error"]
 
-    errors["news_macro"] = NEWS_MACRO_DEFERRED  # A8: M11 입력 포트 이연
+    news_macro, news_err = _news_macro(ctx, asof=asof)
+    if news_err:
+        errors["news_macro"] = news_err
 
     regime_port = ctx.ports.get("regime")
     regime = (regime_port.load(ctx.conn, MARKET) if regime_port is not None else None) or {}
@@ -470,10 +475,24 @@ def build_inputs(
         },
         "technical": _wrap_section(tech, asof=asof, now=now_fn()),
         "sentiment": _wrap_section(sent, asof=asof, now=now_fn()),
-        "news_macro": _wrap_section(None, asof=asof, now=now_fn(), error=NEWS_MACRO_DEFERRED),
+        "news_macro": _wrap_section(news_macro, asof=asof, now=now_fn(), error=news_err),
         "context": _wrap_section(context, asof=asof, now=now_fn()),
         "errors": errors,
     }
+
+
+def _news_macro(ctx: FoExecContext, *, asof: datetime) -> tuple[dict | None, str | None]:
+    """시장 뉴스(`ports["inputs"].recent`, asof 이전 최근 `NEWS_LOOKBACK`). (data, 오류)."""
+    port = ctx.ports.get("inputs")
+    if port is None:
+        return None, NEWS_MACRO_DEFERRED
+    try:
+        rows = port.recent(ctx.conn, MARKET, tickers=None, since=asof - NEWS_LOOKBACK,
+                           limit=NEWS_LIMIT, asof=asof)  # fmt: skip
+    except Exception as e:  # noqa: BLE001 - 절 단위 격리
+        return None, f"{type(e).__name__}: {e}"
+    keys = ("title", "source", "published_at", "tickers")
+    return {"news": [{k: r.get(k) for k in keys} for r in rows]}, None
 
 
 def save_inputs(inputs: dict, *, today: date, state: Path | None) -> Path:
@@ -504,8 +523,8 @@ def bundle(
     ctx = (inputs.get("context") or {}).get("data") or {}
     if kind == "analyst":
         if role == "news_macro":
-            # A8: 거시 원문이 없다(M11). analyst-market 이 ticker 를 proxy 로 적도록 proxy·국면·
-            # 시장 뷰와 이연 사유를 준다
+            # A8: analyst-market 이 ticker 를 proxy 로 적도록 proxy·국면·시장 뷰와 news_macro 절
+            # (inputs 포트가 있으면 `news`, 없으면 이연 사유 error)을 준다
             sec = inputs.get("news_macro") or {}
             return {
                 **base, "proxy": PROXY, "asof": meta.get("asof"), "regime": ctx.get("regime"),

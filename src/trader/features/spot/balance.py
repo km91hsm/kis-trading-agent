@@ -68,16 +68,19 @@ def refresh(
     cancel_buys: bool = False,
     cancel_fn: Callable[..., tuple[int, list[str]]] | None = None,
     notifier: Any | None = None,
+    scan: Any | None = None,
 ) -> dict:
     """시장 하나의 계좌별 잔고를 다시 읽는다. {refreshed: [id], skipped: [id], errors: {id: 사유}}.
     계좌 하나의 실패는 그 계좌만 errors 로. 같은 시장 갱신이 이미 돌고 있으면 기다리지 않고
-    {busy: True}. 현물(stock) 계좌만 읽는다."""
+    {busy: True}. 현물(stock) 계좌만 읽는다. `scan`(scan 포트)이 있으면 읽은 보유 종목을
+    `classify` 로 넘겨 yaml 에 없는 종목의 섹터를 자동 분류한다(실패는 로그만)."""
     lock = _RUNNING.setdefault(market, threading.Lock())
     if not lock.acquire(blocking=False):
         return {"busy": True, "refreshed": [], "skipped": [], "errors": {}}
     try:
         out: dict = {"refreshed": [], "skipped": [], "errors": {}}
         keep = excluded_tickers(settings, regime, market)
+        held: set[str] = set()
         for a in accounts:
             if market not in a.markets or a.id not in brokers:
                 continue
@@ -87,7 +90,7 @@ def refresh(
                 out["skipped"].append(a.id)
                 continue
             try:
-                executor.build_portfolio(
+                pf = executor.build_portfolio(
                     conn,
                     brokers[a.id],
                     a,
@@ -103,9 +106,15 @@ def refresh(
                     notifier=notifier,
                 )
                 out["refreshed"].append(a.id)
+                held.update(pf.positions)
             except (KisApiError, ValueError) as e:
                 out["errors"][a.id] = f"{type(e).__name__}: {e}"
                 logger.warning("잔고 갱신 실패 %s %s: %s", a.id, market, e)
+        if scan is not None and held:
+            try:
+                scan.classify(conn, market, sorted(held))
+            except Exception as e:  # noqa: BLE001 - 섹터 자동 분류는 표시 보조, 잔고 갱신은 지킨다
+                logger.warning("섹터 자동 분류 실패 %s: %s", market, e)
         return out
     finally:
         lock.release()

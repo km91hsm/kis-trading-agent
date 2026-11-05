@@ -45,7 +45,7 @@ def fake_brokers(accounts) -> dict:
 def make_port(accounts, brokers) -> AccountsPortImpl:
     """주어진 FakeBroker 를 돌려주는 계좌 포트."""
     port = AccountsPortImpl(accounts, Secrets())
-    port.brokers = lambda: brokers  # type: ignore[method-assign]
+    port.brokers = lambda: list(brokers.values())  # type: ignore[method-assign]
     return port
 
 

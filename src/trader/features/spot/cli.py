@@ -227,6 +227,7 @@ def balance_refresh(
                 stale_after=balance_mod.OFF_HOURS_EVERY,
                 regime=b.ports.get("regime"),  # 킬스위치 관측·발동 알림만(취소는 데몬 갱신)
                 notifier=ectx.notifier,
+                scan=b.ports.get("scan"),
             )
             failed = failed or bool(r["errors"])
             typer.echo(json.dumps({m: r}, ensure_ascii=False))
