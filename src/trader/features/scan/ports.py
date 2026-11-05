@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date
 from typing import Any
 
 from trader.features.ingest.api import load_sectors
-from trader.features.scan import membership, run, sector_suggest, watchlist
+from trader.features.scan import membership, run, sector_suggest, theme, watchlist
 from trader.features.scan.settings import load_events
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import Port
@@ -19,9 +19,13 @@ logger = logging.getLogger("trader.scan")
 
 
 class ScanPortImpl:
-    def __init__(self, settings: Any, registry: Any = None) -> None:
+    def __init__(
+        self, settings: Any, registry: Any = None, ports: Mapping[str, Any] | None = None
+    ) -> None:
         self._settings = settings
         self._registry = registry
+        # `Boot.ports` 자체 — 시세 클라이언트(accounts 포트)는 classify 때 풀어 쓴다
+        self._ports = ports if ports is not None else {}
 
     def theme_of(
         self, conn: sqlite3.Connection, market: str, today: date
@@ -62,9 +66,38 @@ class ScanPortImpl:
         """런타임 관심종목(`/watch`·웹). market 을 주면 그 시장 종목만 접두사 없이."""
         return watchlist.get_watchlist(conn, market)
 
+    def classify(
+        self,
+        conn: sqlite3.Connection,
+        market: str,
+        tickers: Iterable[str],
+        *,
+        exchanges: Mapping[str, str | None] | None = None,
+    ) -> None:
+        """yaml·자동 캐시에 없는 종목만 KIS 업종으로 대분류해 `state/cache/sector_auto.json` 에
+        적는다(`sector_suggest.auto_classify` — 실패는 같은 날 재조회 없음). 종목명(`ticker_names`)
+        으로 ETF 상표를 묶고, US 는 `exchanges`(잔고의 거래소)로 조회한다. 시세 클라이언트(accounts
+        포트)가 없으면 건너뛴다."""
+        acc = self._ports.get("accounts")
+        mc = acc.market_client() if acc is not None else None
+        if mc is None:
+            logger.info("시세 클라이언트 없음 — 섹터 자동 분류 생략(%s)", market)
+            return
+        sector_suggest.auto_classify(
+            load_sectors(),
+            mc,
+            market=market,
+            tickers=tickers,
+            state=paths.state_dir(),
+            names=theme._ticker_names(conn, market),
+            exchanges=exchanges,
+        )
+
 
 def build_port(boot: Any) -> ScanPortImpl:
-    return ScanPortImpl(boot.settings, getattr(boot, "registry", None))
+    return ScanPortImpl(
+        boot.settings, getattr(boot, "registry", None), getattr(boot, "ports", None)
+    )
 
 
 PORT = Port("scan", build_port)

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from trader.kernel.broker.models import BrokerAccount
 from trader.kernel.config import ConfigError, Env, Market, Section, SectionRegistry, load
 from trader.kernel.config.secrets import CRED_PREFIX_RE, Secrets, load_secrets
+from trader.kernel.config.time import HM_PATTERN
 
 logger = logging.getLogger("trader.config")
 
@@ -63,8 +64,8 @@ class MonitorWindow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     interval_s: int = Field(default=60, ge=1)
-    start: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    end: str = Field(default="15:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    start: str = Field(default="09:00", pattern=HM_PATTERN.pattern)
+    end: str = Field(default="15:30", pattern=HM_PATTERN.pattern)
 
 
 class KrSchedule(BaseModel):

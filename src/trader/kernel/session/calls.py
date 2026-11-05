@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from trader.kernel.config.time import KST
 from trader.kernel.ledger import db
@@ -13,6 +13,7 @@ log = logging.getLogger("trader.session")
 
 FAKE_MODEL = "fake"
 ORCHESTRATOR = "orchestrator"
+STALE_SESSION_AGE = timedelta(hours=1)  # 이보다 오래 running 인 세션 행은 재기동·세션 전에 닫는다
 
 
 def _kst_midnight_utc(now: datetime) -> str:
@@ -122,3 +123,14 @@ def close_stale_running(conn: sqlite3.Connection, *, older_than: str) -> int:
     )
     conn.commit()
     return cur.rowcount
+
+
+def close_stale(
+    conn: sqlite3.Connection, *, now: datetime, age: timedelta = STALE_SESSION_AGE
+) -> int:
+    """`now - age` 이전에 시작해 아직 running 인 세션 행을 error 로 닫고 건수를 돌려준다(세션이
+    중간에 죽으면 남는 행 — 데몬 재기동·세션 시작 전 정리). 닫은 게 있으면 로그를 남긴다."""
+    n = close_stale_running(conn, older_than=(now - age).isoformat())
+    if n:
+        log.info("stale running 세션 %d건을 error 로 정리", n)
+    return n

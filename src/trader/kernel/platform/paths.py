@@ -59,15 +59,6 @@ def web_dist() -> Path:
     return bundle.resource_dir() / "web" / "dist"
 
 
-def agents_dir() -> Path:
-    """서브에이전트 md 디렉터리 (번들은 `_internal/agents`, 개발은 `.claude/agents`)."""
-    from trader.kernel.platform import bundle
-
-    if bundle.is_frozen():
-        return bundle.resource_dir() / "agents"
-    return project_root() / ".claude" / "agents"
-
-
 def playwright_browsers_dir() -> Path:
     """Playwright 가 브라우저를 내려받는 기본 캐시 디렉터리(OS 별)."""
     if sys.platform == "darwin":

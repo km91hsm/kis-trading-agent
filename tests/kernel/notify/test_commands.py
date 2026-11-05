@@ -160,7 +160,8 @@ def test_status_without_sections(conn):
         features=[],
     )
     commands.poll_once(ctx, Recv(["/status"]))
-    assert "등록된 상태 절 없음" in sent.msgs[-1]
+    # 기능 절이 없어도 커널 절(운영 점검·데몬)은 늘 있다
+    assert "데몬:" in sent.msgs[-1] and "점검 기록 없음" in sent.msgs[-1]
 
 
 def test_telegram_run_enqueues_when_daemon_alive(project):

@@ -98,3 +98,38 @@ def test_build_port_resolves_ml_lazily_from_boot_ports(project):
     finally:
         ingest_ports.load_sources = orig
     assert port._ports is boot_ports
+
+
+def _news(conn, title, *, at, tickers="[]", novel=1, published=None):
+    conn.execute(
+        "INSERT INTO news_items(market, source, title, url, url_hash, published_at, received_at, "
+        "tickers_json, novel) VALUES ('KR', 's', ?, ?, ?, ?, ?, ?, ?)",
+        (title, f"u-{title}", f"h-{title}", published, at.isoformat(), tickers, novel),
+    )
+    conn.commit()
+
+
+def test_recent_filters_by_tickers_and_since(project, conn):
+    """`recent` 는 since 이후·asof 이전 수신 뉴스만(룩어헤드 없음), 종목·novel 필터, 최신순."""
+    from datetime import timedelta
+
+    now = datetime(2026, 10, 27, 1, 30, tzinfo=UTC)
+    _news(conn, "old", at=now - timedelta(hours=3), tickers='["005930"]')
+    _news(conn, "a", at=now - timedelta(minutes=50), tickers='["005930"]', novel=0)
+    _news(conn, "b", at=now - timedelta(minutes=10), tickers='["000660", "005930"]')
+    _news(conn, "macro", at=now - timedelta(minutes=5))
+    _news(conn, "future", at=now + timedelta(minutes=5), tickers='["005930"]')
+    port = InputsPortImpl(Secrets(), SourcesConfig())
+    since = now - timedelta(hours=1)
+    got = port.recent(conn, "KR", tickers=["005930"], since=since, asof=now)
+    assert [r["title"] for r in got] == ["b", "a"]
+    assert got[0]["tickers"] == ["000660", "005930"] and got[0]["novel"] is True
+    assert {"id", "title", "published_at", "received_at", "source"} <= set(got[0])
+    every = port.recent(conn, "KR", tickers=None, since=since, asof=now)
+    assert [r["title"] for r in every] == ["macro", "b", "a"]
+    assert [r["title"] for r in port.recent(conn, "KR", tickers=None, since=since, asof=now,
+                                            novel_only=True)] == ["macro", "b"]  # fmt: skip
+    assert len(port.recent(conn, "KR", tickers=None, since=since, asof=now, limit=1)) == 1
+    untagged = port.recent(conn, "KR", tickers=None, since=since, asof=now, untagged_only=True)
+    assert [r["title"] for r in untagged] == ["macro"]  # 종목 태그 없는 시장·거시 뉴스만
+    assert port.recent(conn, "US", tickers=None, since=since, asof=now) == []

@@ -4,7 +4,14 @@ from pathlib import Path
 from trader.kernel.ledger.migrations import Migration
 from trader.kernel.registry import contracts
 from trader.kernel.registry.discover import discover
-from trader.kernel.registry.types import Feature, GateSpec, OriginSpec, QueueKind, SseKey
+from trader.kernel.registry.types import (
+    Feature,
+    GateSpec,
+    HealthArea,
+    OriginSpec,
+    QueueKind,
+    SseKey,
+)
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 OK_ROOT = FIXTURES / "features_ok"
@@ -195,3 +202,26 @@ def test_duplicate_nav_ids_and_callback_prefixes_reported():
     )
     assert "nav id 중복: fo-lane" in msgs
     assert "텔레그램 콜백 prefix 중복: ap:" in msgs
+
+
+def test_contracts_reject_duplicate_or_misnamed_area():
+    alpha, beta = _ok()
+    f = lambda ctx: []  # noqa: E731
+    misnamed = replace(alpha, health_areas=(HealthArea("b", f),))
+    msgs = contracts.check([misnamed, beta], roots=[OK_ROOT])
+    assert "기능 alpha 의 health 영역 key 는 'alpha' 여야 합니다: b" in msgs
+    a2 = replace(alpha, health_areas=(HealthArea("alpha", f),))
+    b2 = replace(beta, health_areas=(HealthArea("alpha", f),))
+    msgs = contracts.check([a2, b2], roots=[OK_ROOT])
+    assert "health 영역 key 중복: alpha" in msgs
+    ok = [a2, replace(beta, health_areas=(HealthArea("beta", f),))]
+    assert contracts.check(ok, roots=[OK_ROOT]) == []
+
+
+def test_contracts_reject_kernel_reserved_area_key():
+    """기능 영역 key 가 커널 내장 영역(jobs·llm·orders)과 겹치면 오류."""
+    alpha, beta = _ok()
+    f = lambda ctx: []  # noqa: E731
+    clash = replace(alpha, id="orders", health_areas=(HealthArea("orders", f),))
+    msgs = contracts.check([clash, beta], roots=[OK_ROOT])
+    assert "기능 orders 의 health 영역 key 'orders' 는 커널 예약 key 입니다" in msgs

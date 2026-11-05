@@ -42,7 +42,7 @@ def lane(
     boot = SimpleNamespace(settings=settings)
     ports = {
         "accounts": SimpleNamespace(
-            brokers=lambda: brokers or {},
+            brokers=lambda: list((brokers or {}).values()),
             accounts=lambda: list(accounts),
             market_client=lambda: market_client,
             holiday_fn=lambda: None,

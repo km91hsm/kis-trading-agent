@@ -4,6 +4,7 @@
 - `GET /features/history?market=&ticker=&days=120` → 한 종목 최근 days 행(날짜 오름차순). 유니버스에
   없는 종목은 파일을 다 읽지 않고 404(토큰 없는 API 비용 방어).
 - `GET /ml/models` → 레지스트리 요약 목록 + 승격 모델, `GET /ml/models/{version}` → 메타 전체.
+- SSE 키 `features`: 피처 스토어 최신 날짜·mtime + 모델 레지스트리 최신 버전·승격 버전 지문.
 ml 의 공개면(`ml.api`)만 쓴다. 섹터·유니버스는 `ingest.api`.
 """
 
@@ -20,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from trader.features.ingest import api as ingest
 from trader.features.ml import api as ml
 from trader.kernel.config import ConfigError
+from trader.kernel.registry.types import SseKey
 
 logger = logging.getLogger("trader.ml")
 
@@ -133,3 +135,14 @@ def model_detail(request: Request, version: str) -> dict:
         if m.get("version") == version:
             return m
     raise HTTPException(status_code=404, detail=f"모델 없음: {version}")
+
+
+def _features_fp(deps: Any) -> str:
+    """피처 스토어 최신 asof·디렉터리 mtime(같은 날 재스냅샷) + 레지스트리 최신·승격 버전."""
+    metas = ml.list_models("quant", deps.state)
+    newest = metas[0].get("version") if metas else None
+    active = next((m.get("version") for m in metas if m.get("promoted")), None)
+    return f"{ml.latest_day(deps.state)}:{ml.store_mtime(deps.state)}:{newest}:{active}"
+
+
+SSE_KEYS = (SseKey("features", _features_fp),)

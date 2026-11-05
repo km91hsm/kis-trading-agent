@@ -844,3 +844,16 @@ def test_stored_closes_reads_only_close_column(project, monkeypatch):
     monkeypatch.setattr(dataset, "load_all", spy)
     got = features._stored_closes(project / "state", {"KR"}, since=date(2026, 1, 1))
     assert got == {} and seen["columns"] == ["close"]
+
+
+def test_zscore_keeps_or_fills_nan():
+    """옛 `test_shared_helpers.py::test_zscore_keeps_or_fills_nan`: 결측은 fill 이 없으면 NaN 유지,
+    있으면 채움. 표준편차 0 은 전부 0, 숫자가 아닌 값은 결측."""
+    import numpy as np
+
+    s = pd.Series([1.0, 2.0, np.nan, 3.0])
+    z = features.zscore(s)
+    assert np.isnan(z.iloc[2]) and abs(z.iloc[1]) < 1e-9
+    assert features.zscore(s, fill=0.0).iloc[2] == 0.0
+    assert (features.zscore(pd.Series([2.0, 2.0])) == 0).all()
+    assert features.zscore(pd.Series(["1", "x", "3"]), fill=0.0).tolist() == [-1.0, 0.0, 1.0]

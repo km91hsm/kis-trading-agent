@@ -146,7 +146,7 @@ def _lane(deps, conn) -> LaneContext:
 
 def reflect_body(deps, job=None, *, market: str | None = None) -> dict:
     """장 마감 후: 피처 스냅샷 → 만기 결정 결과 채우기 → 시장 제안·테마·섀도 채점 → `reflect.mature`
-    훅 → 반성 대기가 있는 시장만 세션 → 메모리 정리. 보존 정리(retention)는 M12 로 미룬다."""
+    훅 → 반성 대기가 있는 시장만 세션 → 메모리 정리. 보존 정리는 커널 `retention` 잡."""
     markets = list(deps.markets)
     today = deps.now().astimezone(KST).date()
     ports = deps.ports or {}

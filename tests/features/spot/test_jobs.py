@@ -128,7 +128,7 @@ class _MonitorPort(AccountsPortImpl):
         self._brokers, self._market = brokers, market
 
     def brokers(self):
-        return self._brokers
+        return list(self._brokers.values())
 
     def market_client(self):
         return self._market
@@ -311,3 +311,62 @@ def test_rebalance_params_market_literal():
         RebalanceParams(market="JP")
     kinds = {q.kind: q for q in QUEUE_KINDS}
     assert kinds["rebalance"].params_model is RebalanceParams
+
+
+# --- approval_notice (웹 거부 알림, P15) ---------------------------------------------------
+
+
+def test_approval_notice_body_sends_reject_message(project, conn, settings):
+    """웹 거부 뒤 큐 `approval_notice` 본문이 텔레그램 `_reject` 와 같은 `[거부]` 문구를 보낸다.
+    알림기가 없으면 건너뛴다. params 는 extra 금지·action 은 reject 만."""
+    from tests.features.spot.approval_helpers import Sent
+    from trader.features.spot import approvals
+    from trader.features.spot.messages import approval_line
+    from trader.kernel.notify import messages
+
+    accounts = [make_account("paper-main", "paper", "approve")]
+    brokers = fake_brokers(accounts)
+    aid = make_pending(conn, settings, accounts, brokers)
+    d = approvals.decide(
+        conn, aid, "reject", channel="web", actor="abcd1234", confirm=None,
+        now=datetime.now(UTC), accounts=accounts,
+    )  # fmt: skip
+    assert d["ok"] is True
+    q = {k.kind: k for k in QUEUE_KINDS}["approval_notice"]
+    assert (q.lane, q.trading) == ("info", False)
+    params = {"approval_id": aid, "action": "reject", "actor": "abcd1234", "channel": "web"}
+    assert q.params_model(**params).model_dump() == params
+    with pytest.raises(ValidationError):
+        q.params_model(**{**params, "action": "approve"})
+    with pytest.raises(ValidationError):
+        q.params_model(**params, extra=1)
+    sent = Sent()
+    deps = SimpleNamespace(
+        settings=settings, conn_factory=db.connect, state=None, now=lambda: datetime.now(UTC),
+        notifier=sent, ports={"accounts": make_port(accounts, brokers)},
+    )  # fmt: skip
+    out = q.body(deps, params, lambda text: None)
+    a = xledger.get_approval(conn, aid)
+    assert sent.msgs == [messages.event("거부", approval_line(a, "paper"))]
+    assert out["sent"] is True and out["approval_id"] == aid
+    skipped = q.body(SimpleNamespace(**{**vars(deps), "notifier": None}), params, lambda t: None)
+    assert "skipped" in skipped and len(sent.msgs) == 1
+
+
+def test_approval_notice_skips_when_not_rejected(project, conn, settings):
+    """거부 상태가 아닌 승인(대기·승인됨 등)에는 `[거부]` 알림을 보내지 않는다(M-1)."""
+    from tests.features.spot.approval_helpers import Sent
+
+    accounts = [make_account("paper-main", "paper", "approve")]
+    brokers = fake_brokers(accounts)
+    aid = make_pending(conn, settings, accounts, brokers)  # pending 그대로
+    q = {k.kind: k for k in QUEUE_KINDS}["approval_notice"]
+    params = {"approval_id": aid, "action": "reject", "actor": None, "channel": "web"}
+    sent = Sent()
+    deps = SimpleNamespace(
+        settings=settings, conn_factory=db.connect, state=None, now=lambda: datetime.now(UTC),
+        notifier=sent, ports={"accounts": make_port(accounts, brokers)},
+    )  # fmt: skip
+    out = q.body(deps, params, lambda text: None)
+    assert sent.msgs == []
+    assert out["approval_id"] == aid and "skipped" in out

@@ -86,7 +86,7 @@ def test_submit_decision_cli_without_dry_run_env_sends_nothing(project, monkeypa
 
     def tracked(self):
         out = real_brokers(self)
-        made.extend(out.values())
+        made.extend(out)
         return out
 
     monkeypatch.setattr(AccountsPortImpl, "brokers", tracked)

@@ -15,6 +15,7 @@ from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
 from trader.kernel.ledger.migrations import KERNEL, WEB, Migration
 from trader.kernel.ledger.migrations import check as check_migrations
+from trader.kernel.ops.types import RESERVED_AREA_KEYS
 from trader.kernel.registry.types import Feature
 from trader.kernel.session.migrations import SESSION
 
@@ -60,6 +61,7 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         ("게이트", [g.name for f in features for g in f.gates]),
         ("nav id", [n.id for f in features for n in f.nav]),
         ("텔레그램 콜백 prefix", [c.prefix for f in features for c in f.telegram_callbacks]),
+        ("health 영역 key", [a.key for f in features for a in f.health_areas]),
     ):
         msgs += [f"{label} 중복: {d}" for d in _dups(values)]
     msgs += [
@@ -67,6 +69,18 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         for f in features
         for g in f.gates
         if g.name not in GATE_NAMES
+    ]
+    msgs += [
+        f"기능 {f.id} 의 health 영역 key 는 '{f.id}' 여야 합니다: {a.key}"
+        for f in features
+        for a in f.health_areas
+        if a.key != f.id
+    ]
+    msgs += [
+        f"기능 {f.id} 의 health 영역 key '{a.key}' 는 커널 예약 key 입니다"
+        for f in features
+        for a in f.health_areas
+        if a.key in RESERVED_AREA_KEYS
     ]
     try:
         check_migrations(all_migrations(features))

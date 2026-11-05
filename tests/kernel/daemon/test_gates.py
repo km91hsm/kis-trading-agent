@@ -63,7 +63,8 @@ def make_deps(project, now: datetime, *, holidays=frozenset({KR_HOLIDAY})) -> Da
     deps = DaemonDeps(
         settings=SimpleNamespace(llm=LlmSettings()),
         schedule=SimpleNamespace(
-            kr=window("09:00", "15:30"), us=window("09:30", "16:00"), ledger_backup="17:10"
+            kr=window("09:00", "15:30"), us=window("09:30", "16:00"), ledger_backup="17:10",
+            retention="17:20",
         ),
         conn_factory=factory, state=project / "state", now=Clock(now), markets=["KR", "US"],
         gates={}, stop_event=threading.Event(), dry_run=False,

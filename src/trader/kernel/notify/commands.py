@@ -1,7 +1,7 @@
 """텔레그램 명령 디스패처. 명령 집합은 기능이 `Feature.telegram_commands` 로 등록하고,
-커널은 내장 `/status`(기능의 `status_sections` 를 모아 보여 줌)와
-`/run`(큐 요청)만 가진다. 인라인 버튼 콜백은 `Feature.telegram_callbacks` 의 prefix
-(callback_data 의 첫 `:` 앞)로 찾는다. CLI·데몬 공용."""
+커널은 내장 `/status`(커널 운영 점검·데몬 절 + 기능의 `status_sections` —
+`ops.status.telegram_lines`)와 `/run`(큐 요청)만 가진다. 인라인 버튼 콜백은
+`Feature.telegram_callbacks` 의 prefix (callback_data 의 첫 `:` 앞)로 찾는다. CLI·데몬 공용."""
 
 from __future__ import annotations
 
@@ -66,15 +66,11 @@ def help_line(features: list[Feature]) -> str:
 
 
 def status_message(ctx: CommandContext) -> str:
-    lines: list[str] = []
-    for f in ctx.features:
-        for sec in f.status_sections:
-            try:
-                lines.extend(sec.render(ctx))
-            except Exception as e:  # noqa: BLE001 - 절 하나의 실패가 나머지 절을 가리지 않는다
-                logger.exception("상태 절 조회 실패: %s", sec.title)
-                lines.append(f"- {sec.title}: 조회 실패({type(e).__name__}: {e})")
-    return messages.event("상태", *(lines or ["등록된 상태 절 없음"]))
+    """커널 앞 2절(운영 점검·데몬) + 기능 절. 절 실패 격리는 `ops.status` 가 한다.
+    `ops.status` → `ops.health` → … → 이 모듈 순환이라 함수 안에서 가져온다."""
+    from trader.kernel.ops.status import telegram_lines
+
+    return messages.event("상태", *(telegram_lines(ctx) or ["등록된 상태 절 없음"]))
 
 
 def run_message(ctx: CommandContext, arg: str | None) -> str:

@@ -84,9 +84,8 @@ def accounts(ctx: ScalpContext) -> list:
 
 
 def brokers(ctx: ScalpContext) -> dict[str, Any]:
-    """계좌 id → 브로커. 포트가 목록을 주면 `{b.account.id: b}` 로."""
-    raw = ctx.ports["accounts"].brokers()
-    return dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+    """계좌 id → 브로커."""
+    return {b.account.id: b for b in ctx.ports["accounts"].brokers()}
 
 
 def label(ctx: ScalpContext, market: str, ticker: str) -> str:
@@ -468,6 +467,7 @@ def advice(ctx: ScalpContext, market: str, today: date, pos: dict, q: Decimal) -
         payload["news"] = judge_context(
             ctx.conn, ctx.ports, ctx.market_client, market=market, ticker=pos["ticker"],
             exchange=pos.get("exchange"), today=run_store.run_date_for(market, ctx.now()),
+            now=ctx.now(),
         )["news"]  # fmt: skip
         ctx.judge.submit(key, payload, ScalpAdvice)
     return None
@@ -559,6 +559,7 @@ def _judge_submit(
     } | judge_context(
         ctx.conn, ctx.ports, ctx.market_client, market=market, ticker=c["ticker"],
         exchange=c.get("exchange"), today=run_store.run_date_for(market, ctx.now()),
+        now=ctx.now(),
     )  # fmt: skip
     ctx.judge.submit(entry_key(market, today, c["ticker"]), payload, ScalpVerdict)
     st.setdefault("pending", {})[c["ticker"]] = {

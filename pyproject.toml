@@ -15,6 +15,7 @@ dependencies = [
     "pyarrow>=17",
     "pydantic>=2",
     "pypdf>=6,<7",
+    "pystray>=0.19.5",
     "python-dotenv",
     "pyyaml",
     "requests>=2",
@@ -44,6 +45,11 @@ dev = [
     "pytest",
     "respx",
     "ruff",
+]
+# 번들 빌드(packaging/build.py·make_icons.py): uv sync --group build
+build = [
+    "pillow>=10",
+    "pyinstaller>=6.11",
 ]
 
 [build-system]

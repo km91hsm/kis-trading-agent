@@ -1,6 +1,5 @@
 // 지표·모델 — GET /features/latest?market= 를 KEY_COLUMNS 표로(머리글 누르면 정렬, aria-sort), 행을 누르면
 // GET /features/history?days=120 종가 추이·최근 행. 모델은 GET /ml/models(활성 칩·note). 잡 버튼은 비매매(trading=false).
-// SSE 에 features 키가 없어 지표·모델은 market_views 로 다시 읽는다.
 import { useMemo, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
@@ -37,8 +36,8 @@ export function Features() {
   const [picked, setPicked] = useState<string | null>(null);
   const params = useMemo(() => ({ market }), [market]);
   const jobParams = useMemo(() => ({ market }), [market]);
-  const latest = useResource<LatestResp>("/features/latest", params, ["market_views"]);
-  const models = useResource<ModelsResp>("/ml/models", undefined, ["market_views"]);
+  const latest = useResource<LatestResp>("/features/latest", params, ["features"]);
+  const models = useResource<ModelsResp>("/ml/models", undefined, ["features"]);
   const rows = useMemo(() => (latest.data ? featureRows(latest.data, sort.key, sort.dir) : []), [latest.data, sort]);
 
   const onSort = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
@@ -115,7 +114,7 @@ export function Features() {
 
 function History({ market, ticker }: { market: Market; ticker: string }) {
   const params = useMemo(() => ({ market, ticker, days: "120" }), [market, ticker]);
-  const res = useResource<HistoryResp>("/features/history", params, ["market_views"]);
+  const res = useResource<HistoryResp>("/features/history", params, ["features"]);
   return (
     <div className="data-history">
       <h3 className="perf-sub">{ticker} 이력(120일)</h3>

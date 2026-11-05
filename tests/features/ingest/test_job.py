@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
+from pydantic import ValidationError
 
 from tests.features.ingest.helpers import load_bytes
 from trader.features.ingest import job, news_store
@@ -165,3 +167,52 @@ def test_post_ingest_hook_failure_does_not_fail_job(project, monkeypatch):
     out = job.news_collect(_deps(project, hooks=hooks), job.JOB)
     assert "ValueError" in out["hooks"][0]["error"]
     assert "error" not in out
+
+
+def test_news_collect_queue_kind_runs_same_body(project, monkeypatch):
+    calls = []
+
+    def fake(ctx, markets):
+        calls.append(list(markets))
+        return {"markets": list(markets)}
+
+    monkeypatch.setattr(job, "_collect", fake)
+    deps = _deps(project)
+    (kind,) = [q for q in FEATURE.queue_kinds if q.kind == "news_collect"]
+    assert (kind.params_model, kind.label, kind.lane, kind.priority) == (
+        job.NewsCollectParams, "뉴스 수집", "info", 0,
+    )  # fmt: skip
+    assert not kind.trading and not kind.restart_requeue and kind.body is job.news_collect_request
+    params = job.NewsCollectParams.model_validate({}).model_dump()
+    assert kind.body(deps, params, lambda _t: None) == {"markets": ["KR", "US"]}
+    assert kind.body(deps, {"market": "US"}, lambda _t: None) == {"markets": ["US"]}
+    assert job.news_collect(deps, job.JOB) == {"markets": ["KR", "US"]}
+    assert calls == [["KR", "US"], ["US"], ["KR", "US"]]
+    with pytest.raises(ValidationError):
+        job.NewsCollectParams.model_validate({"market": "KR", "x": 1})
+
+
+def test_news_collect_params_market_is_literal():
+    """market 은 `Market`(KR|US) — 소문자 등은 검증 오류(텔레그램 `/run` 오류 문구, FR-5)."""
+    assert job.NewsCollectParams.model_validate({"market": "US"}).market == "US"
+    for bad in ("kr", "JP", ""):
+        with pytest.raises(ValidationError):
+            job.NewsCollectParams.model_validate({"market": bad})
+
+
+def test_news_collect_request_intersects_configured_markets(project, monkeypatch):
+    """요청 시장 중 설정(`deps.markets`)에 없는 것은 수집하지 않고 `skipped` 로 적는다(FR-5)."""
+    calls = []
+
+    def fake(ctx, markets):
+        calls.append(list(markets))
+        return {"markets": list(markets)}
+
+    monkeypatch.setattr(job, "_collect", fake)
+    deps = _deps(project, markets=("KR",))
+    out = job.news_collect_request(deps, {"market": "US"}, lambda _t: None)
+    assert out == {"skipped": ["US"]}
+    assert calls == []
+    assert job.news_collect_request(deps, {"market": "KR"}, lambda _t: None) == {"markets": ["KR"]}
+    assert job.news_collect_request(deps, {}, lambda _t: None) == {"markets": ["KR"]}
+    assert calls == [["KR"], ["KR"]]

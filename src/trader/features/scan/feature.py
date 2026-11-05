@@ -7,6 +7,7 @@ from trader.features.scan.ports import PORT
 from trader.features.scan.routes import ROUTERS, SSE_KEYS
 from trader.features.scan.session_kinds import AGENTS, DISCOVER, SCREEN
 from trader.features.scan.settings import EVENT_SECTIONS, SCHEDULE_SECTIONS, SECTIONS
+from trader.features.scan.status import STATUS_SECTION
 from trader.features.scan.telegram import TELEGRAM_COMMANDS
 from trader.features.scan.tool_cli import TOOLS
 from trader.features.scan.triggers import post_ingest
@@ -26,6 +27,7 @@ FEATURE = Feature(
     session_kinds=(SCREEN, DISCOVER),
     queue_kinds=QUEUE_KINDS,
     telegram_commands=TELEGRAM_COMMANDS,
+    status_sections=(STATUS_SECTION,),
     routes=ROUTERS,
     sse_keys=SSE_KEYS,
     nav=(NavItem("data", "themes", "테마·감시목록", 20),),

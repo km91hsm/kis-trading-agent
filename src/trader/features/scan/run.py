@@ -68,14 +68,18 @@ def run_scan(ctx: Any, *, market: str, cancel: Any | None = None, dry_run: bool 
     return out
 
 
-def scan_line(scan: dict) -> str:
-    """scan 결과 알림 한 줄: picks 와 뉴스 발굴 요약(STATUS·텔레그램 /status 와 같은 문구)."""
+def scan_body(scan: dict) -> str:
+    """scan 결과 본문: picks·분석 대상·뉴스 발굴 요약. 알림(`scan_line`)과 status 절 공용."""
     picks = [p.get("ticker") for p in scan.get("picks") or []]
     n_t = len(scan.get("analyze_targets") or [])
     cap = " · 세션 상한" if scan.get("cap_hit") else ""
-    return messages.event(
-        "스캔",
+    return (
         f"{scan.get('market')} {scan.get('date')}: 선정 {len(picks)}"
         f"({', '.join(str(p) for p in picks) or '-'}) · 분석 대상 {n_t} · "
-        f"{discovery_mod.line(scan.get('discovery'))}{cap}",
+        f"{discovery_mod.line(scan.get('discovery'))}{cap}"
     )
+
+
+def scan_line(scan: dict) -> str:
+    """scan 결과 알림 한 줄(`[스캔] …`)."""
+    return messages.event("스캔", scan_body(scan))

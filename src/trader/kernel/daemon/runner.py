@@ -33,7 +33,6 @@ logger = logging.getLogger("trader.daemon")
 
 HEARTBEAT_JOB_ID = "daemon_heartbeat"
 HEARTBEAT_INTERVAL_S = 30
-STALE_SESSION_AGE = timedelta(hours=1)  # 이보다 오래 running 인 세션 행은 재기동 때 닫는다
 
 
 @dataclass(frozen=True)
@@ -154,7 +153,7 @@ class Daemon:
         self.deps = deps
         self._jobs: list[ScheduledJob] = []
         self._scheduler: BackgroundScheduler | None = None
-        self._lock = Lock(deps.state / heartbeat_mod.LOCK_NAME)
+        self._lock = Lock(deps.state / heartbeat_mod.LOCK_NAME, now=deps.now)
         self._hb = Heartbeat(deps.state, deps.now)
         self._guard = threading.Lock()
         self._started = False
@@ -176,12 +175,17 @@ class Daemon:
         if not self._lock.acquire():
             return False
         sched = BackgroundScheduler(timezone=KST)
+        hb_started = False
         try:
             # 잠금을 잡은 뒤에만: 둘째 데몬이 실행 중인 데몬의 running 행을 닫으면 안 된다
             qj.bootstrap_queue(deps)
             # 만료된 queued 를 먼저 정리한 뒤 훅이 enqueue 해야 중복으로 빠지지 않는다
             hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
-            self._close_stale_sessions()
+            conn = deps.conn_factory()
+            try:  # 재기동 전에 남은 running 세션 행(1시간 초과)을 error 로 닫는다
+                calls.close_stale(conn, now=deps.now())
+            finally:
+                conn.close()
             deps.queue.heartbeat = self._hb
             try:
                 qj.catch_up_missed(deps, self._jobs)
@@ -206,6 +210,7 @@ class Daemon:
                 id=HEARTBEAT_JOB_ID, name=HEARTBEAT_JOB_ID, max_instances=1, coalesce=True,
             )  # fmt: skip
             self._hb.start(pid=os.getpid(), jobs=self._jobs)
+            hb_started = True
             sched.start()
             self._scheduler = sched
             self._started = True
@@ -218,22 +223,13 @@ class Daemon:
                 sched.shutdown(wait=False)
             self._scheduler = None
             self._started = False
+            if hb_started:  # 시작 전 stop 은 직전 하트비트 파일을 빈 상태로 덮으므로 건너뛴다
+                self._hb.stop()
             self._restore_signals()
             self._lock.release()
             raise
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
         return True
-
-    def _close_stale_sessions(self) -> None:
-        """재기동 전에 남은 running 세션 행(1시간 초과)을 error 로 닫는다."""
-        conn = self.deps.conn_factory()
-        try:
-            cutoff = (self.deps.now() - STALE_SESSION_AGE).isoformat()
-            n = calls.close_stale_running(conn, older_than=cutoff)
-        finally:
-            conn.close()
-        if n:
-            logger.info("재기동 정리: running 세션 %d건 종료", n)
 
     def _sync_next(self, job_id: str) -> None:
         if self._scheduler is None or self._down:

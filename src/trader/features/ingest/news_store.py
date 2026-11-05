@@ -16,7 +16,7 @@ import json
 import logging
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any
@@ -205,6 +205,51 @@ def recent(
     sql += " ORDER BY COALESCE(published_at, received_at) DESC, id DESC LIMIT ?"
     args.append(limit)
     return [row_to_dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def received_since(
+    conn: sqlite3.Connection,
+    market: str,
+    *,
+    since: datetime,
+    asof: datetime,
+    tickers: Iterable[str] | None = None,
+    novel_only: bool = False,
+    untagged_only: bool = False,
+    limit: int = 20,
+) -> list[dict]:
+    """`since` 이후 수신한 뉴스(수신 최신순) — 레인이 `InputsPort.recent` 로 읽는다. 창은 수신
+    시각 기준이고(주기 수집이라 '새로 들어온 것'), asof 뒤에 발행·수신된 항목은 보이지 않는다.
+    `tickers` 를 주면 그중 하나라도 태그된 것만(빈 목록이면 없음), `untagged_only` 면 종목 태그
+    없는 시장·거시 뉴스만, `novel` 은 bool 로 돌려준다."""
+    cutoff = asof.astimezone(UTC).isoformat()
+    sql = (
+        "SELECT id, market, source, query, title, url, url_hash, published_at, received_at, "
+        "summary, tickers_json, lang, novel FROM news_items WHERE market=? "
+        "AND received_at >= ? AND received_at <= ? AND COALESCE(published_at, received_at) <= ?"
+    )
+    args: list = [market, since.astimezone(UTC).isoformat(), cutoff, cutoff]
+    if tickers is not None:
+        want = list(dict.fromkeys(str(t) for t in tickers))
+        if not want:
+            return []
+        sql += (
+            " AND EXISTS (SELECT 1 FROM json_each(news_items.tickers_json) WHERE value IN "
+            f"({','.join('?' * len(want))}))"
+        )
+        args += want
+    if novel_only:
+        sql += " AND novel = 1"
+    if untagged_only:
+        sql += " AND (tickers_json IS NULL OR tickers_json IN ('', '[]'))"
+    sql += " ORDER BY received_at DESC, id DESC LIMIT ?"
+    args.append(limit)
+    out = []
+    for r in conn.execute(sql, args).fetchall():
+        d = row_to_dict(r)
+        d["novel"] = bool(d.get("novel"))
+        out.append(d)
+    return out
 
 
 # --- 유사 뉴스 판정 (Phase 23) --------------------------------------------------------

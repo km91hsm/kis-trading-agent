@@ -265,9 +265,9 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
 - Ruling(M10, 실행 중 추가): `store.tx` 는 자기 중첩만 합류·암묵 tx 는 선commit · 커널 `insert_fill(commit=)` 추가 · `positions.recover` 진입부 commit 가드 · fo 상한은 원자적 예약 없음 · paused 는 halted 플래그·정산 전이도 차단(옛은 dry_run 만) · `reevaluate_request` 는 사람 요청도 게이트 · 엔진 재평가 enqueue source `fo_monitor` · `fo_session` 큐는 파생 시계 불사용 · 마스터는 CLI·데몬에서 온라인 적재(도구만 offline) · `fo_reconcile` 큐 kind 4번째 추가 · `brokers()` 반환형 list · 실전 파생 skip 결과에 `status/record_only/mode` 키
 - 이연(M10):
   - M11: 웹 `/api/fo/*`·SSE `fo` 키 → M11 에서 해소(`/fo/*`·`/analytics/fo/*`·`/system/fo`)
-  - M12(M11 에서 옮김, 비웹): `InputsPort.recent`(fo 판정 뉴스·거시, 엔진 `_novel_news` 의 `news_items` raw SQL 도 포트로) · spot monitor 단타 보유분 검토 · FAKE 사본 잔여(regime `_turn` ≈ `fake_turn`) · `AccountsPort` dict 가짜 포트 정리(spot/scalp/daemon 테스트의 `brokers` dict 반환) · `views.account_summary` 의존 `test_performance_fo` 2건
-  - M12(M11 에서 옮김) 커널 승격 후보: `reeval.handled_marker`·`_wrap_section`·`_boot_notifier`·`_check_hm`
-  - M12: health `_fo` 4항(unknown·exit_failed critical, 정산 대기 초과, 옵션 매도 D-1 미청산, 15:45 뒤 살아 있는 파생 주문) · `kis ping` fo 잔고 줄 · 틱 단위 브로커·시세 클라이언트 캐시(fo 모니터 포함 — 매 틱 `fo_brokers`·`market_client`×3·`fo_master.load` 재조립, 키 없는 fo 계좌면 매분 경고 로그) · `.claude/settings.json` deny 목록(옛 `test_settings_denies_fo_session`)
+  - M12(M11 에서 옮김, 비웹): `InputsPort.recent`(fo 판정 뉴스·거시, 엔진 `_novel_news` 의 `news_items` raw SQL 도 포트로) · spot monitor 단타 보유분 검토 · FAKE 사본 잔여(regime `_turn` ≈ `fake_turn`) · `AccountsPort` dict 가짜 포트 정리(spot/scalp/daemon 테스트의 `brokers` dict 반환) · `views.account_summary` 의존 `test_performance_fo` 2건 → 해소(M12 Task 14·17; 단타 보유분·`test_performance_fo` 는 「M12 이후」)
+  - M12(M11 에서 옮김) 커널 승격 후보: `reeval.handled_marker`·`_wrap_section`·`_boot_notifier`·`_check_hm` → 해소(M12 Task 14; `_wrap_section` 은 「M12 이후」 사본 허용)
+  - M12: health `_fo` 4항(unknown·exit_failed critical, 정산 대기 초과, 옵션 매도 D-1 미청산, 15:45 뒤 살아 있는 파생 주문; M12 Task 4) · `kis ping` fo 잔고 줄(M12 Task 18 — `accounts ping`) · 틱 단위 브로커·시세 클라이언트 캐시(fo 모니터 포함 — 매 틱 `fo_brokers`·`market_client`×3·`fo_master.load` 재조립, 키 없는 fo 계좌면 매분 경고 로그; 「M12 이후」) · `.claude/settings.json` deny 목록(옛 `test_settings_denies_fo_session`; M12 Task 19 `tests/test_settings_json.py`)
   - 보강(minor): 비공개 `jobs._fo_ctx` 를 공개 이름으로(cli 가 SimpleNamespace 로 호출) · `adopt` 에 `offline=True` 고려(네트워크 다운 시 30s 대기) · `close --confirm` 성공 경로 테스트 · `order-test`/`monitor` CLI 테스트가 배선만 확인 · `off`/`approve` 모드 정산 전이 테스트 · `test_ticks_fo` 가 `test_ticks` 중복 · spot `test_monitor_rules` 의 `rule_hit` 단언 중복 · `ports.py` `fo_accounts/fo_brokers` docstring 동일 · 커널 `monitor_rules` docstring 이 기능 이름 언급 · fo settings `_check_hm` 로컬(accounts 와 같은 정규식이면 커널 승격) · `FoExecContext.settings/accounts` Any · `positions.recover`/`store.tx` docstring 정합·합류+예외 테스트 · `LegStore.claim_reserved` raw SQL·recheck 예외 시 `sending` 잔류 · 실전 분기가 accounts 포트 없으면 KeyError(옛은 skip) · `reeval_apply` 훅 없을 때 지연 import · T6 `_support._tool_ctx` 가 dataclass 에 `_inputs` 부착 · T6 `tools.py` `_schema_error` 인라인 중복(커널 `tooling.schema_error` 로 교체 후보) · T6 `build_tool_app` 경유 CLI 경로 테스트 부재 · 큐 `fo_session`(사람 요청)은 paused 를 검사하지 않아 일시정지 중에도 LLM 세션 비용 발생(주문은 기록 전용 — Ruling 으로 이연) · `fills._replace_fill` 의 `fills.id` 재생성
   - 실기 2(보유 행이 있어야 확인): `features/fo/README.md` 「실기 미확인」
 
@@ -306,7 +306,7 @@ monitor·resume·손절·fills·notice·reconcile·balance·reprice. 완료 기�
   - T12: 계좌 없는 trading kind(`discover`·`fo_session`)는 실전 현물 계좌가 있으면 모의 파생 세션도 실전 confirm 을 요구한다(fail-safe 방향) — 대상 레인별로 좁힐지 결정
   - 웹 테스트 공백(경로 탈출·same-origin 포트·SSE `_SHARED`) · `gen-sse-keys`/`gen-nav` 대상 경로·`web_dist()` 를 소스 트리 기준으로(지금은 `project_root()` — scratch `TRADER_HOME` 에서 `--check` 하려면 생성 파일 복사 필요) · `_hostname`/`_host_of` 정리
 - 이연(M11b, 프런트): 새 UI 전체(설계 §9) · `RunJobButton` · 단타 행은 「단타」 절에 따로 · 결정 화면은 SSE `decisions`+`fo`+`orders` 구독 · 단타 결정 행은 상세 링크 없음 · `/settings/secrets` 는 토큰을 붙여 부름 · `discovery_line` 은 `/news/themes` 로 조립 · 파생 보유 부가 필드 필요 여부 · 수동 작업 confirm 입력은 실전 계좌 드롭다운(T3-R4/T12-R2 완화)
-- 이연(M12): `kernel/ops` 판정으로 `/system/health` 교체 · 운영 이상 텔레그램 발송·쿨다운 · `tailscale_hosts/users/public_base` 실제 값 설정(「사용자 확인 대기」) · 텔레그램 버튼 실기 확인 · `ensure_web_token` 연결 · KIS 환율 실기 확인(`FX@KRW` vs `FX@KRWKFTC` 값·자릿수·갱신 주기·빈 응답; `quotes.fx_code` 로 전환) · 거시 관측 저장소(`/news/events` 거시) · `settings.scalp.accounts` 계좌 키 · M12 절 「M11 최종 리뷰에서 옮긴 이연」 · 아래 「M11 에서 옮긴 비웹 이연」
+- 이연(M12): `kernel/ops` 판정으로 `/system/health` 교체(M12 Task 2) · 운영 이상 텔레그램 발송·쿨다운(M12 Task 1·2 `escalate` 상태 dedup, Task 8 watchdog 1h 재알림) · `tailscale_hosts/users/public_base` 실제 값 설정(「사용자 확인 대기」) · 텔레그램 버튼 실기 확인(「사용자 확인 대기」) · `ensure_web_token` 연결(M12 Task 11 — `trader app` 첫 실행만, `trader web` 은 부르지 않음) · KIS 환율 실기 확인(`FX@KRW` vs `FX@KRWKFTC` 값·자릿수·갱신 주기·빈 응답; `quotes.fx_code` 로 전환 — 「M12 이후」) · 거시 관측 저장소(`/news/events` 거시 — 「M12 이후」) · `settings.scalp.accounts` 계좌 키(「M12 이후」) · M12 절 「M11 최종 리뷰에서 옮긴 이연」 · 아래 「M11 에서 옮긴 비웹 이연」
 
 ## M11b — 웹 UI 프런트(web/)
 M11 설계(`docs/superpowers/specs/2026-11-04-m11-web-ui-design.md`)의 새 웹 UI 를 `web/`(React 19 + Vite 7 + TS, vitest/jsdom)로 구현. 백엔드는 손대지 않는다. 플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`(브랜치 `feat/m11b-web-ui`), 승인 목업 사본(17860b5). 완료 기준: 다섯 화면 + 결정 상세, `npm run typecheck`·`npm test`·`npm run build`·`gen-nav`/`gen-sse-keys --check` 통과.
@@ -324,37 +324,103 @@ M11 설계(`docs/superpowers/specs/2026-11-04-m11-web-ui-design.md`)의 새 웹 
 - [x] Task 12 데이터 화면 — 뉴스·이벤트·테마·지표/모델·감시목록·차트(b3eac7c)
 - [x] Task 13 시스템 화면(6e2b7ee, fix db54a33)
 - [x] Task 14 반응형 점검(`responsive.test.tsx`)·다듬기(맨 폼 컨트롤 토큰화·한국어 줄바꿈·<1024 상태 띠 2줄)·문서(이 줄을 담은 커밋)
-- 이연(프런트): 계좌 단위 일시정지 API 없음(`PATCH /accounts/{id} {paused}` → 화면 생략, 전역 일시정지만) · 옛 `/fo/positions` 부가 필드(`current`·`eval`·`budget_*`·`live_legs`) 없음 → 파생 행은 포인트·원화 평가만 · 단타 결정 상세 없음(`scalp-<id>` 422) → 단타 상세 링크 없음 · 웹 거부 알림은 M12(T5-R1/F1) · 아이콘 PNG(PWA 매니페스트 아이콘 래스터) 미작성
-- 백엔드 요청(M12 후보, 이 마일스톤은 손대지 않음): SSE ping 이벤트화(지금 `: ping {...}` 주석이라 EventSource 에 닿지 않음 — `event: ping` 으로 바꾸면 `lib/sse.ts` 가 그대로 받음, T3-R1) · `news_collect` 큐 kind 없음(데몬 interval 잡뿐 → 뉴스 「지금 수집」 버튼 생략, T12-R1) · `features` SSE 키 없음(지표·모델은 `market_views` 구독이라 피처 갱신이 즉시 반영 안 됨, T12-R2) · `/positions/risk` 한도 필드 없음(리스크 카드는 한도 대비 대신 위험 기여 상위 3 막대, T10-R4)
+- 이연(프런트): 계좌 단위 일시정지 API 없음(`PATCH /accounts/{id} {paused}` → 화면 생략, 전역 일시정지만) · 옛 `/fo/positions` 부가 필드(`current`·`eval`·`budget_*`·`live_legs`) 없음 → 파생 행은 포인트·원화 평가만 · 단타 결정 상세 없음(`scalp-<id>` 422) → 단타 상세 링크 없음 · 웹 거부 알림은 M12(T5-R1/F1 — M12 Task 16 해소) · 아이콘 PNG(PWA 매니페스트 아이콘 래스터) 미작성(M12 Task 15 해소)
+- 백엔드 요청(M12 후보, 이 마일스톤은 손대지 않음 — 전부 M12 에서 해소): SSE ping 이벤트화(지금 `: ping {...}` 주석이라 EventSource 에 닿지 않음 — `event: ping` 으로 바꾸면 `lib/sse.ts` 가 그대로 받음, T3-R1; M12 Task 15) · `news_collect` 큐 kind 없음(데몬 interval 잡뿐 → 뉴스 「지금 수집」 버튼 생략, T12-R1; M12 Task 15) · `features` SSE 키 없음(지표·모델은 `market_views` 구독이라 피처 갱신이 즉시 반영 안 됨, T12-R2; M12 Task 15) · `/positions/risk` 한도 필드 없음(리스크 카드는 한도 대비 대신 위험 기여 상위 3 막대, T10-R4; M12 Task 16 — 한도 막대와 기여 상위 3 병행, T16-R2)
 
 ## M12 — kernel/ops + 번들 + 전환
-health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체.
-- [ ] 착수 전
+health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.py`·`build.yml`), `CLAUDE.md` 최종 다이어트, 전환 리허설. 완료 기준: `FAKE_CLAUDE=1 trader daemon --dry-run` 하루 무사고 → 사용자가 `install` 교체. 플랜 `docs/superpowers/plans/2026-11-05-m12-ops.md`(c52e51d, 브랜치 `feat/m12-ops`), 런북 `docs/runbook-transition.md`.
+- [x] Task 1 `kernel/ops` health 러너·커널 영역 jobs/llm/orders·격상(718f4a2)
+- [x] Task 2 `ops_check` 내장 잡·`/system/health` 를 `kernel/ops` 판정으로 교체(dd6cd70, fix cc64884)
+- [x] Task 3 regime·ingest·evaluation·quotes·saveticker health 영역(42f7983)
+- [x] Task 4 spot·fo health 영역(ddab7e9, fix e723d40)
+- [x] Task 5 retention 내장 cron 잡·`ops.retention_days`(24f8020)
+- [x] Task 6 status 렌더러·`trader status`·텔레그램 `/status` 커널 절(c8cf0cc)
+- [x] Task 7 spot·scan·ml·regime·evaluation·accounts 상태 절 보강(1d334a9, fix def66e2)
+- [x] Task 8 watchdog 외부 감시·`trader watchdog`(26505b3, fix 743f236)
+- [x] Task 9 installer·bundle argv/icons/first_run_init·notify_os·`trader install`(c21db3a)
+- [x] Task 10 메뉴바/트레이 앱 이식(9ea8c3e)
+- [x] Task 11 `trader app`(데몬+웹+트레이)·`__main__` 더블클릭/네이티브 우회·`--version`·`ensure_web_token`(214be90, fix 88fe871)
+- [x] Task 12 PyInstaller 번들·`build.yml`·아이콘·`docs/bundle-usage.md`(e39114a)
+- [x] Task 13 selfcheck 무거운 스택·드라이버 점검·DB 미생성, CLI 경량 기동(db8c74f)
+- [x] Task 14 커널 승격(close_stale·handled_marker·boot_notifier·check_hm)·Lock clock·hb.stop·`interval_from`(3f40a85, fix da612d7)
+- [x] Task 15 SSE ping 이벤트·`news_collect` 큐 kind·`features` SSE 키·PWA 아이콘 PNG(99a7bcc)
+- [x] Task 16 승인 취소 선점 해제·웹 거부 알림 큐·승인 통화·리스크 한도 필드(9d53837, fix 6bee4fc)
+- [x] Task 17 `AccountsPort.brokers` 리스트 통일·`InputsPort.recent`·`ScanPort.classify`(0c9a327, fix d62e213)
+- [x] Task 18 `names_fill` 잡·`instrument_names`·`accounts order-test`·`ping` fo 잔고·잔여 단위 테스트(cf4ef3b, fix 304d93e)
+- [x] Task 19 CLAUDE.md 명령표·architecture `ops`·TODO·`docs/runbook-transition.md`·`.claude/settings.json`·세션 훅 `tools/session_start.py`(이 줄을 담은 커밋)
+- [x] 최종 리뷰·fix wave(dccfea2 코드·0768168 설정·훅·이 줄을 담은 문서 커밋)
+- [ ] PR·CI(ubuntu+windows)·머지
+- [ ] 전환 리허설 하루 무사고(`docs/runbook-transition.md` 2절) → 사용자가 옛 `install --uninstall` 뒤 새 `install`(+`--watchdog`) (사용자)
+- Ruling(M12 실행 중): PF-1 T2 가 웹 busy 사유 테스트를 지우고 T3 quotes 영역이 되살림 · PF-2 `uvicorn`·`create_app` 지연 import 는 T11, 기능 `cli.py` 경량화는 T13 · T1-R1 `to_web` 머리 단계 critical→fail·warning→warn·그 외 ok(watch 는 info 사유만) · T1-R2 항목 link 는 새 라우트(`/`·`/accounts/{id}`·`/system`·`/data`) · T2-R1 `schedule_jobs` 는 모든 게이트를 통과시키는 탐침 ctx 로 펼침 · T2-R2 `kernel/ops/__init__` 은 PEP 562 지연 재노출(순환 회피) · T2-R3 `/system/health` 캐시 경로도 데몬 생존·하트비트를 먼저 보고 죽었으면 직접 판정 · T4-R1 `holiday_fn` None 폴백 `is_us_holiday` 는 US 전용 · T7-R1 spot 최근 결정은 원장 `decisions` 테이블(최근 3건) · T7-R2 ml 절은 메타 `metrics.accuracy` · T7-R3 확인 없는 실전 auto 는 `auto→off(LIVE 미확인)` · T7-R4 텔레그램 `/status` 는 비어 있지 않은 절마다 `[제목]` 줄 · T11-R1 `trader app` 은 `Daemon.start(install_signals=False)`(잡은 스케줄러 스레드) + `WebThread` · T12-R1 PyInstaller 수집·npm 산출물 ⚠️ 는 v0.2.0 태그 CI 가 첫 검증 · T13-R1 selfcheck 는 DB 파일 존재를 먼저 보고 없으면 연결 안 함(boot 불변) · T13-R2 P19 축소 — `trader --help` 회귀 가드는 uvicorn·sklearn 부재만, fastapi·pandas 는 「M12 이후」 · T14-R1 regime/jobs 에는 boot_notifier 사본이 없음(spot·fo 둘만 통합) · T14-R2 기능 측 `close_stale` 로그는 중립 문구·info · T15-R1 테스트는 기존 `tests/features/ingest/test_job.py` 에 · T15-R2 `NewsCollectParams.market` 은 `Market` Literal 로(최종 fix wave) · T16-R1 리스크 한도 테스트는 기존 `test_positions_view.py` 에 · T16-R2 RiskCard 는 한도 막대와 위험 기여 상위 3 병행 · T17-R1 `spot/cash_park.py` 옛 형식 분기는 brokers 와 무관해 제외 · T17-R2 `InputsPort.recent(novel_only=)`·행에 `tickers`·`novel` · T17-R3 `untagged_only=` 키워드, fo `news_macro` 채움 승인 · T18-R1 현물 `accounts order-test` 는 신규 작성(옛 저장소에 없음) · T18-R2 statusline 파일만 최근인 경우의 `usage_probe` 건너뜀 테스트 · T18-R3 `instrument_names` 는 설정이 관측을 덮어씀(broker 는 DO NOTHING) · T18-R4 `test_order_paths.ALLOWED` 에 `accounts/order_test.py` 예외 수용(CLAUDE.md 불변식 예외 둘)
+- Ruling(M12 T19): T19-R1 P12 가 T11 브리프보다 우선 — `trader web` 도 `ensure_web_token()`(최종 fix wave 에서 구현) · T19-R2 settings.json deny 에 브리프 밖 `accounts ping*`·`saveticker monitor*`·`uv run python -m trader …*` 3형 수용 · T19-R3 M12 열린 행 3개 유지(최종 리뷰는 fix wave, PR 은 머지 때, 전환 리허설은 사용자) · T19-R4 deny 에 `spot exec-key release`·`regime killswitch`·`ml promote|demote`·`evaluation rl promote|demote` 추가(CLAUDE.md 금지사항과 일치) · T19-R5 (a) env 접두 형태는 접두 deny 로 못 막는 알려진 한계(「M12 이후」) (b) 훅의 `"$CLAUDE_PROJECT_DIR/…"` 는 공식 문서 형태로 수용
+- Ruling(M12 최종 리뷰):
+  - FR-1: 잠금 보유면 daemon·app 모두 「이미 실행 중입니다 — <url>」 + exit 0, 무거운 boot 전에 잠금 확인(launchd `KeepAlive{SuccessfulExit:false}` 재기동 반복 방지)
+  - FR-2: 로그온 등록 argv = `app --no-browser`(`bundle.service_argv`), app 도 FR-1 처리(포트가 열려 있고 `--no-browser` 가 아니면 브라우저만 열고 0)
+  - FR-3: `Read(./secrets/**)` + Bash `secrets/.env*` 3형(백업 `.env.bak-*` 포함), Bash 로 templates 예시 읽기 과차단 수용, `regime killswitch` deny 는 `on`·`off` 로 분리
+  - FR-4: 리허설 판정 = 그날 예정 시각 지난 잡 전부(주간 잡 fri·sat 은 `jobs run` 으로 1회), 플랜 파일은 손대지 않음
+  - FR-5: `news_collect_request` 는 `deps.markets` 교집합만, 나머지는 `skipped`(`NewsCollectParams.market` 은 `Market` Literal)
+  - FR-6: Minor M-1~M-8 + triage fix-in-wave(T3·T5·T6·T9·T10·T11·T18·T19 문서/테스트) 전부 이번 wave, defer 항목은 「M12 이후」
+  - FR-7: Declined-to-judge 10줄 중 ④(runbook 리허설 saveticker 경합 한 줄)만 반영, 나머지는 옛 동작·기존 Ruling 유지
 - M11 최종 리뷰에서 옮긴 이연(코드 미수정):
-  - M8: `DELETE /jobs/{id}` 로 대기 중인 `approve_execute` 를 취소해도 승인 선점이 TTL 까지 남음 → spot `approvals.release` 훅 또는 409
-  - T5-R2: approve 의 `DuplicateRequest` → 202 기존 request_id 경로가 사실상 도달 불가(정리 또는 제거)
-  - 웹 거부 알림: 스펙 §8.10(e) '웹이 보내는 알림은 없다'와 충돌 → 큐 kind 또는 데몬 watcher 로(텔레그램 거부 알림은 fix wave 에서 구현, T5-R1)
-- M11 에서 옮긴 비웹 이연: 섹터 자동분류 `_classify`·`auto_classify` 호출자(M5·M7) · `_close_stale` 커널 헬퍼 통합(M7) · `metrics.pending_approvals/account_stance/stance_by_market`(M8) · spot monitor 의 단타 보유분 제외 검토(M9·M10) · `InputsPort.recent`(scalp·fo 판정 뉴스·거시, fo `_novel_news` raw SQL) · FAKE 사본 잔여(regime `_turn`) · `AccountsPort` dict 가짜 포트 정리 · `views.account_summary` 의존 `test_performance_fo` 2건 · 커널 승격 후보 `reeval.handled_marker`·`_wrap_section`·`_boot_notifier`·`_check_hm`(M10)
+  - M8: `DELETE /jobs/{id}` 로 대기 중인 `approve_execute` 를 취소해도 승인 선점이 TTL 까지 남음 → spot `approvals.release` 훅 또는 409 (M12 Task 16 — `QueueKind.on_cancel` 이 `approvals.release`)
+  - T5-R2(정정): approve 의 `DuplicateRequest` 분기는 202 기존 request_id 를 돌려주지 않는다 — 집행 요청을 못 넣었으므로 `approvals.release` 로 이 결정의 선점을 푼 뒤 409 를 유지한다(그 밖의 등록 실패도 선점 해제 후 재발생) (M12 Task 16)
+  - 웹 거부 알림: 스펙 §8.10(e) '웹이 보내는 알림은 없다'와 충돌 → 큐 kind 또는 데몬 watcher 로(텔레그램 거부 알림은 fix wave 에서 구현, T5-R1) (M12 Task 16 — 큐 kind `approval_notice`, 데몬이 `[거부]` 발송)
+- M11 에서 옮긴 비웹 이연: 섹터 자동분류 `_classify`·`auto_classify` 호출자(M5·M7; M12 Task 17 `ScanPort.classify`) · `_close_stale` 커널 헬퍼 통합(M7; M12 Task 14 `calls.close_stale`) · `metrics.pending_approvals/account_stance/stance_by_market`(M8; M12 Task 7 — 상태 절이 커널 `pending_approvals`·spot `stance.decide` 로 대체, evaluation 사본 없음) · spot monitor 의 단타 보유분 제외 검토(M9·M10; 「M12 이후」) · `InputsPort.recent`(scalp·fo 판정 뉴스·거시, fo `_novel_news` raw SQL; M12 Task 17) · FAKE 사본 잔여(regime `_turn`; M12 Task 14 `session.fake.fake_turn`) · `AccountsPort` dict 가짜 포트 정리(M12 Task 17 — `brokers()` 리스트 통일) · `views.account_summary` 의존 `test_performance_fo` 2건(「M12 이후」) · 커널 승격 후보 `reeval.handled_marker`·`_boot_notifier`·`_check_hm`(M10; M12 Task 14)·`_wrap_section`(「M12 이후」 — 레인 사본 허용)
 - 이연(M0 리뷰):
-  - `Lock` 주입 clock
-  - 실제 시그널 핸들러 테스트 격리
-  - `start()` 실패 시 `_hb.stop()`
-  - `daemon` 명령 흐름 정리
-  - `uvicorn` 지연 import
-  - `test_bundle` 단언 보강
-  - `selfcheck` 가 DB 를 만드는 점
-  - CLAUDE.md 금지 명령 "(M<N> 이후)" 표기·"WAL+30초" 중복
-  - Windows `install` 로그온 확인(승계)
+  - `Lock` 주입 clock (M12 Task 14)
+  - 실제 시그널 핸들러 테스트 격리 (M12 Task 14)
+  - `start()` 실패 시 `_hb.stop()` (M12 Task 14)
+  - `daemon` 명령 흐름 정리 (M12 Task 14)
+  - `uvicorn` 지연 import (M12 Task 11)
+  - `test_bundle` 단언 보강 (M12 Task 9·12)
+  - `selfcheck` 가 DB 를 만드는 점 (M12 Task 13)
+  - CLAUDE.md 금지 명령 "(M<N> 이후)" 표기·"WAL+30초" 중복 (M12 Task 19 — 두 표기 모두 없음 확인)
+  - Windows `install` 로그온 확인(승계 — 「사용자 확인 대기」 번들 실기와 함께)
+
+## M12 이후 — 다음 Phase 로 넘긴 것 (P9, 코드 미수정)
+
+- 계좌 단위 일시정지 API(저장소·게이트 설계 필요; 지금은 전역 일시정지만)
+- 옛 `/fo/positions` 부가 필드(`current`·`eval`·`budget_*`·`live_legs`)
+- 단타 결정 상세(`scalp-<id>` 422 → 상세 링크 없음)
+- spot monitor 의 단타 보유분 제외(옛 동작도 제외하지 않았음 → 동작 변경)
+- `views.account_summary` 의존 `test_performance_fo` 단언 2개(대응 함수 없음)
+- fo `_wrap_section`(레인이라 ingest 공유 불가 — 7줄 사본 허용)
+- `ops_results`·`daily_markers` 테이블 승격(스펙 §2.4 — 지금은 control 플래그로 충분)
+- 틱 단위 브로커 캐시(scalp·fo) · `settings.scalp.accounts` 계좌 키(`lane_of` 의 scalp 규칙)
+- FAKE 세션 브로커 가짜 대체(`test_session_brokers_fake_fo` — 새 구조에 대응 경로 없음)
+- 거시 관측 저장소(`/news/events` 거시)
+- 실기(「사용자 확인 대기」 그대로): 번들 실빌드·더블클릭·SmartScreen·Gatekeeper · 텔레그램 버튼 · `tailscale_hosts/users/public_base` 실값 · KIS 환율(`FX@KRW` vs `FX@KRWKFTC`)
+- T13-R2 P19 잔여: `trader --help` 가 아직 fastapi/starlette(기능 `routes` 모듈 수준 `APIRouter`, 16+8 모듈)·pandas(briefing→evaluation→ml 체인, 24 모듈)를 올린다 — 해소하려면 `Feature.routes` 팩토리화 + `feature.py` 지연 import(기능 계약 변경)
+- T15: PWA PNG(먹색 ▲)와 `web/public/icon.svg`(파란 차트선) 불일치 → `icon.svg` 를 favicon 계열로
+- T16: `expire_queued` 로 만료된 `approve_execute` 는 선점을 바로 풀지 않는다(TTL 뒤 `approvals_expire` 가 정리)
+- T18: quotes `jobs._insert_name` 과 spot `ledger.upsert_ticker_name` 중복 → `ticker_names` 쓰기 helper 커널(`ledger/names.py`) 승격 후보
+- 최종 리뷰 defer(코드 미수정):
+  - T2: `kernel/ops/__init__` 공개 이름 3벌(`__all__`·지연 표·테스트) 일치 테스트 · `ops_check` 의 `notified` 가 `send` 반환값을 무시 · 오류 경로 항목(`{key}.error`)의 key·link
+  - T3: health 가 매 점검 `load_ml` 재파싱 · quotes 영역 LIKE 의 `_` 이스케이프 · until 파싱 중복 · 로거 이름 혼재 · killswitch 항목 링크
+  - T4: spot·fo health F2~F6 구조 정리 · US reconcile cron `days` 반영
+  - T5: 날짜 모양 계좌 id 의 retention 판정 · `rmtree` 실패를 건수에 반영
+  - T6·T7·T8 polish(상태 절·watchdog 문구·테스트 정리)
+  - T9: 경로에 NUL 이 든 `ValueError` · `Popen` 래핑 · Windows `<Arguments>` 인용 · `first_run_init` 의 templates 전체 복사
+  - T10: 트레이 `toggle_pause` 의 set_fn 경로/기본 경로 비대칭
+  - T11 polish: `webbrowser` 실패 가드 · bind `0.0.0.0` 일 때 URL · 포트 점유 문구 · `WebThread._stopping` 경합
+  - T12: smoke 스크립트 `IndexError` · spec 검사 · `sys.exit(main())` 형태
+  - T13: playwright private API 의존 · frozen 분기 · `schema_version` 경계 · 손상 DB 의 JSON 출력
+  - T14: HH:MM 엄격 파싱 · `Lock` 시계 주입 범위 · `hb_started` 테스트
+  - T15: 큐 테스트 단언 · `_features_fp` glob · `latest_day` 사전순 비교
+  - T16: CURRENCY import 위치 · `actor` 미사용 인자(`expire_queued` 선점은 위 T16 줄)
+  - T17: naive datetime · SELECT 중복 · `classify` 매 호출 로드 · asof 벽시계 · `_failed` 잔존
+  - T18: `ping` 의 boot · `names_fill` 이 `set_flag` 를 매 주기 쓰는 점(`_insert_name` 중복은 위 T18 줄)
+  - T19-R5(a): env 접두(`FOO=1 uv run trader …`)는 `.claude/settings.json` deny 패턴으로 막지 못함 — 권한 훅이 필요
 
 ## 사용자 확인 대기 (옛 저장소 승계)
 
 옛 저장소에서 아직 미확인인 실기 항목. 새 저장소 해당 기능이 이식된 뒤 확인한다.
 
-- [ ] 실기(사용자 확인 대기, 영업일 09:00~15:30 KST): KIS 주문 테스트 — `kis order-test --account paper-main` → 1주 지정가(현재가 −10%) 접수·취소 메시지 확인 (M1·M2 이후)
+- [ ] 실기(사용자 확인 대기, 영업일 09:00~15:30 KST): KIS 주문 테스트 — `trader accounts order-test --account <id>`(모의 계좌) → 1주 지정가(현재가 −10%) 접수·취소 JSON 확인 (M12 Task 18 이후)
 - [ ] 실기(사용자 확인 대기): 텔레그램 승인 — 모드를 `approve` 로 두고 BUY 결정 때 승인 요청 → 텔레그램 `/approve <id>` → 주문 접수 확인 → 모드 `auto` 원복 (M2·M4 이후)
-- [ ] 사용자 확인 대기: `secrets/.env` 에 `WEB_TOKEN` 설정 후 `trader web` → 설정 화면에 토큰 입력 → 일시정지/재개가 반영되는지, 승인 요청이 있을 때 웹·텔레그램 버튼 승인 → 주문 접수 확인 (M12 전환 뒤 — 백엔드는 M11, 화면은 M11b)
+- [ ] 사용자 확인 대기: `secrets/.env` 의 `WEB_TOKEN`(`trader app`·`trader web` 기동이 없으면 자동 생성) → 시스템 화면 「이 PC 에서 받기」 또는 토큰 입력 → 일시정지/재개가 반영되는지, 승인 요청이 있을 때 웹·텔레그램 버튼 승인 → 주문 접수 확인 (M12 전환 뒤 — 백엔드는 M11, 화면은 M11b)
 - [ ] 사용자 확인 대기: `settings.web.tailscale_hosts`·`tailscale_users`·`public_base` 실제 값 설정 → 폰에서 tailnet 이름으로 조회 200·허용 밖 로그인 403·키 입력 403 확인 (M12 전환 뒤)
-- [ ] 실기(사용자 확인 대기): 번들 zip 을 풀어 더블클릭 → 웹 UI → `kis ping` (macOS 우클릭 열기·Windows SmartScreen 1회) (M12 이후)
+- [ ] 실기(사용자 확인 대기): 번들 zip(`v0.2.0` 태그 `build.yml`)을 풀어 더블클릭 → 웹 UI → `./trader accounts ping` (macOS `xattr`/우클릭 열기·Windows SmartScreen 1회; Windows `install` 로그온 등록 확인 포함) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
 - [ ] 사용자 확인 대기: `channels.naver_blog` 기본값 — 옛 기본 `ranto28` 복원 여부 결정 (M3)

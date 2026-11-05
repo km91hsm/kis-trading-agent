@@ -57,8 +57,7 @@ def _brokers_and_accounts(ctx: Any) -> tuple[list, dict[str, Any]]:
     if acc is None:
         return [], {}
     accounts = list(acc.accounts())
-    raw = acc.brokers()
-    brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+    brokers = {b.account.id: b for b in acc.brokers()}
     return accounts, brokers
 
 

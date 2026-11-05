@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from trader.features.accounts import api
+from trader.features.accounts import api, modes
 from trader.features.accounts.api import Account
 from trader.kernel.config import market_hours
 from trader.kernel.config.secrets import Secrets
@@ -63,6 +63,16 @@ class AccountsPortImpl:
 
     def paused(self, conn: sqlite3.Connection) -> bool:
         return api.is_paused(conn)
+
+    def set_paused(
+        self,
+        conn: sqlite3.Connection,
+        value: bool,
+        *,
+        channel: str = "cli",
+        actor: str | None = None,
+    ) -> None:
+        modes.set_paused(conn, value, channel=channel, actor=actor)
 
     def holiday_fn(self) -> Callable[[str, date], bool]:
         """`(market, d) -> bool` 휴장 판정. KR 은 KIS 조회(실패 = 개장), US 는 NYSE 규칙."""

@@ -4,12 +4,17 @@
 
 - 화면 시세(tier=service, 조회 전용 — 웹 프로세스는 주문을 내지 않는다): 국내 실시간 허브(`hub.QuoteHub`, KIS 웹소켓 하나), `/quotes*` 웹 자원(`routes.py`), 종목명(`names.py`)·차트(`charts.py`) 웹 자원, 환율 원천·하루 캐시(`fx.py`).
 - 시세 클라이언트는 시크릿의 공용 실전 키(`load_secrets().kis_creds(env="real")` → `kernel.broker.factory.build_market`)로 직접 만든다. 공용 실전 키가 없으면 시세 클라이언트·허브 없이 빈 값·스냅샷만 돌려준다. 런타임(시세 클라이언트 + 허브)은 원장 위치(`WebDeps.state`)마다 프로세스에 한 번(`routes.runtime_for`, 테스트는 `routes.install/reset`).
-- quotes 는 accounts 를 import 하지 않는다(accounts 통합 현황이 `quotes.api.fx_rate` 를 쓰므로 순환 방지). 다른 기능은 `ingest.api`(FRED·유니버스)·`scan.api`(관심종목, 검색 순위)만 쓴다. 레인은 import 하지 않고 원장 표(`ticker_names`·`decisions`·`orders`·`fills`·`positions_snapshot`)만 읽는다.
+- quotes 는 accounts 를 import 하지 않는다(accounts 통합 현황이 `quotes.api.fx_rate` 를 쓰므로 순환 방지). 다른 기능은 `ingest.api`(FRED·유니버스)·`scan.api`(관심종목, 검색 순위)만 쓴다. 레인은 import 하지 않고 원장 표(`ticker_names`·`ticker_exchanges`·`decisions`·`orders`·`fills`·`positions_snapshot`)만 읽는다 — 쓰기는 데몬 잡 `names_fill` 의 `ticker_names` 하나(이름 없는 행에만 INSERT).
 
 ## 공개면 (`api.py`)
 
 - `prepare_fx(deps) -> None` — quotes 런타임(과 KIS 환율 원천)을 원장 위치마다 한 번 조립. `fx_rate` 를 quotes 경로보다 먼저 부르는 화면이 쓴다.
 - `fx_rate(settings, conn, pair="USDKRW") -> dict | None` — `{pair, rate: str(Decimal), as_of, source: "kis"|"macro"}`, 원천이 없거나 모르는 쌍이면 None. 원천이 모두 실패하면 `fail_at` 을 남기고 `fx.FAIL_TTL_S`(300초) 동안 다시 묻지 않으며, 그동안·실패 때 이전 날짜 값이 있으면 `stale: true` 를 붙여 준다.
+
+## 데몬 잡 (`jobs.py`)
+
+- `names_fill`(interval, schedule.yaml `names_fill.interval_s` 기본 3600초, 기동 120초 뒤 첫 실행): ① 설정 `quotes.instrument_names`(`"<KR|US>:<종목>": 이름`, 기본 `{}` — DART·EDGAR 캐시에 없는 헤지·현금·지수 대용 ETF 등)를 원장 `ticker_names` 에 `source='config'` 로 적재(**설정이 관측보다 우선** — 잔고·브로커 이름이 있어도 덮고, 설정 이름을 바꾸면 다음 실행에 반영; 같은 값이면 쓰기 없음, Ruling T18-R3) ② 원장 `positions_snapshot`(현물, `_CASH*` 제외)·`orders`(asset `stock`)에 나왔지만 이름이 없는 종목을 `ports["accounts"].market_client()` 의 `get_stock_name`(US 는 `ticker_exchanges` 거래소)으로 조회해 `source='broker'` 로 남긴다. ②는 이미 이름이 있는 종목(잔고 관측·설정)을 덮지 않는다. 못 찾은 종목은 control `names_miss`(`{"<시장>:<종목>": KST 날짜}`, `control_namespaces`)로 그날 다시 묻지 않고, 한 번에 20건(`LIMIT`)까지. 시세 클라이언트가 없으면 ①만 하고 `{"skipped": "시세 클라이언트 없음", "config": n}`. 결과 `{config, candidates, asked, filled}`.
+- 옛 대비: 옛 `names.fill_missing` 은 캐시 JSON(DART·EDGAR)으로 먼저 채우고 결정(`decisions`) 종목도 봤으나, 새 잡은 보유·주문 종목만 보고 캐시 적재는 하지 않는다(커널 `names.resolve` 는 읽기 전용 그대로). source `kis` → `broker`, 설정 `instrument_names` 는 `{시장: {코드: 이름}}` → `quotes.instrument_names` 평면 `"<시장>:<코드>"` 키. `ticker_names` 쓰기 helper 는 spot `ledger.upsert_ticker_name` 이 있으나 레인이라 import 할 수 없어 `jobs._insert_name`(이름 없는 행에만, broker 용)·`jobs._fill_config`(설정 우선 upsert)를 둔다.
 
 ## 웹 자원 (`routes.py`, 토큰 없음)
 
@@ -27,6 +32,11 @@
 - `GET /charts?market=&ticker=&exchange=&days=120`(1~1000) → `{ticker, market, candles: [{time: 날짜, open, high, low, close, volume}], markers: [{time, kind: "fill", side, text}], lines: {stop_loss, take_profit, date}}`. 봉은 quotes 런타임의 시세 클라이언트(없으면 503, KIS 오류 502)로, (시장·종목·거래소·일수·KST 날짜) 300초 캐시. 마커는 `fills` ⨝ `orders`(현물), 선 값은 그 종목 최신 결정 `decisions.data_json` 의 `stop_loss/take_profit`.
 - `GET /charts/minute?market=&ticker=&exchange=&count=120`(1~390, US 는 최대 120) → `{ticker, market, interval: "1m", tz, session_date, candles: [{time: UTC epoch…}], markers}`. 60초 캐시, 캐시 미스는 키별 락 안에서 다시 확인해 동시 요청도 KIS 1회. 마커는 session_date(시장 현지) 하루의 체결(UTC 경계를 SQL 로), 분 단위로 내린 epoch + 현지 `HH:MM` 텍스트.
 - US 거래소는 `NAS|NYS|AMS`, 안 주면 유니버스 → 없으면 NAS. 테스트용 캐시 비우기 `charts.reset()`.
+
+## 운영 점검·상태 (M12)
+
+- health 영역 `quotes`: `quotes.session_busy.<env>`(watch) — 체결통보 리스너가 KIS 웹소켓 세션을 쥔 동안(control `ws_session_busy:<env>` until 이 미래) 시세 허브가 양보 중. 옛 웹 임시 판정의 busy 사유를 옮긴 것(PF-1).
+- status 절은 없다(`/status`·STATUS.md 에 quotes 절 없음).
 
 ## 규약
 

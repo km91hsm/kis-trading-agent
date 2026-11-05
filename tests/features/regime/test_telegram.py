@@ -73,7 +73,28 @@ def test_status_has_regime_section(conn, settings):
     sec = FEATURE.status_sections[0]
     assert sec.title == "국면"
     ctx = _ctx(conn, settings, Sent())
-    assert sec.render(ctx) == ["KR - · US -"]
+    lines = sec.render(ctx)
+    assert lines[0] == "- KR - · US -"
     assert "KR - · US -" in commands.status_message(ctx)
     # 설정 없는 문맥에서도 /status 가 깨지지 않는다
     assert sec.render(replace(ctx, settings=None)) == []
+
+
+def test_status_regime_section(conn, settings):
+    ctx = _ctx(conn, settings, Sent())
+    render = FEATURE.status_sections[0].render
+    assert render(ctx) == [
+        "- KR - · US -",
+        "- 헤지: KR 114800/252670, US SH/SDS 최대 20% · bear 기준 2/3",
+        "- 제안 적중률: KR - · US -",
+    ]
+    hedge = settings.hedge.model_copy(update={"leverage": False, "market_session": False})
+    assert render(replace(ctx, settings=settings.model_copy(update={"hedge": hedge}))) == [
+        "- KR - · US -",
+        "- 헤지: KR 114800, US SH 최대 20% · bear 기준 2/3",
+    ]
+    off = settings.hedge.model_copy(update={"enabled": False})
+    assert render(replace(ctx, settings=settings.model_copy(update={"hedge": off}))) == [
+        "- KR - · US -",
+        "- 헤지 비활성 (hedge.enabled=false)",
+    ]

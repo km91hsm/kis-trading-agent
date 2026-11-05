@@ -2,6 +2,7 @@
 
 from trader.features.spot.cli import spot_app
 from trader.features.spot.executor import ORIGINS
+from trader.features.spot.health import AREA
 from trader.features.spot.jobs import (
     APPROVALS_EXPIRE,
     BALANCE_REFRESH,
@@ -18,6 +19,7 @@ from trader.features.spot.routes import RESOURCES, ROUTERS, SSE_KEYS
 from trader.features.spot.scan_analyze import SCAN_ANALYZE
 from trader.features.spot.session_kinds import AGENTS, ANALYZE, RESUME
 from trader.features.spot.settings import SCHEDULE_SECTIONS, SECTIONS
+from trader.features.spot.status import STATUS_SECTIONS
 from trader.features.spot.telegram import TELEGRAM_CALLBACKS, TELEGRAM_COMMANDS
 from trader.features.spot.tool_cli import TOOLS
 from trader.kernel.registry.types import Feature, NavItem
@@ -34,6 +36,7 @@ FEATURE = Feature(
     session_kinds=(ANALYZE, RESUME),
     telegram_commands=TELEGRAM_COMMANDS,
     telegram_callbacks=TELEGRAM_CALLBACKS,
+    status_sections=STATUS_SECTIONS,
     routes=ROUTERS,
     resources=RESOURCES,
     sse_keys=SSE_KEYS,
@@ -44,4 +47,5 @@ FEATURE = Feature(
     ),  # fmt: skip
     queue_kinds=QUEUE_KINDS,
     ports=(PORT,),
+    health_areas=(AREA,),
 )

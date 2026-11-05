@@ -58,7 +58,7 @@
 - A14 주문 알림 꼬리 표 `_kind` 는 `_entry`·`_exit` 다리 접미사를 벗겨 찾는다(커널 `execution.core`).
 - A15 소수정(커널 `OPEN_STATUSES`·accounts `DEAD_STATUSES` 커널 import·`timeout_by_kind` `market: 600`·spot `RebalanceParams`)은 Task 1 에서 고쳤다. `market_view` 큐 kind `trading=False` 는 유지(regime README).
 - T4-R1 `judge_context.regime` 은 `ports["regime"].load` 저장 레코드의 `state`·`count` 를 그대로 싣는다(옛 플랜의 `state()/core_count()` 아님) — 없으면 `{state: None, count: None}`.
-- A16 판정 컨텍스트의 `news` 는 항상 `[]`(뉴스 포트 연결은 M11 `InputsPort.recent`)라, 판단 기준 "셋 중 둘" 이 사실상 거래량 + 호가 둘 다를 요구한다. 호가 조회에 실패하면 GO 를 낼 수 없다.
+- A16 판정 컨텍스트의 `news` 는 `ports["inputs"].recent`(종목 태그, 최근 24시간 수신, ≤5건)로 채운다(M12 T17). 포트가 없거나 실패하면 `[]` 이고, 그때 판단 기준 "셋 중 둘" 은 사실상 거래량 + 호가 둘 다를 요구한다.
 - 사건 키: `judge_drift` 의 현재가 키는 `now` → `price`(`event(now=)` 인자와 충돌). `judge` 사건은 옛과 같이 `go` 키.
 - 오류 격리: 진입 루프의 종목별 try/except 가 모든 예외로 넓어졌다(`errors` 에 남김). `settle_pending` 은 격리 밖이다(옛 동일).
 - `report()` 의 기본 `today` 는 UTC 날짜다(옛 동일 — CLI `report`·`backtest` 둘 다 `run_date_for` 를 넘긴다). `_monitor` 정규장 폴백은 `backtest`·`report` 둘 다 적용된다.

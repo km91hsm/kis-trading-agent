@@ -12,6 +12,7 @@ from trader.features.spot.schemas import CHECKPOINT_NAMES
 from trader.features.spot.session_kinds import AGENTS, RESUME
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.session.agents import by_name
+from trader.kernel.session.markers import handled_marker
 from trader.kernel.session.runner import SessionResult, SessionSpec, run_session
 
 logger = logging.getLogger("trader.spot")
@@ -57,11 +58,3 @@ def reevaluate(
     if not res.ok:
         logger.warning("재평가 세션 실패 %s %s: %s", market, ticker, res.error)
     return res
-
-
-def handled_marker(res: SessionResult) -> str | None:
-    """triggers.session_id 에 남길 값. 세션이 떴어도 실패(타임아웃·예산·오류)면 '실패:' 접두사를
-    붙여 운영일 1회 제한(`reevaluated_between`)에서 빼고 30분 뒤 재시도할 수 있게 한다."""
-    if res.ok:
-        return res.session_id
-    return f"실패: {res.error or 'unknown'} ({res.session_id or '-'})"[:200]

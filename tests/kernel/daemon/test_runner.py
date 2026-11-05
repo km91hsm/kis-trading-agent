@@ -22,7 +22,7 @@ from trader.kernel.registry import discover
 from trader.kernel.registry.contracts import all_migrations
 from trader.kernel.registry.types import Feature, JobSpec
 
-BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup")
+BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup", "ops_check", "retention")
 NOW = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
 
@@ -48,7 +48,8 @@ def make_deps(project: Path, **kw) -> DaemonDeps:
     c.close()
     base = dict(
         settings=SimpleNamespace(notify=SimpleNamespace(enabled=False), llm=LlmSettings()),
-        schedule=SimpleNamespace(at="03:00", ledger_backup="17:10"), conn_factory=factory,
+        schedule=SimpleNamespace(at="03:00", ledger_backup="17:10", retention="17:20"),
+        conn_factory=factory,
         state=state, now=lambda: NOW, markets=["KR"], gates={}, stop_event=threading.Event(),
         dry_run=False,
     )  # fmt: skip
@@ -310,16 +311,24 @@ def test_start_quiets_apscheduler_loggers(project):
         daemon.shutdown(wait=False)
 
 
-def test_start_installs_and_shutdown_restores_signal_handlers(project):
-    before = signal.getsignal(signal.SIGTERM)
+def test_start_installs_and_shutdown_restores_signal_handlers(project, monkeypatch):
+    """실제 핸들러를 바꾸지 않게 signal.signal 을 가짜 표로 바꿔 설치·복원을 본다."""
+    before = {signal.SIGINT: "old-int", signal.SIGTERM: "old-term"}
+    table = dict(before)
+
+    def fake_signal(sig, handler):
+        old, table[sig] = table.get(sig), handler
+        return old
+
+    monkeypatch.setattr(signal, "signal", fake_signal)
     d = make_deps(project)
     daemon = make_daemon(d, spec(id="a"))
     try:
         daemon.start()
-        assert signal.getsignal(signal.SIGTERM) == daemon._on_signal
+        assert table == {signal.SIGINT: daemon._on_signal, signal.SIGTERM: daemon._on_signal}
     finally:
         daemon.shutdown(wait=False)
-    assert signal.getsignal(signal.SIGTERM) == before
+    assert table == before
 
 
 def test_second_sigterm_ignored_while_waiting(project):
@@ -368,6 +377,9 @@ def test_start_failure_after_scheduler_start_cleans_up(project, monkeypatch):
     assert created and not created[0].running
     assert not (d.state / "daemon.lock").exists()
     assert daemon._lock.held() is False
+    # 하트비트를 시작한 뒤 실패했으니 정지 표시도 남긴다
+    data = json.loads((d.state / hb_mod.FILE_NAME).read_text(encoding="utf-8"))
+    assert data["stopped_at"] is not None
 
 
 def _teardown_daemon(project, teardown, markets=("KR", "US")):

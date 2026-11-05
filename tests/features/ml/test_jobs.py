@@ -35,7 +35,7 @@ class Sent:
 
 def _deps(project, settings, *, client=None, accounts=(), now=NOW, **kw):
     port = SimpleNamespace(
-        accounts=lambda: list(accounts), brokers=lambda: {},
+        accounts=lambda: list(accounts), brokers=lambda: [],
         market_client=lambda: client, holiday_fn=lambda: None,
     )  # fmt: skip
     return make_deps(

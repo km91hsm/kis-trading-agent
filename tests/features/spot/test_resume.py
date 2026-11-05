@@ -192,7 +192,7 @@ class _Port(AccountsPortImpl):
         self._brokers = ctx.brokers
 
     def brokers(self):
-        return self._brokers
+        return list(self._brokers.values())
 
     def market_client(self):
         return None

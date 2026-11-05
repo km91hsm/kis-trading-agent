@@ -8,6 +8,7 @@ claim 은 조건부 UPDATE(`status='queued'`)라 enqueue/cancel 과 경합해도
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from trader.kernel.ledger.control import log_change
 from trader.kernel.registry.types import QueueKind
 
 Kinds = dict[str, QueueKind]
+
+logger = logging.getLogger("trader.daemon")
 
 
 class DuplicateRequest(ValueError):
@@ -165,8 +168,12 @@ def finish(
     conn.commit()
 
 
-def cancel(conn: sqlite3.Connection, req_id: int, *, now: datetime | None = None) -> bool:
-    """대기 중(queued)만 취소 → skipped('취소'). 실행 중이면 False."""
+def cancel(
+    conn: sqlite3.Connection, req_id: int, *, now: datetime | None = None,
+    kinds: Kinds | None = None,
+) -> bool:  # fmt: skip
+    """대기 중(queued)만 취소 → skipped('취소'). 실행 중이면 False. 취소했고 `kinds` 의 그 kind 에
+    `on_cancel` 이 있으면 `on_cancel(conn, params)` 를 부른다(실패는 로그만, 결과는 True)."""
     when = _iso(now if now is not None else datetime.now(UTC))
     cur = conn.execute(
         "UPDATE job_requests SET status='skipped', finished_at=?, error='취소' "
@@ -174,7 +181,22 @@ def cancel(conn: sqlite3.Connection, req_id: int, *, now: datetime | None = None
         (when, req_id),
     )
     conn.commit()
-    return cur.rowcount == 1
+    if cur.rowcount != 1:
+        return False
+    if kinds:
+        _after_cancel(conn, req_id, kinds)
+    return True
+
+
+def _after_cancel(conn: sqlite3.Connection, req_id: int, kinds: Kinds) -> None:
+    row = conn.execute("SELECT kind, params FROM job_requests WHERE id=?", (req_id,)).fetchone()
+    spec = kinds.get(row[0]) if row is not None else None
+    if spec is None or spec.on_cancel is None:
+        return
+    try:
+        spec.on_cancel(conn, json.loads(row[1]) if row[1] else {})
+    except Exception as e:  # noqa: BLE001 - 훅 실패가 이미 끝난 취소를 뒤집지 않는다
+        logger.warning("취소 훅 실패 %s #%s: %s", row[0], req_id, e)
 
 
 # 조작 이력에 남기지 않는 파라미터 이름 조각(소문자 비교). 큐 kind 파라미터는 시장·종목·계좌 id 라

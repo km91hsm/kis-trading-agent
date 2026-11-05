@@ -9,11 +9,12 @@
 from __future__ import annotations
 
 import math
-
-import numpy as np
-import pandas as pd
+from typing import TYPE_CHECKING
 
 from trader.kernel.broker.models import Candle
+
+if TYPE_CHECKING:  # pandas·numpy 는 함수 안에서 지연 import — CLI 기동을 가볍게(M12 P19)
+    import pandas as pd
 
 COLUMNS = [
     "sma_5",
@@ -45,6 +46,8 @@ COLUMNS = [
 
 def to_frame(candles: list[Candle]) -> pd.DataFrame:
     """캔들 목록 → date 인덱스의 float DataFrame(open, high, low, close, volume)."""
+    import pandas as pd
+
     if not candles:
         return pd.DataFrame(columns=["open", "high", "low", "close", "volume"], dtype="float64")
     df = pd.DataFrame(
@@ -61,6 +64,8 @@ def to_frame(candles: list[Candle]) -> pd.DataFrame:
 
 
 def _rsi(close: pd.Series, n: int = 14) -> pd.Series:
+    import numpy as np
+
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = (-delta).clip(lower=0)
@@ -76,6 +81,9 @@ def _rsi(close: pd.Series, n: int = 14) -> pd.Series:
 
 def indicator_frame(df: pd.DataFrame) -> pd.DataFrame:
     """지표 컬럼을 붙인 새 DataFrame. 원본은 바꾸지 않는다."""
+    import numpy as np
+    import pandas as pd
+
     out = df.copy()
     if out.empty:
         for c in COLUMNS:

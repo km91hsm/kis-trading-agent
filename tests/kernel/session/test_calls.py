@@ -100,3 +100,22 @@ def test_close_stale_running_marks_error_after_age(conn):
     rows = conn.execute("SELECT status, error, created_at FROM agent_calls ORDER BY id").fetchall()
     assert [r["status"] for r in rows] == ["error", "running", "ok"]
     assert rows[0]["error"] == "데몬 재기동으로 종료"
+
+
+def test_close_stale_closes_only_old_running(conn, caplog):
+    old, fresh = NOW - timedelta(hours=2), NOW - timedelta(minutes=30)
+    for when, status in ((old, "running"), (fresh, "running"), (old, "ok")):
+        conn.execute(
+            "INSERT INTO agent_calls(agent, status, created_at) VALUES ('orchestrator', ?, ?)",
+            (status, when.isoformat()),
+        )
+    conn.commit()
+    assert calls.STALE_SESSION_AGE == timedelta(hours=1)
+    with caplog.at_level("INFO", logger="trader.session"):
+        assert calls.close_stale(conn, now=NOW) == 1
+    assert "stale running 세션 1건을 error 로 정리" in caplog.text
+    st = [r[0] for r in conn.execute("SELECT status FROM agent_calls ORDER BY id").fetchall()]
+    assert st == ["error", "running", "ok"]
+    # age 를 줄이면 남은 running 도 닫힌다, 닫을 게 없으면 0
+    assert calls.close_stale(conn, now=NOW, age=timedelta(minutes=10)) == 1
+    assert calls.close_stale(conn, now=NOW) == 0

@@ -152,3 +152,156 @@ def test_ping_account_filter(project, monkeypatch):
     assert (
         "real-main" not in r.stdout and "[OK] 005930 현재가" in r.stdout and "실패 1건" in r.stdout
     )
+
+
+# --- ping 파생 잔고 줄·order-test (M12 T18, P16) — 가짜 시세·브로커만, 네트워크 없음 ----------
+
+
+def _fo_balance():
+    from datetime import UTC, datetime
+
+    from trader.kernel.broker.models import FoBalance, FoCash
+
+    t = datetime(2026, 11, 5, 1, 0, tzinfo=UTC)
+    z = Decimal("0")
+    cash = FoCash(
+        deposit=Decimal("10000000"), orderable_cash=Decimal("9000000"),
+        orderable_total=Decimal("9000000"), margin_total=z, add_margin=z,
+        nav=Decimal("10000000"), realized_today=z, unrealized=z, requested_at=t, received_at=t,
+    )  # fmt: skip
+    return FoBalance(positions=[], unverified=[], cash=cash)
+
+
+def test_ping_includes_fo_balance_line(project, monkeypatch):
+    """파생 계좌는 `settings.fo` 상품 설정으로 파생 브로커를 조립해 잔고 줄을 보인다."""
+    _accounts(
+        project,
+        extra=[{"id": "paper-fo", "env": "paper", "cano": "2", "acnt_prdt_cd": "03",
+                "markets": ["KR"], "mode": "off", "asset": "fo"}],
+    )  # fmt: skip
+    from trader.features.accounts import cli as acli
+    from trader.kernel.broker.fake import FakeBroker, FakeFoBroker, FakeMarket
+    from trader.kernel.broker.models import Cash
+
+    monkeypatch.setattr(
+        acli,
+        "build_market",
+        lambda s, a: FakeMarket(prices={"005930": Decimal("71500"), "AAPL": Decimal("227.55")}),
+    )
+    seen = []
+
+    def brokers(secrets, accounts, *, fo_product=None):
+        seen.append(([a.id for a in accounts], fo_product is not None))
+        out = []
+        for a in accounts:
+            ba = acli.to_broker_account(a)
+            if a.asset == "fo":
+                assert fo_product is not None  # 파생은 상품 설정이 있어야 조립된다
+                out.append(FakeFoBroker(ba, balance=_fo_balance()))
+            else:
+                cash = Cash(currency="KRW", available=Decimal("1000000"), total=Decimal("1000000"))
+                out.append(FakeBroker(ba, cash={"KR": cash}))
+        return out
+
+    monkeypatch.setattr(acli, "build_brokers", brokers)
+    r = CliRunner().invoke(app, ["accounts", "ping"])
+    assert "[OK] paper-fo 파생 잔고: NAV 10000000 KRW, 주문가능 9000000 KRW" in r.stdout, r.stdout
+    assert "[OK] paper-main KR 현금" in r.stdout and "실패 0건" in r.stdout and r.exit_code == 0
+    assert (["paper-fo"], True) in seen
+
+
+class _OrderTestMarket:
+    def __init__(self, price):
+        self.price, self.asked = price, []
+
+    def get_price_kr(self, ticker):
+        from types import SimpleNamespace
+
+        self.asked.append(ticker)
+        return SimpleNamespace(price=self.price)
+
+
+def _order_test_env(project, monkeypatch, *, fail=()):
+    """paper-main(KR) 계좌 + 가짜 시세(71,500) + 가짜 브로커. 브로커를 돌려준다."""
+    _accounts(project)
+    from trader.features.accounts import cli as acli
+    from trader.kernel.broker.fake import FakeBroker
+
+    holder = {}
+
+    def brokers(secrets, accounts, **kw):
+        out = [FakeBroker(acli.to_broker_account(a), fail=set(fail)) for a in accounts]
+        holder["brokers"] = out
+        return out
+
+    monkeypatch.setattr(acli, "build_market", lambda s, a: _OrderTestMarket(Decimal("71500")))
+    monkeypatch.setattr(acli, "build_brokers", brokers)
+    return holder
+
+
+def test_order_test_paper_places_and_cancels(project, monkeypatch):
+    """모의 계좌: 1주 지정가(현재가 −10%, 호가단위 정렬) 매수 접수 → 즉시 취소, JSON 1줄."""
+    import json
+
+    holder = _order_test_env(project, monkeypatch)
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 0, r.output
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    # 71500 × 0.9 = 64350 → 5만~20만 구간 호가단위 100 → 64400(가장 가까운 호가)
+    assert out == {
+        "account": "paper-main", "market": "KR", "ticker": "005930", "price": "64400",
+        "order_id": "FAKE-1", "placed": True, "cancelled": True, "cancel_error": None,
+    }  # fmt: skip
+    (broker,) = holder["brokers"]
+    (req,) = broker.orders
+    assert (req.side, req.qty, req.order_type, req.price) == ("BUY", 1, "LIMIT", Decimal("64400"))
+    assert broker.cancelled == ["FAKE-1"]
+    assert broker.cancel_kwargs[0]["org_no"] == "00000" and broker.cancel_kwargs[0]["qty"] == 1
+
+
+def test_order_test_refuses_real(project, monkeypatch):
+    holder = _order_test_env(project, monkeypatch)
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "real-main"])
+    assert r.exit_code == 1 and "모의 계좌에서만" in (r.stdout + (r.stderr or ""))
+    assert "brokers" not in holder  # 브로커를 조립하지도 않는다
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "nope"])
+    assert r.exit_code == 1 and "찾을 수 없습니다" in (r.stdout + (r.stderr or ""))
+
+
+def test_order_test_cancels_even_if_cancel_fails(project, monkeypatch):
+    """취소가 실패해도 결과 JSON 에 담고 exit 0(접수는 됐다). 접수 실패는 exit 1."""
+    import json
+
+    _order_test_env(project, monkeypatch, fail={"cancel_order"})
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 0, r.output
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["placed"] is True and out["cancelled"] is False
+    assert "KisApiError" in out["cancel_error"] and "가짜 실패 주입" in out["cancel_error"]
+    _order_test_env(project, monkeypatch, fail={"place_order"})
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 1
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["placed"] is False and out["cancelled"] is False and out["order_id"] is None
+
+
+def test_order_test_fails_clearly_without_price(project, monkeypatch):
+    """현재가가 없으면(None) 주문을 만들지 않고 명확한 오류로 exit 1(M-8)."""
+    from trader.features.accounts import cli as acli
+
+    holder = _order_test_env(project, monkeypatch)
+    monkeypatch.setattr(acli, "build_market", lambda s, a: _OrderTestMarket(None))
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 1
+    assert "현재가가 없어" in (r.stdout + (r.stderr or ""))
+    assert "brokers" not in holder
+
+
+def test_order_test_refuses_dry_run_env(project, monkeypatch):
+    """`TRADER_DRY_RUN` 이 켜져 있으면(0 이 아니면) 점검 주문을 내지 않는다(M-8)."""
+    holder = _order_test_env(project, monkeypatch)
+    monkeypatch.setenv("TRADER_DRY_RUN", "1")
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 1
+    assert "dry-run" in (r.stdout + (r.stderr or ""))
+    assert "brokers" not in holder

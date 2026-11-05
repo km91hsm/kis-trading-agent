@@ -201,7 +201,7 @@ def request_job(request: Request, body: JobBody) -> dict:
 def cancel_job(request: Request, req_id: int) -> Response:
     deps = request.app.state.deps
     with closing(deps.conn_factory()) as conn:
-        if not jobq.cancel(conn, req_id, now=deps.now()):
+        if not jobq.cancel(conn, req_id, now=deps.now(), kinds=kinds(deps)):
             raise HTTPException(status_code=409, detail=CANCEL_ONLY_QUEUED)
         jobq.log_cancel(conn, req_id, channel="web", actor=actor_of(request), now=deps.now())
     return Response(status_code=204)

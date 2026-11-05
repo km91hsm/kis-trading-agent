@@ -15,6 +15,7 @@ from trader.features.spot.messages import (
     APPROVAL_PREFIX,
     approval_line,
     real_confirm_button,
+    reject_notice,
 )
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.notify import messages
@@ -78,8 +79,8 @@ def _decide_and_execute(
 
 
 def _reject(ctx: CommandContext, ectx: executor.ExecContext, aid: int) -> str:
-    """거부 결정. 되면 `[거부]` 알림 1줄(kind approval)을 남긴다 — 알림 기록(notices)이 승인과
-    같이 거부도 갖게(T5-R1; 웹 거부 알림은 M12)."""
+    """거부 결정. 되면 `[거부]` 알림 1줄(`reject_notice`)을 남긴다 — 알림 기록(notices)이 승인과
+    같이 거부도 갖게(T5-R1). 웹 거부는 큐 `approval_notice` 가 같은 문구를 보낸다(M12)."""
     pa = xledger.get_approval(ctx.conn, aid)
     d = approvals.decide(
         ctx.conn, aid, "reject", channel="telegram", actor=ctx.actor, confirm=None,
@@ -88,11 +89,7 @@ def _reject(ctx: CommandContext, ectx: executor.ExecContext, aid: int) -> str:
     if d["ok"]:
         if pa is not None:
             acct = _account(ectx, pa)
-            line = approval_line(pa, acct.env if acct is not None else None)
-            send(
-                ctx.notifier,
-                Message(messages.event("거부", line), kind="approval", account_id=pa["account_id"]),
-            )
+            send(ctx.notifier, reject_notice(pa, acct.env if acct is not None else None))
         return f"#{aid} 거부했어요"
     return messages.failure(f"거부 실패 #{aid}", "", d["error"])
 

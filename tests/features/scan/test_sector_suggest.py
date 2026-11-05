@@ -1,6 +1,6 @@
 """universe sectors: KIS 업종 → sectors.yaml 종목 섹터 제안·기록 (빠진 종목만, 주석 보존)."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -227,7 +227,15 @@ def test_auto_classify_tolerates_lookup_failure(tmp_path):
         SECTORS, Boom(), market="KR", tickers=["357870"], state=tmp_path
     )
     assert got == {}
-    # 실패는 캐시하지 않는다(다음 관측 때 다시 시도)
+    # 실패는 양성 캐시에 넣지 않는다 — 음성 캐시로 같은 날은 다시 묻지 않고 다음 날 다시 시도
+    assert sector_suggest.load_auto(tmp_path).get("KR", {}) == {}
+    m = Boom()
+    sector_suggest.auto_classify(SECTORS, m, market="KR", tickers=["357870"], state=tmp_path)
+    assert "get_industry_kr" not in m.calls
+    tomorrow = datetime.now(UTC) + timedelta(days=1)
+    sector_suggest.auto_classify(
+        SECTORS, m, market="KR", tickers=["357870"], state=tmp_path, now=tomorrow
+    )
     assert sector_suggest.load_auto(tmp_path).get("KR", {}) == {}
 
 

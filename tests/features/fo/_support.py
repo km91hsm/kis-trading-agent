@@ -176,7 +176,7 @@ def env(d=None, **over) -> FoDecisionEnvelope:
 def ports_for(s, accounts: list) -> dict:
     """`Boot.ports` 모양: accounts(모드는 실제 `account_mode`) + regime(실제 구현)."""
     acc = SimpleNamespace(
-        fo_accounts=lambda: list(accounts), fo_brokers=list, accounts=list, brokers=dict,
+        fo_accounts=lambda: list(accounts), fo_brokers=dict, accounts=list, brokers=list,
         market_client=lambda: None, policy=accounts_api.account_mode,
         paused=accounts_api.is_paused, holiday_fn=lambda: (lambda m, d: False),
     )  # fmt: skip

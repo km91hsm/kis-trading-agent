@@ -44,7 +44,8 @@ from trader.kernel.cli.tool_cmd import emit, run_tool
 from trader.kernel.config.market_hours import is_fo_open
 from trader.kernel.execution.types import OrderBookkeepingError
 from trader.kernel.ledger import control
-from trader.kernel.notify.telegram import Notifier, NullNotifier
+from trader.kernel.notify.boot import boot_notifier
+from trader.kernel.notify.telegram import Notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
 from trader.kernel.session import tooling
@@ -100,20 +101,6 @@ class FoToolContext:
     fo: FoExecContext | None = None
 
 
-def _boot_notifier(boot: Any) -> Notifier:
-    """부트 시크릿으로 알림기(없거나 조립 실패면 NullNotifier — 알림 때문에 도구를 막지 않는다)."""
-    from trader.kernel.notify import make_notifier
-
-    if getattr(boot, "secrets", None) is None:
-        return NullNotifier()
-    enabled = boot.settings.notify.enabled if boot.settings is not None else True
-    try:
-        return make_notifier(boot.secrets, enabled=enabled)
-    except (OSError, ValueError) as e:
-        logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
-        return NullNotifier()
-
-
 def _fo_exec_ctx(boot: Any, *, notifier: Notifier, dry_run: bool) -> FoExecContext | None:
     """파생 세션 도구의 실행 컨텍스트(옛 `cli._fo_tool_ctx`). `asset: fo` 계좌가 없으면 None —
     `tool fo *`·`submit-fo-decision` 은 그때 거부한다. 마스터는 캐시만(오프라인), 국면·시장 뷰는
@@ -156,7 +143,7 @@ def tool_ctx(boot: Any) -> FoToolContext:
     """부트 결과(`ports=True`)로 FoToolContext 를 만든다. `TRADER_DRY_RUN` 이 없거나 "1" 이면
     dry_run(주문 없음) — LLM 이 플래그를 빠뜨려도 주문이 나가지 않는다."""
     dry_run = os.environ.get("TRADER_DRY_RUN", "1") != "0"
-    notifier = _boot_notifier(boot)
+    notifier = boot_notifier(boot)
     return FoToolContext(
         settings=boot.settings,
         conn=boot.conn,

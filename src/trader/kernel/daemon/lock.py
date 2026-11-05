@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,8 +22,9 @@ class Lock:
 
     FRESH_S = 10  # 내용 없는 잠금이 이 시간 안에 생겼으면 다른 데몬이 쓰는 중
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, now: Callable[[], datetime] | None = None) -> None:
         self.path = path
+        self._now = now or (lambda: datetime.now(UTC))  # 신선도·started_at 시계(데몬은 deps.now)
         self._hold = None
 
     def _holder(self) -> tuple[int, str | None]:
@@ -39,7 +41,7 @@ class Lock:
 
     def _fresh(self) -> bool:
         try:
-            return (datetime.now(UTC).timestamp() - self.path.stat().st_mtime) < self.FRESH_S
+            return (self._now().timestamp() - self.path.stat().st_mtime) < self.FRESH_S
         except OSError:
             return False
 
@@ -76,7 +78,7 @@ class Lock:
         payload = json.dumps(
             {
                 "pid": os.getpid(),
-                "started_at": datetime.now(UTC).isoformat(),
+                "started_at": self._now().isoformat(),
                 # pid 재사용 대비: 프로세스 시작 시각 식별자를 함께 적고 비교한다
                 "proc_start": process_start(os.getpid()),
             }

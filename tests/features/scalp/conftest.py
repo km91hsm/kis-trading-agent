@@ -138,7 +138,7 @@ def accounts_port(accounts, brokers, market):
     """`AccountsPort` 모양(계좌·브로커·시세 고정, 모드·일시정지는 accounts 기능 원장 조회)."""
     return SimpleNamespace(
         accounts=lambda: accounts,
-        brokers=lambda: brokers,
+        brokers=lambda: list(brokers.values()),
         market_client=lambda: market,
         policy=accounts_api.effective_mode,
         paused=accounts_api.is_paused,

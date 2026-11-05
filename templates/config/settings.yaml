@@ -74,6 +74,10 @@ notify:
   enabled: true
   poll_interval_s: 30
 
+# 보존 정리(내장 retention 잡): 이 일수보다 오래된 state/runs·운영일 플래그·끝난 잡 요청·알림·제어 기록 삭제(30~3650)
+ops:
+  retention_days: 120
+
 # 역할별 모델 (스펙 §4.1). 강세·약세 리서처는 같은 모델(2026-10-26 전체 검토 L11 — 이전엔 약세만 opus).
 models:
   orchestrator: sonnet
@@ -248,3 +252,4 @@ quotes:
   us_poll_ms: 5000         # 미국 정규장 화면 폴링(ms)
   fo_poll_ms: 2000         # 파생 정규장 화면 폴링(ms)
   fx_code: "FX@KRW"       # KIS 환율 종목코드(FHKST03030100, X). FX@KRWKFTC 와 차이는 실기 미확인
+  instrument_names: {}     # 고정 종목명 "<KR|US>:<종목>": 이름 (예: "KR:252670": KODEX 200선물인버스2X) — 데몬 names_fill 이 원장에 적재

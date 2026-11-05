@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
-from fastapi import APIRouter
 
 from trader.kernel.config.sections import Section
 from trader.kernel.ledger.migrations import Migration
 
-if TYPE_CHECKING:  # 순환 import 방지: 둘 다 이 모듈을 import 한다
+if TYPE_CHECKING:  # 순환 import 방지(notify·web 이 이 모듈을 import), fastapi 는 경량 기동(P19)
+    from fastapi import APIRouter
+
     from trader.kernel.notify.commands import CommandContext
     from trader.kernel.web.deps import WebDeps
 
@@ -42,6 +44,8 @@ class JobSpec:
     teardown: Callable[..., None] | None = None
     # cron 요일 제한(APScheduler day_of_week 표기, 예: "mon-sat"). None 이면 매일
     days: str | None = None
+    # interval 잡 주기(초)를 settings 에서 읽는 함수(schedule_key 가 None 이면 interval_s 보다 우선)
+    interval_from: Callable[[Any], int] | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,8 @@ class QueueKind:
     trading: bool
     restart_requeue: bool
     body: Callable[..., Any]
+    # 대기 중 요청을 취소했을 때 부르는 훅 `(conn, params)` — 요청이 쥔 선점 등을 푼다(P14)
+    on_cancel: Callable[[sqlite3.Connection, dict], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,12 @@ class ToolCommand:
 
 @dataclass(frozen=True)
 class HealthArea:
+    """운영 점검 영역 하나. check: `(kernel.ops.OpsContext) -> list[kernel.ops.Item]`.
+
+    기능 영역은 기능당 하나, key = feature id(계약 검사가 중복·불일치를 막는다). 커널 내장 영역은
+    `jobs`·`llm`·`orders`. 항목 key 는 `"{key}.{세부}"` — 접두가 없으면 러너가 붙이고 경고 로그를
+    남긴다. check 가 예외를 던지면 러너가 그 영역만 `"{key}.error"` warning 1건으로 바꾼다."""
+
     key: str
     check: Callable[..., Any]
 

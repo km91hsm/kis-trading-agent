@@ -44,60 +44,106 @@ def _alive_lock(state):
     (state / "daemon.lock").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
 
 
-def test_health_levels(project):
-    deps = ledger_deps(project)
-    out = health.evaluate(deps)
-    assert out["level"] == "fail" and out["checked_at"] == NOW.isoformat()
-    assert {"area": "daemon", "level": "fail", "text": "데몬이 꺼져 있어요"} in out["reasons"]
-    assert set(out) == {"level", "reasons", "checked_at", "version", "features"}
-    _alive_lock(deps.state)
-    assert health.evaluate(deps)["level"] == "ok"
+def _cache(deps, *, at, level="warning", items=None, interval_s=None):
+    from trader.kernel.ops import LABEL, store
+
+    if items is None:
+        items = [{"key": "orders.unknown", "level": "warning", "text": "응답 없는 주문 1건",
+                  "link": "/", "count": 1, "extra": {}}]  # fmt: skip
     conn = deps.conn_factory()
-    for i in range(3):
-        _run(conn, "fx_scan", "error", NOW - timedelta(hours=3 - i))
-    _run(conn, "fx_other", "error", NOW - timedelta(hours=30))  # 24h 밖
-    set_flag(conn, "ws_session_busy:KR", {"until": (NOW + timedelta(seconds=60)).isoformat()})
-    conn.close()
+    try:
+        result = {"level": level, "label": LABEL[level], "at": at.isoformat(), "areas": {},
+                  "items": items, "actions": []}  # fmt: skip
+        if interval_s is not None:
+            result["interval_s"] = interval_s
+        store(conn, result)
+    finally:
+        conn.close()
+
+
+def test_health_uses_daemon_cache_when_fresh(project):
+    deps = ledger_deps(project)
+    _alive_lock(deps.state)
+    at = NOW - timedelta(minutes=5)
+    _cache(deps, at=at)
     out = make_client(deps).get("/api/system/health").json()
-    assert out["level"] == "warn"
-    runs = [r for r in out["reasons"] if r["area"] == "runs"]
-    assert len(runs) == 1 and runs[0]["level"] == "warn" and "fx_scan" in runs[0]["text"]
-    assert {"area": "control", "level": "info", "text": "ws_session_busy:KR"} in out["reasons"]
+    assert out["level"] == "warn" and out["checked_at"] == at.isoformat()
+    assert out["reasons"] == [
+        {"area": "orders", "level": "warn", "text": "응답 없는 주문 1건",
+         "key": "orders.unknown", "link": "/", "count": 1}
+    ]  # fmt: skip
+
+
+def test_health_live_when_cache_missing_or_stale(project):
+    deps = ledger_deps(project)
+    out = make_client(deps).get("/api/system/health").json()  # 캐시 없음 → 웹이 직접 판정
+    assert out["level"] == "fail" and out["checked_at"] == NOW.isoformat()
+    assert any("데몬이 꺼져 있어요" in r["text"] for r in out["reasons"])
+    _cache(deps, at=NOW - timedelta(hours=2), level="ok", items=[])  # 2 × 1800초 넘음
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["level"] == "fail" and out["checked_at"] == NOW.isoformat()
     conn = deps.conn_factory()
-    _run(conn, "fx_scan", "ok", NOW - timedelta(minutes=5))  # 마지막이 성공이면 경고 없음
-    conn.close()
-    assert health.evaluate(deps)["level"] == "ok"
+    try:
+        from trader.kernel.ops import latest
+
+        assert latest(conn)["at"] == (NOW - timedelta(hours=2)).isoformat()  # 웹은 적지 않는다
+    finally:
+        conn.close()
 
 
-def test_health_busy_flag_only_while_until_in_future(project):
-    """`ws_session_busy:<env>` 는 until > now 일 때만 info(M5) — 지난 until·깨진 값은 사유 아님."""
+def test_health_freshness_uses_recorded_interval(project):
+    """데몬이 적은 실제 간격(60초)으로 신선도를 본다 — 2분 지난 결과는 stale(M-2)."""
     deps = ledger_deps(project)
     _alive_lock(deps.state)
-    conn = deps.conn_factory()
-    set_flag(conn, "ws_session_busy:real", {"until": (NOW - timedelta(seconds=1)).isoformat()})
-    set_flag(conn, "ws_session_busy:paper", {"until": "not-a-time"})
-    set_flag(conn, "ws_session_busy:x", True)
-    conn.close()
-    busy = [r for r in health.evaluate(deps)["reasons"] if r["area"] == "control"]
-    assert busy == []
-    conn = deps.conn_factory()
-    set_flag(conn, "ws_session_busy:real", {"until": (NOW + timedelta(seconds=90)).isoformat()})
-    conn.close()
-    busy = [r for r in health.evaluate(deps)["reasons"] if r["area"] == "control"]
-    assert busy == [{"area": "control", "level": "info", "text": "ws_session_busy:real"}]
+    _cache(deps, at=NOW - timedelta(minutes=2), interval_s=60)
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["checked_at"] == NOW.isoformat()  # 캐시를 버리고 직접 판정
+    _cache(deps, at=NOW - timedelta(seconds=90), interval_s=60)
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["checked_at"] == (NOW - timedelta(seconds=90)).isoformat()
 
 
-def test_health_warns_when_daily_sessions_near_cap(project):
+def test_health_live_param_forces_check(project):
     deps = ledger_deps(project)
     _alive_lock(deps.state)
+    _cache(deps, at=NOW - timedelta(minutes=5), level="warning")
+    c = make_client(deps)
+    cached = c.get("/api/system/health").json()
+    assert cached["level"] == "warn" and cached["checked_at"] != NOW.isoformat()
+    live = c.get("/api/system/health?live=1").json()
+    assert live["checked_at"] == NOW.isoformat() and live["level"] == "ok"
+
+
+def test_health_live_when_daemon_dead_despite_fresh_cache(project):
+    """데몬이 ok 점검 직후 죽어도 캐시를 믿지 않는다 — 잠금이 없으면 직접 판정(T2-R3)."""
+    deps = ledger_deps(project)
+    _cache(deps, at=NOW - timedelta(minutes=1), level="ok", items=[])
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["level"] == "fail" and out["checked_at"] == NOW.isoformat()
+    assert any("데몬이 꺼져 있어요" in r["text"] for r in out["reasons"])
+
+
+def test_health_live_reports_kernel_areas(project):
+    """데몬이 살아 있고 오늘 세션이 상한에 닿으면 llm 영역 warn."""
+    deps = ledger_deps(project)
+    _alive_lock(deps.state)
+    assert health.evaluate(deps, live=True)["level"] == "ok"
     deps.settings.llm.daily_session_cap = 10
     conn = deps.conn_factory()
-    for i in range(9):
+    for i in range(10):
         _call(conn, None, NOW - timedelta(minutes=i + 1))
     conn.close()
-    out = health.evaluate(deps)
+    out = health.evaluate(deps, live=True)
     assert out["level"] == "warn"
-    assert any(r["area"] == "sessions" and "9/10" in r["text"] for r in out["reasons"])
+    assert any(r["area"] == "llm" and "10/10" in r["text"] for r in out["reasons"])
+
+
+def test_health_shape_unchanged(project):
+    deps = ledger_deps(project)
+    out = make_client(deps).get("/api/system/health").json()
+    assert set(out) >= {"level", "reasons", "checked_at", "version", "features"}
+    assert out["reasons"] and all(set(r) >= {"area", "level", "text"} for r in out["reasons"])
+    assert out["level"] in {"ok", "warn", "fail"}
 
 
 def test_status_and_daemon_endpoints(project):
@@ -106,7 +152,7 @@ def test_status_and_daemon_endpoints(project):
     set_flag(conn, "some_flag", {"secret": "value"})
     conn.close()
     r = make_client(deps).get("/api/system/status").json()
-    assert "등록된 상태 절 없음" in r["text"]
+    assert "데몬:" in r["text"]  # 커널 절은 늘 있다
     assert r["flags"] == ["some_flag"] and r["paused"] is None
     d = make_client(deps).get("/api/system/daemon").json()
     assert d["alive"] is False and d["pid"] is None

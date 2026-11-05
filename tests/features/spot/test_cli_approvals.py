@@ -52,7 +52,7 @@ def env(project, monkeypatch, settings):
     )
     accounts = [make_account("paper-main", "paper", "approve")]
     brokers = fake_brokers(accounts)
-    monkeypatch.setattr(AccountsPortImpl, "brokers", lambda self: brokers)
+    monkeypatch.setattr(AccountsPortImpl, "brokers", lambda self: list(brokers.values()))
     sent = Sent()
     monkeypatch.setattr(cli_main, "make_notifier", lambda *a, **k: sent)
     conn = db.connect()

@@ -1,6 +1,6 @@
 """파생 세션 입력(`fo/inputs.py`, 옛 `tests/fo/test_inputs.py` 7건) — 절마다 asof·received_at, 체인
 호출 ≤18, 절 실패는 errors, 과거 asof 는 historical, 서브에이전트 묶음 형태. A8: 뉴스·거시 절은
-M11 이연(`news_macro.error`), 시장 뷰는 regime 포트."""
+inputs 포트가 없으면 이연(`news_macro.error`), 있으면 `recent`(M12 T17), 시장 뷰는 regime 포트."""
 
 from __future__ import annotations
 
@@ -89,6 +89,28 @@ def test_bundle_analyst_news_macro_shape(conn):
     assert b["regime"] == inp["context"]["data"]["regime"]
     assert b["market_view"] == inp["context"]["data"]["market_view"]
     assert b["error"] == "M11: InputsPort.recent"
+
+
+def test_news_macro_reads_market_news_through_inputs_port(conn):
+    """M12 T17: `ports["inputs"]` 가 있으면 news_macro 절은 `recent`(종목 무관, asof 이전)로
+    채워지고 이연 오류가 없다 — 묶음에도 `news` 가 실린다."""
+    calls: list = []
+
+    class Inputs:
+        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None,
+                   untagged_only=False):  # fmt: skip
+            calls.append((market, tickers, since, asof, untagged_only))
+            return [{"id": 1, "title": "합성 거시", "source": "s", "published_at": "p",
+                     "received_at": "r", "tickers": [], "novel": True}]  # fmt: skip
+
+    ctx = _ctx(conn)
+    ctx.ports = {**ctx.ports, "inputs": Inputs()}
+    inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
+    assert inp["news_macro"]["error"] is None and "news_macro" not in inp["errors"]
+    assert inp["news_macro"]["data"]["news"][0]["title"] == "합성 거시"
+    assert calls == [("KR", None, NOW - inputs.NEWS_LOOKBACK, NOW, True)]
+    b = inputs.bundle(inp, kind="analyst", role="news_macro")
+    assert b["news"][0]["title"] == "합성 거시" and b["error"] is None
 
 
 def test_bundle_technical_shape(conn):

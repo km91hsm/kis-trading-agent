@@ -144,11 +144,11 @@ def test_api_ml_models_lists_registry(project):
     assert c.get("/api/ml/models/../x").status_code in (400, 404)
 
 
-def test_nav_item_and_no_sse_keys():
+def test_nav_item_and_features_sse_key():
     assert [(n.screen, n.id, n.label, n.order) for n in FEATURE.nav] == [
         ("data", "features", "지표·모델", 30)
     ]
-    assert FEATURE.sse_keys == ()
+    assert [k.key for k in FEATURE.sse_keys] == ["features"]
 
 
 def test_model_version_trailing_newline_rejected(project):

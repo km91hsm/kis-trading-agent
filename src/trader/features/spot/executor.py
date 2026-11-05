@@ -40,6 +40,7 @@ from trader.kernel.execution.types import (
     OrderIntent,
 )
 from trader.kernel.notify import messages
+from trader.kernel.notify.boot import boot_notifier  # spot CLI·도구·분석이 이 이름으로 쓴다
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import OriginSpec
 from trader.kernel.session.run_store import (
@@ -176,8 +177,7 @@ def exec_ctx_from(
     paused: Callable[[Any], bool] | None = None
     if accounts_port is not None:
         accounts = list(accounts_port.accounts())
-        raw = accounts_port.brokers()
-        brokers = dict(raw) if isinstance(raw, dict) else {b.account.id: b for b in raw}
+        brokers = {b.account.id: b for b in accounts_port.brokers()}
         market_client = accounts_port.market_client()
         holiday_fn = accounts_port.holiday_fn()
         policy, paused = accounts_port.policy, accounts_port.paused
@@ -198,22 +198,6 @@ def exec_ctx_from(
         ports=dict(ports or {}),
         **kw,
     )
-
-
-def boot_notifier(boot: Any) -> Any:
-    """부트 결과로 알림기를 만든다(spot CLI·도구·분석 공용). settings `notify.enabled` 를 따르고,
-    시크릿이 없거나 조립이 실패하면(OSError·ValueError) 경고 후 NullNotifier — 알림 때문에
-    실행을 막지 않는다."""
-    from trader.kernel.notify import make_notifier
-
-    if boot.secrets is None:
-        return NullNotifier()
-    enabled = boot.settings.notify.enabled if boot.settings is not None else True
-    try:
-        return make_notifier(boot.secrets, enabled=enabled)
-    except (OSError, ValueError) as e:
-        logger.warning("알림 조립 실패, 알림 없이 진행: %s", type(e).__name__)
-        return NullNotifier()
 
 
 def exec_ctx(boot: Any, *, record_portfolio: bool = True) -> ExecContext:

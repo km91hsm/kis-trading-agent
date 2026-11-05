@@ -145,6 +145,38 @@ def test_judge_context_sections_and_failures():
     assert us["orderbook"] is None
 
 
+def test_judge_context_includes_recent_news():
+    """`ports["inputs"]` 가 있으면 그 종목의 최근 뉴스를 `inputs.recent` 로 싣는다(레인은 수집
+    기능을 import 하지 않는다). 포트가 없거나 실패하면 빈 목록."""
+    calls: list = []
+
+    class Inputs:
+        def recent(self, conn, market, *, tickers, since, limit=20, novel_only=False, asof=None):
+            calls.append((market, list(tickers), since, limit, asof))
+            return [{"id": 1, "title": "합성 뉴스", "published_at": "p", "received_at": "r",
+                     "tickers": ["005930"], "novel": True, "source": "s", "url": "u"}]  # fmt: skip
+
+    class Client:
+        def get_orderbook_kr(self, ticker):
+            return _Book()
+
+    kw = {"market": "KR", "ticker": "005930", "exchange": None, "today": NOW.date(), "now": NOW}
+    out = judge.judge_context(None, {"regime": _Regime(), "inputs": Inputs()}, Client(), **kw)
+    assert out["news"] == [
+        {"title": "합성 뉴스", "source": "s", "published_at": "p"}
+    ]
+    ((market, tickers, since, limit, asof),) = calls
+    assert market == "KR" and tickers == ["005930"] and since < NOW and asof == NOW and limit > 0
+
+    class Broken:
+        def recent(self, *a, **k):
+            raise RuntimeError("뉴스 실패")
+
+    assert judge.judge_context(None, {"regime": _Regime(), "inputs": Broken()}, Client(),
+                               **kw)["news"] == []  # fmt: skip
+    assert judge.judge_context(None, {"regime": _Regime()}, Client(), **kw)["news"] == []
+
+
 def test_judge_context_regime_passes_stored_record(conn, settings):
     """T4-R1: 국면 절은 저장된 기록 그대로 — 없으면 None/None(‘bull’/0 으로 기울이지 않는다)."""
     from trader.features.regime import regime as regime_mod

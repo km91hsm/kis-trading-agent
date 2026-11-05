@@ -25,7 +25,6 @@ def test_not_frozen_defaults(project):
     assert bundle.templates_dir().joinpath("config", "settings.yaml").is_file()
     assert bundle.templates_dir() != project / "templates"
     assert paths.web_dist() == project / "web" / "dist"
-    assert paths.agents_dir() == project / ".claude" / "agents"
 
 
 def test_frozen_root_is_executable_dir(tmp_path, monkeypatch):
@@ -38,7 +37,6 @@ def test_frozen_root_is_executable_dir(tmp_path, monkeypatch):
     assert bundle.tool_command() == "trader tool"
     assert bundle.tool_bin_dir() == exe_dir.resolve()
     assert paths.web_dist() == exe_dir / "_internal" / "web" / "dist"
-    assert paths.agents_dir() == exe_dir / "_internal" / "agents"
     assert bundle.templates_dir() == exe_dir.resolve() / "_internal" / "templates"
     assert bundle.cli_argv() == [str(exe_dir / "trader")]
 
@@ -95,3 +93,63 @@ def test_bundle_root_windows_flat_layout_unchanged(tmp_path, monkeypatch):
 
 def test_app_bundle_dir_is_public():
     assert hasattr(bundle, "app_bundle_dir")
+
+
+def test_service_and_watchdog_argv(tmp_path, monkeypatch):
+    """로그온 등록 대상은 데몬 + 웹 UI 한 프로세스(`app --no-browser`, FR-2)."""
+    assert bundle.service_argv() == [sys.executable, "-m", "trader", "app", "--no-browser"]
+    assert bundle.watchdog_argv() == [sys.executable, "-m", "trader", "watchdog"]
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    assert bundle.service_argv() == [str(exe_dir / "trader"), "app", "--no-browser"]
+    assert bundle.watchdog_argv() == [str(exe_dir / "trader"), "watchdog"]
+
+
+def test_icons_dir_dev_and_frozen(project, tmp_path, monkeypatch):
+    assert bundle.icons_dir() == project / "packaging" / "icons"
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    assert bundle.icons_dir() == exe_dir.resolve() / "_internal" / "icons"
+
+
+def test_first_run_init_copies_missing_only(tmp_path, monkeypatch):
+    """폴더 4개를 만들고 템플릿 중 없는 파일만 복사한다(기존 파일 불변).
+    frozen 이면 번들 docs 도."""
+    tpl = tmp_path / "tpl"
+    (tpl / "config").mkdir(parents=True)
+    (tpl / "secrets").mkdir()
+    (tpl / "config" / "settings.yaml").write_text("a: 1\n", encoding="utf-8")
+    (tpl / "secrets" / ".env.example").write_text("WEB_TOKEN=\n", encoding="utf-8")
+    monkeypatch.setattr(bundle, "templates_dir", lambda: tpl)
+    root = tmp_path / "home"
+    root.mkdir()
+    (root / "config").mkdir()
+    (root / "config" / "settings.yaml").write_text("mine: 1\n", encoding="utf-8")
+    created = bundle.first_run_init(root)
+    assert created == ["secrets/.env.example"]
+    assert all((root / d).is_dir() for d in ("config", "secrets", "state", "docs"))
+    assert (root / "config" / "settings.yaml").read_text(encoding="utf-8") == "mine: 1\n"
+    assert not (root / "secrets" / ".env").exists()
+    assert bundle.first_run_init(root) == []
+    exe_dir = tmp_path / "dist" / "trader"
+    _freeze(monkeypatch, exe_dir)
+    (exe_dir / "_internal" / "docs").mkdir()
+    (exe_dir / "_internal" / "docs" / "guide.md").write_text("# g\n", encoding="utf-8")
+    assert bundle.first_run_init(root) == ["docs/guide.md"]
+
+
+def test_spec_exe_names_differ_case_insensitively():
+    """spec 의 EXE 둘(`trader` 콘솔·`TraderApp` 창 없음)은 대소문자를 무시해도 달라야 한다 —
+    macOS·Windows 의 대소문자 무시 파일시스템에서 같은 폴더에 놓이면 서로 덮어쓴다."""
+    import re
+    from pathlib import Path
+
+    spec = Path(__file__).resolve().parents[3] / "packaging" / "trader.spec"
+    text = spec.read_text(encoding="utf-8")
+    blocks = re.findall(r"\bEXE\((.*?)\n\)", text, re.S)
+    names = [re.search(r'name="([^"]+)"', b).group(1) for b in blocks]
+    assert len(names) == 2
+    assert len({n.lower() for n in names}) == 2
+    # __main__ 은 실행파일명이 traderapp* 일 때만 트레이로 분기한다
+    assert any(n.lower().startswith("traderapp") for n in names)
+    assert "trader" in names

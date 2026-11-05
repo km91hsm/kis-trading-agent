@@ -9,6 +9,16 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+
+def open_folder(path: os.PathLike[str] | str) -> None:
+    """OS 파일 탐색기로 폴더를 연다(트레이 '로그 폴더 열기')."""
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen([opener, str(path)], shell=False)
+
+
 START_FORMAT = "utc:"  # macOS process_start 값의 형식 버전(C 로캘·UTC 고정, 2026-10-27)
 
 

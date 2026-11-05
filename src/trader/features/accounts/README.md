@@ -11,7 +11,10 @@
 
 `LIVE_CONFIRM`, `Account`, `ConfirmationRequired`, `Mode`, `account_mode`, `build_brokers`, `build_market`, `effective_mode`, `get_account_mode`, `is_paused`, `load_accounts`, `market_creds`, `split_accounts`, `to_broker_account`. 다른 기능은 이 파일만 import 한다.
 
-CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secrets import`.
+CLI: `trader accounts show | mode | pause | resume | ping | order-test | add | remove | secrets import`.
+
+- `ping [--account]`: 시세(005930·AAPL)·휴장일 → 현물 계좌는 시장별 현금 줄, 파생 계좌(asset `fo`)는 `settings.fo.product_cfg()`(덕 타이핑 — fo 를 import 하지 않는다)로 조립한 파생 브로커의 잔고 줄 `[OK] <id> 파생 잔고: NAV … KRW, 주문가능 … KRW, 보유 n건, 미확정 n건`(커널 `broker.ping`). `settings.fo` 가 없으면 파생 계좌는 「점검하지 못했습니다」 실패 줄. 사용자 전용(KIS 호출).
+- `order-test --account <id> [--ticker … --exchange NAS]`(P16): 현물 **모의** 계좌 주문 연결 점검 — 계좌 markets 첫 시장의 종목(기본 KR `005930`, US `AAPL`)을 현재가 −10%(`broker.ticks.quantize_price` 로 호가단위 정렬) 1주 지정가 매수로 접수하고 즉시 취소한다. 결과 JSON 1줄 `{account, market, ticker, price, order_id, placed, cancelled, cancel_error}`(접수 실패면 `error` 도). 취소 실패는 `cancel_error` 에 담고 exit 0(주문이 살아 있을 수 있으니 확인), 접수 실패·시세 실패·현재가 없음·키 없음은 exit 1. 실전(`env != paper`)·파생 계좌는 거부(exit 1). `paused` 와 무관하게 돌고(연결 점검), env `TRADER_DRY_RUN` 이 켜져 있으면(0 이 아니면) 거부한다(exit 1). 점검 도구라 executor 코어를 지나지 않고 브로커를 직접 부른다(`order_test.py`, 원장 기록 없음 — 주문 경로 계약 `tests/kernel/registry/test_order_paths.py` 의 `ALLOWED` 예외, fo `order_test` 와 같다). 주문이 나가므로 사용자 전용.
 
 웹(`routes.py`, M11): `GET /accounts`(행: id·env·lane·markets·currency·mode·mode_note·mode_source·paused·nav·nav_at·cash·cash_at·usd_nav·day_pnl·positions_count·pending_approvals — 금액 `str(Decimal)`, `*_at` 은 `account_nav.created_at` UTC, 스냅샷 없으면 null)·`GET /accounts/overview`(KRW·USD 합계 + `quotes.api.fx_rate` 가 있으면 원화 환산, 파생 제외)·`PATCH /accounts/{id}`(실전은 `confirm`=계좌 id; 실전 auto 는 본문 `confirm` 에 계좌 id 를 다시 적으면 웹이 LIVE 확인 기록을 남긴다 — `live_confirmed_json` 에 confirm·at·channel `web`·actor(토큰 지문), `control_log` `account_mode:<id>` 도 같은 channel·actor. 이미 기록이 있으면 다시 쓰지 않는다. 사용자 결정 T6-R1 변경 2026-11-05)·`POST /accounts`·`DELETE /accounts/{id}`(이 PC 직접 접속만)·`GET /settings`·`PATCH /settings/paused`(실전 auto 계좌가 있으면 재개에 그 id 중 하나를 `confirm`)·`GET|POST /settings/secrets`(직접 접속만 — GET 도 토큰을 요구한다: 옛 `POST /control/secrets/status` 는 직접 접속만 봤다. M11b 계약: 연결 키 화면은 토큰을 붙여 부른다). 조립은 `overview.py`(`lane_of`: asset fo → fo, `settings.scalp.accounts` 덕 타이핑 → scalp, 그 밖 spot). SSE 키 `accounts`(모드 지문+paused)·`positions`(보유·NAV 최근 사흘)·`approvals`(pending 수+상태 지문), 메뉴 `accounts/overview "통합"`. 알려진 차이: `settings.scalp.accounts` 키는 아직 없어 `lane_of` 의 scalp 규칙은 맞는 계좌가 없다(T7-R2 — 단타 설정에 계좌 키가 생기면 통일), 파생 NAV 는 통합 현황에 없다(`account_nav` 만 읽음, 파생은 `/fo/summary`, T6-R2).
 
@@ -39,11 +42,12 @@ CLI: `trader accounts show | mode | pause | resume | ping | add | remove | secre
 5. `exec-key list|release` 는 M4.
 6. `accounts_io.blockers` 는 테이블이 없으면 그 사유를 생략한다. 끝난 주문 상태 목록은 커널 `execution.types.dead_status_sql` 을 쓴다(M9). `test_accounts_io.py` 의 `db` fixture 는 M4 전까지 최소 스탠드인 테이블을 CREATE 한다.
 7. 체결통보 리스너(`_notice_listeners`)는 M5.
-8. `ensure_web_token`(`secrets_io`)은 아직 어디에도 연결되지 않았다. 연결 키 웹 라우트는 `GET|POST /settings/secrets`(옛 `POST /control/secrets/status` → GET). 계좌 삭제는 옛 `POST /control/accounts/remove` → `DELETE /accounts/{id}`, 모드는 옛 `POST /control/mode`(실전 auto confirm=LIVE) → `PATCH /accounts/{id}`(confirm=계좌 id + 기존 LIVE 기록).
+8. `ensure_web_token`(`secrets_io`)은 커널 `config.secrets.ensure_web_token` 으로 승격했고(`.env` 편집 helper 포함, `secrets_io` 는 다시 내보냄), `trader app` 이 첫 실행에 호출한다. 연결 키 웹 라우트는 `GET|POST /settings/secrets`(옛 `POST /control/secrets/status` → GET). 계좌 삭제는 옛 `POST /control/accounts/remove` → `DELETE /accounts/{id}`, 모드는 옛 `POST /control/mode`(실전 auto confirm=LIVE) → `PATCH /accounts/{id}`(confirm=계좌 id + 기존 LIVE 기록).
 9. `parse_command("/foo")` 는 이름 `foo` 를 돌려준다(거부는 디스패처의 몫).
 10. `REAL_FO_OFF_NOTE` 문구를 옛 "Phase 26 범위 밖" 에서 "실전 파생 계좌는 주문 없음(파생 레인 범위 밖)" 으로 바꿨다.
 11. 옛 `SCALP_EXIT` 표·`DecisionBrief` 는 커널 `notify.messages` 에 이식하지 않았다 — `SCALP_EXIT` 는 M9 에서 scalp `messages.py` 로 이식됐다(`carry_over` 추가), `DecisionBrief` 는 spot 몫.
-12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다).
+12. `/status` 는 M9 에서 절별 격리를 추가했다(실패 절은 `- {title}: 조회 실패(...)` 한 줄로 남고 나머지 절은 그대로 보인다). M12 부터 커널 `ops.status` 가 절을 모으고(텔레그램은 절마다 `[제목]` 줄, `trader status` 는 STATUS.md `## 계좌`), 「계좌」 절은 `- 실행 중|일시정지` + 계좌마다 `id · env · 시장 · 실효 모드`(확인 없는 실전 auto 는 `auto→off(LIVE 미확인)`, T7-R3).
+13. health(M12): accounts 는 점검 영역을 두지 않는다 — 계좌 손실·주문 상태는 커널 `orders`·기능 `regime`·`spot` 영역이 본다. 트레이 일시정지 토글은 포트 `set_paused(..., channel="tray")` 로 `control_log` 에 남는다.
 13. `notify.enabled=false` 와 토큰 없음이 `telegram poll|loop` 에서 같은 토큰 오류 문구로 나온다(원인 구분 없음).
 14. 명령별 echo 는 `name arg` 한 줄로 통일했다. `/mode <id> fast` 는 옛 코드처럼 "거부: …".
 15. `_COMMAND_RE` 는 `[a-z_]+` 라 숫자가 든 명령 이름은 쓸 수 없다. 핸들러는 `load_accounts()` 를 시크릿 없이 호출한다.

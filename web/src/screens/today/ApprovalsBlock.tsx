@@ -1,5 +1,5 @@
 // 대기 승인 — 행마다 근거 요약·승인·거절. 실전(env≠paper)은 계좌 id 재입력 뒤 confirm 을 싣는다.
-// 행·확인 본문에 금액(계좌 통화 — /accounts currency, 모르면 원화)과 결정 상세 링크(스펙 §6.1-1).
+// 행·확인 본문에 금액(주문 시장 통화 row.currency — 없으면 /accounts currency, 모르면 원화)과 결정 상세 링크(스펙 §6.1-1).
 // 승인 202 는 데몬이 집행할 때까지 「집행 대기」 칩(SSE approvals·orders 로 다시 읽어 행이 사라지면 같이 사라짐).
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -16,6 +16,8 @@ export type Approval = {
   env: string;
   decision: { asset: string; id: number | null } | null;
   ticker: string;
+  market?: string | null;
+  currency?: string | null;
   side: string;
   qty: number;
   amount: string | null;
@@ -30,10 +32,12 @@ type Action = "approve" | "reject";
 const ACTION_LABEL: Record<Action, string> = { approve: "승인", reject: "거절" };
 const SIDE_LABEL: Record<string, string> = { BUY: "매수", SELL: "매도" };
 
-/** 승인 금액 — 계좌 통화로 「210,000원」·「$461.00」. 금액이 없으면 null. */
+/** 승인 금액 — 주문 시장 통화(row.currency, 원화 계좌로 산 미국 주식도 USD)로 「210,000원」·「$461.00」.
+ *  시장을 모르는 행만 계좌 통화로 추정. 금액이 없으면 null. */
 function amountText(row: Approval, accounts: Account[]): string | null {
   if (row.amount == null) return null;
-  const usd = accounts.find((a) => a.id === row.account_id)?.currency === "USD";
+  const currency = row.currency ?? accounts.find((a) => a.id === row.account_id)?.currency;
+  const usd = currency === "USD";
   return usd ? `$${fmtMoney(row.amount, "USD")}` : `${fmtMoney(row.amount, "KRW")}원`;
 }
 

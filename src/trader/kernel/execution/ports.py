@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +27,12 @@ class AccountsPort(Protocol):
         ...
 
     def paused(self, conn: Any) -> bool: ...
+
+    def set_paused(
+        self, conn: Any, value: bool, *, channel: str = "cli", actor: str | None = None
+    ) -> None:
+        """원장 `paused` 플래그를 쓰고 바뀌었으면 control_log 에 남긴다(트레이 등 커널 진입점용)."""
+        ...
 
     def holiday_fn(self) -> Callable[[str, date], bool] | None: ...
 
@@ -53,6 +59,24 @@ class InputsPort(Protocol):
         conn_factory: Callable[[], Any],
     ) -> dict:
         """`00_inputs` 를 저장하고 그 payload 를 돌려준다."""
+        ...
+
+    def recent(
+        self,
+        conn: Any,
+        market: str,
+        *,
+        tickers: Iterable[str] | None,
+        since: datetime,
+        limit: int = 20,
+        novel_only: bool = False,
+        asof: datetime | None = None,
+        untagged_only: bool = False,
+    ) -> list[dict]:
+        """`since` 이후·`asof`(없으면 지금) 이전에 수신한 시장 뉴스(최신순, 최대 `limit`). 행은
+        `id·title·published_at·received_at·tickers(list[str])·novel(bool)·source` 를 담는다.
+        `tickers` 를 주면 그중 하나라도 태그된 뉴스만, `novel_only` 면 유사 중복이 아닌 것만,
+        `untagged_only` 면 종목 태그 없는 시장·거시 뉴스만."""
         ...
 
 
@@ -135,6 +159,19 @@ class ScanPort(Protocol):
 
     def watchlist(self, conn: sqlite3.Connection, market: str | None) -> list[str]:
         """런타임 관심종목. market 을 주면 그 시장 종목만 접두사 없이."""
+        ...
+
+    def classify(
+        self,
+        conn: sqlite3.Connection,
+        market: str,
+        tickers: Iterable[str],
+        *,
+        exchanges: Mapping[str, str | None] | None = None,
+    ) -> None:
+        """sectors.yaml·자동 캐시에 없는 종목을 KIS 업종으로 대분류해 자동 캐시에 적는다
+        (`sector_of` 가 읽는다). `exchanges` 는 US 종목 → 거래소(NAS|NYS|AMS). 조회 실패는 같은
+        날 다시 묻지 않는다. 시세 클라이언트가 없으면 아무것도 하지 않는다."""
         ...
 
 

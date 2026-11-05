@@ -1,4 +1,5 @@
-"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·큐 `approve_execute`(결정된 승인 집행)·
+"""spot 데몬 잡: `approvals_expire`(만료 승인 정리)·큐 `approve_execute`(결정된 승인 집행,
+취소하면 선점 해제)·`approval_notice`(웹 거부 알림)·
 `fills_sync`(체결 동기화)·`balance_refresh`·`{market}_reconcile`(야간 대사)·
 `{market}_rebalance`(주간 리밸런스)·`{market}_monitor`(장중 감시)·`notice_listener`(체결통보)."""
 
@@ -28,19 +29,19 @@ from trader.features.spot import (
     resume,
 )
 from trader.features.spot import ledger as spot_ledger
+from trader.features.spot.messages import reject_notice
 from trader.features.spot.scan_analyze import QUEUE_KINDS_SCAN
 from trader.kernel.broker import factory
 from trader.kernel.config.market_hours import REGULAR, session_over
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
-from trader.kernel.daemon.runner import STALE_SESSION_AGE
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as xledger
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.notify import messages
-from trader.kernel.notify.telegram import NullNotifier
+from trader.kernel.notify.telegram import NullNotifier, send
 from trader.kernel.registry.types import JobSpec, QueueKind
 from trader.kernel.session import calls
 from trader.kernel.session.run_store import run_date_for
@@ -161,6 +162,7 @@ def balance_refresh(ctx, *, force: bool = False) -> dict:
                 cancel_buys=not dry_run and m in open_now,
                 cancel_fn=executor.killswitch_canceller(ectx),
                 notifier=ectx.notifier,
+                scan=ctx.ports.get("scan"),
             )
             for m in markets
         }
@@ -414,20 +416,6 @@ class ReevaluateParams(BaseModel):
     trigger_ids: list[int] = []
 
 
-def _close_stale_sessions(deps) -> int:
-    """1시간 넘게 running 인 세션 행을 error 로 닫는다(세션이 중간에 죽으면 남는다)."""
-    conn = deps.conn_factory()
-    try:
-        n = calls.close_stale_running(
-            conn, older_than=(deps.now() - STALE_SESSION_AGE).isoformat()
-        )
-    finally:
-        conn.close()
-    if n:
-        logger.warning("stale running 세션 %d건을 error 로 정리", n)
-    return n
-
-
 def _recollect(deps, market: str, ticker: str, exchange: str | None) -> None:
     """뉴스 재평가: 입력을 강제 재수집한다. 포트가 없거나 실패하면 기존 입력으로 재평가."""
     inputs = deps.ports.get("inputs")
@@ -460,7 +448,11 @@ def reevaluate_request(deps, params: dict, progress) -> dict:
     """큐 `reevaluate` 1건: 트리거 행을 읽어 `resume.reevaluate` 세션을 돈다. 이미 처리된
     트리거·장 마감(장 없는 날 포함)·종료 중이면 세션 없이 건너뛴다. 세션은 같은 종목 분석과
     겹치지 않게 종목 락(`locks.lock_for`) 안에서 돌고, 끝나면 형제 트리거도 같은 표시로 닫는다."""
-    _close_stale_sessions(deps)
+    conn = deps.conn_factory()
+    try:  # 세션 전에 stale running(1시간 초과) 세션 행을 error 로 닫는다
+        calls.close_stale(conn, now=deps.now())
+    finally:
+        conn.close()
     market, ticker = params["market"], params["ticker"]
     exchange = params.get("exchange")
     trigger_id = int(params["trigger_id"])
@@ -579,11 +571,51 @@ def approve_execute_body(deps, params: dict, progress) -> dict:
         conn.close()
 
 
+class ApprovalNoticeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: int
+    action: Literal["reject"]
+    actor: str | None
+    channel: str
+
+
+def approval_notice_body(deps, params: dict, progress) -> dict:
+    """큐 `approval_notice`: 웹 거부 뒤 텔레그램 `[거부]` 알림(spot `messages.reject_notice` —
+    `/reject` 와 같은 문구)을 보낸다. 웹은 알림을 쥐지 않아 데몬이 보낸다(P15). 알림기가 없거나
+    승인이 거부 상태가 아니면 건너뛴다."""
+    aid = int(params["approval_id"])
+    if deps.notifier is None:
+        return {"approval_id": aid, "skipped": "알림기 없음"}
+    conn = deps.conn_factory()
+    try:
+        a = xledger.get_approval(conn, aid)
+    finally:
+        conn.close()
+    if a is None:
+        return {"approval_id": aid, "skipped": f"승인 요청 #{aid} 없음"}
+    if a["status"] != "rejected":  # 거부로 끝난 승인에만 [거부] 알림을 보낸다(M-1)
+        return {"approval_id": aid, "skipped": f"승인 요청 #{aid} 상태 {a['status']}"}
+    port = (deps.ports or {}).get("accounts")
+    acct = next((x for x in port.accounts() if x.id == a["account_id"]), None) if port else None
+    ok = send(deps.notifier, reject_notice(a, acct.env if acct is not None else None))
+    return {"approval_id": aid, "sent": bool(ok)}
+
+
+APPROVE_EXECUTE = QueueKind(
+    "approve_execute", ApproveExecuteParams, "승인 집행", "fast", 0, True, False,
+    approve_execute_body,
+    # 대기 중 집행 요청을 취소하면 그 승인의 선점을 푼다(P14) — 다시 결정할 수 있게
+    on_cancel=lambda conn, p: approvals.release(conn, int(p["approval_id"])),
+)  # fmt: skip
+APPROVAL_NOTICE = QueueKind(
+    "approval_notice", ApprovalNoticeParams, "승인 결정 알림", "info", 0, False, False,
+    approval_notice_body,
+)  # fmt: skip
+
 QUEUE_KINDS = (
-    QueueKind(
-        "approve_execute", ApproveExecuteParams, "승인 집행", "fast", 0, True, False,
-        approve_execute_body,
-    ),
+    APPROVE_EXECUTE,
+    APPROVAL_NOTICE,
     QueueKind(
         "fills_sync", EmptyParams, "체결 동기화", "fast", 0, False, True, fills_then_balance
     ),

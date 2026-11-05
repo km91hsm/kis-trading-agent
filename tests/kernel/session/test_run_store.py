@@ -46,3 +46,15 @@ def test_run_date_for_us_keeps_previous_kst_date_after_midnight():
     assert run_store.run_date_for("US", datetime(2026, 10, 19, 15, 30, tzinfo=UTC)) == date(
         2026, 10, 19
     )
+
+
+def test_checkpoint_payload_envelope():
+    """체크포인트 봉투 {schema_version, data, call} — tools·executor 공용 모양."""
+    from trader.kernel.session.stages import CHECKPOINT_SCHEMA_VERSION
+
+    assert run_store.checkpoint_payload({"a": 1}) == {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "data": {"a": 1},
+        "call": None,
+    }
+    assert run_store.checkpoint_payload({"a": 1}, call={"agent": "x"})["call"] == {"agent": "x"}

@@ -1,13 +1,16 @@
 """spot 위험 카드(`risk_card`): 지금 보유 비중에 최근 거래일 수익을 적용한 하루 VaR·CVaR 95%·
 베타·상관·위험 기여. 원장 스냅샷과 `ports["ml"].close_table` 만 읽는다(표시 전용). 옛
-`ledger.risk_card` 이식 — `positions_view.py` 에서 나눴다(동작 불변)."""
+`ledger.risk_card` 이식 — `positions_view.py` 에서 나눴다(동작 불변). 설정 한도·사용량(`usage`)은
+M12 추가."""
 
 from __future__ import annotations
 
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from trader.kernel.execution import ledger as xledger
@@ -30,12 +33,75 @@ def _version(conn: sqlite3.Connection, account_id: str, market: str) -> tuple:
     ).fetchone())  # fmt: skip
 
 
+LIMIT_KEYS = ("max_position_pct", "max_positions", "max_sector_pct", "min_cash_pct",
+              "daily_loss_stop_pct")  # fmt: skip
+
+
 def risk_card(
     conn: sqlite3.Connection, ml: Any, *, account_id: str, market: str, today: date,
-    window: int = WINDOW,
+    window: int = WINDOW, limits: Any = None, sector_of: Callable[[str], str | None] | None = None,
+    exclude: frozenset[str] = frozenset(),
 ) -> dict:  # fmt: skip
     """`_risk` 결과를 (계좌·시장·기준일·창)별로 기억한다(스냅샷 버전이 바뀌거나 TTL 이
-    지나면 다시 계산)."""
+    지나면 다시 계산). `limits`(설정 `risk`)를 주면 한도 `limits` 와 지금 사용량 `usage` 를
+    붙인다 — 가벼운 원장 조회라 기억하지 않고, 종가가 부족한 `insufficient` 카드에도 붙는다."""
+    card = _cached(conn, ml, account_id=account_id, market=market, today=today, window=window)
+    if limits is None:
+        return card
+    return {
+        **card,
+        "limits": {k: getattr(limits, k) for k in LIMIT_KEYS},
+        "usage": usage(
+            conn, account_id=account_id, market=market, sector_of=sector_of, exclude=exclude
+        ),
+    }
+
+
+def usage(
+    conn: sqlite3.Connection, *, account_id: str, market: str,
+    sector_of: Callable[[str], str | None] | None, exclude: frozenset[str] = frozenset(),
+) -> dict:  # fmt: skip
+    """최신 잔고 스냅샷의 한도 사용량(NAV 대비 비율). 모르는 값은 None: 스냅샷·NAV 없음, 섹터
+    맵 없음, 직전 NAV 없음(일일 손익).
+
+    게이트(`rules.evaluate`)와 같은 규약: `exclude`(`excluded_tickers` — 헤지·현금 운용 ETF)는
+    종목 수·최대 비중·섹터에서 빼고, 섹터 맵에 없는 종목은 '기타' 로 묶는다. 현금은 브로커 현금
+    (`account_nav.cash`)만 — 게이트의 현금 하한도 가능금액(현금)으로 보므로 현금 운용 ETF 평가액을
+    현금에 더하지 않는다."""
+    out: dict[str, Any] = dict.fromkeys(
+        ("position_pct_max", "positions", "sector_pct_max", "cash_pct", "daily_loss_pct")
+    )
+    snap = xledger.latest_positions(conn, account_id, market)
+    if not snap:
+        return out
+    held = {
+        str(p["ticker"]): Decimal(str(p["eval_amount"] or 0))
+        for p in snap["positions"]
+        if Decimal(str(p["eval_amount"] or 0)) > 0 and str(p["ticker"]) not in exclude
+    }
+    out["positions"] = len(held)
+    nav = Decimal(str(snap["nav"])) if snap["nav"] is not None else None
+    if nav is None or nav <= 0:
+        return out
+    out["position_pct_max"] = float(max(held.values(), default=Decimal(0)) / nav)
+    if snap["cash"] is not None:
+        out["cash_pct"] = float(Decimal(str(snap["cash"])) / nav)
+    if sector_of is not None:
+        sectors: dict[str, Decimal] = {}
+        for t, amount in held.items():
+            sec = sector_of(t) or "기타"
+            sectors[sec] = sectors.get(sec, Decimal(0)) + amount
+        out["sector_pct_max"] = float(max(sectors.values()) / nav) if sectors else None
+    prev = xledger.latest_nav_before(conn, account_id, date.fromisoformat(snap["date"]),
+                                     market=market)  # fmt: skip
+    if prev:
+        out["daily_loss_pct"] = float(nav / prev - 1)
+    return out
+
+
+def _cached(
+    conn: sqlite3.Connection, ml: Any, *, account_id: str, market: str, today: date, window: int
+) -> dict:
     key = (account_id, market, today, window, id(ml))
     version = _version(conn, account_id, market)
     now = time.monotonic()

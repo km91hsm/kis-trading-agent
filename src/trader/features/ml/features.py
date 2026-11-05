@@ -125,6 +125,13 @@ def has_files(state: Path | None) -> bool:
     return d.exists() and any(d.glob("*.parquet"))
 
 
+def latest_day(state: Path | None) -> str | None:
+    """가장 최근 날짜 파일의 날짜(`YYYY-MM-DD`) — 없으면 None (디렉터리는 만들지 않음)."""
+    base = state if state is not None else paths.state_dir()
+    d = base / "features"
+    return max((f.stem for f in d.glob("*.parquet")), default=None) if d.exists() else None
+
+
 def _flow_sums(flows: list[InvestorFlow] | None, days: int = 20) -> dict[str, int | None]:
     if not flows:
         return dict.fromkeys(FLOW_COLUMNS)

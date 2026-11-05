@@ -182,3 +182,16 @@ def test_bad_time_in_list_is_config_error():
     s = spec(id="x", per_market=False, schedule_key="fills.times")
     with pytest.raises(ConfigError):
         run_build([feat(s)], schedule=SimpleNamespace(fills=SimpleNamespace(times=["16:10", "7"])))
+
+
+def test_interval_from_settings_when_no_schedule_key():
+    s = spec(
+        id="probe", per_market=False, trigger="interval", schedule_key=None, interval_s=1800,
+        interval_from=lambda st: st.minutes * 60,
+    )  # fmt: skip
+    (job,) = run_build([feat(s)], settings=SimpleNamespace(minutes=7))
+    assert job.trigger_kwargs == {"seconds": 420}
+    # interval_from 이 없으면 interval_s 그대로
+    (job,) = run_build([feat(spec(id="p2", per_market=False, trigger="interval",
+                                  schedule_key=None, interval_s=1800))])  # fmt: skip
+    assert job.trigger_kwargs == {"seconds": 1800}

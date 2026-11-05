@@ -9,14 +9,15 @@ import time
 from datetime import UTC, datetime
 
 import typer
-import uvicorn
 
-from trader.kernel.cli import init_cmd, selfcheck
+from trader import __version__
+from trader.kernel.cli import app_cmd, init_cmd, install_cmd, selfcheck, status_cmd, watchdog_cmd
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
 from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
+from trader.kernel.config.secrets import ensure_web_token
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
 from trader.kernel.notify import NullNotifier
@@ -26,7 +27,6 @@ from trader.kernel.notify.telegram import TelegramNotifier, make_notifier, make_
 from trader.kernel.platform import paths
 from trader.kernel.registry import discover, hooks
 from trader.kernel.registry.types import Feature
-from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
 from trader.kernel.web.deps import WebDeps
 
 logger = logging.getLogger("trader.cli")
@@ -134,22 +134,26 @@ def build_web_deps(boot_: Boot) -> WebDeps:
 
 @config_errors
 def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 실행")) -> None:
-    """스케줄러 데몬을 시작하고 종료 신호까지 기다린다."""
+    """스케줄러 데몬을 시작하고 종료 신호까지 기다린다. 다른 인스턴스가 잠금을 쥐고 있으면
+    무거운 조립 전에 안내하고 exit 0(로그온 재기동 반복 방지, FR-1)."""
+    running = app_cmd.running_web()
+    if running is not None:
+        typer.echo(f"이미 실행 중입니다 — http://{running[0]}:{running[1]}")
+        return
     b = boot(ports=True, schedule=True, log_name="daemon")
     d = Daemon(b.features, build_daemon_deps(b, dry_run=dry_run))
+    started = False
     try:
         if not d.start():
             typer.echo("다른 데몬이 실행 중입니다", err=True)
             raise typer.Exit(code=1)
-    except BaseException:
-        b.conn.close()
-        raise
-    try:
+        started = True
         # 타임아웃 없는 wait 는 Windows 에서 SIGINT 로 깨지 않는다
         while not d.deps.stop_event.wait(1.0):
             pass
     finally:
-        d.shutdown()
+        if started:  # 기동 실패는 start 가 스스로 정리한다(teardown 은 돌리지 않는다)
+            d.shutdown()
         b.conn.close()
 
 
@@ -159,6 +163,11 @@ def web(
     port: int | None = typer.Option(None, "--port", help="포트 (기본: settings.web.port)"),
 ) -> None:
     """웹 UI·API 서버를 띄운다."""
+    import uvicorn
+
+    from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
+
+    ensure_web_token()  # app 과 같은 순서: 토큰 없이 띄우면 제어 API 가 통째로 닫힌다(T19-R1)
     b = boot(ports=True, log_name="web")  # 계좌 env(실전 confirm) 등은 ports 로 본다
     host = host or b.settings.web.bind
     port = port or b.settings.web.port
@@ -244,12 +253,31 @@ telegram_app.command("poll")(telegram_poll)
 telegram_app.command("loop")(telegram_loop)
 
 
+def _version_cb(value: bool) -> None:
+    if value:
+        typer.echo(f"trader {__version__}")
+        raise typer.Exit()
+
+
+def _root(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_cb, is_eager=True, help="버전을 출력하고 끝낸다"
+    ),
+) -> None:
+    """KIS 자동매매 에이전트"""
+
+
 def build_app(features: list[Feature]) -> typer.Typer:
     root = TraderApp(help="KIS 자동매매 에이전트", no_args_is_help=True)
+    root.callback()(_root)
     root.command("init")(init_cmd.init)
     root.command("selfcheck")(selfcheck.selfcheck)
+    root.command("status")(status_cmd.status)
+    root.command("watchdog")(watchdog_cmd.watchdog)
+    root.command("install")(install_cmd.install)
     root.command("daemon")(daemon)
     root.command("web")(web)
+    root.command("app")(app_cmd.app)
     root.command("notify-test")(notify_test)
     root.add_typer(telegram_app, name="telegram")
     root.add_typer(dev_app, name="dev")

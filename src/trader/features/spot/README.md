@@ -51,6 +51,7 @@ CLI(`uv run trader spot --help` 로 확인):
 | `fills_sync` | fast | 0 | False | True | 없음(`EmptyParams`) | `fills_then_balance` — 체결 동기화 뒤 장 밖이어도 잔고를 바로 다시 읽음 |
 | `reconcile` | fast | 0 | False | True | `market`(선택) | `reconcile_request` |
 | `rebalance` | fast | 0 | True | False | `market`(선택, 없으면 전 시장) | `rebalance_request` — 시장별 `{market: 결과}`, 일시정지면 `skipped` 만 |
+| `approval_notice` | info | 0 | False | False | `approval_id`·`action`(`reject`만)·`actor`·`channel` (`extra=forbid`) | `approval_notice_body` — 웹 거부 뒤 텔레그램 `[거부]` 알림(`messages.reject_notice`, `/reject` 와 같은 문구). 알림기가 없으면 `skipped` |
 | `reevaluate` | reeval | 10 | True | False | `market`·`ticker`·`exchange`·`trigger_id`·`trigger_ids` (`dry_run` 칸 없음, `extra=forbid`) | `reevaluate_request` — 트리거 확인·뉴스면 재수집·종목 락·세션·형제 트리거 마감 |
 
 게이트는 accounts 가 `Feature.gates` 로 공급한다: `market`(일시정지·주말·휴장), `monitor`(market + schedule 의 `<시장>.monitor.start/end` 창). `news_collect` 는 ingest 의 interval 잡이고 spot 큐 kind 가 아니다. 데몬 기동 때 커널 내장 잡 `telegram_poll` 과 큐 틱 4개(`job_queue`·`_fast`·`_reeval`·`_info`)가 함께 등록된다(`docs/architecture.md` daemon).
@@ -78,6 +79,10 @@ CLI(`uv run trader spot --help` 로 확인):
 ## 웹 (M11, `routes.py`)
 
 - `approvals_router`: `GET /approvals`·`PATCH /approvals/{id}`(선점 + `approve_execute` 큐).
+- 승인 취소 선점 해제(M12): 대기 중 `approve_execute` 를 `DELETE /jobs/{id}` 로 취소하면 `QueueKind.on_cancel` 이 `approvals.release` 로 선점을 푼다. 집행 요청이 중복(`DuplicateRequest`)이라 못 들어가도 선점을 풀고 409.
+- 웹 거부 알림(M12): `PATCH {action: reject}` 는 원장 결정 뒤 큐 `approval_notice` 를 넣고 데몬이 텔레그램 `[거부]` 를 보낸다(웹은 알림을 쥐지 않는다). 큐 등록이 실패해도 거부 결과는 그대로(로그만).
+- 승인 행 통화(M12): `market`(주문 시장, 없으면 계좌의 유일한 시장, 모르면 null)·`currency`(시장 기준 KR→KRW·US→USD — 원화 계좌로 산 미국 주식도 USD).
+- 리스크 한도(M12): `/positions/risk` 는 `limits`(설정 `risk` 의 `max_position_pct`·`max_positions`·`max_sector_pct`·`min_cash_pct`·`daily_loss_stop_pct`)와 `usage`(`position_pct_max`·`positions`·`sector_pct_max`(`ports["scan"]` 섹터, 맵에 없는 종목은 '기타', 포트 없으면 null)·`cash_pct`(브로커 현금/NAV)·`daily_loss_pct`(직전 NAV 대비, 없으면 null))를 `insufficient` 카드에도 싣는다. 게이트와 같이 `excluded_tickers`(헤지·현금 운용 ETF)는 사용량에서 뺀다.
 - `positions_router`(조회만): `GET /positions/overview?market=`(현물 계좌 시장·환경별 합산, 파생 제외), `GET /positions/risk?account_id=&market=`(위험 카드 — 종가는 `ports["ml"].close_table`).
 - `decisions_router`(조회만, `decisions_view.py`): `GET /decisions/spot/{id}`·`/trace`·`/outcomes`·`/checkpoints/{stage}`·`GET /decisions/spot/news-refs`, `GET /markets/{market}/today`(옛 `/today`·`/market-checkpoint`), `GET /risk-checks?date=`.
 - `RESOURCES` 의 `/decisions`·`/orders` 현물 조각(단타 행 포함, `format=csv` 는 merge 가 처리).
@@ -89,7 +94,8 @@ CLI(`uv run trader spot --help` 로 확인):
 
 CLI·명령
 - 최상위 `trader analyze`·`trader collect` 별칭이 없다(기능 sub-app 일관): `trader spot analyze`, `trader ingest collect`. 옛 `approvals` 도 `trader spot approvals`. 스펙 M4 행의 `trader analyze --dry-run` 은 `trader spot analyze --dry-run` 으로 읽는다.
-- `trader status`(마지막 결정 표시)는 M12.
+- `trader status`(M12): STATUS.md·`/status` 의 spot 절은 「최근 결정」(원장 `decisions` 최근 3건, T7-R1)·「미승인 주문」·「성향」(계좌×시장 `stance.decide`).
+- health(M12): 영역 `spot` — `spot.fill_ambiguous.{market}`(체결 매칭 모호, warning)·`spot.reconcile.<계좌>.<시장>`(야간 대조 불일치 warning · 현지 평일 예정 시각 + 30분 유예 뒤 미실행 watch — 휴장·건너뜀 제외, KR 휴장은 accounts 포트 `holiday_fn`, 없으면 US 만 `is_us_holiday` 폴백 T4-R1).
 - 텔레그램 핸들러는 `CommandContext.ports["accounts"]` 로 계좌·브로커·정책을 받는다(포트가 없으면 안내만, 주문 없음).
 - `approvals_expire` 잡은 `boot` 를 부르지 않고 `ctx.conn_factory()`·`ctx.now`·`ctx.notifier` 로 계좌·브로커 없는 최소 `ExecContext` 를 만든다(만료는 conn+now 만 쓴다).
 - `approval_line` 은 spot `messages.py` 가 소유한다(커널 `notify.messages` 의 ENV·SIDE·`money`·`kst_hhmm` 재사용).
@@ -101,7 +107,7 @@ CLI·명령
 - `trader_context` 는 quote·risk_limits·costs_bp·portfolio·holding·regime·market_view·quant 를 싣는다(regime·market_view 는 `ports["regime"]` 가 있고 헤지가 켜져 있을 때만, 아니면 None; `quant` 는 M7 부터 `05_quant` 리포트 요약). M8 부터 `memory`·`memory_status`(`ports["evaluation"].memory_context` — 포트·원장이 없으면 `[]`·`{warmup: true, breaker: null}`)와 `calibration`(`35_calibration` 체크포인트, `ml.yaml calibration.enabled ∧ inject` 일 때만, 아니면 None)도 싣는다. theme 컨텍스트는 주입하지 않는다. `35_calibration` 은 `ensure_calibration` 이 `ensure_quant` 와 같은 세 지점(`scan_analyze`·`tool collect`(결과 `calibration`)·`spot analyze`)에서 쓴다.
 - `AnalystRole` 은 4종을 유지한다(`ANALYST_ROLES` 와 일치). `05_quant` 는 `QuantReport.role="quant"` 로 별도 스키마다(Ruling M7-K1).
 - `resume` 세션·`31_decision_r<n>` 재평가와 옛 `ingest_checkpoint` 의 `stop_floor` 규칙(같은 날 재평가 시 BUY/ADD/HOLD 손절가 최고값 유지)은 M5 에서 이식했다(`resume.py`).
-- `paths.agents_dir()` 는 쓰지 않는다(에이전트 md 는 `features/spot/agents/`, 번들 정리는 M12).
+- 에이전트 md 는 `features/spot/agents/` 에 있다(옛 `paths.agents_dir()` 는 M12 에서 삭제).
 - `common_rules`(커널 `session.agents`) 는 옛 정규화(끝 마침표 제거)를 복원했다 — 옛 md 간 마침표 위치 차이를 계약 테스트가 허용하기 위함.
 
 장중 감시(`monitor.py`)
@@ -125,9 +131,9 @@ CLI·명령
 - 메모리 서킷브레이커·RL 사이저는 M8 부터 `ports["evaluation"]` 으로 받는다: 브레이커는 `build_portfolio` 가 모의 계좌·스냅샷 기록일 때 **그 계좌** 최근 30일 NAV(`nav_history`)로 갱신한다(옛 `_paper_nav_series` 의 모의 계좌 합산·오늘 NAV 덧붙이기는 하지 않는다 — 스냅샷 뒤라 오늘 NAV 는 이미 들어 있다). RL 사이저는 모의 계좌·BUY/ADD·dry-run 아님·origin 이 stop/hedge/park/scalp 아님·결정 행 있음일 때만 제안하고(`apply` 모드면 게이트가 제안 비중으로 판정), `rl_shadow` 기록은 최종 판정 뒤다. 섹터 자동분류(M11)는 아직 없다. 국면·전략가 기울기·킬스위치(관측·당일 미체결 BUY 회수)·권리 일정은 `ports["regime"]`, 테마는 `ports["scan"]`로 받는다. 킬스위치 회수의 US 거래소는 옛 `universe.us` 대신 관측 표(`ledger.exchange_of`)다. stop/origin 5건·트리거 가격·`resume` 재평가는 M5 에서 들어왔다.
 
 M5 운영 경로 (monitor·resume·fills·balance·reconcile·reprice·notice·큐 reevaluate)
-- 미이식(범위): 섹터 자동분류(`_classify`, M11 분류), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡·health 는 M12(`kernel/ops`). 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile`·`rebalance`(M6) 4종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.
+- 미이식(범위): 섹터 자동분류(`_classify`, M11 분류), 파생(`fo`) 계좌 분기 전부(M10: `test_balance_dispatch`·`test_fills_fo`). 공시·뉴스 **트리거 생산**(`_news_trigger`·`_disclosure_trigger`)은 M7 — M5 는 이미 기록된 트리거를 소비·재평가만 한다. `ops_check` 잡·health 는 M12 에서 커널 `kernel/ops` + spot 영역으로 들어왔다. 큐 kind 는 `reevaluate`·`fills_sync`·`reconcile`·`rebalance`(M6) 4종이며(`news_collect` 는 ingest 의 interval 잡), `analyze_ticker`·discover 등은 M7 이다.
 - `notice` 는 KIS 체결통보(웹소켓) 리스너이지 공시 알림이 아니다. `fill_notice.enabled` 기본값이 True→False 로 바뀌었다. 리스너는 (env, HTS ID) 가 아니라 **env 별 1개**다 — 같은 env 에 HTS ID 가 여럿이면 첫 계좌 것만 구독하고 경고한다. `interval_s=30` 은 코드 고정(`schedule_key=None`). `websockets` 는 `uvicorn[standard]` 전이 의존이다(직접 선언 없음, 옛과 같음). 실전 키는 시세 허브와 다른 앱키를 먼저 고른다(Ruling 18). 같은 키뿐이면 공유 표시만 하고, 웹 시세 허브의 `hub_blocked` 비켜서기(live_quotes yielding)는 M11 이다.
-- `reevaluate` 큐 kind 는 `restart_requeue=False` 라 데몬 재기동 때 다시 등록하지 않는다(끊긴 요청은 알림만; 중복 주문 방지). `fills_sync`·`reconcile` 만 재등록한다. 세션 기동 예외 시 트리거를 `실패: …` 로 마감하고 `reevaluation_failed` 알림을 보낸 뒤 예외를 다시 올린다(옛 큐 경로는 예외 전파 → 다음 틱 재등록; Ruling 19). 장 마감 skip(`session_over`)은 사람 요청(web/telegram)에도 적용되고 KR 휴장일은 모른다(daemon 출처는 `auto_gate` 시장 게이트가 막는다). 요청에 `dry_run` 이 없어 데몬 `--dry-run` 을 요청이 뒤집지 못한다. `_close_stale_sessions` 는 커널 runner 의 private 과 중복이다(커널 공개 헬퍼 후보).
+- `reevaluate` 큐 kind 는 `restart_requeue=False` 라 데몬 재기동 때 다시 등록하지 않는다(끊긴 요청은 알림만; 중복 주문 방지). `fills_sync`·`reconcile` 만 재등록한다. 세션 기동 예외 시 트리거를 `실패: …` 로 마감하고 `reevaluation_failed` 알림을 보낸 뒤 예외를 다시 올린다(옛 큐 경로는 예외 전파 → 다음 틱 재등록; Ruling 19). 장 마감 skip(`session_over`)은 사람 요청(web/telegram)에도 적용되고 KR 휴장일은 모른다(daemon 출처는 `auto_gate` 시장 게이트가 막는다). 요청에 `dry_run` 이 없어 데몬 `--dry-run` 을 요청이 뒤집지 못한다.
 - fills: `trader spot fills sync` 출력은 계좌마다 JSON 한 줄이다(옛 표 형식 아님). `AUTO_SOURCES` 에 `"restart"` 가 포함된다(Ruling 9). 조회 실패 계좌·시장은 잡 결과의 최상위 `error` 로 올라온다.
 - reconcile: 알림이 라벨이 아닌 티커 표기, `snapshot_age`·nav/cash 는 `account_nav` 기준, `reconcile.us` 는 `{time, tz}` 형태이고 `reconcile.kr` 은 문자열도 허용한다(Ruling 11).
 - rebalance(`rebalance.py`): 옛 `_scalp_open` 제외는 M9 부터 `ports["scalp"].open_tickers(state, market, today)`(오늘 단타 `open` 종목, 판정 대기 제외) 를 제외 집합에 합친다(포트가 없으면 빈 집합). 레그 포트폴리오에 `sector_of` 를 주입하지 않아 섹터 상한은 리밸런스 레그에서 평가되지 않는다(섹터 맵은 M7 유니버스). "오늘 이미 주문한 종목" 건너뛰기는 옛 의미대로 체결 완료 주문도 센다(`ledger.has_open_order_today`, 취소·거부 등 죽은 상태만 제외; Ruling P9 — 커널 `open_orders_today` 는 미체결만 세므로 쓰지 않는다). 잔고·시세가 전부 실패해도 완료 플래그가 기록된다(옛 동일). US 거래소는 `ledger.ticker_exchanges`(관측 표), 없으면 `NAS`. 큐 kind `rebalance` 는 `restart_requeue=False`(끊긴 요청 재등록 안 함, 중복 주문 방지).
@@ -143,6 +149,5 @@ M7 scan_analyze (`scan_analyze.py`, `05_quant`)
 - `analyze_ticker` 의 `dry_run` 은 `deps.dry_run or 요청값` 이다 — 큐 요청이 데몬 `--dry-run` 을 뒤집지 못한다(우선순위는 데몬 설정).
 - `sector_of` 주입 회수: 리밸런스 레그와 executor 가 `ports["scan"].sector_of` 로 섹터 상한을 평가한다(M5 의 "섹터 상한 미평가"가 M7 에서 해소). 리밸런스는 계좌 루프마다 `executor.sector_of_for(ctx.ports, market)` 를 다시 부른다(시장 단위 값이라 낭비, 정확성 영향 없음).
 - `05_quant`(`tools.ensure_quant`)는 `ports["ml"]`(`quant_enabled`·`latest_model(market)`·`latest_row`)로 만든다; 포트·승격 모델·피처 행이 없거나 예외가 나면 None(경고 후 건너뜀, 분석을 막지 않는다).
-- `scan_analyze._close_stale` 이 `spot.jobs._close_stale_sessions`(private)를 지연 import 한다(M5 의 커널 중복과 같은 사유로 공용화 후보).
 
 - M8 이후: 메모리·보정(`35_calibration`)·`memory_entry_id`·메모리 브레이커·RL 사이저는 `ports["evaluation"]` 로만 쓴다. `_rl_record` 는 exec-key 선점 뒤에 불려 선점을 잃으면 `applied=0` 으로 남는다. 브레이커 NAV 는 계좌 자신의 30일 시계열이다.

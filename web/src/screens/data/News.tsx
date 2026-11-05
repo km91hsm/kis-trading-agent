@@ -1,9 +1,11 @@
 // 뉴스 — GET /news(48시간·100건) 다음에 목록의 id·종목으로 라벨(/news/labels)·이름(/names)을, 오늘 날짜로 판정 참조
 // (/decisions/spot/news-refs)를 2차 조회해 newsRows 로 합친다. 「판정에 쓰임」 칩은 첫 판정으로 링크.
-// 수집은 데몬 interval 잡이라 「지금 수집」 버튼은 없다(Ruling T12-R1) — asof 와 안내만. 수동 입력 → POST /news/manual.
+// 수집은 데몬 interval 잡이고, 「지금 수집」 은 큐 kind news_collect(선택 시장, 비매매)로 바로 요청한다.
+// 수동 입력 → POST /news/manual.
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
+import { RunJobButton } from "../../components/RunJobButton";
 import { Table, type Column } from "../../components/Table";
 import { errorText, postJson } from "../../lib/api";
 import { useKstDate, useResource } from "../../lib/hooks";
@@ -18,6 +20,7 @@ export function News() {
   const [market, setMarket] = useState<Market>("KR");
   const today = useKstDate();
   const newsParams = useMemo(() => ({ market, hours: "48", limit: "100" }), [market]);
+  const collectParams = useMemo(() => ({ market }), [market]);
   const news = useResource<NewsResp>("/news", newsParams, ["news"]);
   const items = news.data?.items;
   const ids = useMemo(() => (items ?? []).map((n) => n.id).join(","), [items]);
@@ -80,6 +83,7 @@ export function News() {
         <span className="data-muted">
           {news.data?.asof ? `기준 ${when(news.data.asof)} · ` : ""}데몬이 주기적으로 수집
         </span>
+        <RunJobButton kind="news_collect" params={collectParams} label="지금 수집" trading={false} realAccounts={[]} />
       </div>
       {body(news, "뉴스", () => (
         <>
