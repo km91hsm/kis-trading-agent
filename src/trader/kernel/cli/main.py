@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import typer
 import uvicorn
 
-from trader.kernel.cli import init_cmd, selfcheck
+from trader.kernel.cli import init_cmd, selfcheck, status_cmd
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
@@ -248,6 +248,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root = TraderApp(help="KIS 자동매매 에이전트", no_args_is_help=True)
     root.command("init")(init_cmd.init)
     root.command("selfcheck")(selfcheck.selfcheck)
+    root.command("status")(status_cmd.status)
     root.command("daemon")(daemon)
     root.command("web")(web)
     root.command("notify-test")(notify_test)

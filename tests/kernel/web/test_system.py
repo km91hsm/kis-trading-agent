@@ -137,7 +137,7 @@ def test_status_and_daemon_endpoints(project):
     set_flag(conn, "some_flag", {"secret": "value"})
     conn.close()
     r = make_client(deps).get("/api/system/status").json()
-    assert "등록된 상태 절 없음" in r["text"]
+    assert "데몬:" in r["text"]  # 커널 절은 늘 있다
     assert r["flags"] == ["some_flag"] and r["paused"] is None
     d = make_client(deps).get("/api/system/daemon").json()
     assert d["alive"] is False and d["pid"] is None
