@@ -113,7 +113,7 @@ def test_close_stale_closes_only_old_running(conn, caplog):
     assert calls.STALE_SESSION_AGE == timedelta(hours=1)
     with caplog.at_level("INFO", logger="trader.session"):
         assert calls.close_stale(conn, now=NOW) == 1
-    assert "재기동 정리: running 세션 1건 종료" in caplog.text
+    assert "stale running 세션 1건을 error 로 정리" in caplog.text
     st = [r[0] for r in conn.execute("SELECT status FROM agent_calls ORDER BY id").fetchall()]
     assert st == ["error", "running", "ok"]
     # age 를 줄이면 남은 running 도 닫힌다, 닫을 게 없으면 0

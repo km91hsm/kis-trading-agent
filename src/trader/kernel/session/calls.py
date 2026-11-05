@@ -132,5 +132,5 @@ def close_stale(
     중간에 죽으면 남는 행 — 데몬 재기동·세션 시작 전 정리). 닫은 게 있으면 로그를 남긴다."""
     n = close_stale_running(conn, older_than=(now - age).isoformat())
     if n:
-        log.info("재기동 정리: running 세션 %d건 종료", n)
+        log.info("stale running 세션 %d건을 error 로 정리", n)
     return n
