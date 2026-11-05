@@ -83,6 +83,17 @@ export function fmtDate(iso: string | null | undefined): string {
   return d ? kstDate(d) : DASH;
 }
 
+const kstMmDd = (d: Date) => new Intl.DateTimeFormat("en-US", { timeZone: KST, month: "2-digit", day: "2-digit" }).format(d).replace("/", ".");
+
+/** 화면 공통 시각 표기(KST): 오늘이면 「HH:MM」, 다른 날이면 「MM.DD HH:MM」, 날짜만 있는 값은 「MM.DD」. */
+export function fmtWhen(iso: string | null | undefined, now: Date = new Date()): string {
+  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return `${iso.slice(5, 7)}.${iso.slice(8, 10)}`;
+  const d = parse(iso);
+  if (!d) return DASH;
+  const hm = timeIn(d, KST, false);
+  return kstDate(d) === kstDate(now) ? hm : `${kstMmDd(d)} ${hm}`;
+}
+
 /** 「N초 전」·「N분 전」·「N시간 전」·「N일 전」(내림). 미래 시각(시계 어긋남)은 0초. */
 export function agoText(iso: string | null | undefined, now: Date): string {
   const d = parse(iso);

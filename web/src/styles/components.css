@@ -230,3 +230,38 @@
   border: 1px dashed var(--line);
   border-radius: var(--radius);
 }
+
+/* ── 통계 격자(Stats) — 라벨 위·값 아래. data-cols=auto 는 폭에 맞춰 흐르고, 2·3·4 는 고정 열(<768 은 2열). ── */
+.stats {
+  display: grid;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.stats[data-cols="auto"] { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+.stats[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+.stats[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+.stats[data-cols="4"] { grid-template-columns: repeat(4, 1fr); }
+.stat { min-width: 0; }
+.stat dt { color: var(--fg-muted); font-size: var(--text-xs); margin-bottom: 2px; }
+.stat dd { margin: 0; overflow-wrap: anywhere; }
+.stat dd.num { font-size: var(--text-md); font-weight: 600; }
+.stats[data-size="kpi"] .stat dd.num { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.01em; }
+.stat .stat-sub { color: var(--fg-muted); font-size: var(--text-xs); margin-top: 2px; }
+.stat .chip + .chip { margin-left: var(--space-1); }
+@media (max-width: 767px) {
+  .stats[data-cols="3"],
+  .stats[data-cols="4"] { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 링크 모양 버튼(표 안 run 번호 등) */
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, var(--fg));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-btn[aria-pressed="true"] { font-weight: 700; text-decoration: none; }

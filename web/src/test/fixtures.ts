@@ -14,7 +14,7 @@ export function fixtureUsage(
       spend_limit: null,
       source: "statusline",
     },
-    throttle: { enabled: true, source: "yaml", soft_pct: 70, hard_pct: 90, state: "ok", reason: null },
+    throttle: { enabled: true, source: "yaml", soft_pct: 0.8, hard_pct: 0.95, state: "ok", reason: null },
     usage_file_present: true,
     windows: {
       h5: { sessions: 0, cost_usd: 0, avg_duration_s: null, errors: 0 },

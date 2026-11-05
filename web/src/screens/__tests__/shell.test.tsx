@@ -152,6 +152,65 @@ describe("왼쪽 메뉴 2단", () => {
   });
 });
 
+test("「N초 전 갱신」은 /system#health 링크이고, 테마 버튼 글자는 「테마: …」", async () => {
+  fake = installFakeFetch(ok);
+  const { container } = app();
+  await flush();
+  const ago = container.querySelector(".statusbar-ago") as HTMLAnchorElement;
+  expect(ago.tagName).toBe("A");
+  expect(ago.getAttribute("href")).toBe("/system#health");
+  const btn = container.querySelector("[data-theme-toggle]") as HTMLButtonElement;
+  expect(btn.textContent).toContain("테마: 시스템");
+  expect(btn.textContent).not.toMatch(/^\s*시스템/);
+});
+
+describe("지수·환율 칩", () => {
+  const indices = (session: "open" | "closed") => ({
+    session,
+    at: "2026-11-05T10:00:00+09:00",
+    indices: session === "open" ? { KOSPI: { price: "2540.12", change_pct: 0.41, at: "2026-11-05T10:00:00+09:00", stale: false, source: "rest" }, KOSDAQ: { price: "812.3", change_pct: -1.2, at: "2026-11-05T10:00:00+09:00", stale: false, source: "rest" } } : {},
+    next_poll_ms: 60000,
+  });
+  const fx = { pair: "USDKRW", rate: "1340.8", as_of: "2026-11-05", source: "kis" };
+
+  test("장중이면 KOSPI·KOSDAQ 값과 등락, 환율 칩", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/quotes/indices": indices("open"), "GET /api/quotes/fx": fx });
+    const { container } = app();
+    await flush();
+    const chips = Array.from(container.querySelectorAll("[data-index-chip]"));
+    expect(chips.map((c) => c.getAttribute("data-index-chip"))).toEqual(["KOSPI", "KOSDAQ", "USDKRW"]);
+    expect(chips[0].textContent).toContain("2,540.12");
+    expect(chips[0].textContent).toContain("▲0.41%");
+    expect(chips[0].getAttribute("data-dir")).toBe("up");
+    expect(chips[1].textContent).toContain("▼1.20%");
+    expect(chips[1].getAttribute("data-dir")).toBe("down");
+    expect(chips[2].textContent).toContain("1,340.8");
+  });
+
+  test("장 밖이면 지수 칩은 없고, 환율 404 면 환율 칩도 없다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/quotes/indices": indices("closed"), "GET /api/quotes/fx": () => new Response(JSON.stringify({ detail: "없음" }), { status: 404 }) });
+    const { container } = app();
+    await flush();
+    expect(container.querySelectorAll("[data-index-chip]")).toHaveLength(0);
+  });
+});
+
+test("좁은 폭(<768)에서는 상단 띠가 한 줄: 사용률 칩은 details 안으로", async () => {
+  const orig = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 390 });
+  try {
+    fake = installFakeFetch(ok);
+    const { container } = app();
+    await flush();
+    const more = container.querySelector("details.statusbar-more") as HTMLDetailsElement;
+    expect(more).not.toBeNull();
+    expect(more.querySelectorAll("[data-usage-chip]")).toHaveLength(2);
+    expect(container.querySelector("[data-statusbar] > .usage-chips")).toBeNull();
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: orig });
+  }
+});
+
 test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", async () => {
   fake = installFakeFetch({
     "GET /api/system/health": () => new Response(JSON.stringify({ detail: "토큰" }), { status: 401 }),

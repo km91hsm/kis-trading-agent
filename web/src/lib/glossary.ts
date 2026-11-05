@@ -116,6 +116,20 @@ export const GLOSSARY: Record<string, TermEntry> = {
   "fo.status.settled": { label: "정산됨", help: "만기 정산이 끝났다." },
   "fo.status.closed": { label: "청산됨", help: "보유 0 으로 닫혔다." },
   "status.error": { label: "오류", help: "" },
+  "status.skipped": { label: "건너뜀", help: "조건이 맞지 않아 이번 회차는 실행하지 않았다." },
+  "status.queued": { label: "대기", help: "대기열에 들어가 데몬 실행을 기다린다." },
+  "regime.bull": { label: "강세", help: "국면 지표가 상승을 가리킨다." },
+  "regime.bear": { label: "하락", help: "국면 지표가 하락을 가리킨다. 신규 매수를 막고 헤지한다." },
+  "regime.neutral": { label: "중립", help: "국면 지표가 엇갈린다." },
+  "lane.slow": { label: "긴 작업", help: "분석·학습처럼 오래 걸리는 잡. 한 번에 하나씩." },
+  "lane.fast": { label: "빠른 작업", help: "대사·체결 동기화처럼 금방 끝나는 잡." },
+  "lane.reeval": { label: "재평가", help: "보유 종목 재평가 세션." },
+  "lane.info": { label: "정보", help: "알림·수집처럼 거래와 무관한 잡." },
+  "env.real": { label: "실전", help: "실제 돈이 나가는 계좌." },
+  "env.paper": { label: "모의", help: "모의투자 계좌." },
+  "usage.statusline": { label: "상태줄", help: "claude 대화형 상태줄이 알려 준 구독 사용률." },
+  "usage.session": { label: "세션", help: "마지막 세션이 알려 준 구독 사용률." },
+  "usage.probe": { label: "관측 잡", help: "usage_probe 잡(haiku 단발 1회)이 관측한 구독 사용률." },
 };
 
 export function termLabel(k: string): string {

@@ -7,7 +7,8 @@ export function Clock() {
   return (
     <div className="clock" title={c.phase}>
       <span className="num">
-        {c.date} <strong>{c.kst}</strong> 서울
+        <span className="clock-date">{c.date} </span>
+        <strong>{c.kst}</strong> 서울
       </span>
       <span className="num clock-et">
         {c.etDate} {c.et} (ET)

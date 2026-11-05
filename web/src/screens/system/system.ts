@@ -1,7 +1,7 @@
 // 「시스템」 화면 순수 함수 — 응답 타입과 표·한 줄 변환. 레벨 기준(70/90)은 셸과 같은 `usageLevel` 을 쓴다.
 import type { Tone } from "../../components/Badge";
 import { now as clockNow } from "../../lib/clock";
-import { fmtDate, fmtTime } from "../../lib/format";
+import { fmtPct } from "../../lib/format";
 import { resetsIn, usageLevel, type LimitWindow, type Throttle, type UsageLevel, type UsageResp } from "../../lib/usage";
 
 const DASH = "—";
@@ -45,10 +45,10 @@ export function usageMeters(usage: UsageResp, now: Date = clockNow()): UsageMete
 
 const THROTTLE_STATE: Record<Throttle["state"], string> = { ok: "정상", soft: "완화", hard: "중단" };
 
-/** 「사용량 조절 켜짐(설정 파일) · 정상(완화 70% · 중단 90%) — 사유」. */
+/** 「사용량 조절 켜짐(설정 파일) · 정상(완화 80% · 중단 95%) — 사유」. soft/hard 는 비율(0.8). */
 export function throttleLine(t: Throttle): string {
   const src = t.source === "control" ? "화면 설정" : "설정 파일";
-  const head = `사용량 조절 ${t.enabled ? "켜짐" : "꺼짐"}(${src}) · ${THROTTLE_STATE[t.state] ?? t.state}(완화 ${t.soft_pct}% · 중단 ${t.hard_pct}%)`;
+  const head = `사용량 조절 ${t.enabled ? "켜짐" : "꺼짐"}(${src}) · ${THROTTLE_STATE[t.state] ?? t.state}(완화 ${fmtPct(t.soft_pct, 0)} · 중단 ${fmtPct(t.hard_pct, 0)})`;
   return t.reason ? `${head} — ${t.reason}` : head;
 }
 
@@ -92,7 +92,23 @@ const STATUS: Record<string, { text: string; tone: Tone }> = {
   error: { text: "오류", tone: "fail" },
   skipped: { text: "건너뜀", tone: "muted" },
 };
-const statusOf = (s: string) => STATUS[s] ?? { text: s, tone: "muted" as Tone };
+/** 잡·실행 상태 → 한글 칩(데몬·잡 큐·실행 기록이 같은 표를 쓴다). 모르는 값은 그대로. */
+export const statusOf = (s: string | null | undefined): { text: string; tone: Tone } =>
+  s ? (STATUS[s] ?? { text: s, tone: "muted" as Tone }) : { text: DASH, tone: "muted" as Tone };
+
+/** 잡 요청 인자 한 줄: null 은 빼고 market 은 값만, years 는 「N년」, 그 밖은 키=값. 없으면 "". */
+export function summarizeArgs(params: Record<string, unknown> | null | undefined): string {
+  if (!params) return "";
+  const head: string[] = [];
+  const rest: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null || v === undefined || v === "") continue;
+    if (k === "market") head.unshift(String(v));
+    else if (k === "years") head.push(`${v}년`);
+    else rest.push(`${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);
+  }
+  return [...head, ...rest].join(" · ");
+}
 
 export type RequestRow = {
   id: number;
@@ -120,7 +136,7 @@ export function requestRows(requests: JobRequest[]): RequestRow[] {
       requested_at: r.requested_at,
       finished_at: r.finished_at,
       error: r.error,
-      params: r.params && Object.keys(r.params).length ? JSON.stringify(r.params) : "",
+      params: summarizeArgs(r.params),
     };
   });
 }
@@ -138,10 +154,18 @@ export type Run = {
 };
 export type RunRow = { id: number; kind: string; market: string; status: string; tone: Tone; started_at: string | null; duration: string; error: string | null };
 
-function seconds(from: string | null, to: string | null): string {
+/** 소요 「<1초」·「4초」·「1분 36초」·「2시간 3분」. 시작·끝이 없거나 깨지면 —. */
+export function durationText(from: string | null, to: string | null): string {
   if (!from || !to) return DASH;
   const s = (new Date(to).getTime() - new Date(from).getTime()) / 1000;
-  return Number.isFinite(s) ? String(Math.round(s)) : DASH;
+  if (!Number.isFinite(s) || s < 0) return DASH;
+  if (s < 1) return "<1초";
+  const whole = Math.round(s);
+  if (whole < 60) return `${whole}초`;
+  const m = Math.floor(whole / 60);
+  if (m < 60) return whole % 60 ? `${m}분 ${whole % 60}초` : `${m}분`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h}시간 ${m % 60}분` : `${h}시간`;
 }
 
 export function runRows(runs: Run[]): RunRow[] {
@@ -151,10 +175,10 @@ export function runRows(runs: Run[]): RunRow[] {
       id: r.id,
       kind: r.kind,
       market: r.market ?? DASH,
-      status: r.status,
+      status: st.text,
       tone: st.tone,
       started_at: r.started_at,
-      duration: seconds(r.started_at, r.finished_at),
+      duration: durationText(r.started_at, r.finished_at),
       error: r.error,
     };
   });
@@ -203,12 +227,78 @@ function val(v: unknown): string {
   return typeof v === "string" ? v : JSON.stringify(v);
 }
 
-/** 「2026-11-05 10:00 · web · ohs · account_mode:real-1 · approve → auto」(KST). */
-export function controlRows(log: ControlEntry[]): { id: number; line: string }[] {
-  return log.map((e) => ({
-    id: e.id,
-    line: `${fmtDate(e.at)} ${fmtTime(e.at).slice(0, 5)} · ${e.channel} · ${e.actor ?? DASH} · ${e.key} · ${val(e.old)} → ${val(e.new)}`,
-  }));
+export type ControlRow = { id: number; at: string; channel: string; actor: string; key: string; old: string; new: string };
+
+/** 조작 이력 표 행 — 값은 문자열 그대로, 그 밖은 JSON, null 은 —. */
+export function controlRows(log: ControlEntry[]): ControlRow[] {
+  return log.map((e) => ({ id: e.id, at: e.at, channel: e.channel, actor: e.actor ?? DASH, key: e.key, old: val(e.old), new: val(e.new) }));
+}
+
+// ── 데몬 잡 표 ───────────────────────────────────────────────────────────────
+export type DaemonJob = {
+  id: string;
+  kind: string;
+  trigger: string;
+  schedule_key: string | null;
+  interval_s: number | null;
+  next_at: string | null;
+  last_start: string | null;
+  last_end: string | null;
+  last_status: string | null;
+  last_error: string | null;
+};
+export type DaemonRow = {
+  id: string;
+  label: string;
+  market: string;
+  status: string;
+  tone: Tone;
+  schedule: string;
+  next_at: string | null;
+  last_end: string | null;
+  duration: string;
+  error: string | null;
+};
+
+/** 데몬이 제 살림으로 도는 틱 잡 — 사용자 일정이 아니라 접어 둔다. */
+export const INTERNAL_KINDS = new Set([
+  "job_queue",
+  "job_queue_fast",
+  "job_queue_reeval",
+  "job_queue_info",
+  "telegram_poll",
+  "usage_probe",
+  "approvals_expire",
+  "balance_refresh",
+  "ops_check",
+  "retention",
+  "ledger_backup",
+  "names_fill",
+  "saveticker",
+]);
+
+const MARKET_PREFIX: Record<string, string> = { kr_: "KR", us_: "US" };
+
+/** 잡 표 행: 라벨은 kind 라벨(없으면 kind), 시장은 id 접두(kr_·us_), 일정은 cron 키 또는 「N초마다」, 소요는 마지막 실행. */
+export function daemonRows(jobs: DaemonJob[], labels: Map<string, string>): { user: DaemonRow[]; internal: DaemonRow[] } {
+  const rows = jobs.map((j): DaemonRow => {
+    const st = statusOf(j.last_status);
+    const prefix = Object.keys(MARKET_PREFIX).find((p) => j.id.startsWith(p));
+    const schedule = j.trigger === "interval" && j.interval_s ? `${j.interval_s}초마다` : (j.schedule_key ?? j.trigger);
+    return {
+      id: j.id,
+      label: labels.get(j.kind) || j.kind,
+      market: prefix ? MARKET_PREFIX[prefix] : "",
+      status: st.text,
+      tone: st.tone,
+      schedule,
+      next_at: j.next_at,
+      last_end: j.last_end,
+      duration: durationText(j.last_start, j.last_end),
+      error: j.last_error,
+    };
+  });
+  return { user: rows.filter((r) => !INTERNAL_KINDS.has(jobs.find((j) => j.id === r.id)!.kind)), internal: rows.filter((r) => INTERNAL_KINDS.has(jobs.find((j) => j.id === r.id)!.kind)) };
 }
 
 // ── 시크릿 ───────────────────────────────────────────────────────────────────

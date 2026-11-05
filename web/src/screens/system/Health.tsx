@@ -1,46 +1,113 @@
-// 헬스 — GET /system/health(단계 칩·사유·버전·기능)와 GET /system/status(텔레그램 /status 본문·일시정지·제어 키).
+// 헬스 — GET /system/health: 머리(단계 칩·점검 시각·버전·「지금 점검」= ?live=1), 영역 격자(Stats, 영역마다 단계 칩 + 첫 사유),
+// 사유 표(영역·내용·건·바로가기), 켜진 기능·제어 플래그는 details. /system/status 는 paused·flags 만 쓴다(원문 덤프 없음).
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Chip, Chips } from "../../components/Chip";
+import { Stats } from "../../components/Stats";
+import { Table, type Column } from "../../components/Table";
+import { errorText, getJson } from "../../lib/api";
+import { fmtWhen } from "../../lib/format";
+import { areaLabel, areaLevelText, healthDot, LEVEL_TEXT, type Health as HealthResp, type HealthReason } from "../../lib/health";
 import { useResource } from "../../lib/hooks";
-import type { Health as HealthResp } from "../../lib/health";
-import { healthDot } from "../../lib/health";
 import { body } from "../performance/ResourceView";
 
 type Status = { text: string; paused: boolean | null; flags: string[] };
-const LEVEL_TEXT = { ok: "정상", warn: "주의", fail: "장애" } as const;
+
+const toneOf = (level: string | null | undefined) => (level === "info" ? "muted" : healthDot(level));
+const internal = (link: string) => link.startsWith("/") && !link.startsWith("//");
+
+const REASON_COLUMNS: Column<HealthReason>[] = [
+  { key: "area", label: "영역", width: "14%", align: "chip", render: (r) => <Chip tone={toneOf(r.level)}>{areaLabel(r.area)}</Chip> },
+  { key: "text", label: "내용", width: "58%", long: true, render: (r) => r.text.split("\n")[0] },
+  { key: "count", label: "건", width: "10%", align: "num", render: (r) => (r.count === null || r.count === undefined ? "" : String(r.count)) },
+  {
+    key: "link",
+    label: "바로가기",
+    width: "18%",
+    render: (r) =>
+      r.link ? (
+        internal(r.link) ? (
+          <Link to={r.link}>보기 ›</Link>
+        ) : (
+          <a href={r.link}>보기 ›</a>
+        )
+      ) : (
+        ""
+      ),
+  },
+];
 
 export function Health() {
   const health = useResource<HealthResp>("/system/health", undefined, ["daemon", "control"]);
   const status = useResource<Status>("/system/status", undefined, ["control"]);
-  return (
-    <>
-      {body(health, "헬스", (h) => {
-        const level = healthDot(h.level);
-        return (
-          <>
-            <p>
-              <Chip tone={level}>{LEVEL_TEXT[level]}</Chip> {h.version ? <span className="data-muted">버전 {h.version}</span> : null}
-            </p>
-            {h.reasons.length ? (
-              <ul className="sys-lines">
-                {h.reasons.map((r, i) => (
-                  <li key={i}>
-                    <Chip tone={healthDot(r.level)}>{r.area}</Chip> {r.text}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {h.features?.length ? <Chips items={h.features} max={20} /> : null}
-          </>
-        );
-      })}
-      {body(status, "상태", (s) => (
-        <>
-          <p>
-            {s.paused ? <Chip tone="warn">일시정지</Chip> : null} {s.flags.length ? <Chips items={s.flags} max={10} /> : null}
+  const [live, setLive] = useState<HealthResp | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // 캐시가 새로 오면(SSE·60초) 직접 점검한 결과는 버린다
+  useEffect(() => setLive(null), [health.at]);
+
+  const check = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setLive(await getJson<HealthResp>("/system/health", { live: "1" }));
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const flags = status.data?.flags ?? [];
+  const paused = status.data?.paused ?? null;
+
+  return body({ ...health, data: live ?? health.data }, "헬스", (h) => {
+    const level = healthDot(h.level);
+    const areas = Object.entries(h.areas ?? {});
+    const firstReason = (area: string) => h.reasons.find((r) => r.area === area)?.text.split("\n")[0];
+    return (
+      <>
+        <div className="sys-head">
+          <Chip tone={level}>{LEVEL_TEXT[level]}</Chip>
+          {paused ? <Chip tone="warn">일시정지</Chip> : null}
+          <span className="data-muted">
+            {fmtWhen(h.checked_at)} 점검{h.version ? ` · 버전 ${h.version}` : ""}
+          </span>
+          <button type="button" className="btn" disabled={busy} onClick={() => void check()}>
+            {busy ? "점검 중…" : "지금 점검"}
+          </button>
+        </div>
+        {error ? (
+          <p className="data-error" role="alert">
+            {error}
           </p>
-          <pre className="sys-pre">{s.text}</pre>
-        </>
-      ))}
-    </>
-  );
+        ) : null}
+        {areas.length ? (
+          <Stats
+            cols="auto"
+            items={areas.map(([key, lv]) => ({
+              id: key,
+              label: areaLabel(key),
+              value: <Chip tone={toneOf(lv)}>{areaLevelText(lv)}</Chip>,
+              sub: firstReason(key) ?? "이상 없음",
+              num: false,
+            }))}
+          />
+        ) : null}
+        {h.reasons.length ? <Table columns={REASON_COLUMNS} rows={h.reasons} rowKey={(r) => r.key ?? `${r.area}-${r.text}`} /> : null}
+        {h.features?.length ? (
+          <details className="sys-details">
+            <summary>켜진 기능 {h.features.length}</summary>
+            <Chips items={h.features} max={40} />
+          </details>
+        ) : null}
+        {flags.length ? (
+          <details className="sys-details">
+            <summary>제어 플래그 {flags.length}</summary>
+            <Chips items={flags} max={40} />
+          </details>
+        ) : null}
+      </>
+    );
+  });
 }
