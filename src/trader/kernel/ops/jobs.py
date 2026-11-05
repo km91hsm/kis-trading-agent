@@ -1,5 +1,6 @@
 """데몬 내장 잡 `ops_check`: 점검(`check`) → 결과 보관(control `ops_result`) → 격상 알림.
-웹 `/system/health` 도 같은 문맥 조립(`build_context`)으로 직접 판정한다."""
+웹 `/system/health` 도 같은 문맥 조립(`build_context`)으로 직접 판정한다.
+`retention`: 매일 보존 정리(`retention.prune`, 기간은 settings `ops.retention_days`)."""
 
 from __future__ import annotations
 
@@ -10,9 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from trader.kernel.config import ConfigError
+from trader.kernel.config import KST, ConfigError
 from trader.kernel.daemon import jobs as daemon_jobs
 from trader.kernel.daemon.jobs import ScheduledJob
+from trader.kernel.ops import retention
 from trader.kernel.ops.health import check, escalate, store
 from trader.kernel.ops.types import OpsContext
 from trader.kernel.registry.types import Feature, JobSpec
@@ -99,4 +101,23 @@ OPS_CHECK = JobSpec(
     id="ops_check", kind="ops_check", trigger="interval", per_market=False,
     schedule_key="ops_check.interval_s", interval_s=1800, enabled=None, gate="none",
     heavy=False, misfire="default", catch_up="none", start_soon_s=60, body=ops_check_body,
+)  # fmt: skip
+
+
+def retention_body(deps: Any, job: Any = None) -> dict:
+    """보존 정리 1회(KST 오늘 기준 `ops.retention_days` 이전). 결과 건수는 데몬이 기록한다."""
+    today = deps.now().astimezone(KST).date()
+    conn = deps.conn_factory()
+    try:
+        return retention.prune(
+            conn, deps.state, today=today, keep_days=deps.settings.ops.retention_days
+        )
+    finally:
+        conn.close()
+
+
+RETENTION = JobSpec(
+    id="retention", kind="retention", trigger="cron", per_market=False,
+    schedule_key="retention", interval_s=None, enabled=None, gate="none", heavy=False,
+    misfire="idempotent", catch_up="direct", start_soon_s=0, body=retention_body,
 )  # fmt: skip

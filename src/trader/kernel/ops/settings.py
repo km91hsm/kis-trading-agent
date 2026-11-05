@@ -1,5 +1,5 @@
 """운영 점검 설정 모델. `OpsCheckSchedule` 은 schedule.yaml `ops_check`(커널 섹션),
-`OpsSettings` 는 settings.yaml `ops`(보존 기간 — 섹션 등록은 retention 잡과 함께)."""
+`OpsSettings` 는 settings.yaml `ops`(보존 기간 — `retention` 잡이 쓴다)."""
 
 from __future__ import annotations
 

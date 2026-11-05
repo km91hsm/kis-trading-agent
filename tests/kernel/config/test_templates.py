@@ -43,3 +43,13 @@ def test_schedule_template_has_ops_check():
     assert "ops_check:" in path.read_text(encoding="utf-8")
     cfg = load("schedule", build_registry(discover()), path=path)
     assert isinstance(cfg.ops_check, OpsCheckSchedule) and cfg.ops_check.interval_s == 1800
+
+
+def test_templates_have_ops_retention():
+    """`retention` 잡 시각·보존 기간은 템플릿 yaml 이 정한다."""
+    reg = build_registry(discover())
+    root = templates_dir() / "config"
+    settings = load("settings", reg, path=root / "settings.yaml")
+    schedule = load("schedule", reg, path=root / "schedule.yaml")
+    assert settings.ops.retention_days == 120
+    assert schedule.retention == "17:20"

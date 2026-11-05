@@ -22,7 +22,7 @@ from trader.kernel.registry import discover
 from trader.kernel.registry.contracts import all_migrations
 from trader.kernel.registry.types import Feature, JobSpec
 
-BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup", "ops_check")
+BUILTIN_IDS = ("telegram_poll", "usage_probe", "ledger_backup", "ops_check", "retention")
 NOW = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
 
@@ -48,7 +48,8 @@ def make_deps(project: Path, **kw) -> DaemonDeps:
     c.close()
     base = dict(
         settings=SimpleNamespace(notify=SimpleNamespace(enabled=False), llm=LlmSettings()),
-        schedule=SimpleNamespace(at="03:00", ledger_backup="17:10"), conn_factory=factory,
+        schedule=SimpleNamespace(at="03:00", ledger_backup="17:10", retention="17:20"),
+        conn_factory=factory,
         state=state, now=lambda: NOW, markets=["KR"], gates={}, stop_event=threading.Event(),
         dry_run=False,
     )  # fmt: skip

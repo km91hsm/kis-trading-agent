@@ -1,4 +1,5 @@
-"""커널 내장 잡: 텔레그램 폴링(+보내지 못한 알림 재전송)·구독 사용률 확인·원장 백업·운영 점검.
+"""커널 내장 잡: 텔레그램 폴링(+보내지 못한 알림 재전송)·구독 사용률 확인·원장 백업·운영 점검·
+보존 정리.
 커널은 기능 이름을 모른다."""
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from trader.kernel.ledger import backup as ledger_backup
 from trader.kernel.notify import commands
 from trader.kernel.notify.commands import CommandContext
 from trader.kernel.notify.telegram import make_receiver
-from trader.kernel.ops.jobs import OPS_CHECK
+from trader.kernel.ops.jobs import OPS_CHECK, RETENTION
 from trader.kernel.registry.types import Feature, JobSpec, QueueKind
 from trader.kernel.session import quick, usage
 
@@ -125,7 +126,9 @@ LEDGER_BACKUP = JobSpec(
     schedule_key="ledger_backup", interval_s=None, enabled=None, gate="none", heavy=False,
     misfire="idempotent", catch_up="direct", start_soon_s=0, body=ledger_backup_body,
 )  # fmt: skip
-BUILTIN_JOBS: tuple[JobSpec, ...] = (TELEGRAM_POLL, USAGE_PROBE, LEDGER_BACKUP, OPS_CHECK)
+BUILTIN_JOBS: tuple[JobSpec, ...] = (
+    TELEGRAM_POLL, USAGE_PROBE, LEDGER_BACKUP, OPS_CHECK, RETENTION,
+)  # fmt: skip
 
 
 class UsageProbeParams(BaseModel):

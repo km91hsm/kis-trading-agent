@@ -74,6 +74,10 @@ notify:
   enabled: true
   poll_interval_s: 30
 
+# 보존 정리(내장 retention 잡): 이 일수보다 오래된 state/runs·운영일 플래그·끝난 잡 요청·알림·제어 기록 삭제(30~3650)
+ops:
+  retention_days: 120
+
 # 역할별 모델 (스펙 §4.1). 강세·약세 리서처는 같은 모델(2026-10-26 전체 검토 L11 — 이전엔 약세만 opus).
 models:
   orchestrator: sonnet

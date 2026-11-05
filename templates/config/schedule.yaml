@@ -6,6 +6,7 @@ telegram_poll:
 ops_check:
   interval_s: 1800   # 운영 점검 주기(초, 60 이상): 결과는 웹 헬스·텔레그램 격상 알림
 ledger_backup: "17:10"   # 원장 백업(KST, 매일): 14일치 일별 + 8주치 월요일 보관
+retention: "17:20"   # 보존 정리(KST, 매일): settings ops.retention_days 보다 오래된 산출물·기록 삭제
 news_collect:
   interval_s: 1800   # 시장 뉴스 저장소 수집 주기(초)
 kr:

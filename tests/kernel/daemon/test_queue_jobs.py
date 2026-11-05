@@ -162,6 +162,7 @@ SCHEDULE = SimpleNamespace(
     reflect="16:30",
     backup="17:10",
     ledger_backup="17:10",
+    retention="17:20",
     members="17:20",
 )
 
