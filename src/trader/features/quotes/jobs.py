@@ -66,7 +66,7 @@ def _us_exchanges(conn: sqlite3.Connection) -> dict[str, str]:
 
 def _fill_config(conn: sqlite3.Connection, names: dict[str, str]) -> int:
     """설정 고정 이름은 관측(잔고·브로커)보다 우선한다(Ruling T18-R3): 없으면 넣고, 이름이나
-    source 가 다르면 덮는다. 이미 같으면 쓰기 없음. 실제로 바뀐 행 수를 돌려준다."""
+    source 가 다르면(NULL 포함) 덮는다. 이미 같으면 쓰기 없음. 실제로 바뀐 행 수를 돌려준다."""
     n = 0
     for key, name in names.items():
         market, ticker = key.split(":", 1)
@@ -76,7 +76,7 @@ def _fill_config(conn: sqlite3.Connection, names: dict[str, str]) -> int:
             "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
             "VALUES (?, ?, ?, 'config', ?) ON CONFLICT(market, ticker) DO UPDATE SET "
             "name=excluded.name, source='config', updated_at=excluded.updated_at "
-            "WHERE ticker_names.name IS NOT excluded.name OR ticker_names.source != 'config'",
+            "WHERE ticker_names.name IS NOT excluded.name OR ticker_names.source IS NOT 'config'",
             (market, ticker, name, now_iso()),
         )
         n += cur.rowcount
@@ -112,8 +112,9 @@ def names_fill_body(deps: Any, job: Any = None) -> dict:
             try:
                 name = client.get_stock_name(market, ticker, exchange=exchange)
             except Exception as e:  # noqa: BLE001 - 한 종목 실패가 나머지를 막지 않는다
+                # 조회 실패는 miss 로 적지 않는다 — 다음 실행에 다시 묻는다(M-7)
                 logger.warning("종목명 조회 실패 %s: %s", tag, type(e).__name__)
-                name = None
+                continue
             if _insert_name(conn, market, ticker, name, "broker"):
                 filled += 1
             else:

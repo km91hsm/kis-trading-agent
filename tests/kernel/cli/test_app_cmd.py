@@ -192,6 +192,43 @@ def test_app_exits_1_when_daemon_fails_early(fakes, monkeypatch):
     assert "shutdown" not in [c[0] for c in calls]
 
 
+def _hold_lock(project):
+    import json
+    import os
+
+    from trader.kernel.daemon import heartbeat
+
+    (project / "state" / heartbeat.LOCK_NAME).write_text(
+        json.dumps({"pid": os.getpid()}), encoding="utf-8"
+    )
+
+
+def test_app_lock_held_opens_browser_and_exits_0(project, fakes, monkeypatch):
+    """다른 인스턴스가 잠금을 쥐고 있으면 데몬·웹을 띄우지 않고 브라우저만 연 뒤 0 (FR-1·FR-2)."""
+    calls = fakes
+    _hold_lock(project)
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    seen = []
+    monkeypatch.setattr("webbrowser.open", lambda url: seen.append(url) or True)
+    r = CliRunner().invoke(app, ["app"])
+    assert r.exit_code == 0, r.output
+    assert "이미 실행 중입니다 — http://127.0.0.1:8787" in r.output
+    assert seen == ["http://127.0.0.1:8787"]
+    assert calls == [] and FakeServer.instances == []
+
+
+def test_app_lock_held_no_browser_exits_0_without_opening(project, fakes, monkeypatch):
+    calls = fakes
+    _hold_lock(project)
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    seen = []
+    monkeypatch.setattr("webbrowser.open", lambda url: seen.append(url) or True)
+    r = CliRunner().invoke(app, ["app", "--no-browser"])
+    assert r.exit_code == 0, r.output
+    assert "이미 실행 중입니다" in r.output
+    assert seen == [] and calls == [] and FakeServer.instances == []
+
+
 def test_wait_for_port_returns_when_listening_and_gives_up():
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))

@@ -104,3 +104,19 @@ def test_prune_uses_last_date_segment_as_operational_day(project, conn):
     assert retention.old_date("x:paper-2026-07-01:2026-01-01", cutoff) is True
     assert retention.old_date("x:2026-01-01:2026-07-01", cutoff) is False
     assert retention.old_date("x:2026-01-01x", cutoff) is False  # 통째 날짜만
+
+
+def test_prune_cutoff_compares_in_utc(project, conn):
+    """저장 시각은 UTC ISO — cutoff(KST 자정)도 UTC ISO 로 바꿔 비교한다(T5 M1).
+    cutoff = 2026-06-28 00:00 KST = 2026-06-27T15:00Z. 그 뒤(16:00Z)는 남고 앞(14:00Z)은 지운다."""
+    for at in ("2026-06-27T14:00:00+00:00", "2026-06-27T16:00:00+00:00"):
+        conn.execute(
+            "INSERT INTO notices(at, kind, text, channel, ok) "
+            "VALUES (?, 'info', 't', 'telegram', 1)",
+            (at,),
+        )
+    conn.commit()
+    out = retention.prune(conn, project / "state", today=TODAY, keep_days=120)
+    assert out["notices"] == 1
+    left = [r[0] for r in conn.execute("SELECT at FROM notices")]
+    assert left == ["2026-06-27T16:00:00+00:00"]

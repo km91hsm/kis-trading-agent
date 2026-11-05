@@ -113,10 +113,10 @@ def test_sections_isolate_failures(conn, project):
 
 
 def test_telegram_lines_have_kernel_first(conn, project):
-    assert [s.title for s in status.KERNEL_SECTIONS] == [
+    assert [s.title for s in status.KERNEL_STATUS_SECTIONS] == [
         "운영 점검", "데몬", "마지막 실행", "오늘 LLM 호출",
     ]  # fmt: skip
-    assert status.TELEGRAM_KERNEL_SECTIONS == status.KERNEL_SECTIONS[:2]
+    assert status.TELEGRAM_KERNEL_SECTIONS == status.KERNEL_STATUS_SECTIONS[:2]
     feat = _feat(
         StatusSection("계좌", lambda c: ["실행 중 · 계좌 모드: p 자동"]),
         StatusSection("빈 절", lambda c: []),

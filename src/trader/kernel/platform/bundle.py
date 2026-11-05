@@ -84,9 +84,10 @@ def cli_argv() -> list[str]:
     return [sys.executable, "-m", "trader"]
 
 
-def daemon_argv() -> list[str]:
-    """데몬 등록(launchd·작업 스케줄러)에 쓰는 argv."""
-    return [*cli_argv(), "daemon"]
+def service_argv() -> list[str]:
+    """로그온 등록(launchd·작업 스케줄러)에 쓰는 argv: 데몬 + 웹 UI 한 프로세스
+    (`app --no-browser` — 로그온 직후 브라우저는 열지 않는다, FR-2)."""
+    return [*cli_argv(), "app", "--no-browser"]
 
 
 def watchdog_argv() -> list[str]:

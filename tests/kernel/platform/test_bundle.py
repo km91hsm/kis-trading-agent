@@ -95,12 +95,13 @@ def test_app_bundle_dir_is_public():
     assert hasattr(bundle, "app_bundle_dir")
 
 
-def test_daemon_and_watchdog_argv(tmp_path, monkeypatch):
-    assert bundle.daemon_argv() == [sys.executable, "-m", "trader", "daemon"]
+def test_service_and_watchdog_argv(tmp_path, monkeypatch):
+    """로그온 등록 대상은 데몬 + 웹 UI 한 프로세스(`app --no-browser`, FR-2)."""
+    assert bundle.service_argv() == [sys.executable, "-m", "trader", "app", "--no-browser"]
     assert bundle.watchdog_argv() == [sys.executable, "-m", "trader", "watchdog"]
     exe_dir = tmp_path / "dist" / "trader"
     _freeze(monkeypatch, exe_dir)
-    assert bundle.daemon_argv() == [str(exe_dir / "trader"), "daemon"]
+    assert bundle.service_argv() == [str(exe_dir / "trader"), "app", "--no-browser"]
     assert bundle.watchdog_argv() == [str(exe_dir / "trader"), "watchdog"]
 
 

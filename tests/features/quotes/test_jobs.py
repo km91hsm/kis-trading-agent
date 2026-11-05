@@ -164,3 +164,37 @@ def test_configured_instrument_names_fill_etfs(conn, settings):
     fixed = with_names({"KR:252670": "KODEX 200선물인버스2X(수정)"})
     assert jobs.names_fill_body(_deps(fixed, None))["config"] == 1
     assert _names(conn)[("KR", "252670")] == ("KODEX 200선물인버스2X(수정)", "config")
+
+
+def test_names_fill_does_not_record_miss_when_lookup_raises(conn, settings):
+    """시세 조회가 예외로 끝난 종목은 그날 miss 로 적지 않는다 — 조회는 됐는데 이름이 없을
+    때만 miss(M-7). 다음 실행에 다시 묻는다."""
+
+    class Flaky(NameMarket):
+        def get_stock_name(self, market, ticker, exchange=None):
+            self.asked.append((market, ticker, exchange))
+            if ticker == "777777":
+                raise TimeoutError("일시 오류")
+            return self.names.get(ticker)
+
+    _hold(conn, "777777", "888888")
+    market = Flaky({})
+    out = jobs.names_fill_body(_deps(settings, market))
+    assert out["asked"] == 2 and out["filled"] == 0
+    assert control.get_flag(conn, jobs.MISS_FLAG) == {"KR:888888": "2026-10-29"}
+    market.asked.clear()
+    jobs.names_fill_body(_deps(settings, market))
+    assert market.asked == [("KR", "777777", None)]
+
+
+def test_configured_name_overrides_null_source_row(conn, settings):
+    """source 가 NULL 인 옛 행도 설정 이름으로 승격한다(`IS NOT 'config'`, T18)."""
+    conn.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', '252670', '옛 이름', NULL, 't')"
+    )
+    conn.commit()
+    cfg = settings.quotes.model_copy(update={"instrument_names": {"KR:252670": "옛 이름"}})
+    st = settings.model_copy(update={"quotes": cfg})
+    assert jobs.names_fill_body(_deps(st, None))["config"] == 1
+    assert _names(conn)[("KR", "252670")] == ("옛 이름", "config")

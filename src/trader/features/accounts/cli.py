@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
@@ -154,7 +155,9 @@ def order_test(
     exchange: str = typer.Option("NAS", "--exchange", help="US 거래소 코드"),
 ) -> None:
     """현물 주문 연결 점검(모의 전용): 1주 지정가 매수(현재가 −10%, 호가단위 정렬)를 접수하고
-    즉시 취소한다. 결과 JSON 1줄 — 취소 실패도 담고 exit 0, 접수 실패는 exit 1. 실전 계좌는 거부."""
+    즉시 취소한다. 결과 JSON 1줄 — 취소 실패도 담고 exit 0, 접수 실패는 exit 1. 실전 계좌는 거부.
+    `paused` 와 무관하게 돈다(연결 점검). env `TRADER_DRY_RUN` 이 켜져 있으면(0 이 아니면) 거부,
+    현재가가 없으면 주문을 만들지 않고 exit 1(M-8)."""
     b = boot(secrets=True)
     accounts = load_accounts(secrets=b.secrets)
     acct = next((a for a in accounts if a.id == account), None)
@@ -164,6 +167,8 @@ def order_test(
         _fail(f"주문 점검은 모의 계좌에서만 실행합니다: {account} ({acct.env})")
     if acct.asset != "stock":
         _fail(f"현물 계좌만 점검합니다(파생은 `trader fo order-test`): {account}")
+    if os.environ.get("TRADER_DRY_RUN", "0") != "0":
+        _fail("dry-run(TRADER_DRY_RUN) 상태에서는 주문 점검을 하지 않습니다")
     market = acct.markets[0]
     ticker = ticker or order_test_mod.DEFAULT_TICKER[market]
     exch = exchange if market == "US" else None
@@ -172,6 +177,8 @@ def order_test(
         quote = client.get_price_kr(ticker) if market == "KR" else client.get_price_us(ticker, exch)
     except Exception as e:  # noqa: BLE001 - 점검 도구는 모든 실패를 보고한다
         _fail(f"현재가 조회 실패: {type(e).__name__}: {e}")
+    if quote is None or quote.price is None:
+        _fail(f"현재가가 없어 점검 주문을 만들지 못했습니다: {market} {ticker}")
     brokers = build_brokers(b.secrets, [acct])
     if not brokers:
         _fail(f"{acct.env} 앱키·시크릿이 없어 점검하지 못했습니다: {account}")

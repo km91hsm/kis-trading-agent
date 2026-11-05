@@ -34,9 +34,27 @@ def test_calibration_review_flags_at_threshold(conn, project):
     assert health.check(ctx(conn, project)) == []  # 주입이 켜져 있으면 알릴 것 없음
 
 
-def test_calibration_review_swallows_errors(conn, project, monkeypatch):
+def test_calibration_review_errors_surface_as_area_error(conn, project, monkeypatch):
+    """예외를 삼키지 않는다 — 러너가 `evaluation.error` warning 으로 격리한다(M-4)."""
+    from trader.kernel.ops.health import _run_area
+
     def boom(_conn):
         raise RuntimeError("x")
+
+    monkeypatch.setattr(health, "matured_count", boom)
+    items = _run_area(health.AREA, ctx(conn, project))
+    assert [(i.key, i.level) for i in items] == [("evaluation.error", "warning")]
+    assert "RuntimeError: x" in items[0].text
+
+
+def test_calibration_review_disabled_is_explicit_empty(conn, project, monkeypatch):
+    """보정이 꺼져 있으면 원장을 보지 않고 빈 결과(정상 경로)."""
+    (project / "config" / "ml.yaml").write_text(
+        "models:\n  calibration:\n    enabled: false\n", encoding="utf-8"
+    )
+
+    def boom(_conn):
+        raise AssertionError("꺼져 있으면 세지 않는다")
 
     monkeypatch.setattr(health, "matured_count", boom)
     assert health.check(ctx(conn, project)) == []

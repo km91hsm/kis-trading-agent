@@ -31,7 +31,11 @@ def test_status_cli_utf8_korean_path(tmp_path):
     for name in ("config", "state", "docs", "secrets"):
         (home / name).mkdir(parents=True)
     (home / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
-    env = {**os.environ, "TRADER_HOME": str(home), "PYTHONIOENCODING": "cp949"}
+    # 필요한 키만 넘긴다 — 개발자 셸의 WEB_TOKEN·TRADER_DRY_RUN 같은 값이 새지 않게(T6).
+    # SYSTEMROOT·USERPROFILE·TEMP·TMP 는 Windows 파이썬 기동에 필요하다
+    keep = ("PATH", "HOME", "SYSTEMROOT", "USERPROFILE", "TEMP", "TMP", "TMPDIR")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env.update(TRADER_HOME=str(home), PYTHONIOENCODING="cp949")
     r = subprocess.run(
         [sys.executable, "-m", "trader", "status"],
         env=env, cwd=home, capture_output=True, encoding="utf-8", errors="replace",

@@ -351,3 +351,22 @@ def test_approval_notice_body_sends_reject_message(project, conn, settings):
     assert out["sent"] is True and out["approval_id"] == aid
     skipped = q.body(SimpleNamespace(**{**vars(deps), "notifier": None}), params, lambda t: None)
     assert "skipped" in skipped and len(sent.msgs) == 1
+
+
+def test_approval_notice_skips_when_not_rejected(project, conn, settings):
+    """거부 상태가 아닌 승인(대기·승인됨 등)에는 `[거부]` 알림을 보내지 않는다(M-1)."""
+    from tests.features.spot.approval_helpers import Sent
+
+    accounts = [make_account("paper-main", "paper", "approve")]
+    brokers = fake_brokers(accounts)
+    aid = make_pending(conn, settings, accounts, brokers)  # pending 그대로
+    q = {k.kind: k for k in QUEUE_KINDS}["approval_notice"]
+    params = {"approval_id": aid, "action": "reject", "actor": None, "channel": "web"}
+    sent = Sent()
+    deps = SimpleNamespace(
+        settings=settings, conn_factory=db.connect, state=None, now=lambda: datetime.now(UTC),
+        notifier=sent, ports={"accounts": make_port(accounts, brokers)},
+    )  # fmt: skip
+    out = q.body(deps, params, lambda text: None)
+    assert sent.msgs == []
+    assert out["approval_id"] == aid and "skipped" in out

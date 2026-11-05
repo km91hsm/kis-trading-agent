@@ -85,3 +85,14 @@ def test_loss_area_shows_flow_suspicion(conn, project):
     assert "killswitch off" in flow[0].text and "모든 계좌" in flow[0].text
     later = ctx(conn, project, acct("paper-main"), now=NOW + timedelta(days=3))
     assert not [i for i in health.check(later) if i.key.startswith("regime.flow")]
+
+
+def test_bad_flow_date_skips_only_that_item(conn, project):
+    """flow 기록의 날짜가 깨져도 그 항목만 건너뛴다 — 영역 전체가 `.error` 가 되지 않는다(T3)."""
+    bad = {"date": "not-a-date", "residual": "-1", "prev_nav": "1", "nav": "0"}
+    set_flag(conn, "killswitch_flow:paper-1:KR", bad)
+    good = {"date": "2026-10-27", "residual": "-2500", "prev_nav": "10500", "nav": "8000"}
+    set_flag(conn, "killswitch_flow:paper-2:KR", good)
+    items = health.check(ctx(conn, project, acct("paper-1"), acct("paper-2")))
+    keys = {i.key for i in items}
+    assert "regime.flow.paper-2.KR" in keys and "regime.flow.paper-1.KR" not in keys

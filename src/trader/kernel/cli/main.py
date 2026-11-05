@@ -17,6 +17,7 @@ from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
 from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
+from trader.kernel.config.secrets import ensure_web_token
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
 from trader.kernel.notify import NullNotifier
@@ -133,7 +134,12 @@ def build_web_deps(boot_: Boot) -> WebDeps:
 
 @config_errors
 def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 실행")) -> None:
-    """스케줄러 데몬을 시작하고 종료 신호까지 기다린다."""
+    """스케줄러 데몬을 시작하고 종료 신호까지 기다린다. 다른 인스턴스가 잠금을 쥐고 있으면
+    무거운 조립 전에 안내하고 exit 0(로그온 재기동 반복 방지, FR-1)."""
+    running = app_cmd.running_web()
+    if running is not None:
+        typer.echo(f"이미 실행 중입니다 — http://{running[0]}:{running[1]}")
+        return
     b = boot(ports=True, schedule=True, log_name="daemon")
     d = Daemon(b.features, build_daemon_deps(b, dry_run=dry_run))
     started = False
@@ -161,6 +167,7 @@ def web(
 
     from trader.kernel.web.app import LOOPBACK_HOSTS, create_app
 
+    ensure_web_token()  # app 과 같은 순서: 토큰 없이 띄우면 제어 API 가 통째로 닫힌다(T19-R1)
     b = boot(ports=True, log_name="web")  # 계좌 env(실전 confirm) 등은 ports 로 본다
     host = host or b.settings.web.bind
     port = port or b.settings.web.port

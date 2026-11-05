@@ -1,8 +1,9 @@
 """`/system/health` 어댑터: 판정은 `kernel/ops` 가 하고 여기서는 원천만 고른다.
 
 기본은 데몬 `ops_check` 가 적은 control `ops_result`(그 `at` 이 `CACHE_MAX_AGE_FACTOR × 간격`
-안이고 데몬이 살아 있으며 하트비트가 멈추지 않았을 때). 그 밖·`live` 면 이 프로세스가
-직접 `check()` 를 돈다(결과는 적지 않는다).
+— 결과에 함께 적힌 실제 `interval_s`, 없으면 `OPS_CHECK.interval_s` — 안이고 데몬이 살아
+있으며 하트비트가 멈추지 않았을 때). 그 밖·`live` 면 이 프로세스가 직접 `check()` 를 돈다
+(결과는 적지 않는다).
 응답 모양 `{level: ok|warn|fail, reasons, checked_at, version, features}` 는 그대로다."""
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ def version() -> str:
 
 
 def _fresh(cached: dict | None, now: datetime) -> bool:
-    """간격은 웹 deps 에 schedule 이 없어 `OPS_CHECK.interval_s` 기본값으로 본다."""
+    """간격은 데몬이 결과와 함께 적은 `interval_s`(웹 deps 에는 schedule 이 없다). 없거나 잘못된
+    값이면 `OPS_CHECK.interval_s` 기본값으로 본다(M-2)."""
     if not cached:
         return False
     try:
@@ -38,8 +40,14 @@ def _fresh(cached: dict | None, now: datetime) -> bool:
         return False
     if at.tzinfo is None:
         return False
+    try:
+        interval = int(cached.get("interval_s") or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    if interval <= 0:
+        interval = int(OPS_CHECK.interval_s or 0)
     age = (now - at).total_seconds()
-    return 0 <= age < CACHE_MAX_AGE_FACTOR * int(OPS_CHECK.interval_s or 0)
+    return 0 <= age < CACHE_MAX_AGE_FACTOR * interval
 
 
 def _daemon_up(deps: Any, now: datetime) -> bool:

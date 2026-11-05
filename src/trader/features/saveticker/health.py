@@ -3,26 +3,21 @@
 
 from __future__ import annotations
 
-import logging
-
 from trader.features.saveticker import automation, paths
 from trader.kernel.ops.types import Item, OpsContext
 from trader.kernel.registry.types import HealthArea
 
-logger = logging.getLogger("trader.features.saveticker")
 LINK = "/system#saveticker"
 
 
 def check(ctx: OpsContext) -> list[Item]:
-    try:
-        if not paths.credentials_path().is_file():
-            return []
-        home = paths.home()
-        s = automation.status(home)
-        paused = automation.active_skip_lanes(home, now=ctx.now)
-    except Exception as e:  # noqa: BLE001 — 점검은 읽기 전용, 실패가 다른 영역을 막지 않는다
-        logger.debug("세이브티커 점검 실패: %s", e)
+    """계정 파일이 없으면 빈 결과(기능 미사용 — 정상 경로). 상태 파일 읽기 실패는 올려 러너의
+    `saveticker.error` 격리에 맡긴다(M-4)."""
+    if not paths.credentials_path().is_file():
         return []
+    home = paths.home()
+    s = automation.status(home)
+    paused = automation.active_skip_lanes(home, now=ctx.now)
     out: list[Item] = []
     if s["blocked"]:
         text = f"세이브티커 수집 멈춤 — {s['reason_text']}"

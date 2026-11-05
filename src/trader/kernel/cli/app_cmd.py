@@ -30,7 +30,22 @@ from trader.kernel.platform.tray import TrayUnavailable, run_tray
 logger = logging.getLogger("trader.cli")
 
 PORT_WAIT_S = 20.0  # 첫 실행은 무거운 import 로 오래 걸린다 — 포트가 열릴 때까지 최대 이만큼
+RUNNING_PORT_WAIT_S = 2.0  # 이미 실행 중인 인스턴스의 웹 포트는 열려 있어야 한다 — 짧게만 확인
 WEB_JOIN_S = 10.0
+
+
+def running_web() -> tuple[str, int] | None:
+    """다른 데몬(daemon·app)이 잠금을 쥐고 있으면 웹 (host, port), 아니면 None.
+
+    무거운 조립(포트·스케줄) 전에 부른다 — 설정만 읽는다(FR-1). 잠금 보유는 '이미 실행 중'
+    이라 호출자는 exit 0 으로 끝낸다(launchd `KeepAlive{SuccessfulExit:false}` 가 재기동을
+    반복하지 않게)."""
+    from trader.kernel.cli.jobs_cmd import daemon_running
+
+    if not daemon_running():
+        return None
+    b = boot(settings=True)
+    return b.settings.web.bind, b.settings.web.port
 
 
 def wait_for_port(
@@ -245,6 +260,14 @@ def app(
     if created:
         typer.echo("초기화: " + ", ".join(created))
     ensure_web_token()
+    running = running_web()
+    if running is not None:
+        host, port = running
+        url = f"http://{host}:{port}"
+        typer.echo(f"이미 실행 중입니다 — {url}")
+        if not no_browser and wait_for_port(host, port, timeout_s=RUNNING_PORT_WAIT_S):
+            webbrowser.open(url)
+        return
     b = boot(ports=True, schedule=True, log_name="app")
     try:
         url = f"http://{b.settings.web.bind}:{b.settings.web.port}"

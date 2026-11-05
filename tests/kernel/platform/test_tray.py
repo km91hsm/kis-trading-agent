@@ -113,21 +113,28 @@ def test_watch_signals_off_main_thread_is_noop():
     out: list = []
     t = threading.Thread(target=lambda: out.append(tray.watch_signals(lambda s: None, ())))
     t.start()
-    t.join()
+    t.join(5)
+    assert not t.is_alive()
     out[0]()  # 예외 없이 no-op 해제
 
 
 class _FakeIcon:
+    """워커 스레드 결과를 고정 폴링 대신 이벤트로 기다린다(T10 — 부하 큰 CI 플레이크 방지)."""
+
     def __init__(self):
         self.title = ""
         self.stopped = False
         self.menu_updates = 0
+        self.stopped_evt = threading.Event()
+        self.updated_evt = threading.Event()
 
     def stop(self):
         self.stopped = True
+        self.stopped_evt.set()
 
     def update_menu(self):
         self.menu_updates += 1
+        self.updated_evt.set()
 
 
 def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None):
@@ -179,10 +186,7 @@ def test_quit_action_returns_immediately_and_stops_icon_after_shutdown():
     assert icon.title == tray.QUITTING_TITLE and icon.stopped is False
     ctl.quit_action(icon, None)  # 두 번 눌러도 한 번만
     release.set()
-    for _ in range(50):
-        if icon.stopped:
-            break
-        threading.Event().wait(0.02)
+    assert icon.stopped_evt.wait(5)
     assert icon.stopped is True
 
 
@@ -194,10 +198,7 @@ def test_pause_action_toggles_on_worker_and_refreshes_title():
 
     ctl, icon = _controller(lambda: _state(paused=flag["paused"]), on_toggle=toggle)
     ctl.pause_action(icon, None)
-    for _ in range(50):
-        if icon.title == "trader · 일시정지":
-            break
-        threading.Event().wait(0.02)
+    assert icon.updated_evt.wait(5)  # 제목을 바꾼 뒤 메뉴를 갱신한다
     assert icon.title == "trader · 일시정지" and ctl.checked("toggle_pause") is True
     assert icon.menu_updates >= 1
 

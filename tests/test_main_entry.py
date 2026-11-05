@@ -93,3 +93,13 @@ def test_ensure_streams_replaces_none(monkeypatch):
     print("ok")  # 죽지 않는다
     sys.stdout.close()
     sys.stderr.close()
+
+
+def test_main_imports_native_host_only_for_chrome_origin(monkeypatch):
+    """보통 CLI 인자면 세이브티커 네이티브 호스트 모듈을 import 하지 않는다(T11 — 기동 비용)."""
+    calls = []
+    monkeypatch.setattr(main_mod, "app", lambda args=None: calls.append(args))
+    monkeypatch.setitem(sys.modules, "trader.features.saveticker.bridge_install", None)
+    monkeypatch.setattr(sys, "argv", ["trader", "status"])
+    entry.main()  # None 모듈을 import 하면 ImportError — 그 전에 걸러져야 한다
+    assert calls == [None]

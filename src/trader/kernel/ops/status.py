@@ -132,13 +132,13 @@ def calls_lines(ctx: Any) -> list[str]:
     return [f"- {len(rows)}건, ${cost:.2f}"]
 
 
-KERNEL_SECTIONS: tuple[StatusSection, ...] = (
+KERNEL_STATUS_SECTIONS: tuple[StatusSection, ...] = (
     StatusSection("운영 점검", ops_lines),
     StatusSection("데몬", daemon_lines),
     StatusSection("마지막 실행", runs_lines),
     StatusSection("오늘 LLM 호출", calls_lines),
 )
-TELEGRAM_KERNEL_SECTIONS = KERNEL_SECTIONS[:2]
+TELEGRAM_KERNEL_SECTIONS = KERNEL_STATUS_SECTIONS[:2]
 
 
 # --- 모으기·렌더 ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ def telegram_lines(ctx: Any) -> list[str]:
 def render_markdown(ctx: Any, *, todo_path: Path | None) -> str:
     stamp = _now(ctx).astimezone(KST).strftime("%Y-%m-%d %H:%M KST")
     lines = [f"# 시스템 상태 (생성: {stamp})"]
-    for title, body in sections(ctx, kernel=KERNEL_SECTIONS):
+    for title, body in sections(ctx, kernel=KERNEL_STATUS_SECTIONS):
         if body:
             lines += ["", f"## {title}", *body]
     if todo_path is not None:

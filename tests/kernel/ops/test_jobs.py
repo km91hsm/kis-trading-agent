@@ -121,3 +121,22 @@ def test_build_context_without_schedule_has_no_jobs(conn, settings, project):
         features=[], schedule=None, markets=["KR"],
     )  # fmt: skip
     assert list(ctx.jobs) == [] and ctx.conn is conn
+
+
+def test_ops_check_body_records_actual_interval(daemon_deps):
+    """`ops_result` 에 실제 잡 간격을 함께 적는다 — 웹 신선도가 기본 1800 에 묶이지 않게(M-2)."""
+    from trader.kernel.daemon.jobs import ScheduledJob
+
+    job = ScheduledJob("ops_check", ops_jobs.OPS_CHECK, None, {"seconds": 60})
+    ops_jobs.ops_check_body(daemon_deps, job)
+    conn = daemon_deps.conn_factory()
+    try:
+        assert latest(conn)["interval_s"] == 60
+    finally:
+        conn.close()
+    ops_jobs.ops_check_body(daemon_deps)  # 잡 없이 부르면 선언 기본값
+    conn = daemon_deps.conn_factory()
+    try:
+        assert latest(conn)["interval_s"] == ops_jobs.OPS_CHECK.interval_s
+    finally:
+        conn.close()

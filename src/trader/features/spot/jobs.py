@@ -582,8 +582,8 @@ class ApprovalNoticeParams(BaseModel):
 
 def approval_notice_body(deps, params: dict, progress) -> dict:
     """큐 `approval_notice`: 웹 거부 뒤 텔레그램 `[거부]` 알림(spot `messages.reject_notice` —
-    `/reject` 와 같은 문구)을 보낸다. 웹은 알림을 쥐지 않아 데몬이 보낸다(P15). 알림기가 없으면
-    건너뛴다."""
+    `/reject` 와 같은 문구)을 보낸다. 웹은 알림을 쥐지 않아 데몬이 보낸다(P15). 알림기가 없거나
+    승인이 거부 상태가 아니면 건너뛴다."""
     aid = int(params["approval_id"])
     if deps.notifier is None:
         return {"approval_id": aid, "skipped": "알림기 없음"}
@@ -594,6 +594,8 @@ def approval_notice_body(deps, params: dict, progress) -> dict:
         conn.close()
     if a is None:
         return {"approval_id": aid, "skipped": f"승인 요청 #{aid} 없음"}
+    if a["status"] != "rejected":  # 거부로 끝난 승인에만 [거부] 알림을 보낸다(M-1)
+        return {"approval_id": aid, "skipped": f"승인 요청 #{aid} 상태 {a['status']}"}
     port = (deps.ports or {}).get("accounts")
     acct = next((x for x in port.accounts() if x.id == a["account_id"]), None) if port else None
     ok = send(deps.notifier, reject_notice(a, acct.env if acct is not None else None))

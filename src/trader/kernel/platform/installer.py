@@ -1,4 +1,5 @@
-"""로그온 시 데몬 자동 시작 등록 (스펙 §10.1). 파이썬 템플릿 + subprocess, 셸 스크립트 없음.
+"""로그온 시 데몬 + 웹 UI(`app --no-browser`) 자동 시작 등록 (스펙 §10.1). 파이썬 템플릿 +
+subprocess, 셸 스크립트 없음.
 
 - macOS: ~/Library/LaunchAgents/com.trader.daemon.plist + `launchctl load -w`
 - Windows: %USERPROFILE%/trader-daemon.xml + `schtasks /Create /TN trader-daemon /XML … /F`
@@ -6,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from collections.abc import Callable
@@ -15,6 +17,8 @@ from xml.sax.saxutils import escape
 
 from trader.kernel.config import ConfigError
 from trader.kernel.platform import bundle, paths
+
+logger = logging.getLogger("trader.platform")
 
 LABEL = "com.trader.daemon"
 TASK_NAME = "trader-daemon"
@@ -39,8 +43,9 @@ _PLIST = """<?xml version="1.0" encoding="UTF-8"?>
     <key>PATH</key><string>{path_env}</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <!-- 비정상 종료일 때만 다시 띄운다: 잠금이 이미 잡혀 있거나(앱이 데몬을 돌리는 중) 설정 오류로
-       곧바로 끝나면 10초마다 무한 재기동하던 문제(전체 검토 2026-10-27) -->
+  <!-- 비정상 종료(exit != 0)일 때만 다시 띄운다. 잠금이 이미 잡혀 있으면(다른 인스턴스가 실행 중)
+       app·daemon 은 안내 뒤 exit 0 으로 끝나므로 launchd 가 재기동하지 않는다. 설정 오류 등
+       기동 실패(exit 1)는 ThrottleInterval 60초 간격으로 다시 시도한다 -->
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>60</integer>
   <key>ExitTimeOut</key><integer>{exit_timeout}</integer>
@@ -137,9 +142,9 @@ def render(
     exit_timeout_s: int = DEFAULT_EXIT_TIMEOUT_S,
     interval_s: int | None = None,
 ) -> str:
-    """program 은 데몬 argv (`[python, "-m", "trader", "daemon"]` 또는 번들 `[exe, "daemon"]`,
-    기본은 `bundle.daemon_argv()`). extra_paths(claude 디렉터리 등)를 launchd PATH 앞에 둔다
-    (launchd 는 셸 PATH 가 없다).
+    """program 은 등록 argv (`[python, "-m", "trader", "app", "--no-browser"]` 또는 번들
+    `[exe, "app", "--no-browser"]`, 기본은 `bundle.service_argv()`). extra_paths(claude
+    디렉터리 등)를 launchd PATH 앞에 둔다 (launchd 는 셸 PATH 가 없다).
 
     exit_timeout_s: SIGTERM 뒤 launchd 가 SIGKILL 하기까지의 시간. 데몬은 실행 중인 analyze
     세션(llm.timeout_s)을 기다린 뒤 잠금을 풀므로 그보다 길어야 한다 (기본 20초면 세션이 고아).
@@ -209,7 +214,7 @@ def install(
     kind="watchdog" 은 `trader watchdog` 를 5분 간격 1회 실행으로 등록한다."""
     home = home or Path.home()
     watchdog = kind == "watchdog"
-    program = program or (bundle.watchdog_argv() if watchdog else bundle.daemon_argv())
+    program = program or (bundle.watchdog_argv() if watchdog else bundle.service_argv())
     project_root = project_root or paths.project_root()
     path = _target(platform, home, kind)
     text = render(
@@ -250,7 +255,9 @@ def uninstall(
     home: Path | None = None,
     kind: Literal["daemon", "watchdog"] = "daemon",
 ) -> dict:
-    """등록을 내리고 템플릿 파일을 지운다(Windows 는 파일이 없어도 작업 삭제를 시도)."""
+    """등록을 내리고 템플릿 파일을 지운다(Windows 는 파일이 없어도 작업 삭제를 시도). 멱등:
+    Windows 에서 파일이 없고 작업 삭제가 실패하면 등록돼 있지 않은 것으로 보고 `note` 만
+    남긴다(T9). 파일이 있는데 삭제가 실패하면 ConfigError."""
     home = home or Path.home()
     path = _target(platform, home, kind)
     task = WATCHDOG_TASK if kind == "watchdog" else TASK_NAME
@@ -258,8 +265,14 @@ def uninstall(
         command = ["launchctl", "unload", "-w", str(path)]
     else:
         command = ["schtasks", "/Delete", "/TN", task, "/F"]
-    if path.exists() or platform == "win32":
-        _run(run, command)
+    out: dict = {"path": path, "command": command}
     if path.exists():
+        _run(run, command)
         path.unlink()
-    return {"path": path, "command": command}
+    elif platform == "win32":
+        try:
+            _run(run, command)
+        except ConfigError as e:
+            logger.info("작업 삭제 실패 — 등록돼 있지 않은 것으로 봄: %s", e)
+            out["note"] = "등록돼 있지 않음"
+    return out

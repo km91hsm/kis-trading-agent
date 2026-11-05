@@ -190,3 +190,29 @@ def test_news_collect_queue_kind_runs_same_body(project, monkeypatch):
     assert calls == [["KR", "US"], ["US"], ["KR", "US"]]
     with pytest.raises(ValidationError):
         job.NewsCollectParams.model_validate({"market": "KR", "x": 1})
+
+
+def test_news_collect_params_market_is_literal():
+    """market 은 `Market`(KR|US) — 소문자 등은 검증 오류(텔레그램 `/run` 오류 문구, FR-5)."""
+    assert job.NewsCollectParams.model_validate({"market": "US"}).market == "US"
+    for bad in ("kr", "JP", ""):
+        with pytest.raises(ValidationError):
+            job.NewsCollectParams.model_validate({"market": bad})
+
+
+def test_news_collect_request_intersects_configured_markets(project, monkeypatch):
+    """요청 시장 중 설정(`deps.markets`)에 없는 것은 수집하지 않고 `skipped` 로 적는다(FR-5)."""
+    calls = []
+
+    def fake(ctx, markets):
+        calls.append(list(markets))
+        return {"markets": list(markets)}
+
+    monkeypatch.setattr(job, "_collect", fake)
+    deps = _deps(project, markets=("KR",))
+    out = job.news_collect_request(deps, {"market": "US"}, lambda _t: None)
+    assert out == {"skipped": ["US"]}
+    assert calls == []
+    assert job.news_collect_request(deps, {"market": "KR"}, lambda _t: None) == {"markets": ["KR"]}
+    assert job.news_collect_request(deps, {}, lambda _t: None) == {"markets": ["KR"]}
+    assert calls == [["KR"], ["KR"]]

@@ -283,3 +283,25 @@ def test_order_test_cancels_even_if_cancel_fails(project, monkeypatch):
     assert r.exit_code == 1
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["placed"] is False and out["cancelled"] is False and out["order_id"] is None
+
+
+def test_order_test_fails_clearly_without_price(project, monkeypatch):
+    """현재가가 없으면(None) 주문을 만들지 않고 명확한 오류로 exit 1(M-8)."""
+    from trader.features.accounts import cli as acli
+
+    holder = _order_test_env(project, monkeypatch)
+    monkeypatch.setattr(acli, "build_market", lambda s, a: _OrderTestMarket(None))
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 1
+    assert "현재가가 없어" in (r.stdout + (r.stderr or ""))
+    assert "brokers" not in holder
+
+
+def test_order_test_refuses_dry_run_env(project, monkeypatch):
+    """`TRADER_DRY_RUN` 이 켜져 있으면(0 이 아니면) 점검 주문을 내지 않는다(M-8)."""
+    holder = _order_test_env(project, monkeypatch)
+    monkeypatch.setenv("TRADER_DRY_RUN", "1")
+    r = CliRunner().invoke(app, ["accounts", "order-test", "--account", "paper-main"])
+    assert r.exit_code == 1
+    assert "dry-run" in (r.stdout + (r.stderr or ""))
+    assert "brokers" not in holder

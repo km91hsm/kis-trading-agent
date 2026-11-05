@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -11,6 +12,8 @@ from trader.kernel.execution.ledger import latest_nav_before, realized_pnl_5d
 from trader.kernel.ops.types import Item, OpsContext
 from trader.kernel.registry.types import HealthArea
 from trader.kernel.session.run_store import run_date_for
+
+logger = logging.getLogger("trader.regime")
 
 LOSS_WATCH_5D = Decimal("-0.02")
 LOSS_WARNING_5D = Decimal("-0.05")
@@ -29,6 +32,15 @@ def _loss_level(pct: Decimal) -> str | None:
     return None
 
 
+def _flow_date(flow: dict) -> date | None:
+    """입출금 의심 기록의 날짜. 깨진 값이면 그 항목만 건너뛴다(영역 전체가 오류가 되지 않게, T3)."""
+    try:
+        return date.fromisoformat(str(flow.get("date")))
+    except ValueError:
+        logger.warning("입출금 의심 기록의 날짜가 잘못됨: %r", flow.get("date"))
+        return None
+
+
 def check(ctx: OpsContext) -> list[Item]:
     out: list[Item] = []
     ks = killswitch.reason(ctx.conn)
@@ -43,7 +55,8 @@ def check(ctx: OpsContext) -> list[Item]:
             d = run_date_for(m, ctx.now)
             link = f"/accounts/{a.id}"
             flow = killswitch.flow_suspicion(ctx.conn, a.id, m)
-            if flow and (d - date.fromisoformat(str(flow.get("date")))).days <= FLOW_SHOW_DAYS:
+            flow_date = _flow_date(flow) if flow else None
+            if flow_date is not None and (d - flow_date).days <= FLOW_SHOW_DAYS:
                 out.append(
                     Item(
                         f"regime.flow.{a.id}.{m}",

@@ -44,7 +44,7 @@ def _alive_lock(state):
     (state / "daemon.lock").write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
 
 
-def _cache(deps, *, at, level="warning", items=None):
+def _cache(deps, *, at, level="warning", items=None, interval_s=None):
     from trader.kernel.ops import LABEL, store
 
     if items is None:
@@ -52,8 +52,11 @@ def _cache(deps, *, at, level="warning", items=None):
                   "link": "/", "count": 1, "extra": {}}]  # fmt: skip
     conn = deps.conn_factory()
     try:
-        store(conn, {"level": level, "label": LABEL[level], "at": at.isoformat(), "areas": {},
-                     "items": items, "actions": []})  # fmt: skip
+        result = {"level": level, "label": LABEL[level], "at": at.isoformat(), "areas": {},
+                  "items": items, "actions": []}  # fmt: skip
+        if interval_s is not None:
+            result["interval_s"] = interval_s
+        store(conn, result)
     finally:
         conn.close()
 
@@ -67,7 +70,7 @@ def test_health_uses_daemon_cache_when_fresh(project):
     assert out["level"] == "warn" and out["checked_at"] == at.isoformat()
     assert out["reasons"] == [
         {"area": "orders", "level": "warn", "text": "응답 없는 주문 1건",
-         "key": "orders.unknown", "link": "/"}
+         "key": "orders.unknown", "link": "/", "count": 1}
     ]  # fmt: skip
 
 
@@ -86,6 +89,18 @@ def test_health_live_when_cache_missing_or_stale(project):
         assert latest(conn)["at"] == (NOW - timedelta(hours=2)).isoformat()  # 웹은 적지 않는다
     finally:
         conn.close()
+
+
+def test_health_freshness_uses_recorded_interval(project):
+    """데몬이 적은 실제 간격(60초)으로 신선도를 본다 — 2분 지난 결과는 stale(M-2)."""
+    deps = ledger_deps(project)
+    _alive_lock(deps.state)
+    _cache(deps, at=NOW - timedelta(minutes=2), interval_s=60)
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["checked_at"] == NOW.isoformat()  # 캐시를 버리고 직접 판정
+    _cache(deps, at=NOW - timedelta(seconds=90), interval_s=60)
+    out = make_client(deps).get("/api/system/health").json()
+    assert out["checked_at"] == (NOW - timedelta(seconds=90)).isoformat()
 
 
 def test_health_live_param_forces_check(project):

@@ -12,7 +12,7 @@ import logging
 import re
 import shutil
 import sqlite3
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from trader.kernel.config import KST
@@ -55,7 +55,8 @@ def prune(
 ) -> dict[str, int]:
     """keep_days 보다 오래된 것을 지우고 종류별 건수를 돌려준다(멱등)."""
     cutoff = today - timedelta(days=keep_days)
-    cutoff_iso = datetime.combine(cutoff, time.min, KST).isoformat()
+    # 저장 시각은 UTC ISO 문자열이라 사전순 비교가 맞으려면 cutoff 도 UTC ISO 여야 한다(T5 M1)
+    cutoff_iso = datetime.combine(cutoff, time.min, KST).astimezone(UTC).isoformat()
     out = {"run_dirs": 0, "control": 0, "job_requests": 0, "runs": 0}
 
     root = (state or paths.state_dir()) / "runs"

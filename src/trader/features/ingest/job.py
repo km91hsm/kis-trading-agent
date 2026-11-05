@@ -14,6 +14,7 @@ from trader.features.ingest.saveticker_ingest import ingest_news
 from trader.features.ingest.settings import load_sources
 from trader.features.ingest.universe import load_universe
 from trader.features.saveticker.api import load_cfg, resolve_dir
+from trader.kernel.config import Market
 from trader.kernel.config.secrets import Secrets
 from trader.kernel.registry import hooks
 from trader.kernel.registry.types import JobSpec, QueueKind
@@ -33,13 +34,23 @@ def news_collect(ctx: Any, job: Any) -> dict:
 class NewsCollectParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    market: str | None = None
+    market: Market | None = None
 
 
 def news_collect_request(deps: Any, params: dict, progress: Any) -> dict:
-    """큐 `news_collect` 본문: market 이 있으면 그 시장만, 없으면 전 시장 — 잡과 같은 `_collect`."""
+    """큐 `news_collect` 본문: market 이 있으면 그 시장만, 없으면 전 시장 — 잡과 같은 `_collect`.
+    설정(`deps.markets`)에 없는 시장은 수집하지 않고 결과에 `skipped: [..]` 로 남긴다(FR-5)."""
     market = params.get("market")
-    return _collect(deps, [market] if market else list(deps.markets))
+    configured = list(deps.markets)
+    wanted = [market] if market else configured
+    markets = [m for m in wanted if m in configured]
+    skipped = [m for m in wanted if m not in configured]
+    if not markets:
+        return {"skipped": skipped}
+    out = _collect(deps, markets)
+    if skipped and "skipped" not in out:  # news.enabled=false 의 skipped 문구는 그대로 둔다
+        out["skipped"] = skipped
+    return out
 
 
 def _collect(ctx: Any, markets: list[str]) -> dict:

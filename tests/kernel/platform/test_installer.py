@@ -184,12 +184,16 @@ def test_render_uses_program_argv_for_bundle(tmp_path):
     assert "<Arguments>daemon</Arguments>" in xml
 
 
-def test_install_defaults_program_to_bundle_daemon_argv(tmp_path, monkeypatch):
+def test_install_defaults_program_to_bundle_service_argv(tmp_path, monkeypatch):
     from trader.kernel.platform import bundle
 
-    monkeypatch.setattr(bundle, "daemon_argv", lambda: ["/dist/trader/trader", "daemon"])
+    monkeypatch.setattr(bundle, "is_frozen", lambda: True)
+    monkeypatch.setattr(bundle, "cli_executable", lambda: Path("/dist/trader/trader"))
     r = installer.install(dry_run=True, platform="darwin", home=tmp_path, project_root=tmp_path)
     assert "<string>/dist/trader/trader</string>" in r["content"]
+    assert "<string>app</string>\n    <string>--no-browser</string>" in r["content"]
+    w = installer.install(dry_run=True, platform="win32", home=tmp_path, project_root=tmp_path)
+    assert "<Arguments>app --no-browser</Arguments>" in w["content"]
 
 
 def test_render_watchdog_variants_use_interval_not_keepalive(tmp_path):
@@ -225,3 +229,24 @@ def test_render_watchdog_variants_use_interval_not_keepalive(tmp_path):
         run=lambda cmd, **kw: calls.append(cmd), platform="darwin", home=tmp_path, kind="watchdog"
     )
     assert r2["path"].name == "com.trader.watchdog.plist"
+
+
+def test_uninstall_win32_is_idempotent_when_not_registered(tmp_path):
+    """등록 파일이 없고 schtasks /Delete 가 실패하면(작업 없음) 오류가 아니라
+    「등록돼 있지 않음」(T9)."""
+
+    def run(cmd, **kw):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "ERROR: 지정된 파일을 찾을 수 없습니다."
+
+        return R()
+
+    r = installer.uninstall(run=run, platform="win32", home=tmp_path)
+    assert r["command"] == ["schtasks", "/Delete", "/TN", "trader-daemon", "/F"]
+    assert r["note"] == "등록돼 있지 않음"
+    # 등록 파일이 있는데 삭제가 실패하면 그대로 오류
+    (tmp_path / "trader-daemon.xml").write_text("x", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        installer.uninstall(run=run, platform="win32", home=tmp_path)

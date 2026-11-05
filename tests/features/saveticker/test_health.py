@@ -42,13 +42,16 @@ def test_saveticker_stopped_is_warning_and_paused_lane_is_watch(project):
     assert paused.link == "/system#saveticker"
 
 
-def test_saveticker_check_failure_returns_empty(project, monkeypatch, caplog):
+def test_saveticker_check_failure_surfaces_as_area_error(project, monkeypatch):
+    """예외를 삼키지 않는다 — 러너가 `saveticker.error` warning 으로 격리한다(M-4)."""
+    from trader.kernel.ops.health import _run_area
+
     paths.credentials_path().write_text("x", encoding="utf-8")
 
     def boom(home):
         raise OSError("읽기 실패")
 
     monkeypatch.setattr(automation, "status", boom)
-    with caplog.at_level("DEBUG", logger="trader.features.saveticker"):
-        assert health.check(ctx(project)) == []
-    assert "읽기 실패" in caplog.text
+    items = _run_area(health.AREA, ctx(project))
+    assert [(i.key, i.level) for i in items] == [("saveticker.error", "warning")]
+    assert "읽기 실패" in items[0].text

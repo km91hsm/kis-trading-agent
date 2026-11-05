@@ -135,18 +135,22 @@ def headline(result: dict | None) -> str:
 
 def to_web(result: dict, *, version: str, features: Sequence[str]) -> dict:
     """`/system/health` 응답 모양 `{level: ok|warn|fail, reasons, checked_at, version, features}`.
-    ok 항목은 빼고, watch 는 info 사유로만 남긴다(머리 단계 미반영)."""
-    reasons = [
-        {
+    ok 항목은 빼고, watch 는 info 사유로만 남긴다(머리 단계 미반영). 항목에 `count` 가 있으면
+    사유에도 싣는다(선택 필드, M-3)."""
+    reasons = []
+    for i in result["items"]:
+        if i["level"] == "ok":
+            continue
+        reason = {
             "area": str(i["key"]).split(".")[0],
             "level": WEB_LEVEL[i["level"]],
             "text": i["text"],
             "key": i["key"],
             "link": i.get("link"),
         }
-        for i in result["items"]
-        if i["level"] != "ok"
-    ]
+        if i.get("count") is not None:
+            reason["count"] = i["count"]
+        reasons.append(reason)
     return {
         "level": _WEB_HEAD.get(result["level"], "ok"),
         "reasons": reasons,

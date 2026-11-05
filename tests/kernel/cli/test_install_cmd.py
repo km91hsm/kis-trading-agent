@@ -19,6 +19,7 @@ def test_cli_install_dry_run(project):
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["kind"] == "daemon" and out["written"] is False
     assert set(out) == {"path", "command", "written", "content", "kind"}
+    assert "app" in out["content"] and "--no-browser" in out["content"]  # 데몬 + 웹 UI (FR-2)
     w = CliRunner().invoke(app, ["install", "--dry-run", "--watchdog"])
     assert w.exit_code == 0, w.output
     wout = json.loads(w.stdout.strip().splitlines()[-1])

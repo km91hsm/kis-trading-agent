@@ -3,24 +3,20 @@ calibration.min_decisions` 에 닿았는데 주입(`inject`)이 꺼져 있으면
 
 from __future__ import annotations
 
-import logging
-
 from trader.features.evaluation.memory.store import matured_count
 from trader.features.ml import api as ml_api
 from trader.kernel.ops.types import Item, OpsContext
 from trader.kernel.registry.types import HealthArea
 
-logger = logging.getLogger("trader.evaluation")
-
 
 def check(ctx: OpsContext) -> list[Item]:
-    try:
-        cal = ml_api.load_ml().models.calibration
-        n = matured_count(ctx.conn)
-    except Exception:  # noqa: BLE001 - 점검 보조: 설정·원장을 못 읽으면 알릴 것이 없다
-        logger.debug("보정 재검토 점검 실패", exc_info=True)
+    """보정이 꺼져 있거나 이미 주입 중이면 빈 결과(정상 경로). 설정·원장 읽기 실패는 올려
+    러너의 `evaluation.error` 격리에 맡긴다(M-4)."""
+    cal = ml_api.load_ml().models.calibration
+    if not cal.enabled or cal.inject:
         return []
-    if not (cal.enabled and not cal.inject and n >= cal.min_decisions):
+    n = matured_count(ctx.conn)
+    if n < cal.min_decisions:
         return []
     return [
         Item(

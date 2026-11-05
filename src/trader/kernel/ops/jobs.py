@@ -21,7 +21,7 @@ from trader.kernel.registry.types import Feature, JobSpec
 
 logger = logging.getLogger("trader.ops")
 
-CACHE_MAX_AGE_FACTOR = 2  # 데몬 결과가 `2 × ops_check 간격` 안이면 웹이 그대로 쓴다
+CACHE_MAX_AGE_FACTOR = 2  # 데몬 결과가 `2 × 기록된 ops_check 간격` 안이면 웹이 그대로 쓴다
 
 
 class _AnyGates:
@@ -77,7 +77,9 @@ def build_context(
 
 
 def ops_check_body(deps: Any, job: Any = None) -> dict:
-    """점검 1회: 결과를 control `ops_result` 에 적고, 나빠졌으면 텔레그램으로 한 번 알린다."""
+    """점검 1회: 결과를 control `ops_result` 에 적고, 나빠졌으면 텔레그램으로 한 번 알린다.
+    결과에는 실제 잡 간격 `interval_s`(schedule.yaml 값, 잡 없이 부르면 선언 기본값)를 함께
+    적는다 — 웹 신선도 판정이 그 값을 쓴다(M-2)."""
     conn = deps.conn_factory()
     try:
         ctx = build_context(
@@ -86,6 +88,7 @@ def ops_check_body(deps: Any, job: Any = None) -> dict:
             markets=deps.markets,
         )  # fmt: skip
         result = check(ctx)
+        result["interval_s"] = int(getattr(job, "interval_s", None) or OPS_CHECK.interval_s or 0)
         store(conn, result)
         msg = escalate(conn, result)
     finally:

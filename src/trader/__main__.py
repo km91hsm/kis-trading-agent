@@ -71,7 +71,8 @@ def _pause_if_console() -> None:
 
 def main() -> None:
     # (1) Chrome 은 호출한 확장 origin 을 argv[1] 로 준다 — CLI 로깅·출력이 프레이밍을 깨지 않게
-    if len(sys.argv) > 1:
+    # 접두만 먼저 보고, 그때만 기능 모듈을 import 한다(보통 CLI 기동 비용, T11)
+    if len(sys.argv) > 1 and sys.argv[1].startswith("chrome-extension://"):
         from trader.features.saveticker.bridge_install import is_native_origin, native_entry
 
         if is_native_origin(sys.argv[1]):
