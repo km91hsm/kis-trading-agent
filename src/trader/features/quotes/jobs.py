@@ -1,11 +1,12 @@
 """quotes 데몬 잡 `names_fill`(interval, schedule.yaml `names_fill.interval_s`): 종목명 채우기.
 
 1. 설정 `quotes.instrument_names`(`"<시장>:<종목>": 이름` — 헤지·현금·지수 대용 ETF 처럼 DART·EDGAR
-   캐시에 없는 상품)를 원장 `ticker_names` 에 `source='config'` 로 적재한다. 이미 이름이 있는
-   종목(잔고 관측 등)은 덮지 않는다.
+   캐시에 없는 상품)를 원장 `ticker_names` 에 `source='config'` 로 적재한다. 설정이 관측(잔고·
+   브로커)보다 우선해 다른 이름·source 는 덮는다(Ruling T18-R3).
 2. 원장 `positions_snapshot`·`orders`(현물)에 나왔지만 `ticker_names` 에 없는 종목을 시세
-   클라이언트 `get_stock_name` 으로 조회해 `source='broker'` 로 남긴다. 못 찾은 종목은 control
-   `names_miss` 에 그날(KST) 날짜를 남겨 다시 묻지 않고, 한 번에 `LIMIT` 건까지만 묻는다.
+   클라이언트 `get_stock_name` 으로 조회해 `source='broker'` 로 남긴다(기존 이름은 덮지 않음).
+   못 찾은 종목은 control `names_miss` 에 그날(KST) 날짜를 남겨 다시 묻지 않고, 한 번에
+   `LIMIT` 건까지만 묻는다.
 
 `ticker_names`·`ticker_exchanges` 는 spot 표다(데이터 접근 — quotes 는 레인을 import 하지 않는다).
 옛 `names.fill_missing`·데몬 `_names_fill_body` 이식. 화면 표시 경로는 이 잡을 부르지 않는다."""
@@ -64,10 +65,22 @@ def _us_exchanges(conn: sqlite3.Connection) -> dict[str, str]:
 
 
 def _fill_config(conn: sqlite3.Connection, names: dict[str, str]) -> int:
+    """설정 고정 이름은 관측(잔고·브로커)보다 우선한다(Ruling T18-R3): 없으면 넣고, 이름이나
+    source 가 다르면 덮는다. 이미 같으면 쓰기 없음. 실제로 바뀐 행 수를 돌려준다."""
     n = 0
     for key, name in names.items():
         market, ticker = key.split(":", 1)
-        n += _insert_name(conn, market, ticker, name, "config")
+        if not name or name == ticker:
+            continue
+        cur = conn.execute(
+            "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+            "VALUES (?, ?, ?, 'config', ?) ON CONFLICT(market, ticker) DO UPDATE SET "
+            "name=excluded.name, source='config', updated_at=excluded.updated_at "
+            "WHERE ticker_names.name IS NOT excluded.name OR ticker_names.source != 'config'",
+            (market, ticker, name, now_iso()),
+        )
+        n += cur.rowcount
+    conn.commit()
     return n
 
 

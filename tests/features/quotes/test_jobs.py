@@ -128,33 +128,39 @@ def test_names_fill_skips_without_market_client(conn, settings):
 
 def test_configured_instrument_names_fill_etfs(conn, settings):
     """헤지·현금·지수 대용 ETF 는 DART 캐시에 없다 — 설정 `quotes.instrument_names` 를 같은 잡이
-    source='config' 로 적재하고(시세 클라이언트가 없어도), 관측 이름(잔고 등)은 덮지 않는다.
+    source='config' 로 적재한다(시세 클라이언트가 없어도). 설정이 관측보다 우선한다(T18-R3):
+    잔고·브로커 이름을 덮고, 설정을 고치면 다음 실행에 반영되며, 같은 값이면 쓰기 0건.
     설정으로 채워진 종목은 브로커에 묻지 않는다."""
     assert QuotesSettings().instrument_names == {}
     with pytest.raises(ValidationError):
         QuotesSettings(instrument_names={"252670": "키에 시장 없음"})
-    cfg = settings.quotes.model_copy(
-        update={
-            "instrument_names": {
-                "KR:252670": "KODEX 200선물인버스2X",
-                "US:SH": "ProShares Short S&P500",
-                "KR:069500": "설정 이름",
-            }
-        }
-    )
-    st = settings.model_copy(update={"quotes": cfg})
+
+    def with_names(names):
+        cfg = settings.quotes.model_copy(update={"instrument_names": names})
+        return settings.model_copy(update={"quotes": cfg})
+
+    st = with_names({
+        "KR:252670": "KODEX 200선물인버스2X", "US:SH": "ProShares Short S&P500",
+        "KR:069500": "설정 이름", "KR:114800": "KODEX 인버스",
+    })  # fmt: skip
     conn.execute(
-        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
-        "VALUES ('KR', '069500', '관측 이름', 'balance', 't')"
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) VALUES "
+        "('KR', '069500', '관측 이름', 'balance', 't'), ('KR', '114800', '잘린이름', 'broker', 't')"
     )
     conn.commit()
     _hold(conn, "252670")
     out = jobs.names_fill_body(_deps(st, None))
-    assert out["config"] == 2 and "skipped" in out
+    assert out["config"] == 4 and "skipped" in out
     got = _names(conn)
     assert got[("KR", "252670")] == ("KODEX 200선물인버스2X", "config")
     assert got[("US", "SH")] == ("ProShares Short S&P500", "config")
-    assert got[("KR", "069500")] == ("관측 이름", "balance")  # 관측값 우선
+    assert got[("KR", "069500")] == ("설정 이름", "config")  # (a) 관측(balance)을 덮는다
+    assert got[("KR", "114800")] == ("KODEX 인버스", "config")  # (a) 브로커 이름도 덮는다
+    # (c) 같은 값이면 쓰기 없음, 설정으로 채운 종목은 브로커에 묻지 않는다
     market = NameMarket({})
     out = jobs.names_fill_body(_deps(st, market))
     assert out["config"] == 0 and market.asked == []
+    # (b) 설정 이름을 고치면 다음 실행에 반영된다
+    fixed = with_names({"KR:252670": "KODEX 200선물인버스2X(수정)"})
+    assert jobs.names_fill_body(_deps(fixed, None))["config"] == 1
+    assert _names(conn)[("KR", "252670")] == ("KODEX 200선물인버스2X(수정)", "config")
