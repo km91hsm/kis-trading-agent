@@ -8,13 +8,14 @@ import { Nav } from "./Nav";
 import { StatusBar } from "./StatusBar";
 import "../../styles/shell.css";
 
-/** 주소의 #<id> 가 바뀌면 그 섹션으로 스크롤한다(하위 목차 클릭·새로 고침). */
+/** 주소의 #<id> 로 이동할 때마다 그 섹션으로 스크롤한다(하위 목차 클릭·새로 고침).
+ *  같은 항목을 다시 눌러도 location.key 는 새로 나오므로 다시 스크롤한다. */
 function useHashScroll(): void {
-  const { pathname, hash } = useLocation();
+  const { hash, key } = useLocation();
   useEffect(() => {
     if (!hash) return;
     document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView?.({ block: "start" });
-  }, [pathname, hash]);
+  }, [hash, key]);
 }
 
 export function Shell() {

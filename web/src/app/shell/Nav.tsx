@@ -1,14 +1,20 @@
-// 2단 메뉴 — 화면 5개(1단)와 화면 안 섹션 목차(2단, 자동 생성 NAV). 폭에 따라 shell.css 가
+// 2단 메뉴 — 화면 5개(1단)와 현재 화면의 섹션 목차(2단, 자동 생성 NAV). 폭에 따라 shell.css 가
 // 왼쪽 메뉴(≥1280)·아이콘 레일(1024~1279)·하단 탭(<1024)으로 바꾼다. 하위 목차는 `#<id>` 앵커.
+// 하위 목차는 현재 화면 것만 펼치고, 화면이 `hidden` 으로 숨긴 섹션(승인 0건·없는 레인 등)은 목차에서도 뺀다.
+// 현재 항목: 방금 누른 항목(주소 해시)이 우선, 사용자가 스크롤 입력을 하면 보이는 가장 위 섹션(IntersectionObserver).
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import { NAV } from "../../generated/nav";
+import { type Health, healthDot } from "../../lib/health";
+import { useResource } from "../../lib/hooks";
 
 export type Screen = keyof typeof NAV;
 export type NavGroup = { screen: Screen; label: string; path: string; items: { id: string; label: string; order: number }[] };
 
 const SCREENS = Object.keys(NAV) as Screen[];
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+const LEVEL_TEXT = { ok: "정상", warn: "주의", fail: "장애" } as const;
 
 /** NAV 를 화면 순서대로, 각 화면의 items 를 order 오름차순으로. */
 export function navGroups(): NavGroup[] {
@@ -25,15 +31,44 @@ export function screenOf(pathname: string): Screen | null {
   return SCREENS.find((s) => s !== "today" && (pathname === NAV[s].path || pathname.startsWith(NAV[s].path + "/"))) ?? null;
 }
 
-/** 지금 보이는 섹션 id — IntersectionObserver 가 있으면 화면에 들어온 가장 위 섹션, 없으면 location.hash. */
-function useCurrentSection(ids: string[], hash: string): string | null {
-  const [seen, setSeen] = useState<string | null>(null);
+/** 본문에 실제로 있고 `hidden` 이 아닌 섹션 id 만. 본문 DOM 의 hidden 변화·교체를 MutationObserver 로 따라간다. */
+function useShownSections(ids: string[], pathname: string): string[] {
   const key = ids.join(",");
+  const [state, setState] = useState({ key, shown: key });
+  useEffect(() => {
+    const compute = () => {
+      const shown = key
+        ? key
+            .split(",")
+            .filter((id) => {
+              const el = document.getElementById(id);
+              return !!el && !el.hidden;
+            })
+            .join(",")
+        : "";
+      setState((s) => (s.key === key && s.shown === shown ? s : { key, shown }));
+    };
+    compute();
+    if (typeof MutationObserver !== "function") return;
+    const mo = new MutationObserver(compute);
+    mo.observe(document.querySelector("main") ?? document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
+    return () => mo.disconnect();
+  }, [key, pathname]);
+  const shown = state.key === key ? state.shown : key;
+  return shown ? shown.split(",") : [];
+}
+
+/** 지금 표시할 섹션 id — 방금 누른 항목(해시, 이동마다 새 key)이 우선이고, 스크롤 입력이 오면
+ *  IntersectionObserver 가 고른 보이는 가장 위 섹션으로 넘어간다. IO 가 없으면 해시. */
+function useCurrentSection(ids: string[], hash: string, key: string): string | null {
+  const [seen, setSeen] = useState<string | null>(null);
+  const [clearedKey, setClearedKey] = useState<string | null>(null);
+  const idsKey = ids.join(",");
   useEffect(() => {
     setSeen(null);
-    if (typeof IntersectionObserver !== "function" || !key) return;
+    if (typeof IntersectionObserver !== "function" || !idsKey) return;
     const visible = new Set<string>();
-    const order = key.split(",");
+    const order = idsKey.split(",");
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) {
         if (e.isIntersecting) visible.add(e.target.id);
@@ -46,20 +81,57 @@ function useCurrentSection(ids: string[], hash: string): string | null {
       if (el) io.observe(el);
     }
     return () => io.disconnect();
-  }, [key]);
+  }, [idsKey]);
+
   const fromHash = hash.startsWith("#") ? decodeURIComponent(hash.slice(1)) : "";
-  return seen ?? (ids.includes(fromHash) ? fromHash : null);
+  const hashId = ids.includes(fromHash) ? fromHash : null;
+  const picked = clearedKey !== key ? hashId : null;
+  useEffect(() => {
+    if (!picked) return;
+    const clear = (e: Event) => {
+      if (e.type === "keydown" && !SCROLL_KEYS.has((e as KeyboardEvent).key)) return;
+      setClearedKey(key);
+    };
+    const opts: AddEventListenerOptions = { passive: true };
+    window.addEventListener("wheel", clear, opts);
+    window.addEventListener("touchmove", clear, opts);
+    window.addEventListener("keydown", clear, opts);
+    return () => {
+      window.removeEventListener("wheel", clear);
+      window.removeEventListener("touchmove", clear);
+      window.removeEventListener("keydown", clear);
+    };
+  }, [picked, key]);
+  return picked ?? seen ?? hashId;
+}
+
+/** 메뉴 푸터 「데몬 정상 · v0.2.0」 — 상태 띠와 같은 /system/health(진행 중 요청은 나눠 쓴다). */
+function NavFoot() {
+  const { data: h, error } = useResource<Health>("/system/health", undefined, ["daemon", "runs", "usage", "control"]);
+  const level = h ? LEVEL_TEXT[healthDot(h.level)] : error ? "확인 실패" : "확인 중";
+  return (
+    <div className="nav-foot" data-nav-foot>
+      <div>
+        데몬 {level}
+        {h?.version ? <span className="num"> · v{h.version}</span> : null}
+      </div>
+    </div>
+  );
 }
 
 export function Nav() {
-  const { pathname, hash } = useLocation();
+  const { pathname, hash, key } = useLocation();
   const groups = navGroups();
   const active = screenOf(pathname);
   const activeIds = groups.find((g) => g.screen === active)?.items.map((i) => i.id) ?? [];
-  const current = useCurrentSection(activeIds, hash);
+  const shown = useShownSections(activeIds, pathname);
+  const current = useCurrentSection(activeIds, hash, key);
 
   return (
     <nav className="nav" aria-label="주 메뉴">
+      <div className="nav-brand" aria-hidden="true">
+        trader
+      </div>
       <ul className="nav-groups">
         {groups.map((g) => {
           const on = g.screen === active;
@@ -69,24 +141,29 @@ export function Nav() {
                 <Icon name={g.screen} />
                 <span className="nav-label">{g.label}</span>
               </Link>
-              <ul className="nav-items">
-                {g.items.map((it) => (
-                  <li key={it.id}>
-                    <Link
-                      to={{ pathname: g.path, hash: `#${it.id}` }}
-                      className="nav-item"
-                      data-nav-item={it.id}
-                      aria-current={on && current === it.id ? "location" : undefined}
-                    >
-                      {it.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              {on ? (
+                <ul className="nav-items">
+                  {g.items
+                    .filter((it) => shown.includes(it.id))
+                    .map((it) => (
+                      <li key={it.id}>
+                        <Link
+                          to={{ pathname: g.path, hash: `#${it.id}` }}
+                          className="nav-item"
+                          data-nav-item={it.id}
+                          aria-current={current === it.id ? "location" : undefined}
+                        >
+                          {it.label}
+                        </Link>
+                      </li>
+                    ))}
+                </ul>
+              ) : null}
             </li>
           );
         })}
       </ul>
+      <NavFoot />
     </nav>
   );
 }
