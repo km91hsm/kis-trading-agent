@@ -43,5 +43,5 @@ FEATURE = Feature(
     routes=(*ROUTERS, analytics_fo_router, system_fo_router), resources=RESOURCES,
     sse_keys=SSE_KEYS, health_areas=(AREA,),
     nav=(NavItem("accounts", "fo-positions", "파생 보유", 20),
-         NavItem("today", "fo-lane", "파생", 30)),
+         NavItem("today", "fo-lane", "파생", 30), NavItem("system", "fo", "파생", 60)),
 )  # fmt: skip

@@ -37,7 +37,22 @@ function cssVar(name: string): string | undefined {
   return v || undefined;
 }
 
-export function Chart({ series, candles, markers, lines, extra, height = 240 }: ChartProps) {
+/** 점이 하나도 없으면 차트를 만들지 않고 같은 높이의 빈 틀에 「자료 없음」(점 1개짜리 수평선·가짜 축을 그리지 않는다).
+ *  자료가 들어오면 LiveChart 가 그때 마운트되어 차트를 만든다. */
+export function Chart(props: ChartProps) {
+  const { series, candles, extra, height = 240 } = props;
+  const points = candles !== undefined ? candles.length : (series ?? []).length;
+  if (points === 0 && !extra?.length) {
+    return (
+      <div className="chart chart-empty" data-chart-empty style={{ height }}>
+        자료 없음
+      </div>
+    );
+  }
+  return <LiveChart {...props} />;
+}
+
+function LiveChart({ series, candles, markers, lines, extra, height = 240 }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRef = useRef<ISeriesApi<"Line"> | ISeriesApi<"Candlestick"> | null>(null);

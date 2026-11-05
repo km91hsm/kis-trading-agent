@@ -96,7 +96,7 @@ function type(el: HTMLInputElement, value: string) {
 const header = (init: RequestInit | undefined, name: string) => (init?.headers as Record<string, string> | undefined)?.[name];
 
 describe("시스템 화면", () => {
-  test("섹션·목차는 데이터 전에 바로 그려진다", async () => {
+  test("섹션은 데이터 전에 바로 그려지고 본문 목차는 없다", async () => {
     ff = installFakeFetch(routes());
     render(
       <MemoryRouter>
@@ -104,8 +104,8 @@ describe("시스템 화면", () => {
       </MemoryRouter>,
     );
     for (const id of SECTIONS) expect(section(id)).not.toBeNull();
-    const toc = document.querySelector('nav[aria-label="목차"]') as HTMLElement;
-    expect(Array.from(toc.querySelectorAll("a")).map((a) => a.getAttribute("href"))).toEqual(SECTIONS.map((s) => `#${s}`));
+    // 본문 목차는 없다 — 왼쪽 메뉴(generated nav.ts 의 system 항목)가 절 앵커를 맡는다
+    expect(document.querySelector('nav[aria-label="목차"]')).toBeNull();
     await flush();
     await flush();
   });

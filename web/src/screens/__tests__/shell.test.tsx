@@ -106,7 +106,7 @@ describe("왼쪽 메뉴 2단", () => {
 
   test("스크롤 입력(wheel)이 오면 눌렀던 항목 대신 보이는 가장 위 섹션을 현재로 표시한다", async () => {
     const OrigIO = globalThis.IntersectionObserver;
-    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = regime
+    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 시스템 첫 항목(usage)
     globalThis.IntersectionObserver = class {
       cb: IntersectionObserverCallback;
       constructor(cb: IntersectionObserverCallback) {
@@ -125,7 +125,7 @@ describe("왼쪽 메뉴 2단", () => {
       fake = installFakeFetch(ok);
       const { container } = app("/system");
       await flush();
-      const regime = container.querySelector('[data-nav-item="regime"]') as HTMLAnchorElement;
+      const regime = container.querySelector(`[data-nav-item="${NAV.system.items[0].id}"]`) as HTMLAnchorElement;
       const save = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
       expect(regime.getAttribute("aria-current")).toBe("location");
       act(() => save.click());

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from trader.kernel.registry.types import Feature
+from trader.kernel.registry.types import Feature, NavItem
 from trader.kernel.web.sse import KERNEL_NOISY_KEYS, KERNEL_SSE_KEYS
 
 REL_PATH = Path("web/src/generated/sse-keys.ts")
@@ -18,6 +18,20 @@ SCREENS = (
     ("performance", "성과", "/performance"),
     ("data", "데이터", "/data"),
     ("system", "시스템", "/system"),
+)
+
+# 시스템 화면의 커널 절(웹 `/system/*` 커널 라우트·ops).
+# 기능 항목(국면 30·저장소 40·단타 50·파생 60)보다 앞에 선다.
+KERNEL_NAV = (
+    NavItem("system", "usage", "사용량", 0),
+    NavItem("system", "health", "헬스", 1),
+    NavItem("system", "daemon", "데몬", 2),
+    NavItem("system", "jobs", "잡 큐", 3),
+    NavItem("system", "runs", "실행 기록", 4),
+    NavItem("system", "settings", "설정", 5),
+    NavItem("system", "secrets", "연결 키", 6),
+    NavItem("system", "token", "쓰기 토큰", 7),
+    NavItem("system", "control-log", "조작 이력", 8),
 )
 
 
@@ -47,12 +61,14 @@ def _json(value: object) -> str:
 
 
 def nav_ts(features: list[Feature]) -> str:
-    """커널 고정 5 화면 + 기능 `nav` 로 `nav.ts` 본문을 만든다 (끝에 개행 한 줄).
+    """커널 고정 5 화면 + 커널 시스템 절(`KERNEL_NAV`) + 기능 `nav` 로 `nav.ts` 본문을 만든다
+    (끝에 개행 한 줄).
 
     항목은 (screen, order, id) 순. 알 수 없는 screen 은 KeyError 로 생성이 실패한다."""
     rank = {sid: i for i, (sid, _, _) in enumerate(SCREENS)}
     items = sorted(
-        (n for f in features for n in f.nav), key=lambda n: (rank[n.screen], n.order, n.id)
+        (*KERNEL_NAV, *(n for f in features for n in f.nav)),
+        key=lambda n: (rank[n.screen], n.order, n.id),
     )
     lines = []
     for sid, label, path in SCREENS:

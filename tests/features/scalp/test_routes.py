@@ -75,4 +75,5 @@ def test_scalp_sse_key_changes_with_state(project, client):
 
 def test_scalp_nav_item():
     assert NavItem("today", "scalp-lane", "단타", 20) in FEATURE.nav
+    assert NavItem("system", "scalp", "단타", 50) in FEATURE.nav  # 시스템 화면 「단타」 절
 

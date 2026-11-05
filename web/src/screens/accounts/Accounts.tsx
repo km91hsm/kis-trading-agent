@@ -1,4 +1,4 @@
-// 「계좌·보유」 통합 화면 — 원화·달러 합계와 당일 손익, 환율 줄, 전역 일시정지·재개, 계좌 카드(계좌별 화면 링크).
+// 「계좌·보유」 통합 화면 — 합계 띠(원화·달러·참고 환율), 전역 일시정지·재개, 계좌 표(행의 id 가 계좌별 화면 링크).
 // 섹션 컨테이너(id = NAV 항목)는 데이터 전에 바로 그린다. `fo-positions` 는 파생 계좌 카드 묶음(Ruling P2) — 각 카드에서
 // 계좌별 화면으로 간다. fo 계좌가 없을 때만 hidden. 전역 일시정지는 합계(/accounts/overview) 성공 여부와 무관하게 늘 그린다.
 import { useState } from "react";
@@ -7,11 +7,39 @@ import { Card } from "../../components/Card";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
+import { Table, type Column } from "../../components/Table";
 import { errorText, patchJson } from "../../lib/api";
 import { fmtMoney } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
-import { AccountCardView } from "./AccountCard";
-import { cardRows, resumeNeedsConfirm, totals, type Account, type Overview } from "./accounts.ts";
+import { cardRows, resumeNeedsConfirm, totals, type Account, type AccountCard, type Overview } from "./accounts.ts";
+
+/** 계좌 표 — 첫 열의 id 가 계좌별 화면 링크(data-account-row). 숫자 열은 오른쪽 정렬·tabular. */
+const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
+  {
+    key: "id", label: "계좌", width: "26%", long: true,
+    render: (c) => (
+      <>
+        <Link to={c.href} data-account-row={c.id} className="account-link">{c.id}</Link>{" "}
+        <Chip tone={c.live ? "live" : "muted"}>{c.envLabel}</Chip>
+        {c.paused ? <> <Chip tone="fail">일시정지</Chip></> : null}
+      </>
+    ),
+  },
+  { key: "lane", label: "레인", width: "10%" },
+  {
+    key: "mode", label: "모드", width: "16%",
+    render: (c) => (
+      <>
+        {c.mode}
+        {c.modeNote ? <span className="account-mode-note"> · {c.modeNote}</span> : null}
+      </>
+    ),
+  },
+  { key: "nav", label: "NAV", width: "16%", align: "num" },
+  { key: "dayPnl", label: "당일 손익", width: "14%", align: "num" },
+  { key: "positions", label: "보유", width: "8%", align: "num", render: (c) => `${c.positions}종목` },
+  { key: "pending", label: "승인 대기", width: "10%", align: "chip", render: (c) => <Chip tone={c.pending > 0 ? "warn" : "muted"}>{c.pending}건</Chip> },
+];  // fmt: skip
 
 export function Accounts() {
   const overview = useResource<Overview>("/accounts/overview", undefined, ["accounts", "positions", "control"]);
@@ -47,11 +75,7 @@ export function Accounts() {
           <Empty title="계좌를 불러오지 못했습니다">{accounts.error.message}</Empty>
         ) : accounts.data ? (
           accounts.data.length ? (
-            <div className="account-grid">
-              {spotCards.map((c) => (
-                <AccountCardView key={c.id} card={c} />
-              ))}
-            </div>
+            <Table columns={ACCOUNT_COLUMNS} rows={spotCards} rowKey={(c) => c.id} empty="계좌 없음" />
           ) : (
             <Empty title="계좌 없음" />
           )
@@ -103,19 +127,25 @@ function FoAccountCard({ account: a }: { account: Account }) {
   );
 }
 
+/** 합계 띠 — 한 묶음을 1px 선으로 세 칸(원화·달러·참고). 참고 칸은 환율·환산 합계(합계 계산에 쓰지 않음). */
 function TotalsRow({ data }: { data: Overview }) {
   const t = totals(data);
   return (
-    <div className="totals-grid">
-      <Card title="원화 합계">
-        <p className="totals-value">{t.krw}</p>
-        <p className="totals-pnl">당일 손익 {t.krwPnl}</p>
-      </Card>
-      <Card title="달러 합계">
-        <p className="totals-value">{t.usd}</p>
-        <p className="totals-pnl">당일 손익 {t.usdPnl}</p>
-      </Card>
-      <p className="totals-fx">{t.converted ? `${t.fxLine} → ${t.converted}` : t.fxLine}</p>
+    <div className="kpi-strip">
+      <div className="kpi" data-kpi="krw">
+        <span className="kpi-label">원화 합계</span>
+        <span className="kpi-value num">{t.krw}</span>
+        <span className="kpi-sub num">당일 손익 {t.krwPnl}</span>
+      </div>
+      <div className="kpi" data-kpi="usd">
+        <span className="kpi-label">달러 합계</span>
+        <span className="kpi-value num">{t.usd}</span>
+        <span className="kpi-sub num">당일 손익 {t.usdPnl}</span>
+      </div>
+      <div className="kpi" data-kpi="fx">
+        <span className="kpi-label">참고 · 합계 계산에 쓰지 않음</span>
+        <span className="kpi-sub">{t.converted ? `${t.fxLine} → ${t.converted}` : t.fxLine}</span>
+      </div>
     </div>
   );
 }

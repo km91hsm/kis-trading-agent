@@ -5,7 +5,8 @@ const REQUIRED = [
   "--bg", "--bg-elev", "--fg", "--fg-muted", "--line", "--accent",
   "--ok", "--warn", "--fail", "--up", "--down", "--live", "--live-bg",
   "--space-1", "--space-2", "--space-3", "--space-4", "--space-6",
-  "--radius", "--font", "--font-mono", "--z-sticky",
+  "--radius", "--radius-card", "--radius-chip", "--font", "--font-mono", "--z-sticky",
+  "--text-xs", "--text-sm", "--text-md", "--text-lg", "--text-xl", "--text-kpi", "--bar",
 ];
 test("tokens.css 가 필수 변수를 :root 와 [data-theme=dark] 둘 다 정의한다", () => {
   for (const v of REQUIRED) {
