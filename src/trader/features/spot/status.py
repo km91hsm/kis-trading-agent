@@ -30,7 +30,7 @@ def recent_decisions(ctx: Any) -> list[str]:
         (RECENT,),
     ).fetchall()
     if not rows:
-        return ["- 아직 없음"]
+        return ["- 최근 결정 없음"]
     cache_dir = (ctx.state or paths.state_dir()) / "cache"
     return [
         f"- {r['date']} {r['market']} "

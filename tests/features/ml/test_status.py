@@ -24,7 +24,7 @@ def _ctx(conn, project):
 def test_status_shows_ml_model(conn, project):
     ctx = _ctx(conn, project)
     assert [s.title for s in FEATURE.status_sections] == ["ML 모델"]
-    assert status.model_lines(ctx) == ["- 모델 없음"]
+    assert status.model_lines(ctx) == ["- ML 모델 없음"]
     for i, (market, acc) in enumerate((("KR", 0.55), ("US", 0.58), ("KR", 0.61), (None, 0.5))):
         at = datetime(2026, 10, 29, 15, 30, tzinfo=UTC) + timedelta(days=i)  # KST 다음날 00:30
         registry.save(

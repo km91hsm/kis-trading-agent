@@ -123,10 +123,11 @@ def test_telegram_lines_have_kernel_first(conn, project):
         StatusSection("B", lambda c: 1 / 0),
     )
     lines = status.telegram_lines(_ctx(conn, project, [feat]))
-    assert lines[0] == "점검 기록 없음" and lines[1] == "데몬: 꺼짐"
-    assert lines[2] == "실행 중 · 계좌 모드: p 자동"
-    assert lines[3].startswith("- B: 조회 실패(ZeroDivisionError")
-    assert len(lines) == 4  # 빈 절 생략, 마지막 실행·LLM 호출 절은 텔레그램에 없음
+    # 비어 있지 않은 절마다 `[제목]` 한 줄을 앞세운다(실패 절 포함) — T7-R4
+    assert lines[:4] == ["[운영 점검]", "점검 기록 없음", "[데몬]", "데몬: 꺼짐"]
+    assert lines[4:6] == ["[계좌]", "실행 중 · 계좌 모드: p 자동"]
+    assert lines[6] == "[B]" and lines[7].startswith("- B: 조회 실패(ZeroDivisionError")
+    assert len(lines) == 8  # 빈 절 생략, 마지막 실행·LLM 호출 절은 텔레그램에 없음
 
 
 def test_markdown_includes_feature_sections(conn, project):

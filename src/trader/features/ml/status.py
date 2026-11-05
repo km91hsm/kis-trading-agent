@@ -24,7 +24,7 @@ def model_lines(ctx: Any) -> list[str]:
     (`metrics.accuracy` — 메타에 AUC 는 없다), 날짜는 저장 시각의 KST 날짜."""
     metas = registry.list_models("quant", ctx.state)[:RECENT]
     if not metas:
-        return ["- 모델 없음"]
+        return ["- ML 모델 없음"]
     return [
         f"- {m.get('version')} {m.get('market') or '전체'} "
         f"정확도 {(m.get('metrics') or {}).get('accuracy', '-')} · "

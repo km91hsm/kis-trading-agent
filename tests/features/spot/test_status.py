@@ -34,7 +34,7 @@ def _decision(conn, d, market, ticker, action):
 
 def test_status_shows_last_decisions(conn, settings, project):
     ctx = _ctx(conn, settings, project)
-    assert status.recent_decisions(ctx) == ["- 아직 없음"]
+    assert status.recent_decisions(ctx) == ["- 최근 결정 없음"]
     upsert_ticker_name(conn, "KR", "005930", "삼성전자", "test")
     _decision(conn, "2026-11-03", "US", "AAPL", "HOLD")
     _decision(conn, "2026-11-04", "KR", "000660", "SELL")

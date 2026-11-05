@@ -26,7 +26,7 @@ def _ctx(conn, settings, project):
 def test_status_scan_section(conn, settings, project):
     ctx = _ctx(conn, settings, project)
     assert [s.title for s in FEATURE.status_sections] == ["오늘 스캔"]
-    assert status.scan_lines(ctx) == ["- 아직 없음"]
+    assert status.scan_lines(ctx) == ["- 오늘 스캔 없음"]
     d = run_date_for("KR", NOW)
     scan = {
         "market": "KR",

@@ -162,11 +162,14 @@ def sections(ctx: Any, *, kernel: Sequence[StatusSection]) -> list[tuple[str, li
 
 
 def telegram_lines(ctx: Any) -> list[str]:
-    """커널 앞 2절 + 기능 절의 줄(제목 없이 이어 붙임 — 기존 `/status` 형식). 빈 절은 생략하고,
-    실패한 절은 어느 절인지 알 수 있게 `- 제목: 조회 실패(…)` 한 줄."""
+    """커널 앞 2절 + 기능 절의 줄. 비어 있지 않은 절마다 `[제목]` 한 줄을 앞세운다(T7-R4 —
+    대체 문구·줄이 어느 절 것인지 보이게). 빈 절은 생략하고, 실패한 절은 `[제목]` 뒤에
+    `- 제목: 조회 실패(…)` 한 줄."""
     out: list[str] = []
     for title, lines, failed in _collect(ctx, TELEGRAM_KERNEL_SECTIONS):
-        out.extend([f"- {title}: {lines[0]}"] if failed else lines)
+        if lines:
+            out.append(f"[{title}]")
+            out.extend([f"- {title}: {lines[0]}"] if failed else lines)
     return out
 
 
