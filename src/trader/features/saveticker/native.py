@@ -48,6 +48,31 @@ REASONS = {
     "snapshot_too_large",
     "calendar_rows_unverified",
 }
+DIAGNOSTIC_REASONS = {
+    "recheck": {
+        "not_app_recheck",
+        "invalid_recovery",
+        "healthy_period_unverified",
+        "recovery_used",
+        "recovery_timeout",
+        "owner_unverified",
+        "page_unverified",
+        "content_unavailable",
+        "reload_failed",
+    },
+    "html_trial": {
+        "invalid_trial",
+        "verification_required",
+        "trial_complete",
+        "content_timeout",
+        "reload_budget",
+        "health_stale",
+        "owned_tab_unverified",
+        "content_unavailable",
+        "page_unverified",
+        "reload_failed",
+    },
+}
 
 
 def _now():
@@ -312,6 +337,29 @@ class NativeSession:
         if kind == "ping":
             self._heartbeat()
             return {"type": "pong"}
+        if kind == "diagnostics":
+            category, reason = message.get("category"), message.get("reason")
+            reload_count = message.get("reload_count")
+            if (
+                not isinstance(category, str)
+                or category not in DIAGNOSTIC_REASONS
+                or not isinstance(reason, str)
+                or reason not in DIAGNOSTIC_REASONS[category]
+                or type(reload_count) is not int
+                or not 0 <= reload_count <= 1_000_000
+            ):
+                _reject("invalid_message")
+            # 연결 하트비트와 분리해 종료·재접속 뒤에도 마지막 원인을 보존한다.
+            atomic_json(
+                self.root / "runtime/extension-diagnostics.json",
+                {
+                    "category": category,
+                    "reason": reason,
+                    "reload_count": reload_count,
+                    "recorded_at": _now().isoformat(),
+                },
+            )
+            return {"type": "diagnostics_saved"}
         if kind == "state":
             lane, state = message.get("lane"), message.get("state")
             if lane not in LANES or state not in STATES:

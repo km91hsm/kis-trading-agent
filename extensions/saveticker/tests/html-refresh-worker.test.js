@@ -22,3 +22,30 @@ test('a delayed initial state snapshot cannot expire a newly restarted trial',as
  const now=Date.now(),state={enabled:false,backend:'api',ownerToken:TOKEN,htmlRefreshTest:true,htmlRefreshTrial:beginHtmlTrial(now-2100001),lastApiHealthyAt:now};const f=setup(state);let enter,release;const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r);let hold=true;
  chrome.storage.local.get=async keys=>{const snapshot={...state};if(hold&&Array.isArray(keys)&&keys.length>5){hold=false;enter();await held;}return snapshot;};const worker=await import('../worker.js?html-stale-initial');state.enabled=true;const running=worker.tick();await entered;await f.action({action:'stop'});await f.action({action:'resume'});release();await running;assert.equal(state.enabled,true);assert.equal(state.htmlRefreshTrial.status,'active');await f.action({action:'stop'});
 });
+
+test('a connected trial reports its terminal reason before disconnecting',async()=>{
+ const state={enabled:false,backend:'api',ownerToken:TOKEN,htmlRefreshTest:true,htmlRefreshTrial:beginHtmlTrial()};const f=setup(state);
+ const original=chrome.runtime.connectNative;chrome.runtime.connectNative=()=>{const p=original();p.disconnect=()=>f.calls.push({type:'disconnect'});return p;};
+ const worker=await import('../worker.js?html-terminal-diagnostic');state.enabled=true;await worker.tick();
+ state.hostBlocked=true;await worker.tick();const diagnostic=f.calls.find(m=>m.type==='diagnostics');
+ assert.ok(diagnostic);assert.equal(diagnostic.category,'html_trial');assert.equal(diagnostic.reason,'verification_required');
+ assert.ok(f.calls.indexOf(diagnostic)<f.calls.findIndex(m=>m.type==='disconnect'));assert.equal(state.enabled,false);
+});
+
+test('an old trial diagnostic cannot stop or overwrite a manually resumed trial',async()=>{
+ const state={enabled:false,backend:'api',ownerToken:TOKEN,htmlRefreshTest:true,htmlRefreshTrial:beginHtmlTrial()};const f=setup(state);
+ let enter;const entered=new Promise(r=>enter=r),original=chrome.runtime.connectNative;
+ chrome.runtime.connectNative=()=>{const p=original(),post=p.postMessage;p.postMessage=m=>{if(m.type==='diagnostics'){enter();return;}post(m);};return p;};
+ const worker=await import('../worker.js?html-diagnostic-stop-race');state.enabled=true;await worker.tick();
+ state.hostBlocked=true;const running=worker.tick();await entered;
+ await f.action({action:'stop'});await f.action({action:'resume'});await running;
+ assert.equal(state.enabled,true);assert.equal(state.htmlRefreshTrial.status,'active');await f.action({action:'stop'});
+});
+test('direct Resume during trial diagnostic delivery invalidates the old stop',async()=>{
+ const state={enabled:false,backend:'api',ownerToken:TOKEN,htmlRefreshTest:true,htmlRefreshTrial:beginHtmlTrial()};const f=setup(state);
+ let enter;const entered=new Promise(r=>enter=r),original=chrome.runtime.connectNative;
+ chrome.runtime.connectNative=()=>{const p=original(),post=p.postMessage;p.postMessage=m=>{if(m.type==='diagnostics'){enter();return;}post(m);};return p;};
+ const worker=await import('../worker.js?html-diagnostic-direct-resume');state.enabled=true;await worker.tick();
+ state.hostBlocked=true;const running=worker.tick();await entered;await f.action({action:'resume'});await running;
+ assert.equal(state.enabled,true);assert.equal(state.htmlRefreshTrial.status,'active');await f.action({action:'stop'});
+});

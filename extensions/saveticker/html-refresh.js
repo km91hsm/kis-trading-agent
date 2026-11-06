@@ -14,7 +14,7 @@ export function htmlTrialTerminal(state, now = Date.now()) {
     return null;
 }
 export async function htmlTrialStep({ chrome, state, token, active, store, halt, blockHost, busy = false, now = Date.now() }) {
-    const trial = state.htmlRefreshTrial;
+    let trial = state.htmlRefreshTrial;
     if (!state.htmlRefreshTest || !active()) return false;
     const end = async (status, reason) => { if (active()) await halt({ ...trial, status, reason, endedAt: now }); return true; };
     const terminal = htmlTrialTerminal(state, now);
@@ -46,6 +46,7 @@ export async function htmlTrialStep({ chrome, state, token, active, store, halt,
     // Reserve BEFORE navigation: worker restarts cannot repeat the same reload.
     const reserved = { ...trial, lastReloadAt: now, reloadCount: trial.reloadCount + 1, pendingAt: now, pendingTabId: tab.id };
     await store({ htmlRefreshTrial: reserved, connection: '정상 페이지 갱신 중 · API 대기' });
+    trial = reserved;
     if (!active()) return true;
     try { await chrome.tabs.reload(tab.id); }
     catch { return end('failed', 'reload_failed'); }

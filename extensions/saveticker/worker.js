@@ -3,11 +3,12 @@ import { recoverRecheck } from './recheck.js';
 import { beginHtmlTrial, htmlTrialStep, htmlTrialTerminal, HTML_TRIAL_MS } from './html-refresh.js';
 import { apiCycle, abortApi, apiErrorCode } from './api-runner.js';
 import { LANES, Scheduler, laneFor, marker, ownedLane, safePage, PdfPair } from './core.js';
-const WORKER_VERSION = '1.4.1';
+const WORKER_VERSION = '1.4.2';
 const scheduler = new Scheduler(), pdf = new PdfPair(), reportAttempts = new Map();
 let limits = { max_scrolls: 2, max_details: 2, max_reports: 2 };
 let port = null, requests = new Map(), seq = 0, enabled = false, token = '', ticking = null, retryAt = 0, failures = 0, planAt = 0, epoch = 0, nextTimer = null, presentRequested = false;
 let apiSetupRequired = false, recoveryResume = null;
+let controlGeneration = 0;
 const handoffReleases = new Map();
 const PDF_BEGIN_ERRORS = { pdf_busy: 'pdf_begin_busy', unknown_report: 'pdf_begin_unknown_report', pdf_cached: 'pdf_begin_cached' };
 const PDF_SAVE_ERRORS = { invalid_pdf_ticket: 'pdf_save_ticket', invalid_pdf_path: 'pdf_save_path', invalid_pdf: 'pdf_save_invalid' };
@@ -176,11 +177,17 @@ function scheduleNext() {
     }
 }
 const store = values => chrome.storage.local.set(values);
-function request(type, body = {}) {
+function request(type, body = {}, timeoutMs = type === 'pdf' ? 90000 : 20000) {
     if (!port)
         return Promise.reject(Error('disconnected'));
     const id = ++seq;
-    return new Promise((resolve, reject) => { const timer = setTimeout(() => { requests.delete(id); reject(Error('host_timeout')); }, type === 'pdf' ? 90000 : 20000); requests.set(id, { resolve, reject, timer }); port.postMessage({ type, id, ...body }); });
+    return new Promise((resolve, reject) => { const timer = setTimeout(() => { requests.delete(id); reject(Error('host_timeout')); }, timeoutMs); requests.set(id, { resolve, reject, timer }); port.postMessage({ type, id, ...body }); });
+}
+async function reportTerminal({ category, reason, reload_count }) {
+    if (!port) return;
+    const count = Number.isInteger(reload_count) && reload_count >= 0 && reload_count <= 1000000 ? reload_count : 0;
+    try { await request('diagnostics', { category, reason, reload_count: count }, 1000); }
+    catch { /* 구버전·연결 종료·저장 실패는 중지 동작에 영향을 주지 않는다. */ }
 }
 async function loadPlan(plan) {
     apiSetupRequired = plan.api_setup_required === true;
@@ -592,9 +599,10 @@ export async function tick() {
             token = crypto.randomUUID().replaceAll('-', '');
             await store({ ownerToken: token });
         }
-        const recoveryEpoch = epoch;
-        if (await recoverRecheck({ chrome, state, token, active: () => enabled && epoch === recoveryEpoch, store,
-            stop: async () => { await control('stop'); if (!enabled && epoch === recoveryEpoch + 1) await store({ connection: '재확인 자동 복구 중지 · 직접 확인 필요' }); },
+        const recoveryEpoch = epoch, recoveryGeneration = controlGeneration;
+        if (await recoverRecheck({ chrome, state, token, active: () => enabled && epoch === recoveryEpoch && controlGeneration === recoveryGeneration, store,
+            report: reportTerminal,
+            stop: async () => { await control('stop'); if (!enabled && epoch === recoveryEpoch + 1 && controlGeneration === recoveryGeneration + 1) await store({ connection: '재확인 자동 복구 중지 · 직접 확인 필요' }); },
             resume: () => resumeRecovered(recoveryEpoch), busy: !!pdf.pending || activeJobs.size > 0 || requests.size > 0 })) return;
         if (Date.now() < retryAt)
             return;
@@ -656,8 +664,12 @@ export async function tick() {
     return ticking;
 }
 async function haltHtmlTrial(trial) {
+    const trialEpoch = epoch, trialGeneration = controlGeneration;
+    if (!enabled) return;
+    await reportTerminal({ category: 'html_trial', reason: trial.reason, reload_count: trial.reloadCount });
+    if (!enabled || epoch !== trialEpoch || controlGeneration !== trialGeneration) return;
     await control('stop');
-    if (enabled) return;
+    if (enabled || epoch !== trialEpoch + 1 || controlGeneration !== trialGeneration + 1) return;
     await store({ htmlRefreshTest: false, htmlRefreshTrial: trial, connection: trial.status === 'finished' ? '35분 시험 완료 · 중지됨' : '정상 페이지 갱신 시험 중지 · 직접 확인 필요' });
 }
 async function resumeRecovered(expectedEpoch) {
@@ -675,6 +687,7 @@ async function resumeRecovered(expectedEpoch) {
     finally { if (recoveryResume === operation) recoveryResume = null; }
 }
 async function control(action) {
+    controlGeneration++;
     if (action === 'start' || action === 'resume')
         presentRequested = true;
     if (action === 'stop') {

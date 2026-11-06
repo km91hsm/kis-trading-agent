@@ -175,12 +175,16 @@ def test_build_rejects_job_with_unregistered_gate(project):
               markets=deps.markets, ctx=deps)  # fmt: skip
 
 
-def test_run_closes_stale_running_calls(project, monkeypatch):
+@pytest.fixture
+def paused_scheduler(monkeypatch):
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    # 기동 정리만 검증한다. 실제 시계가 과거 fixture의 잡을 즉시 실행하지 않게 한다.
+    # 기동 정리·잠금만 검증한다. 과거 fixture의 예약 잡이 원장 상태를 바꾸지 않게 한다.
     real_start = BackgroundScheduler.start
     monkeypatch.setattr(BackgroundScheduler, "start", lambda self: real_start(self, paused=True))
+
+
+def test_run_closes_stale_running_calls(project, paused_scheduler):
     now = datetime(2026, 10, 10, 1, 0, tzinfo=UTC)
     deps = make_deps(project, now)
     conn = deps.conn_factory()
@@ -213,7 +217,7 @@ def test_run_closes_stale_running_calls(project, monkeypatch):
 
 
 
-def test_start_without_lock_runs_no_bootstrap_or_stale_cleanup(project):
+def test_start_without_lock_runs_no_bootstrap_or_stale_cleanup(project, paused_scheduler):
     deps = make_deps(project, datetime(2026, 10, 10, 1, 0, tzinfo=UTC))
     seen = []
     feature = Feature(
@@ -232,8 +236,8 @@ def test_start_without_lock_runs_no_bootstrap_or_stale_cleanup(project):
         conn.close()
         assert second.start(install_signals=False) is False
     finally:
-        second.shutdown(wait=False)
-        first.shutdown(wait=False)
+        second.shutdown(wait=True)
+        first.shutdown(wait=True)
     conn = deps.conn_factory()
     (status,) = conn.execute("SELECT status FROM agent_calls").fetchone()
     conn.close()

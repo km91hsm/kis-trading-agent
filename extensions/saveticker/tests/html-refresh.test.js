@@ -51,3 +51,7 @@ test('four minute boundary and eight reloads stay inside the thirty five minute 
  assert.equal(f.calls.filter(x=>x.type==='reload').length,8);
  f.deps.now=BASE+35*MIN;await f.run();assert.ok(f.calls.some(x=>x.type==='halt'&&x.status==='finished'));
 });
+test('a failed reload retains the reserved attempt count in its terminal result',async()=>{
+ const f=fixture();f.deps.chrome.tabs.reload=async()=>{throw Error('reload failed');};await f.run();
+ const result=f.calls.find(x=>x.type==='halt');assert.equal(result.reason,'reload_failed');assert.equal(result.reloadCount,1);
+});
