@@ -74,7 +74,7 @@ describe("Chart", () => {
   });
 
   test("ResizeObserver 로 폭을 맞추고, 언마운트하면 remove·disconnect", () => {
-    const { unmount } = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} />);
+    const { unmount } = render(<Chart series={[{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 1 }]} />);
     roCallback!([{ contentRect: { width: 640 } } as ResizeObserverEntry], {} as ResizeObserver);
     expect(m.chart.applyOptions).toHaveBeenCalledWith({ width: 640 });
     unmount();
@@ -83,19 +83,19 @@ describe("Chart", () => {
   });
 
   test("series 가 바뀌면 차트를 다시 만들지 않고 setData 만", () => {
-    const r = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} />);
-    r.rerender(<Chart series={[{ time: "2026-11-05", value: 2 }]} />);
+    const r = render(<Chart series={[{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 1 }]} />);
+    r.rerender(<Chart series={[{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 2 }]} />);
     expect(m.createChart).toHaveBeenCalledTimes(1);
-    expect(m.series.setData).toHaveBeenLastCalledWith([{ time: "2026-11-05", value: 2 }]);
+    expect(m.series.setData).toHaveBeenLastCalledWith([{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 2 }]);
   });
 
   test("extra 는 선 시리즈를 더 붙여 setData 하고, 바뀌면 옛 시리즈를 뗀다", () => {
     const extra = [{ label: "1/N 균등", data: [{ time: "2026-11-05", value: 1.01 }] }];
-    const r = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={extra} />);
+    const r = render(<Chart series={[{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 1 }]} extra={extra} />);
     expect(m.chart.addSeries).toHaveBeenCalledTimes(2);
     expect((m.chart.addSeries.mock.calls[1] as unknown[])[1]).toMatchObject({ title: "1/N 균등" });
     expect(m.series.setData).toHaveBeenCalledWith([{ time: "2026-11-05", value: 1.01 }]);
-    r.rerender(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={[]} />);
+    r.rerender(<Chart series={[{ time: "2026-11-04", value: 1 }, { time: "2026-11-05", value: 1 }]} extra={[]} />);
     expect(m.chart.removeSeries).toHaveBeenCalledTimes(1);
   });
 
@@ -130,5 +130,13 @@ describe("빈 자료", () => {
     const { container } = render(<Chart candles={[]} />);
     expect(m.createChart).not.toHaveBeenCalled();
     expect(container.querySelector("[data-chart-empty]")).not.toBeNull();
+  });
+});
+
+describe("점 1개", () => {
+  test("선 시리즈 점이 1개면 차트를 만들지 않고 「자료 1일 — 추이는 내일부터」", () => {
+    const { container } = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} />);
+    expect(container.querySelector("[data-chart-empty]")?.textContent).toBe("자료 1일 — 추이는 내일부터");
+    expect(m.createChart).not.toHaveBeenCalled();
   });
 });

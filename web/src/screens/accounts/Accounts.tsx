@@ -7,6 +7,7 @@ import { Card } from "../../components/Card";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, patchJson } from "../../lib/api";
 import { fmtMoney } from "../../lib/format";
@@ -112,16 +113,13 @@ function FoAccountCard({ account: a }: { account: Account }) {
         모드 {MODE_LABEL[a.mode] ?? a.mode}
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
-      <dl className="account-stats">
-        <div>
-          <dt>NAV</dt>
-          <dd>{money(a.nav)}</dd>
-        </div>
-        <div>
-          <dt>현금</dt>
-          <dd>{money(a.cash)}</dd>
-        </div>
-      </dl>
+      <Stats
+        cols={2}
+        items={[
+          { id: "nav", label: "NAV", value: money(a.nav) },
+          { id: "cash", label: "현금", value: money(a.cash) },
+        ]}
+      />
       <Link to={`/accounts/${encodeURIComponent(a.id)}`}>계좌별 화면 ›</Link>
     </Card>
   );

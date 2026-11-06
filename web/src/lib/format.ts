@@ -23,6 +23,13 @@ export function fmtKrw(v: string | number | null | undefined): string {
   return (Math.round(n) || 0).toLocaleString("en-US"); // || 0: -0 을 "0" 으로
 }
 
+/** 정수 천 단위 "18,018"(수량 등). */
+export function fmtInt(v: string | number | null | undefined): string {
+  const n = num(v);
+  if (n === null) return DASH;
+  return (Math.round(n) || 0).toLocaleString("en-US");
+}
+
 /** 달러: 소수 둘째 "1,234.50". */
 export function fmtUsd(v: string | number | null | undefined): string {
   return fixed2(v);

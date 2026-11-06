@@ -49,6 +49,14 @@ export function Chart(props: ChartProps) {
       </div>
     );
   }
+  // 선 시리즈 점이 하나면 평평한 선·가짜 축이 된다 — 내일부터 추이가 생긴다고 알린다.
+  if (candles === undefined && points === 1 && !extra?.length) {
+    return (
+      <div className="chart chart-empty" data-chart-empty style={{ height }}>
+        자료 1일 — 추이는 내일부터
+      </div>
+    );
+  }
   return <LiveChart {...props} />;
 }
 

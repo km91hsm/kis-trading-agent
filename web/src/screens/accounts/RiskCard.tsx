@@ -1,7 +1,13 @@
-// 리스크 카드(현물 계좌만) — VaR95·CVaR95·베타, 서버가 설정 한도(limits)를 주면 「한도 대비」 막대(사용량/한도, 초과는 강조),
-// 그리고 위험 기여 상위 3종목 막대(둘 다, T16-R2). 자료가 모자라면 서버 사유 한 줄(한도 막대는 그래도 그린다).
+// 리스크 카드(현물 계좌만) — VaR95·CVaR95·베타(Stats), 서버가 설정 한도(limits)를 주면 「한도 대비」 표(항목·현재·한도·판정 —
+// 상한은 「최대」, 현금 하한은 「최소」, 손실 한도는 「손실」; 값 없는 줄은 「자료 없음」), 그리고 위험 기여 상위 3종목 막대(코드+이름).
+// 자료가 모자라면 서버 사유를 Empty 한 줄로(한도 표는 그래도 그린다).
 import { Card } from "../../components/Card";
+import { Chip } from "../../components/Chip";
+import { Empty } from "../../components/Empty";
+import { Stats } from "../../components/Stats";
+import { Table, type Column } from "../../components/Table";
 import { fmtPct } from "../../lib/format";
+import { tickerLabel } from "../../lib/ticker";
 
 export type RiskLimits = {
   max_position_pct: number;
@@ -30,9 +36,9 @@ export type Risk = {
   usage?: RiskUsage;
 };
 
-type LimitRow = { label: string; used: number | null; limit: number; kind: "max" | "min" | "loss"; count?: boolean };
+export type LimitRow = { label: string; used: number | null; limit: number; kind: "max" | "min" | "loss"; count?: boolean };
 
-function limitRows(limits: RiskLimits, usage: Partial<RiskUsage> = {}): LimitRow[] {
+export function limitRows(limits: RiskLimits, usage: Partial<RiskUsage> = {}): LimitRow[] {
   return [
     { label: "최대 종목 비중", used: usage.position_pct_max ?? null, limit: limits.max_position_pct, kind: "max" },
     { label: "보유 종목 수", used: usage.positions ?? null, limit: limits.max_positions, kind: "max", count: true },
@@ -43,55 +49,48 @@ function limitRows(limits: RiskLimits, usage: Partial<RiskUsage> = {}): LimitRow
 }
 
 /** 한도를 넘었나 — 상한(max)은 초과, 하한(min, 현금)은 미달, 손실 한도(음수)는 그 이하. 사용량을 모르면 false. */
-function breached(r: LimitRow): boolean {
+export function breached(r: LimitRow): boolean {
   if (r.used === null) return false;
   if (r.kind === "max") return r.used > r.limit;
   return r.kind === "min" ? r.used < r.limit : r.used <= r.limit;
 }
 
-/** 막대 채움(0~1) — 사용량/한도. 현금 하한 0 이면 늘 충족(가득), 손실은 손실일 때만 한도 쪽으로 찬다. */
-function fill(r: LimitRow): number {
-  if (r.used === null) return 0;
-  let ratio: number;
-  if (r.kind === "min") ratio = r.limit > 0 ? r.used / r.limit : 1;
-  else if (r.kind === "loss") ratio = r.used < 0 && r.limit < 0 ? r.used / r.limit : 0;
-  else ratio = r.limit > 0 ? r.used / r.limit : 0;
-  return Math.max(0, Math.min(1, ratio));
-}
+const KIND_WORD = { max: "최대", min: "최소", loss: "손실" } as const;
+const BREACH_WORD = { max: "초과", min: "미달", loss: "초과" } as const;
 
 function shown(v: number | null, count?: boolean): string {
   if (v === null) return "—";
   return count ? String(v) : fmtPct(v);
 }
 
-function LimitBars({ limits, usage }: { limits: RiskLimits; usage?: RiskUsage }) {
+function verdict(r: LimitRow) {
+  if (r.used === null) return <Chip>자료 없음</Chip>;
+  return breached(r) ? <Chip tone="fail">{BREACH_WORD[r.kind]}</Chip> : <Chip tone="ok">정상</Chip>;
+}
+
+const LIMIT_COLUMNS: Column<LimitRow>[] = [
+  { key: "label", label: "항목", width: "34%", long: true },
+  { key: "used", label: "현재", width: "22%", align: "num", render: (r) => shown(r.used, r.count) },
+  { key: "limit", label: "한도", width: "24%", align: "num", render: (r) => `${KIND_WORD[r.kind]} ${shown(r.limit, r.count)}` },
+  { key: "verdict", label: "판정", width: "20%", align: "chip", render: verdict },
+];
+
+function LimitTable({ limits, usage }: { limits: RiskLimits; usage?: RiskUsage }) {
   return (
-    <>
+    <div className="risk-limits">
       <h3 className="risk-limits-title">한도 대비</h3>
-      <ul className="risk-limits">
-        {limitRows(limits, usage).map((r) => (
-          <li key={r.label} className={breached(r) ? "risk-limit over" : "risk-limit"}>
-            <span className="risk-ticker">{r.label}</span>
-            <div className="risk-bar">
-              <div className="risk-bar-fill" style={{ width: `${fill(r) * 100}%` }} />
-            </div>
-            <span className="risk-pct">
-              {shown(r.used, r.count)} / {shown(r.limit, r.count)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </>
+      <Table columns={LIMIT_COLUMNS} rows={limitRows(limits, usage)} rowKey={(r) => r.label} />
+    </div>
   );
 }
 
-export function RiskCard({ risk }: { risk: Risk }) {
+export function RiskCard({ risk, names = {} }: { risk: Risk; names?: Record<string, string | null | undefined> }) {
   const title = risk.market ? `리스크 (${risk.market})` : "리스크";
-  const limits = risk.limits ? <LimitBars limits={risk.limits} usage={risk.usage} /> : null;
+  const limits = risk.limits ? <LimitTable limits={risk.limits} usage={risk.usage} /> : null;
   if (risk.insufficient) {
     return (
       <Card title={title}>
-        <p className="risk-insufficient">자료 부족: {risk.insufficient}</p>
+        <Empty title="자료 부족">{risk.insufficient}</Empty>
         {limits}
       </Card>
     );
@@ -99,26 +98,20 @@ export function RiskCard({ risk }: { risk: Risk }) {
   const top = (risk.contributions ?? []).slice(0, 3);
   return (
     <Card title={title}>
-      <dl className="risk-stats">
-        <div>
-          <dt>VaR95</dt>
-          <dd>{fmtPct(risk.var95 ?? null)}</dd>
-        </div>
-        <div>
-          <dt>CVaR95</dt>
-          <dd>{fmtPct(risk.cvar95 ?? null)}</dd>
-        </div>
-        <div>
-          <dt>베타</dt>
-          <dd>{risk.beta === null || risk.beta === undefined ? "—" : risk.beta.toFixed(2)}</dd>
-        </div>
-      </dl>
+      <Stats
+        cols={3}
+        items={[
+          { id: "var95", label: "VaR95", value: fmtPct(risk.var95 ?? null) },
+          { id: "cvar95", label: "CVaR95", value: fmtPct(risk.cvar95 ?? null) },
+          { id: "beta", label: "베타", value: risk.beta === null || risk.beta === undefined ? "—" : risk.beta.toFixed(2) },
+        ]}
+      />
       {limits}
       {top.length ? (
-        <ul className="risk-contrib">
+        <ul className="risk-contrib" aria-label="위험 기여 상위">
           {top.map((c) => (
             <li key={c.ticker}>
-              <span className="risk-ticker">{c.ticker}</span>
+              <span className="risk-ticker">{tickerLabel(c.ticker, names[c.ticker])}</span>
               <div className="risk-bar">
                 <div className="risk-bar-fill" style={{ width: `${Math.max(0, Math.min(100, c.contribution * 100))}%` }} />
               </div>
