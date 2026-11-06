@@ -22,6 +22,7 @@ from trader.features.evaluation.memory import vector
 from trader.features.evaluation.rl.policy import Policy
 from trader.features.ml import api as ml_api
 from trader.features.ml.api import RlSizerCfg
+from trader.kernel.ledger import names
 
 logger = logging.getLogger("trader.evaluation")
 NAME = "rl_sizer"
@@ -134,8 +135,12 @@ def recent(conn: sqlite3.Connection, account_id: str, *, days: int = 30) -> list
         (account_id, since),
     ).fetchall()
     out = []
+    name_cache: dict[tuple[str, str], str | None] = {}  # 같은 종목은 한 번만 조회
     for r in rows:
         pr = r["price_return"]
+        key = (str(r["market"]), str(r["ticker"]))
+        if r["ticker"] and key not in name_cache:
+            name_cache[key] = names.resolve(conn, key[0], key[1])
         out.append(
             {
                 "id": r["id"],
@@ -145,6 +150,7 @@ def recent(conn: sqlite3.Connection, account_id: str, *, days: int = 30) -> list
                 "model_version": r["model_version"],
                 "ticker": r["ticker"],
                 "market": r["market"],
+                "name": name_cache.get(key),  # 원장 ticker_names 종목명(없으면 None)
                 "decision_date": r["decision_date"],
                 "llm_weight": r["llm_weight"],
                 "proposed_weight": r["proposed_weight"],

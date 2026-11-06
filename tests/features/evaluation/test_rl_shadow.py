@@ -72,4 +72,10 @@ def test_record_idempotent_and_recent_joins_outcome(conn):
     rows = shadow.recent(conn, "paper-main", days=30)
     assert len(rows) == 1 and rows[0]["realized_rl"] == pytest.approx(0.006)
     assert rows[0]["realized_llm"] == pytest.approx(0.003) and rows[0]["ticker"] == "T000"
+    assert rows[0]["name"] is None  # 종목명(원장 ticker_names) — 화면이 코드+이름으로 그린다
+    conn.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) VALUES(?,?,?,?,?)",
+        ("KR", "T000", "테스트종목", "test", "2026-11-05T00:00:00+00:00"),
+    )
+    assert shadow.recent(conn, "paper-main", days=30)[0]["name"] == "테스트종목"
     assert shadow.recent(conn, "real-main") == []

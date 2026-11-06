@@ -13,7 +13,7 @@ import { Table, type Column } from "../../components/Table";
 import { fmtInt, fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
 import { tickerLabel } from "../../lib/ticker";
-import { usePaged } from "../../lib/usePaged";
+import { usePaged, usePageReset } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { useMarket, type Market } from "./Data.tsx";
 import { featureLabel, featureRows, fmtFeature, KEY_COLUMNS, type FeatureRow, type HistoryResp, type LatestResp, type Names, type SortDir } from "./data.ts";
@@ -53,7 +53,11 @@ export function Features() {
   const nameParams = useMemo(() => ({ tickers: pageTickers, market }), [pageTickers, market]);
   const names = useResource<Names>("/names", nameParams, ["accounts"], { enabled: !!pageTickers });
 
-  const onSort = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
+  const resetPage = usePageReset("page");
+  const onSort = (key: string) => {
+    resetPage(); // 새 순서는 1쪽부터
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
+  };
   const ariaSort = (key: string) => (sort.key !== key ? "none" : sort.dir === "asc" ? "ascending" : "descending");
 
   return (
@@ -104,7 +108,7 @@ export function Features() {
           <Empty title="지표 없음" />
         ),
       )}
-      {picked ? <History market={market} ticker={picked} /> : null}
+      {picked ? <History market={market} ticker={picked} name={names.data?.[`${market}:${picked}`] ?? null} /> : null}
 
       <h3 className="perf-sub">모델</h3>
       {body(models, "모델", (d) => <Models data={d} />)}
@@ -117,12 +121,12 @@ export function Features() {
   );
 }
 
-function History({ market, ticker }: { market: Market; ticker: string }) {
+function History({ market, ticker, name }: { market: Market; ticker: string; name: string | null }) {
   const params = useMemo(() => ({ market, ticker, days: "120" }), [market, ticker]);
   const res = useResource<HistoryResp>("/features/history", params, ["features"]);
   return (
     <div className="data-history">
-      <h3 className="perf-sub">{ticker} 이력(120일)</h3>
+      <h3 className="perf-sub">{tickerLabel(ticker, name)} 이력(120일)</h3>
       {body(res, "지표 이력", (d) => {
         if (!d.rows.length) return <Empty title="이력 없음" />;
         const closes = d.rows.map((r) => Number(r.close)).filter((v) => Number.isFinite(v));

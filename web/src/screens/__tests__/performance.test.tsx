@@ -190,6 +190,7 @@ describe("성과 화면", () => {
     const shadow = Array.from(tables).find((t) => t.textContent?.includes("005930"))!;
     expect(Array.from(shadow.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["시각", "종목", "모델", "비중 LLM / RL", "적용", "수익률", "실현 RL / LLM"]);
     expect(shadow.textContent).toContain("8.00% / 6.00%");
+    expect(shadow.textContent).toContain("005930 삼성전자"); // 종목 코드+이름(rows[].name)
     expect(shadow.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("적용");
     // 실험 펼침
     const exp = Array.from(tables).find((t) => t.textContent?.includes("rl-006"))!;

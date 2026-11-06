@@ -66,6 +66,9 @@ describe("trace (결정 추적)", () => {
     expect(t.quote).toBeNull();
     expect(t.stages).toHaveLength(3);
     expect(t.analysts[0]).toMatchObject({ role: "macro", label: "macro", signal: "BULLISH", evidence: [] });
+    // claim 없는 evidence(백엔드가 None 을 실음)는 「null」 글자가 아니라 건너뛴다
+    const n = normalizeTrace("spot", fixtureSpotTrace({ analysts: [{ role: "technical", label: "차트", signal: "BULLISH", confidence: 0.7, summary: "s", evidence: ["a", null, "b"] }] }));
+    expect(n.analysts[0].evidence).toEqual(["a", "b"]);
     expect(t.checks).toHaveProperty("_fo_risk_check_paper-fo");
     expect(t.checkpoint).toEqual({ intent: "ENTER" });
   });
