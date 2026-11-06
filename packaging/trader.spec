@@ -10,7 +10,8 @@
 
 _internal/(sys._MEIPASS) 리소스 레이아웃은 platform/bundle.py 가 기대하는 대로:
 templates/ icons/ web/dist/ extensions/saveticker/ docs/, 기능 agents md 는 모듈 옆
-trader/features/<기능>/agents/*.md (`Path(__file__).parent / "agents"`). secrets/·state/ 는 넣지 않는다.
+trader/features/<기능>/agents/*.md (`Path(__file__).parent / "agents"`), 기능 README.md 는 boot() 계약 검사용.
+secrets/·state/ 는 넣지 않는다.
 실제 빌드는 v* 태그 CI 에서만 돈다(packaging/build.py, .github/workflows/build.yml)."""
 
 import re
@@ -39,8 +40,8 @@ if EXT.is_dir():
         rel = f.relative_to(EXT)
         if f.is_file() and "tests" not in rel.parts:
             datas.append((str(f), (Path("extensions/saveticker") / rel.parent).as_posix()))
-# 기능 agents md: _internal/trader/features/<기능>/agents/*.md
-datas += collect_data_files("trader", includes=["**/agents/*.md"])
+# 기능 agents md: _internal/trader/features/<기능>/agents/*.md, 기능 README: boot() 계약 검사가 요구
+datas += collect_data_files("trader", includes=["**/agents/*.md", "features/*/README.md"])
 datas += collect_data_files("tzdata")
 # 세이브티커 수집기: Playwright 드라이버(node + package). Chromium 은 첫 실행에 내려받는다.
 datas += collect_data_files("playwright")

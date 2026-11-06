@@ -1,6 +1,6 @@
 [project]
 name = "trader"
-version = "0.2.0"
+version = "0.2.1"
 description = "LLM 멀티 에이전트 + ML 주식 자동매매 (KIS)"
 requires-python = ">=3.12"
 dependencies = [

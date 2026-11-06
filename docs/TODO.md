@@ -420,7 +420,7 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
 - [ ] 실기(사용자 확인 대기): 텔레그램 승인 — 모드를 `approve` 로 두고 BUY 결정 때 승인 요청 → 텔레그램 `/approve <id>` → 주문 접수 확인 → 모드 `auto` 원복 (M2·M4 이후)
 - [ ] 사용자 확인 대기: `secrets/.env` 의 `WEB_TOKEN`(`trader app`·`trader web` 기동이 없으면 자동 생성) → 시스템 화면 「이 PC 에서 받기」 또는 토큰 입력 → 일시정지/재개가 반영되는지, 승인 요청이 있을 때 웹·텔레그램 버튼 승인 → 주문 접수 확인 (M12 전환 뒤 — 백엔드는 M11, 화면은 M11b)
 - [ ] 사용자 확인 대기: `settings.web.tailscale_hosts`·`tailscale_users`·`public_base` 실제 값 설정 → 폰에서 tailnet 이름으로 조회 200·허용 밖 로그인 403·키 입력 403 확인 (M12 전환 뒤)
-- [ ] 실기(사용자 확인 대기): 번들 zip(`v0.2.0` 태그 `build.yml`)을 풀어 더블클릭 → 웹 UI → `./trader accounts ping` (macOS `xattr`/우클릭 열기·Windows SmartScreen 1회; Windows `install` 로그온 등록 확인 포함) (M12 이후)
+- [ ] 실기(사용자 확인 대기): 번들 zip(`v0.2.1` 태그 `build.yml`; `v0.2.0` 은 기능 README 누락으로 스모크 실패)을 풀어 더블클릭 → 웹 UI → `./trader accounts ping` (macOS `xattr`/우클릭 열기·Windows SmartScreen 1회; Windows `install` 로그온 등록 확인 포함) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
 - [ ] 사용자 확인 대기: `channels.naver_blog` 기본값 — 옛 기본 `ranto28` 복원 여부 결정 (M3)
