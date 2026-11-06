@@ -1,7 +1,8 @@
 // 「시스템」 화면 순수 함수 — 응답 타입과 표·한 줄 변환. 레벨 기준(70/90)은 셸과 같은 `usageLevel` 을 쓴다.
 import type { Tone } from "../../components/Badge";
+import { GLOSSARY } from "../../lib/glossary";
 import { now as clockNow } from "../../lib/clock";
-import { fmtPct } from "../../lib/format";
+import { fmtPct, fmtTime } from "../../lib/format";
 import { resetsIn, usageLevel, type LimitWindow, type Throttle, type UsageLevel, type UsageResp } from "../../lib/usage";
 
 const DASH = "—";
@@ -279,15 +280,23 @@ export const INTERNAL_KINDS = new Set([
 
 const MARKET_PREFIX: Record<string, string> = { kr_: "KR", us_: "US" };
 
-/** 잡 표 행: 라벨은 kind 라벨(없으면 kind), 시장은 id 접두(kr_·us_), 일정은 cron 키 또는 「N초마다」, 소요는 마지막 실행. */
+/** 주기 글귀: 60 의 배수면 「N분마다」(3600 의 배수면 「N시간마다」), 아니면 「N초마다」. */
+export function intervalText(s: number): string {
+  if (s % 3600 === 0) return `${s / 3600}시간마다`;
+  if (s % 60 === 0) return `${s / 60}분마다`;
+  return `${s}초마다`;
+}
+
+/** 잡 표 행: 라벨은 /jobs 라벨 → glossary job.<kind> → kind, 시장은 id 접두(kr_·us_),
+ *  일정은 주기면 intervalText, 예약(cron)이면 다음 실행의 KST 시각 「HH:MM」(내부 schedule_key 는 노출하지 않음), 소요는 마지막 실행. */
 export function daemonRows(jobs: DaemonJob[], labels: Map<string, string>): { user: DaemonRow[]; internal: DaemonRow[] } {
   const rows = jobs.map((j): DaemonRow => {
     const st = statusOf(j.last_status);
     const prefix = Object.keys(MARKET_PREFIX).find((p) => j.id.startsWith(p));
-    const schedule = j.trigger === "interval" && j.interval_s ? `${j.interval_s}초마다` : (j.schedule_key ?? j.trigger);
+    const schedule = j.trigger === "interval" && j.interval_s ? intervalText(j.interval_s) : j.next_at ? fmtTime(j.next_at).slice(0, 5) : "—";
     return {
       id: j.id,
-      label: labels.get(j.kind) || j.kind,
+      label: labels.get(j.kind) || GLOSSARY[`job.${j.kind}`]?.label || j.kind,
       market: prefix ? MARKET_PREFIX[prefix] : "",
       status: st.text,
       tone: st.tone,

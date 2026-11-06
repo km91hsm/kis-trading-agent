@@ -26,7 +26,7 @@ function freshText(r: Fresh | undefined): string {
 }
 
 const CAP_COLUMNS: Column<CapRow>[] = [
-  { key: "kind", label: "잡 종류", width: "50%" },
+  { key: "kind", label: "세션 종류", width: "50%", render: (r) => termLabel(`session.${r.kind}`) },
   { key: "used", label: "오늘 사용", width: "25%", align: "num" },
   { key: "cap", label: "상한", width: "25%", align: "num", render: (r) => (r.cap === null ? "—" : String(r.cap)) },
 ];

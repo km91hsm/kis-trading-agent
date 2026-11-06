@@ -21,7 +21,7 @@ export function fixtureDaemon(over: Over = {}) {
     stale_after_s: 180,
     jobs: [
       {
-        id: "spot.trade.KR",
+        id: "kr_spot_trade",
         kind: "spot_trade",
         trigger: "cron",
         schedule_key: "spot.KR",

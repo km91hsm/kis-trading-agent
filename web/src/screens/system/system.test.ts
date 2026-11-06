@@ -88,13 +88,31 @@ describe("시스템 순수 함수", () => {
     ];
     const labels = new Map([["daily_report", "일일 리포트"]]);
     const r = daemonRows(jobs, labels);
+    // 라벨: /jobs 라벨 → glossary job.<kind> → kind. 일정: 주기면 「N분마다」, 예약이면 다음 실행의 시각(내부 키 report.KR 은 노출하지 않음)
     expect(r.user.map((j) => [j.id, j.label, j.market, j.status, j.schedule, j.duration])).toEqual([
-      ["kr_daily_report", "일일 리포트", "KR", "완료", "report.KR", "4초"],
-      ["ml_train", "ml_train", "", "오류", "ml.train", "1분 36초"],
+      ["kr_daily_report", "일일 리포트", "KR", "완료", "16:20", "4초"],
+      ["ml_train", "퀀트 학습", "", "오류", "—", "1분 36초"],
     ]);
     expect(r.user[0].tone).toBe("ok");
     expect(r.user[1].tone).toBe("fail");
-    expect(r.internal.map((j) => [j.id, j.status, j.schedule, j.duration])).toEqual([["job_queue_fast", "건너뜀", "10초마다", "—"]]);
+    expect(r.internal.map((j) => [j.id, j.label, j.status, j.schedule, j.duration])).toEqual([["job_queue_fast", "빠른 대기열", "건너뜀", "10초마다", "—"]]);
+  });
+
+  test("daemonRows 일정: 60초 → 1분마다, 1800 → 30분마다, 3600 → 1시간마다, 90 → 90초마다; 라벨 없는 kind 는 glossary 뒤 원문", () => {
+    const base = { trigger: "interval", schedule_key: null, next_at: null, last_start: null, last_end: null, last_status: null, last_error: null };
+    const jobs = [
+      { ...base, id: "kr_monitor", kind: "monitor", interval_s: 60 },
+      { ...base, id: "theme_kr", kind: "theme", interval_s: 1800 },
+      { ...base, id: "names_fill", kind: "names_fill", interval_s: 3600 },
+      { ...base, id: "x", kind: "mystery_kind", interval_s: 90 },
+    ];
+    const r = daemonRows(jobs, new Map());
+    expect(r.user.map((j) => [j.label, j.schedule])).toEqual([
+      ["장중 감시", "1분마다"],
+      ["테마 감지", "30분마다"],
+      ["mystery_kind", "90초마다"],
+    ]);
+    expect(r.internal.map((j) => [j.label, j.schedule])).toEqual([["종목명 채우기", "1시간마다"]]);
   });
 
   test("runRows·callRows: 상태 칩, 비용 USD 4자리·소요 초·턴", () => {

@@ -162,9 +162,13 @@ describe("시스템 화면", () => {
   test("사용량: 요약은 Stats(세션·오류 수), 「지금 확인」은 usage_probe 잡 요청, 지출 한도 미터는 값 없으면 숨김", async () => {
     tokenStore.set("tok");
     const u0 = fixtureUsage();
+    u0.caps_by_kind = [{ kind: "reflect", used: 1, cap: 2 }, { kind: "analyze", used: 16, cap: null }];
     u0.windows.h5 = { sessions: 3, cost_usd: 1.5, avg_duration_s: 42, errors: 1 };
     await mount(routes({ "GET /api/system/usage": u0 }));
     const u = section("usage");
+    // kind 별 상한 표의 잡 종류는 한글(session.<kind>) — 영문 원문 노출 없음
+    expect(u.querySelector("table")?.textContent).toContain("복기");
+    expect(u.querySelector("table")?.textContent).not.toContain("reflect");
     const stats = u.querySelector("dl.stats") as HTMLElement;
     expect(stats.textContent).toContain("오늘 세션");
     expect(stats.textContent).toContain("0 / 40");
@@ -224,8 +228,10 @@ describe("시스템 화면", () => {
     expect(heads).not.toContain("종류");
     const first = s.querySelector("table tbody tr") as HTMLElement;
     expect(first.textContent).toContain("현물 매매"); // kind 라벨(GET /jobs)
-    expect(first.textContent).toContain("KR"); // id 접두 kr_ 는 없지만 spot.trade.KR 은 시장 없음 → 라벨만
-    expect(first.querySelector(".chip")?.textContent).toBe("완료");
+    // 잡 칸의 시장 칩(id 접두 kr_) + 상태 칩 「완료」, 일정은 내부 키(spot.KR) 대신 다음 실행 시각
+    expect(Array.from(first.querySelectorAll(".chip")).map((c) => c.textContent)).toEqual(["KR", "완료"]);
+    expect(first.textContent).not.toContain("spot.KR");
+    expect(first.textContent).toContain("10:30");
     expect(s.textContent).not.toContain("spot_trade");
     const det = s.querySelector("details") as HTMLDetailsElement;
     expect(det.querySelector("summary")?.textContent).toContain("내부 잡 1");
