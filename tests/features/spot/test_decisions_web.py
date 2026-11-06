@@ -106,6 +106,7 @@ def test_today_and_checkpoint_read(client, ledger, project):
     did = _decide(ledger)
     r = client.get("/api/markets/KR/today", params={"date": D.isoformat()}).json()
     assert r["tickers"]["005930"] == ["00_inputs", "10_analyst_technical", "20_debate_r0_bull"]
+    assert r["names"] == {"005930": None}  # 종목명(원장 ticker_names) — 화면이 코드+이름으로 그린다
     assert r["market_files"] == ["_scan"]
     assert r["scan"]["picks"][0] == {"ticker": "005930", "reason": "돌파", "discovery": None}
     assert r["scan"]["targets"] == 1
@@ -342,11 +343,17 @@ def test_risk_checks_by_date(client, ledger):
     old = _decide(ledger, ticker="000660", d=date(2026, 11, 3))
     xledger.insert_risk_check(ledger, decision_id=old, account_id="paper-main", approved=True,
                               adjusted_qty=1, reasons=[])  # fmt: skip
+    ledger.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', '005930', '삼성전자', 'test', '2026-11-04T00:00:00+00:00')"
+    )
+    ledger.commit()
     (rc,) = client.get("/api/risk-checks").json()
     assert rc["decision_id"] == did and rc["approved"] is False and rc["reasons"] == ["주간 한도"]
     assert rc["ticker"] == "005930" and rc["market"] == "KR" and rc["date"] == D.isoformat()
+    assert rc["name"] == "삼성전자"  # 종목은 코드+이름으로 보인다(원장 ticker_names, 없으면 None)
     (rc2,) = client.get("/api/risk-checks", params={"date": "2026-11-03"}).json()
-    assert rc2["decision_id"] == old and rc2["approved"] is True
+    assert rc2["decision_id"] == old and rc2["approved"] is True and rc2["name"] is None
 
 
 def test_risk_checks_older_date_beyond_limit(client, ledger, monkeypatch):

@@ -466,7 +466,7 @@ def news_jobs(conn: sqlite3.Connection, market: str, d: date) -> list[dict]:
 
 
 def market_today(conn: sqlite3.Connection, market: str, d: date, state: Path | None) -> dict:
-    """그 운영일의 종목별 단계 목록(빈 디렉터리 숨김)·스캔 요약·시장 단계 파일·뉴스 요청."""
+    """그 운영일의 종목별 단계 목록(빈 디렉터리 숨김)·종목명·스캔 요약·시장 단계 파일·뉴스 요청."""
     base = state if state is not None else paths.state_dir()
     mdir = run_store.market_dir(d, market, base)
     tickers: dict[str, list[str]] = {}
@@ -475,7 +475,9 @@ def market_today(conn: sqlite3.Connection, market: str, d: date, state: Path | N
             if p.is_dir() and (stages := run_store.list_checkpoints(p)):
                 tickers[p.name] = stages
     return {
-        "date": d.isoformat(), "market": market, "tickers": tickers, "scan": scan_summary(mdir),
+        "date": d.isoformat(), "market": market, "tickers": tickers,
+        "names": {t: names.resolve(conn, market, t) for t in tickers},
+        "scan": scan_summary(mdir),
         "market_files": market_files(mdir), "news_jobs": news_jobs(conn, market, d),
     }  # fmt: skip
 
@@ -523,6 +525,10 @@ def risk_checks(
         row = dict(r)
         row["approved"] = bool(row["approved"])
         row["reasons"] = _loads(row.pop("reasons_json"), [])
+        row["name"] = (
+            names.resolve(conn, row["market"], row["ticker"])
+            if row.get("market") and row.get("ticker") else None
+        )
         out.append(row)
     return out
 

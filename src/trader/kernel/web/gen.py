@@ -35,7 +35,7 @@ SYSTEM_PAGES = (
     ("admin", "관리", "/system/admin", ("token", "secrets", "settings", "control-log")),
 )
 TODAY_PAGES = (
-    ("today", "현황", "/", ("approvals", "decisions")),
+    ("today", "현황", "/", ("approvals", "pipeline", "decisions", "risk-checks")),
     ("log", "기록", "/log", ("orders-timeline", "next-jobs", "notices")),
 )
 SCREEN_PAGES: dict[str, tuple[tuple[str, str, str, tuple[str, ...]], ...]] = {
@@ -58,8 +58,10 @@ def page_of(screen: str, section_id: str) -> str:
     return pages[0][0]
 
 KERNEL_NAV = (
-    # 오늘: 기능 레인 카드(10~30) 뒤에 커널 절
+    # 오늘: 기능 레인 카드(10~30) 뒤에 커널 절 — 현황(파이프라인·결정·게이트) → 기록(주문·다음 할 일·알림)
+    NavItem("today", "pipeline", "아침 파이프라인", 35),
     NavItem("today", "decisions", "결정", 40),
+    NavItem("today", "risk-checks", "리스크 게이트", 45),
     NavItem("today", "orders-timeline", "주문·체결", 50),
     NavItem("today", "next-jobs", "다음 할 일", 60),
     NavItem("today", "notices", "알림", 70),

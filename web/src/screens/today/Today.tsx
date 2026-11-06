@@ -1,4 +1,5 @@
-// 「오늘」 화면 — 페이지 2개(nav.ts pages). 현황(`/`): 날짜 → 대기 승인(최상단) → 오늘 요약 KPI → 레인 카드(현물·단타·파생) → 결정.
+// 「오늘」 화면 — 페이지 2개(nav.ts pages). 현황(`/`): 날짜 → 대기 승인(최상단) → 오늘 요약 KPI → 레인 카드(현물·단타·파생) →
+// 아침 파이프라인(시장별) → 결정 → 리스크 게이트(0건이면 hidden).
 // 기록(`/log`): 주문·체결 → 다음 할 일 → 알림. 날짜는 `?date=` 로 두 페이지가 같이 쓴다(없으면 오늘을 따라가 KST 자정에 넘어감).
 // 섹션 컨테이너(id = NAV 항목)는 데이터 전에 바로 그린다(메뉴의 IntersectionObserver 가 마운트 시점 DOM 만 본다).
 // 계좌 없는 레인·대기 승인 없음은 언마운트하지 않고 hidden 으로 둔다(메뉴 앵커가 계속 가리킬 수 있게).
@@ -17,6 +18,9 @@ import { LaneCardView, type LaneFetch } from "./LaneCards";
 import { NextJobs } from "./NextJobs";
 import { NoticesFeed } from "./NoticesFeed";
 import { OrdersTimeline } from "./OrdersTimeline";
+import { Pipeline } from "./Pipeline";
+import { RiskChecks } from "./RiskChecks";
+import type { MarketToday, RiskCheck } from "./morning.ts";
 import { LANE_LABEL, LANES, laneCards, laneNextAt, todaySummary, type Account, type Daemon, type Decision, type Merged, type Notice, type Order } from "./today.ts";
 
 export type TodayPage = NavPage["id"];
@@ -48,6 +52,9 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
   const [noticeKind, setNoticeKind] = useState<string | null>(null);
   const notices = useResource<Notice[]>("/system/notices", noticeKind ? { limit: "200", kind: noticeKind } : { limit: "200" }, ["notices"]);
   const daemon = useResource<Daemon>("/system/daemon", undefined, ["jobs", "runs", "daemon"]); // 현황은 레인 「다음 예정」, 기록은 「다음 할 일」
+  const pipeKr = useResource<MarketToday>("/markets/KR/today", day, ["decisions", "jobs"], { enabled: !log });
+  const pipeUs = useResource<MarketToday>("/markets/US/today", day, ["decisions", "jobs"], { enabled: !log });
+  const riskChecks = useResource<RiskCheck[]>("/risk-checks", day, ["decisions", "orders"], { enabled: !log });
 
   const pending = approvals.data?.approvals ?? [];
   const cards = accounts.data
@@ -131,6 +138,11 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
         })}
       </div>
 
+      <section id="pipeline" className="screen-section">
+        <h2>아침 파이프라인</h2>
+        <Pipeline kr={pipeKr} us={pipeUs} />
+      </section>
+
       <section id="decisions" className="screen-section">
         <h2>결정</h2>
         {decisions.error ? (
@@ -138,6 +150,11 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
         ) : (
           <DecisionsList items={decisions.data?.items ?? []} partial={!!decisions.data?.partial} date={date} />
         )}
+      </section>
+
+      <section id="risk-checks" className="screen-section" hidden={!!riskChecks.data && !riskChecks.data.length}>
+        <h2>리스크 게이트</h2>
+        <RiskChecks data={riskChecks.data} error={riskChecks.error} />
       </section>
 
     </div>

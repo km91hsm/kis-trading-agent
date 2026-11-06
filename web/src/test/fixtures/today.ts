@@ -214,3 +214,54 @@ export function fixtureJob(over: Over = {}) {
 export function fixtureDaemon(jobs: ReturnType<typeof fixtureJob>[] = [fixtureJob()], over: Over = {}) {
   return { alive: true, pid: 4242, heartbeat: "2026-11-05T01:00:00+00:00", jobs, ...over };
 }
+
+/** `GET /markets/{m}/today`(spot/decisions_view.py market_today) — KR 은 스캔·시장 세션·종목 2개, US 는 빈 날. */
+export type MarketTodayFixture = {
+  date: string;
+  market: string;
+  tickers: Record<string, string[]>;
+  names: Record<string, string | null>;
+  scan: { picks: { ticker: string; reason: string | null; discovery: { tier: string | null; catalyst: string | null } | null }[]; targets: number; cap_hit: boolean; discovery: null } | null;
+  market_files: string[];
+  news_jobs: { id: number; kind: string; ticker: string | null; status: string; requested_at: string; finished_at: string | null; error: string | null }[];
+};
+export function fixtureMarketToday(market = "KR", over: Partial<MarketTodayFixture> = {}): MarketTodayFixture {
+  if (market !== "KR") return { date: "2026-11-05", market, tickers: {}, names: {}, scan: null, market_files: [], news_jobs: [], ...over };
+  return {
+    date: "2026-11-05",
+    market: "KR",
+    tickers: {
+      "005930": ["00_inputs", "10_analyst_technical", "20_debate_r0_bull", "30_decision", "40_risk_check_paper-1"],
+      "000660": ["00_inputs", "10_analyst_technical"],
+    },
+    names: { "005930": "삼성전자", "000660": null },
+    scan: {
+      picks: [{ ticker: "005930", reason: "돌파", discovery: { tier: "A", catalyst: "실적" } }, { ticker: "000660", reason: "수급", discovery: null }],
+      targets: 2,
+      cap_hit: false,
+      discovery: null,
+    },
+    market_files: ["_market_view", "_scan", "_screen"],
+    news_jobs: [{ id: 7, kind: "analyze", ticker: "005930", status: "done", requested_at: "2026-11-05T02:00:00+00:00", finished_at: null, error: null }],
+    ...over,
+  };
+}
+
+/** `GET /risk-checks`(spot/decisions_view.py risk_checks) 한 행 — 기본은 거부(주간 한도). */
+export function fixtureRiskCheck(over: Over = {}) {
+  return {
+    id: 1,
+    decision_id: 1,
+    account_id: "paper-1",
+    approved: false,
+    adjusted_qty: null,
+    reasons: ["주간 한도", "현금 부족"],
+    created_at: "2026-11-05T01:10:00+00:00",
+    ticker: "005930",
+    name: "삼성전자",
+    market: "KR",
+    date: "2026-11-05",
+    action: "BUY",
+    ...over,
+  };
+}

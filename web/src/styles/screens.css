@@ -44,6 +44,14 @@
 }
 .approval-actions .btn { min-height: var(--touch); }
 
+/* 아침 파이프라인 — 시장 카드 2열(<768 1열), 단계 칩 줄, 발굴·뉴스 한 줄 */
+.pipeline-grid { display: grid; gap: var(--space-3); grid-template-columns: 1fr 1fr; }
+@media (max-width: 767px) {
+  .pipeline-grid { grid-template-columns: 1fr; }
+}
+.pipeline-steps { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); }
+.pipeline-line { margin: 0 0 var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
 /* 오늘 요약 KPI 띠(Stats kpi) — 레인 카드 위 */
 .today-summary { margin-bottom: var(--space-4); }
 

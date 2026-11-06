@@ -12,7 +12,9 @@ import {
   fixtureApproval,
   fixtureDaemon,
   fixtureJob,
+  fixtureMarketToday,
   fixtureNotice,
+  fixtureRiskCheck,
   fixtureScalpDecision,
   fixtureSpotDecision,
   fixtureSpotOrder,
@@ -283,7 +285,7 @@ describe("배치", () => {
     const { container } = await mount(routes());
     expect(container.querySelector(".section-pair")).toBeNull();
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
-      "approvals", "spot-lane", "scalp-lane", "fo-lane", "decisions",
+      "approvals", "spot-lane", "scalp-lane", "fo-lane", "pipeline", "decisions", "risk-checks",
     ]);
     expect(container.querySelector("h1")?.textContent).toBe("오늘");
     expect(Array.from(container.querySelectorAll(".page-tabs a")).map((e) => [e.textContent, e.getAttribute("href")])).toEqual([
@@ -352,5 +354,44 @@ describe("배치", () => {
     await mount(routes({ "GET /api/decisions": merged([]) }));
     expect(section("decisions").querySelector("a[download]")).toBeNull();
     expect(section("decisions").textContent).toContain("이 날 결정이 없습니다");
+  });
+
+  test("아침 파이프라인: 시장마다 단계 칩(스캔·시장 세션·분석)과 종목 표(코드+이름·단계), 발굴 줄; US 처럼 빈 날은 「기록 없음」", async () => {
+    await mount(routes({ "GET /api/markets/KR/today": fixtureMarketToday("KR"), "GET /api/markets/US/today": fixtureMarketToday("US") }));
+    const sec = section("pipeline");
+    expect(sec.hidden).toBe(false);
+    const kr = sec.querySelector('[data-market="KR"]') as HTMLElement;
+    expect(Array.from(kr.querySelectorAll(".pipeline-steps .chip")).map((c) => [c.textContent, c.getAttribute("data-tone")])).toEqual([
+      ["스캔", "ok"], ["시장 세션", "ok"], ["분석 2종목 · 결정 1", "ok"],
+    ]);
+    expect(kr.textContent).toContain("발굴 005930 삼성전자 돌파(실적) · 000660 수급");
+    expect(kr.textContent).toContain("뉴스 발굴 요청 1건");
+    // long 열은 말풍선(Tooltip)이 같은 글을 한 번 더 넣으므로 보이는 span 만 읽는다
+    const cells = Array.from(kr.querySelectorAll("tbody tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("td")).map((td) => (td.querySelector(".cell-ellipsis") ?? td).textContent),
+    );
+    expect(cells).toEqual([["005930 삼성전자", "리스크 게이트", "5"], ["000660", "애널리스트", "2"]]);
+    const us = sec.querySelector('[data-market="US"]') as HTMLElement;
+    expect(us.textContent).toContain("기록 없음");
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=" + new Date().toISOString().slice(0, 10));
+  });
+
+  test("리스크 게이트: 0건이면 hidden, 있으면 표(시각·계좌·종목·결과 칩·수량 조정·사유) + 결정 링크", async () => {
+    const a = await mount(routes({ "GET /api/risk-checks": [] }));
+    expect(section("risk-checks").hidden).toBe(true);
+    a.unmount();
+    clearResourceCache();
+    await mount(routes({ "GET /api/risk-checks": [fixtureRiskCheck(), fixtureRiskCheck({ id: 2, approved: true, adjusted_qty: 3, reasons: [], decision_id: 9 })] }));
+    const sec = section("risk-checks");
+    expect(sec.hidden).toBe(false);
+    const rows = Array.from(sec.querySelectorAll("tbody tr"));
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("paper-1");
+    expect(rows[0].textContent).toContain("005930 삼성전자");
+    expect(rows[0].querySelector('.chip[data-tone="fail"]')?.textContent).toBe("거부");
+    expect(rows[0].textContent).toContain("주간 한도 · 현금 부족");
+    expect(rows[0].querySelector('a[href="/decisions/spot/1"]')).not.toBeNull();
+    expect(rows[1].querySelector('.chip[data-tone="ok"]')?.textContent).toBe("통과");
+    expect(rows[1].textContent).toContain("3주");
   });
 });

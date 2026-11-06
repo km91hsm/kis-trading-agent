@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { decisionHref, decisionRows, laneCards, laneNextAt, nextJobs, noticeKinds, noticeRows, statusLabel, timeline, todaySummary } from "./today.ts";
+import { pipelineOf, riskCheckRows, stageLabel } from "./morning.ts";
+import { fixtureMarketToday, fixtureRiskCheck } from "../../test/fixtures/today";
 import {
   fixtureAccount,
   fixtureDaemon,
@@ -198,5 +200,39 @@ describe("today 순수 함수", () => {
   test("noticeKinds: 처음 본 순서대로 중복 없이", () => {
     const notices = [fixtureNotice({ id: 3, kind: "fill" }), fixtureNotice({ id: 2, kind: "approval" }), fixtureNotice({ id: 1, kind: "fill" })];
     expect(noticeKinds(notices)).toEqual(["fill", "approval"]);
+  });
+});
+
+describe("아침 파이프라인·리스크 게이트 순수 함수", () => {
+  test("stageLabel: 체크포인트 이름 → glossary stage.* 한글(접미사 무시), 모르는 이름은 그대로", () => {
+    expect(stageLabel("00_inputs")).toBe("입력");
+    expect(stageLabel("10_analyst_technical")).toBe("애널리스트");
+    expect(stageLabel("20_debate_r0_bull")).toBe("토론");
+    expect(stageLabel("30_decision")).toBe("결정");
+    expect(stageLabel("40_risk_check_paper-1")).toBe("리스크 게이트");
+    expect(stageLabel("99_whatever")).toBe("99_whatever");
+  });
+
+  test("pipelineOf: 시장 단계 칩(스캔·시장 세션·분석)과 종목 행(코드+이름·마지막 단계·단계 수), 발굴 줄, 빈 날은 null", () => {
+    const kr = pipelineOf(fixtureMarketToday("KR"))!;
+    expect(kr.steps.map((s) => [s.id, s.done])).toEqual([["scan", true], ["market", true], ["analyze", true]]);
+    expect(kr.rows.map((r) => [r.ticker, r.label, r.last, r.count])).toEqual([
+      ["005930", "005930 삼성전자", "리스크 게이트", 5],
+      ["000660", "000660", "애널리스트", 2],
+    ]);
+    expect(kr.decided).toBe(1);
+    expect(kr.picks).toBe("005930 삼성전자 돌파(실적) · 000660 수급");
+    expect(kr.newsJobs).toBe(1);
+    expect(kr.capHit).toBe(false);
+    expect(pipelineOf(fixtureMarketToday("US"))).toBeNull();
+    const noScan = pipelineOf(fixtureMarketToday("KR", { scan: null, market_files: [] }))!;
+    expect(noScan.steps.map((s) => s.done)).toEqual([false, false, true]);
+    expect(noScan.picks).toBeNull();
+  });
+
+  test("riskCheckRows: 시각·계좌·종목(코드+이름)·결과·수량 조정·사유 한 줄·결정 링크", () => {
+    const rows = riskCheckRows([fixtureRiskCheck(), fixtureRiskCheck({ id: 2, approved: true, adjusted_qty: 3, reasons: [], name: null, ticker: "000660", decision_id: 9 })]);
+    expect(rows[0]).toMatchObject({ id: 1, account_id: "paper-1", ticker: "005930 삼성전자", approved: false, adjusted: "—", reasons: "주간 한도 · 현금 부족", href: "/decisions/spot/1", market: "KR" });
+    expect(rows[1]).toMatchObject({ ticker: "000660", approved: true, adjusted: "3주", reasons: "—", href: "/decisions/spot/9" });
   });
 });
