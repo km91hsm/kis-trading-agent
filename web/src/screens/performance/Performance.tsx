@@ -16,7 +16,7 @@ import { MemoryBlock } from "./MemoryBlock";
 import { FilterBar, OverviewBody } from "./Overview";
 import { compareAllEmpty, defaultFilters, type Calibration, type Compare, type FilterAccount, type Filters, type Perf, type Shadow } from "./performance.ts";
 import { body, failed } from "./ResourceView";
-import { RlExperimentsTable, RlSummary, ShadowTables, type RlExperiments, type RlReport } from "./ShadowTables";
+import { RlExperimentsTable, RlShadowTable, RlSummary, ShadowTables, type RlExperiments, type RlReport, type RlShadow } from "./ShadowTables";
 
 type FoScorecard = { decisions: number; matured: number; hit_rate: number | null; contract_pnl: string | number | null };
 
@@ -48,6 +48,8 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
   const shadow = useResource<Shadow>("/analytics/shadow", marketParams, ["shadow"], { enabled: !!f.market && on("shadow") });
   const rl = useResource<RlReport>("/analytics/rl/report", rlParams, ["market_views"], { enabled: chosen && on("rl") });
   const rlExp = useResource<RlExperiments>("/analytics/rl/experiments", undefined, ["market_views"], { enabled: on("rl") });
+  const rlShadowParams = useMemo(() => ({ account_id: f.account_id, days: "30" }), [f.account_id]);
+  const rlShadow = useResource<RlShadow>("/analytics/rl/shadow", rlShadowParams, ["market_views"], { enabled: chosen && on("rl") });
   const fo = useResource<FoScorecard>("/analytics/fo/scorecard", undefined, ["fo"], { enabled: hasFo && on("fo-scorecard") });
 
   // 계좌 목록이 실패하면 계좌에 묶인 절은 그 오류를 보인다(영원히 「불러오는 중」 이 되지 않게).
@@ -73,6 +75,8 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
       body: (
         <>
           {needsAccount(rl, "RL 보고서", (d) => <RlSummary report={d} />)}
+          <h3 className="perf-sub">섀도 거래(30일)</h3>
+          {needsAccount(rlShadow, "섀도 거래", (d) => <RlShadowTable data={d} />)}
           <h3 className="perf-sub">실험</h3>
           {body(rlExp, "RL 실험", (d) => <RlExperimentsTable data={d} />)}
         </>

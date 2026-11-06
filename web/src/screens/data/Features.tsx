@@ -1,14 +1,16 @@
 // 지표·모델 — GET /features/latest?market=(화면 머리 세그먼트) 를 KEY_COLUMNS 표로(머리글 한글 `featureLabel`, `th[data-key]` 는 원문 키;
 // 누르면 정렬 aria-sort; 30행 `Pager` ?page; 가로 스크롤), 행을 누르면 GET /features/history?days=120 종가 추이·최근 행.
-// 모델은 GET /ml/models(활성 칩·note). 잡 버튼은 비매매(trading=false).
+// 모델은 GET /ml/models(활성 칩·note), 행을 펼치면 GET /ml/models/{version}(학습 기간·행·피처 수·지표 Stats + 중요도 표).
+// 잡 버튼은 비매매(trading=false).
 import { useEffect, useMemo, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Pager } from "../../components/Pager";
 import { RunJobButton } from "../../components/RunJobButton";
 import { Sparkline } from "../../components/Sparkline";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
-import { fmtPct } from "../../lib/format";
+import { fmtInt, fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
 import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
@@ -29,6 +31,7 @@ type Model = {
   metrics: { accuracy: number | null; baseline: number | null; alpha: number | null; n_test: number | null } | null;
 };
 type ModelsResp = { models: Model[]; active: Model | null; note: string | null };
+type ModelDetail = Model & { window_years: number | null; features: string[] | null; importances: Record<string, number> | null; importances_scope: string | null };
 
 const HISTORY_COLUMNS = ["date", "close", "roc_10", "high_52w_pos", "flow_foreign_20d", "news_count"];
 const NO_PARAMS = {};
@@ -156,7 +159,48 @@ function Models({ data }: { data: ModelsResp }) {
       <p className="perf-note">
         {data.active ? <Chip tone="ok">활성 {data.active.version}</Chip> : <Chip>활성 모델 없음</Chip>} {data.note ? <span className="data-muted">{data.note}</span> : null}
       </p>
-      <Table columns={columns} rows={data.models} rowKey={(m) => `${m.name}-${m.version}`} empty="모델 없음" />
+      <Table columns={columns} rows={data.models} rowKey={(m) => `${m.name}-${m.version}`} empty="모델 없음" expand={(m) => <ModelDetailBlock version={m.version} />} />
     </>
   );
+}
+
+const range = (r: unknown): string => (Array.isArray(r) && r.length === 2 ? `${r[0]} ~ ${r[1]}` : "—");
+
+function ModelDetailBlock({ version }: { version: string }) {
+  const res = useResource<ModelDetail>(`/ml/models/${version}`, NO_PARAMS, ["features"]);
+  const imp = useMemo(
+    () =>
+      Object.entries(res.data?.importances ?? {})
+        .map(([feature, weight]) => ({ feature, weight }))
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, 10),
+    [res.data],
+  );
+  const impColumns: Column<{ feature: string; weight: number }>[] = [
+    { key: "feature", label: "피처", width: "60%", render: (r) => featureLabel(r.feature) },
+    { key: "weight", label: "중요도", width: "40%", align: "num", render: (r) => r.weight.toFixed(3) },
+  ];
+  return body(res, "모델 상세", (d) => (
+    <>
+      <Stats
+        cols={4}
+        items={[
+          { label: "학습 기간", value: range(d.train_range), num: false },
+          { label: "행 수", value: fmtInt(d.rows) },
+          { label: "피처 수", value: fmtInt(d.features?.length ?? null) },
+          { label: "창(년)", value: fmtInt(d.window_years) },
+          { label: "표본 수(n)", value: fmtInt(d.metrics?.n_test ?? null) },
+          { label: "정확도", value: fmtPct(d.metrics?.accuracy ?? null) },
+          { label: "기준선", value: fmtPct(d.metrics?.baseline ?? null) },
+          { label: "알파", value: fmtPct(d.metrics?.alpha ?? null) },
+        ]}
+      />
+      {imp.length ? (
+        <>
+          <p className="perf-note">중요도 상위 {imp.length}{d.importances_scope ? ` · ${d.importances_scope === "last_fold_holdout" ? "마지막 폴드 검증" : d.importances_scope}` : ""}</p>
+          <Table columns={impColumns} rows={imp} rowKey={(r) => r.feature} />
+        </>
+      ) : null}
+    </>
+  ));
 }

@@ -1,10 +1,11 @@
-// 뉴스·공시 — GET /news(48시간·100건) 다음에 목록의 id·종목으로 라벨(/news/labels)·이름(/names)을, 오늘 날짜로 판정 참조
+// 뉴스·공시 — GET /news(48시간·100건[·ticker]) 다음에 목록의 id·종목으로 라벨(/news/labels)·이름(/names)을, 오늘 날짜로 판정 참조
 // (/decisions/spot/news-refs)를 2차 조회해 newsRows 로 합친다. 「판정에 쓰임」 칩은 첫 판정으로 링크. 표는 30행 `Pager`(?page),
 // 종목·꼬리표 열은 값이 하나라도 있을 때만, 출처는 한글, 시각은 fmtWhen. 시장은 화면 머리 세그먼트(?market=).
+// 종목 칩을 누르면 `?ticker=` 로 그 종목만 다시 읽고, 필터 줄에 「차트 보기」(/data?ticker=) 링크와 해제 버튼.
 // 수집은 데몬 interval 잡이고, 「지금 수집」 은 큐 kind news_collect(선택 시장, 비매매)로 바로 요청한다.
 // 수동 입력은 접힌 details 안 — 저장은 확인 뒤 POST /news/manual, 최근 입력은 표(시각·제목).
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Pager } from "../../components/Pager";
@@ -23,8 +24,21 @@ type ManualResp = { market: string; items: { received_at: string; title: string;
 
 export function News() {
   const [market] = useMarket();
+  const [sp, setSp] = useSearchParams();
+  const filterTicker = (sp.get("ticker") ?? "").trim();
+  const setFilter = (t: string | null) =>
+    setSp(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (t) next.set("ticker", t);
+        else next.delete("ticker");
+        next.delete("page");
+        return next;
+      },
+      { replace: true },
+    );
   const today = useKstDate();
-  const newsParams = useMemo(() => ({ market, hours: "48", limit: "100" }), [market]);
+  const newsParams = useMemo((): Record<string, string> => (filterTicker ? { market, hours: "48", limit: "100", ticker: filterTicker } : { market, hours: "48", limit: "100" }), [market, filterTicker]);
   const collectParams = useMemo(() => ({ market }), [market]);
   const news = useResource<NewsResp>("/news", newsParams, ["news"]);
   const items = news.data?.items;
@@ -44,6 +58,8 @@ export function News() {
   const paged = usePaged(rows, 30, "page");
   const hasTickers = rows.some((r) => r.tickers.length);
   const hasChips = rows.some((r) => r.chips.length);
+  const filterName = filterTicker ? (names.data?.[`${market}:${filterTicker}`] ?? rows.flatMap((r) => r.tickers).find((t) => t.ticker === filterTicker)?.name ?? null) : null;
+  const chartHref = filterTicker ? (market === "US" ? `/data?ticker=${filterTicker}&market=US` : `/data?ticker=${filterTicker}`) : null;
   const columns: Column<NewsRow>[] = [
     { key: "at", label: "시각", width: "12%", render: (r) => fmtWhen(r.at) },
     { key: "title", label: "제목", width: "auto", long: true, render: (r) => (r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a> : r.title) },
@@ -57,7 +73,9 @@ export function News() {
             render: (r: NewsRow) => (
               <span className="chips">
                 {r.tickers.map((t) => (
-                  <Chip key={t.ticker}>{t.name}</Chip>
+                  <button key={t.ticker} type="button" className="chip" data-tone={t.ticker === filterTicker ? "ok" : "muted"} title={`${t.ticker} 뉴스만`} onClick={() => setFilter(t.ticker)}>
+                    {t.name}
+                  </button>
                 ))}
               </span>
             ),
@@ -100,6 +118,18 @@ export function News() {
         </span>
         <RunJobButton kind="news_collect" params={collectParams} label="지금 수집" trading={false} realAccounts={[]} />
       </div>
+      {filterTicker ? (
+        <p className="perf-note data-news-filter" data-news-filter>
+          <span>
+            종목 {filterTicker}
+            {filterName && filterName !== filterTicker ? ` ${filterName}` : ""} 뉴스만
+          </span>
+          <Link to={chartHref!}>차트 보기</Link>
+          <button type="button" className="btn btn-sm" onClick={() => setFilter(null)}>
+            해제
+          </button>
+        </p>
+      ) : null}
       {body(news, "뉴스", () => (
         <>
           {labels.error ? failed("뉴스 라벨", labels.error) : null}

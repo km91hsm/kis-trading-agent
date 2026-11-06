@@ -27,8 +27,9 @@ export function useMarket(): [Market, (m: Market) => void] {
           const next = new URLSearchParams(prev);
           if (m === "KR") next.delete("market");
           else next.set("market", m);
-          next.delete("page"); // 시장을 바꾸면 1쪽부터
+          next.delete("page"); // 시장을 바꾸면 1쪽부터, 종목 필터도 뜻이 없다
           next.delete("epage");
+          next.delete("ticker");
           return next;
         },
         { replace: true },

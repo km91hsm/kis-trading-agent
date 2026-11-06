@@ -1,7 +1,9 @@
-// 시세·차트 — 시장 고르고 종목 검색(GET /names/search) → 고르면 GET /charts?days=120 의 일봉 캔들 + 체결 표식 + 손절·목표선
-// + 실시간 현재가선(useQuotes). KR 은 호가 10단(GET /quotes/book)을 서버가 정한 next_poll_ms 마다 다시 읽는다
-// (가려진 탭·언마운트면 멈춤). 색은 data.ts 가 준 CSS 변수 이름을 여기서 값으로 푼다.
-import { useEffect, useMemo, useState } from "react";
+// 시세·차트 — 시장(화면 머리 세그먼트) + 종목 검색(GET /names/search) → 고르면 GET /charts?days=120 의 일봉 캔들 + 체결 표식 +
+// 손절·목표선 + 실시간 현재가선(useQuotes). 「1분」 토글은 GET /charts/minute?count=120(epoch 캔들·그날 체결 표식, 비면 「오늘 분봉 없음」).
+// `?ticker=` 로 들어오면(뉴스 「차트 보기」) 그 코드로 검색해 바로 연다. KR 은 호가 10단(GET /quotes/book)을 서버가 정한
+// next_poll_ms 마다 다시 읽는다(가려진 탭·언마운트면 멈춤). 색은 data.ts 가 준 CSS 변수 이름을 여기서 값으로 푼다.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Chart, type ChartCandle, type ChartLine, type ChartMarker } from "../../components/Chart";
 import { Empty } from "../../components/Empty";
 import { ApiError, errorText, getJson } from "../../lib/api";
@@ -21,6 +23,20 @@ type ChartsResp = {
   markers: FillMarker[];
   lines: { stop_loss: Num | null; take_profit: Num | null; date: string | null } | null;
 };
+type MinuteResp = {
+  ticker: string;
+  market: string;
+  interval: string;
+  tz: string;
+  session_date: string | null;
+  candles: { time: number; open: Num; high: Num; low: Num; close: Num; volume: number }[];
+  markers: FillMarker[];
+};
+type Interval = "day" | "minute";
+const INTERVALS: { id: Interval; label: string }[] = [
+  { id: "day", label: "일봉" },
+  { id: "minute", label: "1분" },
+];
 type BookResp = {
   session: string;
   ticker: string;
@@ -37,12 +53,26 @@ function cssVar(name: string): string {
 
 export function ChartView() {
   const [market] = useMarket();
-  const [text, setText] = useState("");
-  const [q, setQ] = useState("");
-  useEffect(() => setQ(""), [market]); // 시장이 바뀌면 검색 결과는 뜻이 없다
+  const [sp] = useSearchParams();
+  const deep = (sp.get("ticker") ?? "").trim(); // 뉴스 「차트 보기」 딥링크
+  const [text, setText] = useState(deep);
+  const [q, setQ] = useState(deep);
+  const prevMarket = useRef(market);
+  useEffect(() => {
+    // 시장이 바뀌면 검색 결과는 뜻이 없다(첫 마운트는 딥링크 q 를 지키려 건너뜀)
+    if (prevMarket.current === market) return;
+    prevMarket.current = market;
+    setQ("");
+  }, [market]);
   const [picked, setPicked] = useState<Picked | null>(null);
   const searchParams = useMemo(() => ({ q, market }), [q, market]);
   const search = useResource<NameHit[]>("/names/search", searchParams, [], { enabled: !!q });
+  // 딥링크 코드로 검색한 결과가 오면 정확히 그 코드인 종목을 바로 연다(없으면 코드만으로).
+  useEffect(() => {
+    if (!deep || q !== deep || !search.data || picked) return;
+    const hit = search.data.find((h) => h.ticker === deep) ?? null;
+    setPicked(hit ? { ticker: hit.ticker, market: hit.market === "US" ? "US" : "KR", name: hit.name, exchange: hit.exchange } : { ticker: deep, market, name: null, exchange: null });
+  }, [deep, q, search.data, picked, market]);
 
   return (
     <>
@@ -93,22 +123,31 @@ export function ChartView() {
 
 function PickedChart({ picked }: { picked: Picked }) {
   const { ticker, market, exchange } = picked;
+  const [interval, setInterval] = useState<Interval>("day");
   const params = useMemo((): Record<string, string> => {
     const p: Record<string, string> = { ticker, market, days: "120" };
     if (exchange) p.exchange = exchange;
     return p;
   }, [ticker, market, exchange]);
-  const charts = useResource<ChartsResp>("/charts", params, ["orders", "positions"]);
+  const minuteParams = useMemo((): Record<string, string> => {
+    const p: Record<string, string> = { ticker, market, count: "120" };
+    if (exchange) p.exchange = exchange;
+    return p;
+  }, [ticker, market, exchange]);
+  const charts = useResource<ChartsResp>("/charts", params, ["orders", "positions"], { enabled: interval === "day" });
+  const minute = useResource<MinuteResp>("/charts/minute", minuteParams, ["orders", "positions"], { enabled: interval === "minute" });
   const tickers = useMemo(() => [ticker], [ticker]);
   const quotes = useQuotes(market, tickers);
   const price = quotes?.quotes[ticker]?.price ?? null;
 
   const d = charts.data;
+  const src = interval === "day" ? d?.candles : minute.data?.candles;
   const candles = useMemo(
-    (): ChartCandle[] => (d?.candles ?? []).map((c) => ({ time: c.time, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) })),
-    [d],
+    (): ChartCandle[] => (src ?? []).map((c) => ({ time: c.time, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) })),
+    [src],
   );
-  const markers = useMemo((): ChartMarker[] => chartMarkers(d?.markers ?? []).map((m) => ({ ...m, color: cssVar(m.color) })), [d]);
+  const rawMarkers = interval === "day" ? d?.markers : minute.data?.markers;
+  const markers = useMemo((): ChartMarker[] => chartMarkers(rawMarkers ?? []).map((m) => ({ ...m, color: cssVar(m.color) })), [rawMarkers]);
   const lines = useMemo((): ChartLine[] => {
     const l = d?.lines;
     const level = (v: Num | null | undefined) => (v === null || v === undefined ? null : { level: v, source: "chart" });
@@ -123,7 +162,16 @@ function PickedChart({ picked }: { picked: Picked }) {
       <h3 className="perf-sub">
         {picked.name ?? ticker} <span className="data-muted">{ticker}</span>
       </h3>
-      {body(charts, "차트", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} /> : <Empty title="일봉 없음" />))}
+      <div className="segment" role="group" aria-label="봉 간격" data-chart-interval>
+        {INTERVALS.map((i) => (
+          <button key={i.id} type="button" className="segment-btn" aria-pressed={interval === i.id} onClick={() => setInterval(i.id)}>
+            {i.label}
+          </button>
+        ))}
+      </div>
+      {interval === "day"
+        ? body(charts, "차트", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} /> : <Empty title="일봉 없음" />))
+        : body(minute, "분봉", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} intraday /> : <Empty title="오늘 분봉 없음" />))}
       {market === "KR" ? <Book ticker={ticker} /> : null}
     </>
   );

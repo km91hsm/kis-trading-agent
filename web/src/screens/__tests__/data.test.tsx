@@ -34,6 +34,8 @@ import {
   fixtureFeaturesLatest,
   fixtureLabels,
   fixtureManual,
+  fixtureMinute,
+  fixtureModelDetail,
   fixtureModels,
   fixtureNames,
   fixtureNameSearch,
@@ -76,6 +78,8 @@ function routes(over: Routes = {}): Routes {
     "GET /api/features/latest": fixtureFeaturesLatest(),
     "GET /api/features/history": fixtureFeaturesHistory(),
     "GET /api/ml/models": fixtureModels(),
+    "GET /api/ml/models/20261101_120000": fixtureModelDetail(),
+    "GET /api/charts/minute": fixtureMinute(),
     "GET /api/settings/watchlist": fixtureWatchlist(),
     "PATCH /api/settings/watchlist": (_u: URL, init?: RequestInit) => JSON.parse(String(init?.body)) as unknown,
     "GET /api/charts": fixtureCharts(),
@@ -86,10 +90,10 @@ function routes(over: Routes = {}): Routes {
 }
 
 type Page = Parameters<typeof Data>[0]["page"];
-async function mount(r: Routes, page: Page = "quotes") {
+async function mount(r: Routes, page: Page = "quotes", path = "/data") {
   ff = installFakeFetch(r);
   const out = render(
-    <MemoryRouter initialEntries={["/data"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Data page={page} />
     </MemoryRouter>,
   );
@@ -191,6 +195,25 @@ describe("데이터 화면", () => {
     expect(ev.querySelector("tbody td")!.textContent).toBe("2026-11-05");
     // 검색 안내 통일
     expect(section("news").querySelector("select")).toBeNull();
+  });
+
+  test("뉴스 종목 칩을 누르면 ?ticker= 로 다시 읽고, 필터 줄에 「차트 보기」 링크와 해제 버튼", async () => {
+    await mount(routes(), "news", "/data/news");
+    const news = section("news");
+    const chip = Array.from(news.querySelectorAll("button.chip")).find((b) => b.textContent === "삼성전자") as HTMLButtonElement;
+    expect(chip).toBeDefined();
+    await act(async () => chip.click());
+    await flush();
+    await flush();
+    const last = callsTo("/news").at(-1)!;
+    expect(last.searchParams.get("ticker")).toBe("005930");
+    const bar = news.querySelector("[data-news-filter]") as HTMLElement;
+    expect(bar.textContent).toContain("005930 삼성전자");
+    expect((bar.querySelector("a") as HTMLAnchorElement).getAttribute("href")).toBe("/data?ticker=005930");
+    await act(async () => button(bar, "해제").click());
+    await flush();
+    expect(news.querySelector("[data-news-filter]")).toBeNull();
+    expect(news.querySelectorAll("table")[0].querySelectorAll("tbody tr")).toHaveLength(2);
   });
 
   test("뉴스 종목 열은 종목이 하나도 없으면 빼고, 중요도 없는 공시는 칩 대신 「—」", async () => {
@@ -321,6 +344,45 @@ describe("데이터 화면", () => {
     expect((section("quotes").querySelector('input[aria-label="종목 검색"]') as HTMLInputElement).placeholder).toBe("종목명 또는 코드로 검색");
   });
 
+  test("차트: 「1분」 토글 → /charts/minute?ticker=&market=&count=120, epoch 캔들·체결 표식, 비면 「오늘 분봉 없음」", async () => {
+    await mount(routes());
+    await pickSamsung();
+    const q = section("quotes");
+    const seg = q.querySelector("[data-chart-interval]") as HTMLElement;
+    expect(Array.from(seg.querySelectorAll("button")).map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
+      ["일봉", "true"],
+      ["1분", "false"],
+    ]);
+    expect(callsTo("/charts/minute")).toHaveLength(0);
+    await act(async () => button(seg, "1분").click());
+    await flush();
+    expect(callsTo("/charts/minute")[0].search).toBe("?ticker=005930&market=KR&count=120");
+    expect(m.series.setData).toHaveBeenLastCalledWith([
+      { time: 1762302600, open: 70000, high: 70100, low: 69900, close: 70050 },
+      { time: 1762302660, open: 70050, high: 70200, low: 70000, close: 70150 },
+    ]);
+    expect(m.chart.applyOptions).toHaveBeenCalledWith(expect.objectContaining({ timeScale: expect.objectContaining({ timeVisible: true }) }));
+    // 「일봉」 으로 돌아가면 일봉은 다시 부르지 않는다(캐시)
+    await act(async () => button(seg, "일봉").click());
+    await flush();
+    expect(callsTo("/charts")).toHaveLength(1);
+  });
+
+  test("장 밖이라 분봉이 비면 「오늘 분봉 없음」", async () => {
+    await mount(routes({ "GET /api/charts/minute": fixtureMinute({ session_date: null, candles: [], markers: [] }) }));
+    await pickSamsung();
+    await act(async () => button(section("quotes").querySelector("[data-chart-interval]") as HTMLElement, "1분").click());
+    await flush();
+    expect(section("quotes").textContent).toContain("오늘 분봉 없음");
+  });
+
+  test("?ticker= 로 들어오면 검색 없이 그 종목 차트를 바로 연다(이름은 /names/search 로)", async () => {
+    await mount(routes(), "quotes", "/data?ticker=005930");
+    expect(callsTo("/names/search")[0].searchParams.get("q")).toBe("005930");
+    expect(callsTo("/charts")[0].searchParams.get("ticker")).toBe("005930");
+    expect(section("quotes").querySelector("h3")!.textContent).toContain("삼성전자");
+  });
+
   test("호가는 next_poll_ms 마다 다시 부르고, 언마운트하면 멈춘다", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const { unmount } = await mount(routes());
@@ -377,6 +439,26 @@ describe("데이터 화면", () => {
     expect(f.textContent).toContain("활성 20261101_120000");
     expect(f.textContent).toContain("판정 보조 신호로만 쓴다");
     for (const label of ["지표 스냅샷", "파생 지표 계산", "지표 백필"]) expect(button(f, label)).toBeDefined();
+  });
+
+  test("모델 행을 펼치면 /ml/models/{version} — 학습 기간·행·피처 수·지표 Stats + 중요도 표", async () => {
+    await mount(routes(), "features");
+    const f = section("features");
+    const models = f.querySelectorAll("table")[1];
+    expect(callsTo("/ml/models/20261101_120000")).toHaveLength(0);
+    await act(async () => (models.querySelector('button[aria-label="펼치기"]') as HTMLButtonElement).click());
+    await flush();
+    await flush();
+    expect(callsTo("/ml/models/20261101_120000")).toHaveLength(1);
+    const ex = models.querySelector(".table-expand") as HTMLElement;
+    const dts = Array.from(ex.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(expect.arrayContaining(["학습 기간", "행 수", "피처 수", "표본 수(n)", "정확도", "기준선", "알파"]));
+    expect(ex.textContent).toContain("2023-01-02 ~ 2026-10-31");
+    expect(ex.textContent).toContain("5,000");
+    const imp = ex.querySelector("table")!;
+    expect(Array.from(imp.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["피처", "중요도"]);
+    // 겹친 표라 "tbody tr" 은 바깥 tbody 의 자손인 안쪽 thead 행도 맞는다 — 안쪽 tbody 를 먼저 잡는다
+    expect(imp.querySelector("tbody")!.querySelector("tr")!.textContent).toContain("ROE");
   });
 
   test("지표 표는 30행 페이지(?page)", async () => {

@@ -307,6 +307,7 @@
 .data-manual textarea,
 .data-manual input { font: inherit; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); }
 .data-manual .btn { justify-self: start; min-height: var(--touch); }
+.data-news-filter { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .data-manual-details { margin: var(--space-3) 0; }
 .data-manual-details > summary { cursor: pointer; font-weight: 600; min-height: var(--touch); display: flex; align-items: center; }
 .data-manual-details .data-manual { margin-top: var(--space-2); }

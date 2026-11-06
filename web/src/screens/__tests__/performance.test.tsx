@@ -31,7 +31,9 @@ import {
   fixtureMemory,
   fixturePerfAccounts,
   fixturePerformance,
+  fixtureRlExperimentDetail,
   fixtureRlExperiments,
+  fixtureRlShadow,
   fixtureRlReport,
   fixtureShadow,
 } from "../../test/fixtures/performance";
@@ -59,6 +61,8 @@ function routes(over: Routes = {}): Routes {
     "GET /api/analytics/shadow": fixtureShadow(),
     "GET /api/analytics/rl/report": fixtureRlReport(),
     "GET /api/analytics/rl/experiments": fixtureRlExperiments(),
+    "GET /api/analytics/rl/experiments/rl-007": fixtureRlExperimentDetail(),
+    "GET /api/analytics/rl/shadow": fixtureRlShadow(),
     "GET /api/analytics/memory": (u: URL) =>
       u.searchParams.get("q") ? fixtureMemory({ query: { ticker: "005930", entry_id: 1, market: "KR" }, warmup: true, breaker: "임베딩 장애" }) : fixtureMemory(),
     "GET /api/analytics/fo/scorecard": fixtureFoScorecard(),
@@ -161,6 +165,31 @@ describe("성과 화면", () => {
     // bias 는 signal 평균 − realized_sign 평균(차이값, 퍼센트 아님)
     expect(section("calibration")!.textContent).toContain("+0.12");
     expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
+  });
+
+  test("RL 섀도 거래 표(/analytics/rl/shadow?account_id=&days=30)와 실험 행 펼침(/rl/experiments/{version})", async () => {
+    await mount(routes(), "analysis");
+    const rl = section("rl")!;
+    expect(callsTo("/analytics/rl/shadow")[0].search).toBe("?account_id=paper-1&days=30");
+    const tables = rl.querySelectorAll("table");
+    const shadow = Array.from(tables).find((t) => t.textContent?.includes("005930"))!;
+    expect(Array.from(shadow.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["시각", "종목", "모델", "비중 LLM / RL", "적용", "수익률", "실현 RL / LLM"]);
+    expect(shadow.textContent).toContain("8.00% / 6.00%");
+    expect(shadow.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("적용");
+    // 실험 펼침
+    const exp = Array.from(tables).find((t) => t.textContent?.includes("rl-006"))!;
+    expect(callsTo("/analytics/rl/experiments/rl-007")).toHaveLength(0);
+    await act(async () => (exp.querySelector('button[aria-label="펼치기"]') as HTMLButtonElement).click());
+    await flush();
+    expect(callsTo("/analytics/rl/experiments/rl-007")).toHaveLength(1);
+    const ex = exp.querySelector(".table-expand") as HTMLElement;
+    const dts = Array.from(ex.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(expect.arrayContaining(["학습 기간", "스텝", "시드", "폴드", "지평(일)"]));
+    expect(ex.textContent).toContain("2025-01-02 ~ 2026-10-31");
+    const sum = ex.querySelector("table")!;
+    expect(Array.from(sum.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["정책", "표본 수(n)", "수익 평균", "수익 표준편차", "최대 낙폭(MDD) 평균", "소르티노 평균"]);
+    expect(sum.textContent).toContain("RL");
+    expect(sum.textContent).toContain("3.10%");
   });
 
   test("섀도 기준선이 전부 표본 부족이면 표 대신 한 줄 「기준선 n개 · 표본 x/20 — 20쌍부터 집계」", async () => {

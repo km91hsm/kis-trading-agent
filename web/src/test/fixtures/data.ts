@@ -151,6 +151,35 @@ export function fixtureCharts(over: Over = {}) {
   };
 }
 
+export function fixtureMinute(over: Over = {}) {
+  // charts.py minute_chart — time 은 epoch 초, 마커는 그날 체결(분 단위 epoch)
+  return {
+    ticker: "005930",
+    market: "KR",
+    interval: "1m",
+    tz: "Asia/Seoul",
+    session_date: "2026-11-05",
+    candles: [
+      { time: 1762302600, open: "70000", high: "70100", low: "69900", close: "70050", volume: 100 },
+      { time: 1762302660, open: "70050", high: "70200", low: "70000", close: "70150", volume: 120 },
+    ],
+    markers: [{ time: 1762302660, kind: "fill", side: "buy", text: "09:31 paper-1 buy 10주 @70100" }],
+    ...over,
+  };
+}
+
+export function fixtureModelDetail(over: Over = {}) {
+  return {
+    ...model(),
+    window_years: 3,
+    features: ["roc_10", "high_52w_pos", "roe"],
+    importances: { roe: 0.5, roc_10: 0.3, high_52w_pos: 0.2 },
+    importances_scope: "last_fold_holdout",
+    params: { n_estimators: 200 },
+    ...over,
+  };
+}
+
 export function fixtureBook(over: Over = {}) {
   return {
     session: "open",

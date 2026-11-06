@@ -194,7 +194,7 @@ export function featureRows(latest: LatestResp, sortKey: string | null, dir: Sor
 
 // ── 차트 ─────────────────────────────────────────────────────────────────────
 /** `/charts` markers 한 항목(체결). side 는 buy|sell(대소문자 무관). */
-export type FillMarker = { time: string; kind?: string; side: string; text: string };
+export type FillMarker = { time: string | number; kind?: string; side: string; text: string };
 
 /** 체결 표식 — 매수 --up(적)·매도 --down(청). color 는 CSS 변수 이름(화면이 값으로 푼다). */
 export function chartMarkers(markers: FillMarker[]): ChartMarker[] {

@@ -16,10 +16,11 @@ import {
 } from "lightweight-charts";
 
 export type ChartPoint = { time: string; value: number };
-export type ChartMarker = { time: string; text: string; color: string };
+export type ChartMarker = { time: string | number; text: string; color: string };
 export type ChartLine = { price: number; label: string; color: string };
 export type ChartExtra = { label: string; data: ChartPoint[] };
-export type ChartCandle = { time: string; open: number; high: number; low: number; close: number };
+/** time 은 일봉이면 "YYYY-MM-DD", 분봉이면 epoch 초. */
+export type ChartCandle = { time: string | number; open: number; high: number; low: number; close: number };
 
 export type ChartProps = {
   series?: ChartPoint[];
@@ -28,6 +29,8 @@ export type ChartProps = {
   lines?: ChartLine[];
   extra?: ChartExtra[];
   height?: number;
+  /** 분봉 — 시간축에 시각을 보인다. */
+  intraday?: boolean;
 };
 
 const EXTRA_COLORS = ["--fg-muted", "--warn", "--ok"];
@@ -77,7 +80,7 @@ export function Chart(props: ChartProps) {
   return <LiveChart {...props} />;
 }
 
-function LiveChart({ series, candles, markers, lines, extra, height = 240 }: ChartProps) {
+function LiveChart({ series, candles, markers, lines, extra, height = 240, intraday = false }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRef = useRef<ISeriesApi<"Line"> | ISeriesApi<"Candlestick"> | null>(null);
@@ -119,6 +122,10 @@ function LiveChart({ series, candles, markers, lines, extra, height = 240 }: Cha
   useEffect(() => {
     chartRef.current?.applyOptions({ height });
   }, [height]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+  }, [intraday]);
 
   useEffect(() => {
     const s = lineRef.current;
