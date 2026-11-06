@@ -1,6 +1,10 @@
 import { recordHealth } from './recovery-health.js';
 import { LANES, ownsApiTab as owned } from './core.js';
 const ROOT = 'https://www.saveticker.com/news';
+const API_ERRORS = new Set('api_contract_unverified api_response_unverified api_shape_unverified api_context_unverified api_detail_unverified api_source_unverified api_basis_unverified api_regular_unverified api_pdf_unverified api_response_too_large api_busy api_content_unavailable api_already_prepared invalid_pdf_path invalid_pdf_ticket invalid_pdf invalid_job invalid_message lane_busy snapshot_too_large unknown_stream'.split(' '));
+export function apiErrorCode(error) {
+    return API_ERRORS.has(error?.message) ? error.message : 'api_request_failed';
+}
 export function retryDeadline(value, now = Date.now()) {
     let delay = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) * 1000 : Date.parse(value) - now;
     if (!Number.isFinite(delay) || delay < 0 || delay > 31536000000) delay = 60000;
@@ -52,10 +56,11 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
         if (!active()) break;
         const view = scheduler.next(Date.now(), lane);
         if (!view) continue;
-        let job, saved = false, failed = true, authBlocked = false;
+        let job, saved = false, failed = true, authBlocked = false, stage = 'begin';
         try {
             job = await request('api_begin', { stream: view.stream });
             if (!active()) return;
+            stage = 'fetch';
             const response = await fetchJob(job);
             if (!active()) return;
             if (response?.status === 401 || response?.status === 403) {
@@ -71,33 +76,37 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
             if (!response || response.error) throw Error(response?.error || 'api_content_unavailable');
             const details = [];
             if (view.stream === 'news_all' || view.stream === 'news_reports') {
+                stage = 'prepare';
                 const prepared = await request('api_prepare', { stream: view.stream, job_id: job.job_id, response });
                 if (!active()) return;
                 for (const child of (prepared.requests || []).slice(0, 2)) {
+                    stage = 'detail';
                     const detail = await fetchJob(child);
                     if (!active()) return;
                     if (await blocked(detail)) { authBlocked = detail?.status !== 429; return; }
-                    if (!detail || detail.error) throw Error('api_detail_unverified');
+                    if (!detail || detail.error) throw Error(detail?.error || 'api_detail_unverified');
                     details.push(detail);
                 }
             }
+            stage = 'snapshot';
             const result = await request('api_snapshot', { stream: view.stream, job_id: job.job_id, response, details });
             saved = true;
             if (!active()) return;
             failed = false;
             for (const item of (result.pdf_items || []).slice(0, 1)) {
+                stage = 'pdf';
                 if (!active()) return;
                 const result = await onPdf(item, tab);
                 if (!active()) return;
                 if (result && await blocked(result)) return;
             }
             Object.assign(health, recordHealth(health, Date.now()));
-            await store({ connection: '연결됨 · API 수집 중', ...health, ['lane_' + lane]: 'API 부분 수집 · ' + (result.count || 0) + '개', ['lane_error_' + lane]: null, ...(result.count > 0 ? { lastCollected: Date.now() } : {}), apiCoverage: 'API 부분 수집 · 서버 응답 기준 검증' });
+            await store({ connection: '연결됨 · API 수집 중', ...health, ['lane_' + lane]: 'API 부분 수집 · ' + (result.count || 0) + '개', ['lane_error_' + lane]: null, ['lane_error_stage_' + lane]: null, ...(result.count > 0 ? { lastCollected: Date.now() } : {}), apiCoverage: 'API 부분 수집 · 서버 응답 기준 검증' });
         } catch (error) {
             failed = true;
             if (!active()) return;
             const unsupported = error?.message === 'api_contract_unverified';
-            await store({ ['lane_' + lane]: unsupported ? 'API 요청 조건 미확인 · 대기' : 'API 수집 오류 · 다음 주기 대기', ['lane_error_' + lane]: unsupported ? 'api_contract_unverified' : 'api_request_failed' });
+            await store({ ['lane_' + lane]: unsupported ? 'API 요청 조건 미확인 · 대기' : 'API 수집 오류 · 다음 주기 대기', ['lane_error_' + lane]: apiErrorCode(error), ['lane_error_stage_' + lane]: stage });
         } finally {
             // Cancel only this exact job. Errors do not replace the last good capture.
             if (job && !saved && active()) try { await request('api_cancel', { stream: view.stream, job_id: job.job_id, ...(authBlocked ? { reason: 'verification_required' } : {}) }); } catch { }

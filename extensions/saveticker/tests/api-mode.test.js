@@ -40,6 +40,21 @@ function runner(response={status:200,url:URL_NEWS,content_type:'application/json
  const deps={wait:async()=>{},token:TOKEN,active:()=>current,store:async v=>Object.assign(state,v),blockHost:async()=>{blocked=true;},scheduler:{next:(_now,lane)=>views.find(v=>v.kind===lane),done:(...x)=>done.push(x),snapshot:()=>({})},request:async(type,body)=>{calls.push({type,...body});if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor,view:views[0],expires_at:new Date(Date.now()+60000).toISOString()};return {count:0,status:'partial'};},chrome:{tabs:{query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],sendMessage:async()=>{if(opts.stop)current=false;return response;}},windows:{update:()=>{throw Error('focus forbidden');}}},...opts.deps};
  return {run:()=>apiCycle(deps),calls,state,done,isBlocked:()=>blocked};
 }
+test('API failures retain a fixed cause and stage without saving arbitrary exception text', async () => {
+ for (const [cause, expected] of [['api_shape_unverified', 'api_shape_unverified'], ['PRIVATE https://secret.test?token=secret', 'api_request_failed']]) {
+  const r=runner(undefined,{deps:{request:async type=>{
+   if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor};
+   if(type==='api_prepare')throw Error(cause);
+  }}});
+  await r.run();
+  assert.equal(r.state.lane_error_news,expected);
+  assert.equal(r.state.lane_error_stage_news,'prepare');
+  assert.ok(!JSON.stringify(r.state).includes('PRIVATE'));
+ }
+ const r=runner({error:'api_response_unverified'});await r.run();
+ assert.equal(r.state.lane_error_news,'api_response_unverified');
+ assert.equal(r.state.lane_error_stage_news,'fetch');
+});
 test('API cycle never focuses/activates, saves only current job and preserves partial',async()=>{
  const r=runner();await r.run();assert.ok(r.calls.some(c=>c.type==='api_snapshot'));assert.equal(r.state.lane_news,'API 부분 수집 · 0개');
  const stale=runner(undefined,{stop:true});await stale.run();assert.ok(!stale.calls.some(c=>c.type==='api_snapshot'));
@@ -50,7 +65,7 @@ test('auth stops later lanes; rate limit persists whole host deadline',async()=>
 });
 test('production worker API mode routes to api_snapshot and persisted cooldown prevents tab access',async()=>{
  const ev=()=>({listeners:[],addListener(fn){this.listeners.push(fn);}}), state={enabled:false,backend:'api',ownerToken:TOKEN},calls=[];const messages=ev();
- globalThis.chrome={storage:{local:{get:async()=>({...state}),set:async x=>Object.assign(state,x)}},runtime:{id:'ext',onMessage:messages,onStartup:ev(),onInstalled:ev(),connectNative:()=>{const p={onMessage:ev(),onDisconnect:ev(),disconnect(){},postMessage(m){calls.push(m);queueMicrotask(()=>p.onMessage.listeners[0]({ok:true,id:m.id,views:[{stream:'news_all',kind:'news',url:'https://www.saveticker.com/news',interval_s:30}],job_id:'b'.repeat(32),request:descriptor,status:'partial',count:1}));}};return p;}},tabs:{query:async()=>{calls.push({type:'query'});return[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}];},sendMessage:async()=>({url:URL_NEWS,status:200,content_type:'application/json',data:{news_list:[]}})},alarms:{onAlarm:ev(),create:async()=>{},clear:async()=>{}},downloads:{onChanged:ev()}};
+ globalThis.chrome={storage:{local:{get:async()=>({...state}),set:async x=>Object.assign(state,x)}},runtime:{id:'ext',onMessage:messages,onStartup:ev(),onInstalled:ev(),connectNative:()=>{const p={onMessage:ev(),onDisconnect:ev(),disconnect(){},postMessage(m){calls.push(m);queueMicrotask(()=>p.onMessage.listeners[0]({ok:true,id:m.id,views:[{stream:'news_all',kind:'news',url:'https://www.saveticker.com/news',interval_s:30}],job_id:'b'.repeat(32),request:descriptor,status:'partial',count:1}));}};return p;}},tabs:{query:async()=>{calls.push({type:'query'});return[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}];},sendMessage:async()=>({url:URL_NEWS,status:200,content_type:'application/json',data:{news_list:[]}})},alarms:{onAlarm:ev(),create:async()=>{},clear:async()=>{}},downloads:{onDeterminingFilename:ev(),onChanged:ev()}};
  const worker=await import('../worker.js?api-mode-integration');state.enabled=true;await worker.tick();assert.ok(calls.some(c=>c.type==='api_snapshot'));assert.ok(!calls.some(c=>c.type==='begin'||c.type==='snapshot'));
  state.apiCooldownUntil=Date.now()+120000;calls.length=0;await worker.tick();assert.ok(!calls.some(c=>c.type==='query'||c.type==='api_begin'));
  await new Promise(resolve=>messages.listeners[0]({action:'stop'},{id:'ext'},resolve));
@@ -66,7 +81,7 @@ test('opaque authentication redirect stops before reading a body',async()=>{
 });
 test('persisted 429 cooldown survives worker reload and DOM mode switch',async()=>{
  const ev=()=>({listeners:[],addListener(fn){this.listeners.push(fn);}}), state={enabled:false,backend:'dom',apiCooldownUntil:Date.now()+180000},calls=[];
- const messages=ev();globalThis.chrome={storage:{local:{get:async()=>({...state}),set:async x=>Object.assign(state,x)}},runtime:{id:'ext',onMessage:messages,onStartup:ev(),onInstalled:ev(),connectNative:()=>{const p={onMessage:ev(),onDisconnect:ev(),disconnect(){},postMessage(m){calls.push(m);queueMicrotask(()=>p.onMessage.listeners[0]({ok:true,id:m.id,views:[{stream:'news_all',kind:'news',interval_s:30}]}));}};return p;}},tabs:{query:async()=>{throw Error('must not access tabs during cooldown');}},alarms:{onAlarm:ev(),create:async()=>{},clear:async()=>{}},downloads:{onChanged:ev()}};
+ const messages=ev();globalThis.chrome={storage:{local:{get:async()=>({...state}),set:async x=>Object.assign(state,x)}},runtime:{id:'ext',onMessage:messages,onStartup:ev(),onInstalled:ev(),connectNative:()=>{const p={onMessage:ev(),onDisconnect:ev(),disconnect(){},postMessage(m){calls.push(m);queueMicrotask(()=>p.onMessage.listeners[0]({ok:true,id:m.id,views:[{stream:'news_all',kind:'news',interval_s:30}]}));}};return p;}},tabs:{query:async()=>{throw Error('must not access tabs during cooldown');}},alarms:{onAlarm:ev(),create:async()=>{},clear:async()=>{}},downloads:{onDeterminingFilename:ev(),onChanged:ev()}};
  const worker=await import('../worker.js?api-cooldown-restart');state.enabled=true;await worker.tick();assert.ok(!calls.some(c=>c.type==='begin'||c.type==='api_begin'));assert.equal(state.connection,'요청 제한 · 서버 대기 시간 적용');await new Promise(resolve=>messages.listeners[0]({action:'stop'},{id:'ext'},resolve));
 });
 test('project default group context without account names and allow issued detail requests',async()=>{

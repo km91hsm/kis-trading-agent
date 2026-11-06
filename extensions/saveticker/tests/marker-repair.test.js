@@ -53,7 +53,9 @@ test('issued owned report job repairs only exact hashless report route through p
     await worker.tick();
     assert.equal(repairs.length, 1);
     assert.equal(calls.filter(m => m.type === 'pdf_begin').length, 1);
-    assert.equal(chrome.downloads.onDeterminingFilename.listeners.length, 0, 'no global filename observer can rename an unrelated download');
+    const suggestions = [];
+    chrome.downloads.onDeterminingFilename.listeners[0]({ id: 777, url: 'https://example.invalid/file.pdf' }, (...args) => suggestions.push(args));
+    assert.deepEqual(suggestions, [[]], 'an unrelated download receives exactly one unchanged suggestion');
     assert.equal(calls.filter(m => m.type === 'pdf').length, 1, 'search after returned id catches completion-before-return race');
     await chrome.downloads.onChanged.listeners[0]({ id: 777, state: { current: 'complete' } });
     await chrome.downloads.onChanged.listeners[0]({ id: 99, state: { current: 'complete' } });
