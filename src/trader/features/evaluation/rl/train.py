@@ -75,6 +75,14 @@ def _summarize(rows: dict[str, list[dict]]) -> dict:
     return out
 
 
+def _purge_labels(steps: pd.DataFrame, test_start) -> pd.DataFrame:
+    """관측 날짜와 별개로 실제 라벨 확인일이 테스트에 걸친 학습 행을 제거한다."""
+    if "fwd_date" not in steps.columns:
+        return steps.iloc[:0]  # 확인일을 모르는 라벨은 학습 검증에서 제외한다
+    available = pd.to_datetime(steps["fwd_date"]).dt.date
+    return steps[available < test_start]
+
+
 def train_sizer(
     cfg: Any,
     conn: sqlite3.Connection,
@@ -126,7 +134,7 @@ def train_sizer(
     collected: dict[str, list[dict]] = {p: [] for p in POLICIES}
     backend_used: str | None = None
     for f in folds:
-        train = steps[dates <= f.train_end]
+        train = _purge_labels(steps[dates <= f.train_end], f.test_start)
         test = steps[(dates >= f.test_start) & (dates <= f.test_end)]
         if train.empty or test.empty:
             continue

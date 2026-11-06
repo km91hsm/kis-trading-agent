@@ -23,8 +23,8 @@ def test_env_penalizes_drawdown_and_turnover():
     env = SizingEnv(_steps([-0.10, -0.10]), max_weight=0.25, drawdown_penalty=2.0, cost_bp=100)
     env.reset()
     _, r, *_ = env.step(0.25)
-    # w·r = −0.025, 회전 비용 0.01·0.25 = 0.0025, 드로다운 증가 0.025 × 2
-    assert r == pytest.approx(-0.025 - 0.0025 - 0.05)
+    # 수익 −0.025와 비용 −0.0025를 NAV에 함께 반영: 순손실 드로다운 × 2
+    assert r == pytest.approx(-0.0275 - 2 * 0.0275)
 
 
 def test_env_rejects_empty_steps():
@@ -101,3 +101,25 @@ def test_population_rewards_match_episode_loop():
         [learners._episode_reward(env, LinearPolicy(th, 0.25, mean=mean, std=std)) for th in pop]
     )
     assert np.allclose(fast, slow, atol=1e-9)
+
+
+def test_evaluation_nav_includes_turnover_cost():
+    env = SizingEnv(_steps([0.0]), max_weight=0.25, drawdown_penalty=0.0, cost_bp=100)
+    env.reset()
+    _, reward, _, _, info = env.step(0.25)
+    assert info["nav"] == pytest.approx(0.9975)
+    assert reward == pytest.approx(-0.0025)
+
+
+def test_future_return_not_visible_to_same_day_observation():
+    import pandas as pd
+
+    steps = _steps([-0.5, 0.0, 0.0])
+    steps["date"] = pd.to_datetime(["2026-01-05", "2026-01-05", "2026-01-13"])
+    steps["fwd_date"] = pd.to_datetime(["2026-01-12", "2026-01-12", "2026-01-20"])
+    env = SizingEnv(steps, max_weight=1, drawdown_penalty=0, cost_bp=0, horizon_days=5)
+    env.reset()
+    obs, *_ = env.step(1)
+    assert obs[-1] == 0.0
+    obs, *_ = env.step(0)
+    assert obs[-1] == pytest.approx(-0.05)

@@ -857,3 +857,8 @@ def test_zscore_keeps_or_fills_nan():
     assert features.zscore(s, fill=0.0).iloc[2] == 0.0
     assert (features.zscore(pd.Series([2.0, 2.0])) == 0).all()
     assert features.zscore(pd.Series(["1", "x", "3"]), fill=0.0).tolist() == [-1.0, 0.0, 1.0]
+
+
+def test_zscore_nullable_all_missing_does_not_crash():
+    s = pd.Series([pd.NA, pd.NA], dtype="Float64")
+    assert features.zscore(s, fill=0.0).tolist() == [0.0, 0.0]

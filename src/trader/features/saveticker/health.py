@@ -7,18 +7,22 @@ from trader.features.saveticker import automation, paths
 from trader.kernel.ops.types import Item, OpsContext
 from trader.kernel.registry.types import HealthArea
 
-LINK = "/system#saveticker"
+LINK = "/system/features#saveticker"
 
 
 def check(ctx: OpsContext) -> list[Item]:
     """계정 파일이 없으면 빈 결과(기능 미사용 — 정상 경로). 상태 파일 읽기 실패는 올려 러너의
     `saveticker.error` 격리에 맡긴다(M-4)."""
-    if not paths.credentials_path().is_file():
-        return []
     home = paths.home()
+    bridge = automation.read(home / "runtime/bridge-config.json") or {}
+    if not paths.credentials_path().is_file() and bridge.get("backend") != "extension":
+        return []
     s = automation.status(home)
     paused = automation.active_skip_lanes(home, now=ctx.now)
     out: list[Item] = []
+    if s["backend"] == "extension" and s["health"] == "waiting_chrome":
+        out.append(Item("saveticker.disconnected", "warning",
+                        "세이브티커 확장 연결 끊김 — Chrome 수집 상태를 확인하세요", link=LINK))
     if s["blocked"]:
         text = f"세이브티커 수집 멈춤 — {s['reason_text']}"
         out.append(Item("saveticker.stopped", "warning", text, link=LINK))

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -51,6 +52,14 @@ class SizingEnv:
         self.returns = np.asarray(steps["fwd_return"], dtype="float64")
         self.dates = [pd.Timestamp(d).date().isoformat() for d in steps["date"]]
         self.tickers = [str(t) for t in steps["ticker"]]
+        # 라벨 수익은 확인일 다음 날짜부터만 관측에 반영한다.
+        # 확인일 없는 레거시 입력은 미래수익을 관측에 노출하지 않는다.
+        ends = steps.get("fwd_date", pd.Series([pd.NaT] * len(steps)))
+        self.release_steps = [
+            max(i + 1, bisect_right(self.dates, pd.Timestamp(end).date().isoformat()))
+            if pd.notna(end) else len(self.dates)
+            for i, end in enumerate(ends)
+        ]
         counts = pd.Series(self.dates).value_counts()
         if "horizon_days" in steps.columns:
             hs = [max(int(h), 1) for h in steps["horizon_days"].fillna(horizon_days)]
@@ -75,13 +84,19 @@ class SizingEnv:
         self.peak = 1.0
         self.last_w: dict[str, float] = {}  # 종목별 직전 비중 (회전 비용·관측용)
         self.dd = 0.0
+        self.observed_nav = self.observed_peak = 1.0
+        self.pending_pnl: dict[int, list[float]] = {}
         self.navs: list[float] = [1.0]
         return self._obs(), {}
 
     def _obs(self) -> np.ndarray:
         k = min(self.i, len(self.returns) - 1)
         w_prev = self.last_w.get(self.tickers[k], 0.0)
-        return np.concatenate([self.obs_matrix[k], [w_prev, self.dd]]).astype("float64")
+        for pnl in self.pending_pnl.pop(self.i, []):
+            self.observed_nav *= 1.0 + pnl
+            self.observed_peak = max(self.observed_peak, self.observed_nav)
+        observed_dd = self.observed_nav / self.observed_peak - 1.0
+        return np.concatenate([self.obs_matrix[k], [w_prev, observed_dd]]).astype("float64")
 
     def step(self, action: Any):
         if self.i >= len(self.returns):
@@ -92,13 +107,13 @@ class SizingEnv:
         scale = float(self.scale[self.i])
         ticker = self.tickers[self.i]
         w_prev = self.last_w.get(ticker, 0.0)
-        pnl = w * r * scale
+        pnl = (w * r - self.cost * abs(w - w_prev)) * scale
+        self.pending_pnl.setdefault(self.release_steps[self.i], []).append(pnl)
         self.nav *= 1.0 + pnl
         self.peak = max(self.peak, self.nav)
         dd_new = self.nav / self.peak - 1.0 if self.peak > 0 else 0.0
         reward = (
             pnl
-            - self.cost * abs(w - w_prev) * scale
             - self.drawdown_penalty * max(0.0, self.dd - dd_new)
         )
         self.last_w[ticker] = w

@@ -15,7 +15,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
 from trader.features.spot import executor, fills, horizon, labels, resume
@@ -33,6 +33,7 @@ from trader.features.spot.schemas import Decision
 from trader.features.spot.settings import HorizonProfile
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.broker.models import Position
+from trader.kernel.broker.ticks import quantize_price
 from trader.kernel.config.time import KST, MARKET_TZ
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as xledger
@@ -106,9 +107,7 @@ def _cached_quote(
 
 
 def _stop_loss_decision(ticker: str, market: str, quote: Decimal, sig: Signal) -> Decision:
-    limit = (quote * (1 - STOP_LOSS_LIMIT_DISCOUNT)).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
-    )
+    limit = quantize_price(market, quote * (1 - STOP_LOSS_LIMIT_DISCOUNT))
     return Decision(
         ticker=ticker,
         action="SELL",

@@ -284,3 +284,35 @@ def test_verification_reason_text_and_retry_rule(tmp_path, monkeypatch):
     assert automation.status(tmp_path)["reason_text"].startswith("사이트 재확인 필요")
     assert automation.should_start(tmp_path, creds, now=now + timedelta(hours=1))[0] is False
     assert automation.should_start(tmp_path, creds, now=now + timedelta(hours=7))[0] is True
+
+
+def test_status_uses_capture_timestamps_without_monitor(tmp_path):
+    from trader.features.saveticker.store import atomic_json
+
+    atomic_json(tmp_path / "data/status.json", {"streams": {
+        "news_all": {"last_success_at": "2026-11-06T01:00:00+00:00"},
+        "market_gain_live": {"last_success_at": "2026-11-06T02:00:00+00:00"},
+    }})
+    assert automation.status(tmp_path)["last_success_at"] == "2026-11-06T02:00:00+00:00"
+
+
+def test_live_extension_requiring_verification_is_not_healthy(tmp_path):
+    import os
+
+    from trader.features.saveticker.store import atomic_json
+    from trader.kernel.daemon.lock import Lock
+
+    runtime = tmp_path / "runtime"
+    atomic_json(runtime / "bridge-config.json", {"backend": "extension"})
+    atomic_json(runtime / "bridge.json", {"pid": os.getpid(),
+        "updated_at": datetime.now(UTC).isoformat(), "state": "waiting_verification",
+        "reason": "verification_required"})
+    lock = Lock(runtime / "bridge-host.lock")
+    assert lock.acquire()
+    try:
+        result = automation.status(tmp_path)
+        assert result["blocked"] is True
+        assert result["health"] != "healthy"
+        assert "재확인" in result["reason_text"]
+    finally:
+        lock.release()

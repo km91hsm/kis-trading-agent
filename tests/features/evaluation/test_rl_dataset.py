@@ -27,7 +27,8 @@ def test_steps_prefer_memory_when_enough(project, conn):
 
 def test_steps_empty_when_no_data(project, conn):
     df = rl_dataset.build_steps(conn, None, market=None, horizon_days=5, min_memory_steps=200)
-    assert df.empty and list(df.columns) == ["date", "ticker", "obs", "fwd_return", "source"]
+    assert df.empty
+    assert list(df.columns) == ["date", "ticker", "obs", "fwd_return", "source", "fwd_date"]
 
 
 def test_memory_steps_carry_horizon_days(project, conn):
@@ -67,3 +68,16 @@ def test_memory_step_date_is_run_date_in_kst(project, conn):
     store.fill_outcome(conn, eid, outcome_at="x", price_return=0.02, direction_score=0.02)
     df = rl_dataset.build_steps(conn, None, market="KR", horizon_days=5, min_memory_steps=1)
     assert df["date"].iloc[0].date().isoformat() == "2026-10-10"
+
+
+def test_feature_steps_preserve_label_realization_date(monkeypatch):
+    import pandas as pd
+
+    from tests.features.ml.helpers import synthetic_features
+    from trader.features.evaluation.rl import dataset
+
+    frame = synthetic_features(2, 20, signal=True)
+    monkeypatch.setattr(dataset.ml_api, "load_all", lambda *a, **kw: frame)
+    result = dataset._feature_steps(None, "KR", 5)
+    assert "fwd_date" in result.columns
+    assert (pd.to_datetime(result["fwd_date"]) > pd.to_datetime(result["date"])).all()

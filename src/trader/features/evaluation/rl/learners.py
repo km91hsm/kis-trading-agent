@@ -67,25 +67,33 @@ def population_rewards(
     nav = np.ones(p_n)
     peak = np.ones(p_n)
     dd = np.zeros(p_n)
+    observed_nav = np.ones(p_n)
+    observed_peak = np.ones(p_n)
+    pending_pnl: dict[int, list[np.ndarray]] = {}
     total = np.zeros(p_n)
     last_w: dict[str, np.ndarray] = {}
     zeros = np.zeros(p_n)
     for i in range(len(env.returns)):
+        for realized in pending_pnl.pop(i, []):
+            observed_nav *= 1.0 + realized
+            observed_peak = np.maximum(observed_peak, observed_nav)
+        observed_dd = observed_nav / observed_peak - 1.0
         ticker = env.tickers[i]
         w_prev = last_w.get(ticker, zeros)
         z = (
             lin[i]
             + th_w * ((w_prev - mean[n_static]) / std[n_static])
-            + th_dd * ((dd - mean[n_static + 1]) / std[n_static + 1])
+            + th_dd * ((observed_dd - mean[n_static + 1]) / std[n_static + 1])
             + bias
         )
         w = np.clip(max_weight / (1.0 + np.exp(-z)), 0.0, env.max_weight)
         scale = float(env.scale[i])
-        pnl = w * float(env.returns[i]) * scale
+        pnl = (w * float(env.returns[i]) - env.cost * np.abs(w - w_prev)) * scale
+        pending_pnl.setdefault(env.release_steps[i], []).append(pnl)
         nav = nav * (1.0 + pnl)
         peak = np.maximum(peak, nav)
         dd_new = np.where(peak > 0, nav / peak - 1.0, 0.0)
-        total += pnl - env.cost * np.abs(w - w_prev) * scale
+        total += pnl
         total -= env.drawdown_penalty * np.maximum(0.0, dd - dd_new)
         last_w[ticker] = w
         dd = dd_new

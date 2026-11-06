@@ -83,7 +83,7 @@ def simple_backtest(
                 skipped += 1
                 continue
             ret, bench = res
-            realized = ret * outcomes.SIGN.get(action, 0.0)
+            realized, _ = outcomes.direction_scores(action, ret, outcomes._held(conn, r))
             alpha, source = realized - bench, "features"
             price_return = ret
         decisions.append(

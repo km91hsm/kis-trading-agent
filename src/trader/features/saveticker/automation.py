@@ -268,6 +268,7 @@ _REASON_TEXT = {
         "사이트 재확인 필요 — 브라우저에서 세이브티커에 로그인해 재확인을 마친 뒤 '다시 시작'"
         "(6시간 뒤 1회 자동 재시도)"
     ),
+    "verification_required": "사이트 재확인 필요 — Chrome에서 확인 후 확장 팝업에서 재개하세요",
     "authentication": "인증 실패로 멈춤 — 6시간마다 다시 시도(계정 확인 필요할 수 있음)",
     "authentication_or_stopped": "인증 실패로 멈춤 — 6시간마다 다시 시도(계정 확인 필요할 수 있음)",
     "restart_limit": "재기동 한도로 멈춤 — 1시간 뒤 다시 시도",
@@ -287,7 +288,14 @@ def status(home):
             row = {}
         lanes[lane] = {k: row.get(k) for k in ("state", "error_type", "stage", "updated_at")}
     monitor = read(runtime / "alert-monitor.json") or {}
-    success = monitor.get("last_success_at") or {}
+    captures = read(home / "data" / "status.json") or {}
+    streams = captures.get("streams")
+    success = (
+        {name: row.get("last_success_at") for name, row in streams.items()
+         if isinstance(row, dict)}
+        if isinstance(streams, dict)
+        else monitor.get("last_success_at") or {}
+    )
     last = (
         max((v for v in success.values() if isinstance(v, str)), default=None)
         if isinstance(success, dict)
@@ -323,7 +331,9 @@ def status(home):
                 row["state"] = "paused"
                 row["error_type"] = None
         monitor = {"health": "healthy" if alive else "waiting_chrome"}
-    blocked = service_state.get("state") == "blocked"
+    blocked = service_state.get("state") in ("blocked", "waiting_verification", "auth_required")
+    if backend == "extension" and blocked:
+        monitor = {"health": "blocked"}
     return {
         "backend": backend,
         "service": {k: service_state.get(k) for k in ("state", "reason", "at", "exit_code")},

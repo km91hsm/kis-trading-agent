@@ -18,7 +18,7 @@ from trader.features.ml import api as ml_api
 from trader.kernel.config import KST
 
 OBS_COLUMNS: tuple[str, ...] = (*vector.DIMS, "confidence", "llm_weight")
-STEP_COLUMNS = ["date", "ticker", "obs", "fwd_return", "source"]
+STEP_COLUMNS = ["date", "ticker", "obs", "fwd_return", "source", "fwd_date"]
 MEMORY_COLUMNS = [*STEP_COLUMNS, "horizon_days"]  # 결정별 horizon (엠바고·보상 정규화용)
 
 
@@ -36,10 +36,15 @@ def _run_day(iso: str) -> pd.Timestamp:
     return pd.Timestamp(ts.date())
 
 
+def _label_day(value) -> pd.Timestamp:
+    parsed = pd.to_datetime(value, errors="coerce", utc=True)
+    return _run_day(parsed) if pd.notna(parsed) else pd.NaT
+
+
 def _memory_steps(conn: sqlite3.Connection, market: str | None) -> pd.DataFrame:
     sql = (
         "SELECT m.decided_at, m.ticker, m.situation_vector, m.decision, m.price_return, "
-        "m.horizon_days, d.date AS run_date FROM memory_entries m "
+        "m.horizon_days, m.outcome_at, d.date AS run_date FROM memory_entries m "
         "LEFT JOIN decisions d ON d.id = m.decision_id "
         "WHERE m.price_return IS NOT NULL AND m.round=0"
     )
@@ -64,6 +69,7 @@ def _memory_steps(conn: sqlite3.Connection, market: str | None) -> pd.DataFrame:
                 "obs": [*vec, conf, w],
                 "fwd_return": float(r["price_return"]),
                 "source": "memory",
+                "fwd_date": _label_day(r["outcome_at"]),
                 "horizon_days": int(r["horizon_days"] or 1),
             }
         )
@@ -88,6 +94,7 @@ def _feature_steps(state: Path | None, market: str | None, horizon_days: int) ->
                 "obs": [*vector.situation_vector(row, mk), 0.5, 0.0],
                 "fwd_return": float(row["fwd_return"]),
                 "source": "features",
+                "fwd_date": pd.Timestamp(row["fwd_date"]),
             }
         )
     return pd.DataFrame(out, columns=STEP_COLUMNS)
