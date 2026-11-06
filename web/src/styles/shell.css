@@ -258,6 +258,7 @@
   color: var(--accent);
   font-weight: 600;
 }
+.nav-back { color: var(--fg); }
 
 /* 브랜드·푸터는 왼쪽 메뉴(≥1280)에서만 */
 .nav-brand {

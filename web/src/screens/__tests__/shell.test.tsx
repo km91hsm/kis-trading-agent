@@ -9,6 +9,7 @@ import { noteServerTime } from "../../lib/clock";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { fixtureHealth, fixtureUsage } from "../../test/fixtures";
+import { fixtureAccounts } from "../../test/fixtures/accounts";
 import { fixtureAccount } from "../../test/fixtures/today";
 import { flush, render } from "../../test/render";
 
@@ -172,6 +173,41 @@ describe("왼쪽 메뉴 2단", () => {
     expect(foot?.textContent).toContain("데몬 정상");
     expect(foot?.textContent).toContain("v0.2.0");
     expect(fake.calls.filter((c) => c.url.includes("/system/health"))).toHaveLength(1);
+  });
+});
+
+describe("상세 화면 하위 목차(본문 DOM)", () => {
+  test("/accounts/paper-1: 2단은 「‹ 돌아가기」(/accounts) 다음에 본문 section[id] > h2 목차 — 숨긴 절(단타)은 뺀다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() }); // 보유·주문은 404 → 단타 절 hidden
+    const { container } = app("/accounts/paper-1");
+    await flush();
+    expect(container.querySelector('[data-nav-screen="accounts"]')?.getAttribute("aria-current")).toBe("page");
+    const items = Array.from(container.querySelectorAll("[data-nav-item]"));
+    expect(items[0].getAttribute("data-nav-item")).toBe("back");
+    expect(items[0].textContent).toBe("‹ 돌아가기");
+    expect(items[0].getAttribute("href")).toBe("/accounts");
+    const rest = items.slice(1).map((e) => [e.getAttribute("data-nav-item"), e.textContent, e.getAttribute("href")]);
+    expect(rest).toEqual([
+      ["orders", "오늘 주문·체결", "/accounts/paper-1#orders"],
+      ["positions", "보유", "/accounts/paper-1#positions"],
+      ["risk", "리스크", "/accounts/paper-1#risk"],
+      ["nav-chart", "NAV 추이", "/accounts/paper-1#nav-chart"],
+    ]);
+  });
+
+  test("/decisions/spot/1: 오늘 메뉴가 현재, 돌아가기는 /, 목차는 h2 가 있는 절만(머리 카드 절은 제외)", async () => {
+    const err = () => new Response("{}", { status: 500, headers: { "Content-Type": "application/json" } });
+    fake = installFakeFetch({ ...ok, "GET /api/decisions/spot/1": err(), "GET /api/decisions/spot/1/trace": err() }); // 404 면 「결정 없음」 분기
+    const { container } = app("/decisions/spot/1");
+    await flush();
+    expect(container.querySelector('[data-nav-screen="today"]')?.getAttribute("aria-current")).toBe("page");
+    const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
+    expect(items[0]).toBe("back");
+    expect(container.querySelector('[data-nav-item="back"]')?.getAttribute("href")).toBe("/");
+    expect(items).toContain("rationale");
+    expect(items).not.toContain("header");
+    expect(container.querySelector('[data-nav-item="rationale"]')?.textContent).toBe("근거 전문");
+    expect(container.querySelector('[data-nav-item="rationale"]')?.getAttribute("href")).toBe("/decisions/spot/1#rationale");
   });
 });
 

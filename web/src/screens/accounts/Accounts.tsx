@@ -121,7 +121,7 @@ export function Accounts() {
 const MODE_LABEL: Record<string, string> = { auto: "자동", approve: "승인", off: "끔" };
 
 /** 파생 계좌 카드 — id·모의/실전·상태 칩(/fo/summary state)·모드(+메모)·NAV/증거금(/fo/summary, 없으면 /accounts 의 NAV·현금)·
- * 계좌별 화면 링크. 보유 상세는 계좌별 화면 「파생 보유」. */
+ * 계좌별 화면 링크. 보유 상세는 계좌별 화면 「파생 보유」 절. */
 function FoAccountCard({ account: a, status }: { account: Account; status?: FoStatus }) {
   const money = (v: Account["nav"] | undefined) => moneyUnit(v, a.currency);
   const live = a.env !== "paper";
