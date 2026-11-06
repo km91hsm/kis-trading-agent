@@ -90,7 +90,7 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 ## 4. 번들 (선택)
 
 ```
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.2.1 && git push origin v0.2.1
 ```
 → GitHub Actions `build.yml`(macOS arm64·x86_64, Windows x86_64)이 테스트·웹 빌드·PyInstaller 번들·zip 을 만들고
 Release 에 올린다. 번들의 `./trader install` 도 소스와 같이 `app --no-browser` 를 등록한다(로그온 뒤 웹 UI 포함).

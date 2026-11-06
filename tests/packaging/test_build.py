@@ -149,7 +149,11 @@ def test_spec_declares_feature_agents_and_extensions():
     """기능 agents md 는 `_internal/trader/features/<f>/agents/` 로(모듈의 `Path(__file__).parent`
     기준), 세이브티커 확장은 `tests/` 를 빼고, 웹 dist 는 있으면 들어가야 한다."""
     text = (ROOT / "packaging" / "trader.spec").read_text(encoding="utf-8")
-    assert 'collect_data_files("trader", includes=["**/agents/*.md"])' in text
+    # 기능 README 도 함께 — boot() 의 계약 검사가 features/<f>/README.md 를 요구해 없으면 번들의
+    # 모든 명령이 「기능 X: README.md 가 없습니다」 로 죽는다(v0.2.0 첫 CI 빌드에서 확인)
+    includes = '["**/agents/*.md", "features/*/README.md"]'
+    assert f'collect_data_files("trader", includes={includes})' in text
+    assert list((ROOT / "src" / "trader" / "features").glob("*/README.md"))
     assert "extensions/saveticker" in text
     assert "web/dist" in text
     assert '"tests"' in text  # 확장 datas 에서 tests/ 를 빼는 규칙
