@@ -279,12 +279,48 @@ describe("오늘 화면", () => {
 });
 
 describe("배치", () => {
-  test("절 순서: 승인 → 레인 카드 → 결정 → 주문·체결 → 다음 할 일 → 알림(전체 폭, .section-pair 없음)", async () => {
+  test("현황 페이지 절 순서: 승인 → 레인 카드 → 결정 — 기록(주문·체결·다음 할 일·알림)은 /log 페이지", async () => {
     const { container } = await mount(routes());
     expect(container.querySelector(".section-pair")).toBeNull();
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
-      "approvals", "spot-lane", "scalp-lane", "fo-lane", "decisions", "orders-timeline", "next-jobs", "notices",
+      "approvals", "spot-lane", "scalp-lane", "fo-lane", "decisions",
     ]);
+    expect(container.querySelector("h1")?.textContent).toBe("오늘");
+    expect(Array.from(container.querySelectorAll(".page-tabs a")).map((e) => [e.textContent, e.getAttribute("href")])).toEqual([
+      ["현황", "/"],
+      ["기록", "/log"],
+    ]);
+  });
+
+  test("기록 페이지(page=log)는 주문·체결 → 다음 할 일 → 알림, h1 「오늘 · 기록」, 날짜 선택기 있음", async () => {
+    ff = installFakeFetch(routes());
+    const { container } = render(
+      <MemoryRouter initialEntries={["/log"]}>
+        <Today page="log" />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(["orders-timeline", "next-jobs", "notices"]);
+    expect(container.querySelector("h1")?.textContent).toBe("오늘 · 기록");
+    expect(container.querySelector('input[type="date"]')).not.toBeNull();
+    expect(ff!.calls.map((c) => c.url)).not.toContain("/api/decisions?date=" + new Date().toISOString().slice(0, 10));
+  });
+
+  test("날짜는 ?date= 로 두 페이지가 같이 쓴다 — /?date=2026-11-04 로 들어오면 그 날을 읽고, 고르면 주소가 바뀐다", async () => {
+    ff = installFakeFetch(routes());
+    const { container } = render(
+      <MemoryRouter initialEntries={["/?date=2026-11-04"]}>
+        <Today />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/decisions?date=2026-11-04");
+    expect((container.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-04");
+    expect(container.querySelector('.page-tabs a[href="/log?date=2026-11-04"]')).not.toBeNull();
+    type(container.querySelector('input[type="date"]') as HTMLInputElement, "2026-11-03");
+    await flush();
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/decisions?date=2026-11-03");
+    expect(container.querySelector('.page-tabs a[href="/log?date=2026-11-03"]')).not.toBeNull();
   });
 
   test("「오늘 요약」 KPI 띠: 결정·주문·체결·실패·알림 건수가 레인 카드 위에", async () => {

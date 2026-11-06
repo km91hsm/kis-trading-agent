@@ -2,9 +2,15 @@ import { describe, expect, test } from "vitest";
 import { pagePathOf, resolveLink, screenPages } from "../nav";
 
 describe("nav 페이지", () => {
-  test("시스템 화면은 페이지 4개(상태·잡·기능·관리), 다른 화면은 자기 자신 하나", () => {
+  test("시스템 화면은 페이지 4개(상태·잡·기능·관리), 오늘은 2개(현황·기록), 계좌는 자기 자신 하나", () => {
     expect(screenPages("system").map((p) => p.path)).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
-    expect(screenPages("today")).toEqual([{ id: "today", label: "오늘", path: "/" }]);
+    expect(screenPages("today")).toEqual([
+      { id: "today", label: "현황", path: "/" },
+      { id: "log", label: "기록", path: "/log" },
+    ]);
+    expect(screenPages("accounts")).toEqual([{ id: "accounts", label: "계좌·보유", path: "/accounts" }]);
+    expect(pagePathOf("today", "notices")).toBe("/log");
+    expect(pagePathOf("today", "decisions")).toBe("/");
   });
   test("절 id → 그 절이 있는 페이지 경로", () => {
     expect(pagePathOf("system", "runs")).toBe("/system/jobs");

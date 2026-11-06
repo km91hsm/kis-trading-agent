@@ -1,11 +1,15 @@
-// 「오늘」 화면 — 날짜 → 대기 승인(최상단) → 오늘 요약 KPI → 레인 카드(현물·단타·파생) → 결정 → 주문·체결 → 다음 할 일 → 알림(기록, 맨 아래).
+// 「오늘」 화면 — 페이지 2개(nav.ts pages). 현황(`/`): 날짜 → 대기 승인(최상단) → 오늘 요약 KPI → 레인 카드(현물·단타·파생) → 결정.
+// 기록(`/log`): 주문·체결 → 다음 할 일 → 알림. 날짜는 `?date=` 로 두 페이지가 같이 쓴다(없으면 오늘을 따라가 KST 자정에 넘어감).
 // 섹션 컨테이너(id = NAV 항목)는 데이터 전에 바로 그린다(메뉴의 IntersectionObserver 가 마운트 시점 DOM 만 본다).
 // 계좌 없는 레인·대기 승인 없음은 언마운트하지 않고 hidden 으로 둔다(메뉴 앵커가 계속 가리킬 수 있게).
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DatePicker } from "../../components/DatePicker";
 import { Empty } from "../../components/Empty";
+import { PageTabs } from "../../components/PageTabs";
 import { Stats } from "../../components/Stats";
 import { useKstDate, useResource } from "../../lib/hooks";
+import type { NavPage } from "../../lib/nav";
 import type { UsageResp } from "../../lib/usage";
 import { ApprovalsBlock, type Approval } from "./ApprovalsBlock";
 import { DecisionsList } from "./DecisionsList";
@@ -15,20 +19,35 @@ import { NoticesFeed } from "./NoticesFeed";
 import { OrdersTimeline } from "./OrdersTimeline";
 import { LANE_LABEL, LANES, laneCards, laneNextAt, todaySummary, type Account, type Daemon, type Decision, type Merged, type Notice, type Order } from "./today.ts";
 
-export function Today() {
-  // picked = null 이면 「오늘」을 따라간다(KST 자정에 넘어감). 사용자가 다른 날을 고르면 그 날에 머문다.
+export type TodayPage = NavPage["id"];
+
+export function Today({ page = "today" }: { page?: TodayPage }) {
+  const log = page === "log";
+  // ?date= 가 없으면 「오늘」을 따라간다(KST 자정에 넘어감). 사용자가 다른 날을 고르면 주소에 남아 두 페이지가 같이 쓴다.
   const today = useKstDate();
-  const [picked, setPicked] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const picked = params.get("date");
   const date = picked ?? today;
   const day = { date };
-  const approvals = useResource<{ approvals: Approval[] }>("/approvals", undefined, ["approvals", "orders"]);
-  const decisions = useResource<Merged<Decision>>("/decisions", day, ["decisions", "scalp", "fo"]);
+  const setDate = (v: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v && v !== today) next.set("date", v);
+        else next.delete("date");
+        return next;
+      },
+      { replace: true },
+    );
+  const search = picked ? `?date=${picked}` : "";
+  const approvals = useResource<{ approvals: Approval[] }>("/approvals", undefined, ["approvals", "orders"], { enabled: !log });
+  const decisions = useResource<Merged<Decision>>("/decisions", day, ["decisions", "scalp", "fo"], { enabled: !log });
   const orders = useResource<Merged<Order>>("/orders", day, ["orders", "scalp", "fo"]);
-  const accounts = useResource<Account[]>("/accounts", undefined, ["accounts"]);
-  const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"]);
+  const accounts = useResource<Account[]>("/accounts", undefined, ["accounts"], { enabled: !log });
+  const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"], { enabled: !log });
   const [noticeKind, setNoticeKind] = useState<string | null>(null);
   const notices = useResource<Notice[]>("/system/notices", noticeKind ? { limit: "200", kind: noticeKind } : { limit: "200" }, ["notices"]);
-  const daemon = useResource<Daemon>("/system/daemon", undefined, ["jobs", "runs", "daemon"]);
+  const daemon = useResource<Daemon>("/system/daemon", undefined, ["jobs", "runs", "daemon"]); // 현황은 레인 「다음 예정」, 기록은 「다음 할 일」
 
   const pending = approvals.data?.approvals ?? [];
   const cards = accounts.data
@@ -40,12 +59,40 @@ export function Today() {
   const summary = laneFetch === "ready" ? todaySummary(decisions.data?.items ?? [], orders.data?.items ?? [], notices.data ?? []) : null;
   const n = (v: number | undefined) => (summary ? String(v) : "—");
 
+  if (log) {
+    return (
+      <div className="screen" data-screen="today" data-page="log">
+        <header className="screen-head">
+          <h1 className="screen-title">오늘 · 기록</h1>
+          <DatePicker value={date} onChange={(v) => v && setDate(v)} max={today} />
+        </header>
+        <PageTabs screen="today" label="오늘 페이지" search={search} />
+
+        <section id="orders-timeline" className="screen-section">
+          <h2>주문·체결</h2>
+          <OrdersTimeline data={orders.data} error={orders.error} />
+        </section>
+
+        <section id="next-jobs" className="screen-section">
+          <h2>다음 할 일</h2>
+          <NextJobs data={daemon.data} error={daemon.error} />
+        </section>
+
+        <section id="notices" className="screen-section">
+          <h2>알림</h2>
+          <NoticesFeed data={notices.data} error={notices.error} kind={noticeKind} onKind={setNoticeKind} />
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <div className="screen" data-screen="today">
+    <div className="screen" data-screen="today" data-page="today">
       <header className="screen-head">
         <h1 className="screen-title">오늘</h1>
-        <DatePicker value={date} onChange={(v) => v && setPicked(v === today ? null : v)} max={today} />
+        <DatePicker value={date} onChange={(v) => v && setDate(v)} max={today} />
       </header>
+      <PageTabs screen="today" label="오늘 페이지" search={search} />
 
       <section id="approvals" className="screen-section" hidden={!pending.length && !approvals.error}>
         <h2>승인 대기 {pending.length}건</h2>
@@ -93,20 +140,6 @@ export function Today() {
         )}
       </section>
 
-      <section id="orders-timeline" className="screen-section">
-        <h2>주문·체결</h2>
-        <OrdersTimeline data={orders.data} error={orders.error} />
-      </section>
-
-      <section id="next-jobs" className="screen-section">
-        <h2>다음 할 일</h2>
-        <NextJobs data={daemon.data} error={daemon.error} />
-      </section>
-
-      <section id="notices" className="screen-section">
-        <h2>알림</h2>
-        <NoticesFeed data={notices.data} error={notices.error} kind={noticeKind} onKind={setNoticeKind} />
-      </section>
     </div>
   );
 }

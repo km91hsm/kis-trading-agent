@@ -56,17 +56,17 @@ test("상태 띠는 health level 과 첫 사유, 사용률 칩 2개를 그린다
 });
 
 test("PC 폭에서 왼쪽 메뉴는 현재 화면의 하위 목차만 한 줄씩 펼친다 (data-nav-item = 그 화면의 NAV items)", async () => {
-  fake = installFakeFetch(ok);
-  const { container } = app();
+  fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+  const { container } = app("/accounts");
   await flush();
-  // 승인·계좌 응답이 404(오류)라 오늘 화면의 섹션 4개가 모두 보인다 → 항목 4개, 다른 화면 항목은 없다
+  // 계좌 화면은 페이지 하나 → 절 앵커 목차(통합·파생 계좌), 다른 화면 항목은 없다
   const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
-  expect(items).toEqual(NAV.today.items.map((i) => i.id));
-  const first = container.querySelector('[data-nav-item="approvals"]') as HTMLAnchorElement;
-  expect(first.getAttribute("href")).toBe("/#approvals");
+  expect(items).toEqual(NAV.accounts.items.map((i) => i.id));
+  const first = container.querySelector('[data-nav-item="overview"]') as HTMLAnchorElement;
+  expect(first.getAttribute("href")).toBe("/accounts#overview");
   expect(container.querySelector('[data-nav-item="regime"]')).toBeNull();
-  // 오늘 화면의 섹션 컨테이너가 id 로 달려 있다(앵커 계약)
-  for (const it of NAV.today.items) expect(container.querySelector(`#${it.id}`)).not.toBeNull();
+  // 섹션 컨테이너가 id 로 달려 있다(앵커 계약)
+  for (const it of NAV.accounts.items) expect(container.querySelector(`#${it.id}`)).not.toBeNull();
 });
 
 describe("왼쪽 메뉴 2단", () => {
@@ -81,13 +81,32 @@ describe("왼쪽 메뉴 2단", () => {
     Element.prototype.scrollIntoView = origScroll;
   });
 
-  test("숨긴 섹션(승인 0건·없는 레인)의 항목은 메뉴에서 뺀다", async () => {
-    fake = installFakeFetch({ ...ok, "GET /api/approvals": { approvals: [] }, "GET /api/accounts": [fixtureAccount()] });
-    const { container } = app();
+  test("숨긴 섹션(파생 계좌 없음)의 항목은 메뉴에서 뺀다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts().filter((a) => a.lane !== "fo") });
+    const { container } = app("/accounts");
     await flush();
     const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
-    expect(items).toEqual(["spot-lane", "decisions", "orders-timeline", "next-jobs", "notices"]); // 승인·단타·파생은 빠짐
-    expect((container.querySelector("#fo-lane") as HTMLElement).hidden).toBe(true);
+    expect(items).toEqual(["overview"]); // 파생 계좌 절은 빠짐
+    expect((container.querySelector("#fo-positions") as HTMLElement).hidden).toBe(true);
+  });
+
+  test("오늘 화면의 하위 메뉴는 페이지 2개(현황 / · 기록 /log) — /log 에서도 오늘 메뉴가 현재", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/approvals": { approvals: [] }, "GET /api/accounts": [fixtureAccount()] });
+    const a = app();
+    await flush();
+    const links = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => [e.getAttribute("data-nav-item"), e.getAttribute("href")]);
+    expect(links).toEqual([["today", "/"], ["log", "/log"]]);
+    expect(a.container.querySelector('[data-nav-item="today"]')?.getAttribute("aria-current")).toBe("page");
+    expect(a.container.querySelector("#decisions")).not.toBeNull();
+    expect(a.container.querySelector("#notices")).toBeNull();
+    a.unmount();
+    const b = app("/log");
+    await flush();
+    expect(b.container.querySelector('[data-nav-screen="today"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="log"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector("#notices")).not.toBeNull();
+    expect(b.container.querySelector("#decisions")).toBeNull();
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["현황", "기록"]);
   });
 
   test("시스템 화면의 하위 메뉴는 절 앵커가 아니라 페이지 4개(상태·잡·기능·관리)이고, 페이지마다 자기 절만 그린다", async () => {
@@ -340,10 +359,10 @@ describe("정리", () => {
     const origMM = window.matchMedia;
     window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener: added, removeEventListener: removed })) as unknown as typeof window.matchMedia;
     try {
-      fake = installFakeFetch(ok);
-      const { unmount } = app();
+      fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+      const { unmount } = app("/accounts"); // 절 앵커 목차가 있는 화면(오늘·시스템은 페이지 링크라 IO 없음)
       await flush();
-      expect(observed.map((e) => e.id).sort()).toEqual(NAV.today.items.map((i) => i.id).sort());
+      expect(observed.map((e) => e.id).sort()).toEqual(NAV.accounts.items.map((i) => i.id).sort());
       expect(added).toHaveBeenCalled();
       unmount();
       expect(vi.getTimerCount()).toBe(0);

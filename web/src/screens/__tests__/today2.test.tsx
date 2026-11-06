@@ -69,8 +69,8 @@ function routes(over: Routes = {}): Routes {
 async function mount(r: Routes) {
   ff = installFakeFetch(r);
   render(
-    <MemoryRouter>
-      <Today />
+    <MemoryRouter initialEntries={["/log"]}>
+      <Today page="log" />
     </MemoryRouter>,
   );
   await flush();
@@ -82,8 +82,8 @@ describe("오늘 화면 ② — 주문·체결·알림·다음 할 일", () => {
   test("섹션 컨테이너는 데이터 전에 있다; 타임라인 3줄(시:분:초) + 일부 레인 칩, /orders 는 한 번만", async () => {
     ff = installFakeFetch(routes());
     render(
-      <MemoryRouter>
-        <Today />
+      <MemoryRouter initialEntries={["/log"]}>
+        <Today page="log" />
       </MemoryRouter>,
     );
     for (const id of ["orders-timeline", "notices", "next-jobs"]) expect(section(id)).not.toBeNull();

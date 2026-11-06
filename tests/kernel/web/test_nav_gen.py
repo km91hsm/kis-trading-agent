@@ -102,5 +102,29 @@ def test_nav_ts_system_pages_group_items_into_four_pages():
         "regime": "features",
         "settings": "admin", "secrets": "admin", "token": "admin", "control-log": "admin",
     }
-    assert nav["today"]["pages"] == [{"id": "today", "label": "오늘", "path": "/"}]
-    assert {i["page"] for i in nav["today"]["items"]} == {"today"}
+    assert nav["accounts"]["pages"] == [
+        {"id": "accounts", "label": "계좌·보유", "path": "/accounts"},
+    ]
+    assert {i["page"] for i in nav["accounts"]["items"]} == set()
+
+
+TODAY_PAGES = [
+    {"id": "today", "label": "현황", "path": "/"},
+    {"id": "log", "label": "기록", "path": "/log"},
+]
+
+
+def test_nav_ts_today_pages_split_status_and_log():
+    """오늘 화면은 페이지 2개 — 현황(`/`: 승인·레인·결정)과 기록(`/log`: 주문·체결·다음 할 일·알림).
+    기능 레인 카드(spot-lane·fo-lane)는 현황으로 간다(표에 없는 절은 첫 페이지)."""
+    nav = _nav_obj(gen.nav_ts([fixture_feature_with_nav()]))
+    assert nav["today"]["pages"] == TODAY_PAGES
+    page_of = {i["id"]: i["page"] for i in nav["today"]["items"]}
+    assert page_of == {
+        "spot-lane": "today", "fo-lane": "today", "decisions": "today",
+        "orders-timeline": "log", "next-jobs": "log", "notices": "log",
+    }
+    assert gen.page_of("today", "scalp-lane") == "today"
+    assert gen.page_of("today", "unknown-section") == "today"
+    assert gen.page_of("system", "unknown-section") == "features"
+    assert gen.page_of("accounts", "overview") == "accounts"

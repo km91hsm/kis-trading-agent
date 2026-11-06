@@ -29,10 +29,13 @@ export function navGroups(): NavGroup[] {
   });
 }
 
-/** 경로가 속한 화면. `/accounts/paper-1` → accounts, `/decisions/...` → today(결정 절에서 들어온 상세). */
+/** 경로가 속한 화면 — 페이지 주소(`/`·`/log`·`/system/jobs`)가 먼저, 그다음 `/accounts/paper-1` 같은 하위 경로.
+ *  `/decisions/...` 는 today(결정 절에서 들어온 상세). */
 export function screenOf(pathname: string): Screen | null {
-  if (pathname === "/" || pathname.startsWith("/decisions/")) return "today";
-  return SCREENS.find((s) => s !== "today" && (pathname === NAV[s].path || pathname.startsWith(NAV[s].path + "/"))) ?? null;
+  if (pathname.startsWith("/decisions/")) return "today";
+  const byPage = SCREENS.find((s) => NAV[s].pages.some((p) => p.path === pathname));
+  if (byPage) return byPage;
+  return SCREENS.find((s) => s !== "today" && pathname.startsWith(NAV[s].path + "/")) ?? null;
 }
 
 export type Detail = { screen: Screen; back: string };
@@ -165,7 +168,7 @@ export function Nav() {
   const active = screenOf(pathname);
   const detail = detailOf(pathname);
   const pages = active && !detail ? screenPages(active) : [];
-  const paged = pages.length > 1; // 페이지가 여럿인 화면은 2단이 페이지 링크 — 절 목차·IO 는 쓰지 않는다
+  const paged = pages.length > 1; // 페이지가 여럿인 화면(시스템·오늘)은 2단이 페이지 링크 — 절 목차·IO 는 쓰지 않는다
   const domSections = useDomSections(!!detail, pathname);
   const activeIds = paged ? [] : detail ? domSections.map((d) => d.id) : (groups.find((g) => g.screen === active)?.items.map((i) => i.id) ?? []);
   const shown = useShownSections(activeIds, pathname);
