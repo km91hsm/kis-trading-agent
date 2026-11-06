@@ -124,6 +124,39 @@ describe("왼쪽 메뉴 2단", () => {
     expect(sys).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
   });
 
+  test("성과 화면은 페이지 3개(성과·복기·추가 분석), 데이터 화면은 4개(시세·차트·뉴스·공시·테마·감시목록·지표·모델) — 페이지마다 자기 절만", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/accounts": [fixtureAccount()] });
+    const a = app("/performance");
+    await flush();
+    const links = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => [e.getAttribute("data-nav-item"), e.getAttribute("href")]);
+    expect(links).toEqual([["performance", "/performance"], ["memory", "/performance/memory"], ["analysis", "/performance/analysis"]]);
+    expect(a.container.querySelector("#performance-overview")).not.toBeNull();
+    expect(a.container.querySelector("#compare")).not.toBeNull();
+    expect(a.container.querySelector("#memory")).toBeNull();
+    expect(a.container.querySelector("#calibration")).toBeNull();
+    a.unmount();
+    const b = app("/performance/analysis");
+    await flush();
+    expect(b.container.querySelector('[data-nav-screen="performance"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="analysis"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector("#calibration")).not.toBeNull();
+    expect(b.container.querySelector("#shadow")).not.toBeNull();
+    expect(b.container.querySelector("#rl")).not.toBeNull();
+    expect(b.container.querySelector("#performance-overview")).toBeNull();
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
+    b.unmount();
+    const c = app("/data/themes");
+    await flush();
+    const dl = Array.from(c.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("href"));
+    expect(dl).toEqual(["/data", "/data/news", "/data/themes", "/data/features"]);
+    expect(c.container.querySelector("#themes")).not.toBeNull();
+    expect(c.container.querySelector("#watchlist")).not.toBeNull();
+    expect(c.container.querySelector("#quotes")).toBeNull();
+    expect(c.container.querySelector("#news")).toBeNull();
+    expect(c.container.querySelector("#features")).toBeNull();
+    expect(Array.from(c.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["시세·차트", "뉴스·공시", "테마·감시목록", "지표·모델"]);
+  });
+
   test("시스템 화면의 하위 메뉴는 절 앵커가 아니라 페이지 4개(상태·잡·기능·관리)이고, 페이지마다 자기 절만 그린다", async () => {
     fake = installFakeFetch(ok);
     const a = app("/system");
@@ -148,15 +181,15 @@ describe("왼쪽 메뉴 2단", () => {
   });
 
   test("하위 목차를 누르면 그 항목이 현재가 되고, 같은 항목을 다시 눌러도 스크롤한다", async () => {
-    fake = installFakeFetch(ok);
-    const { container } = app("/data");
+    fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+    const { container } = app("/accounts");
     await flush();
-    const link = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
+    const link = container.querySelector('[data-nav-item="fo-positions"]') as HTMLAnchorElement;
     expect(link.getAttribute("aria-current")).toBeNull();
     act(() => link.click());
     expect(link.getAttribute("aria-current")).toBe("location");
     expect(scroll).toHaveBeenCalledTimes(1);
-    expect((scroll.mock.instances[0] as Element).id).toBe("themes");
+    expect((scroll.mock.instances[0] as Element).id).toBe("fo-positions");
     act(() => link.click());
     expect(scroll).toHaveBeenCalledTimes(2);
     expect(link.getAttribute("aria-current")).toBe("location");
@@ -164,7 +197,7 @@ describe("왼쪽 메뉴 2단", () => {
 
   test("스크롤 입력(wheel)이 오면 눌렀던 항목 대신 보이는 가장 위 섹션을 현재로 표시한다", async () => {
     const OrigIO = globalThis.IntersectionObserver;
-    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 데이터 첫 항목(quotes)
+    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 계좌 첫 항목(overview)
     globalThis.IntersectionObserver = class {
       cb: IntersectionObserverCallback;
       constructor(cb: IntersectionObserverCallback) {
@@ -180,11 +213,11 @@ describe("왼쪽 메뉴 2단", () => {
       }
     } as unknown as typeof IntersectionObserver;
     try {
-      fake = installFakeFetch(ok);
-      const { container } = app("/data");
+      fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+      const { container } = app("/accounts");
       await flush();
-      const regime = container.querySelector(`[data-nav-item="${NAV.data.items[0].id}"]`) as HTMLAnchorElement;
-      const save = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
+      const regime = container.querySelector('[data-nav-item="overview"]') as HTMLAnchorElement;
+      const save = container.querySelector('[data-nav-item="fo-positions"]') as HTMLAnchorElement;
       expect(regime.getAttribute("aria-current")).toBe("location");
       act(() => save.click());
       expect(save.getAttribute("aria-current")).toBe("location");

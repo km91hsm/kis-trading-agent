@@ -128,7 +128,7 @@ def test_news_sse_key_tracks_store(project):
 
 def test_nav_item():
     assert [(n.screen, n.id, n.label, n.order) for n in FEATURE.nav] == [
-        ("data", "news", "뉴스·이벤트", 10)
+        ("data", "news", "뉴스·공시", 10)
     ]
 
 

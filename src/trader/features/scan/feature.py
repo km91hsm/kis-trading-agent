@@ -30,5 +30,5 @@ FEATURE = Feature(
     status_sections=(STATUS_SECTION,),
     routes=ROUTERS,
     sse_keys=SSE_KEYS,
-    nav=(NavItem("data", "themes", "테마·감시목록", 20),),
+    nav=(NavItem("data", "themes", "테마", 20), NavItem("data", "watchlist", "감시목록", 21)),
 )

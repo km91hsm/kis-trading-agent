@@ -296,3 +296,6 @@ def test_sse_keys_follow_old_fingerprints(client, conn):
 def test_evaluation_nav_items():
     assert NavItem("performance", "performance-overview", "성과", 0) in FEATURE.nav
     assert NavItem("performance", "memory", "복기", 20) in FEATURE.nav
+    assert [n.id for n in FEATURE.nav] == [
+        "performance-overview", "compare", "memory", "calibration", "shadow", "rl",
+    ]

@@ -21,6 +21,6 @@ FEATURE = Feature(
     ports=(PORT,),
     routes=ROUTERS,
     sse_keys=SSE_KEYS,
-    nav=(NavItem("data", "news", "뉴스·이벤트", 10),),
+    nav=(NavItem("data", "news", "뉴스·공시", 10),),
     health_areas=(HEALTH,),
 )

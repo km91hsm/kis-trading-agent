@@ -85,11 +85,12 @@ function routes(over: Routes = {}): Routes {
   };
 }
 
-async function mount(r: Routes) {
+type Page = Parameters<typeof Data>[0]["page"];
+async function mount(r: Routes, page: Page = "quotes") {
   ff = installFakeFetch(r);
   const out = render(
     <MemoryRouter initialEntries={["/data"]}>
-      <Data />
+      <Data page={page} />
     </MemoryRouter>,
   );
   await flush();
@@ -123,20 +124,42 @@ async function pickSamsung() {
 }
 
 describe("데이터 화면", () => {
-  test("섹션은 데이터 전에 바로 그려진다", async () => {
+  test("페이지마다 자기 절만 데이터 전에 바로 그린다 — 시세·차트 / 뉴스·공시 / 테마·감시목록 / 지표·모델", async () => {
     ff = installFakeFetch(routes());
-    render(
+    const pagesOf: [Page, string[]][] = [
+      ["quotes", ["quotes"]],
+      ["news", ["news"]],
+      ["themes", ["themes", "watchlist"]],
+      ["features", ["features"]],
+    ];
+    const all = ["quotes", "news", "themes", "watchlist", "features"];
+    for (const [page, ids] of pagesOf) {
+      const { unmount } = render(
+        <MemoryRouter>
+          <Data page={page} />
+        </MemoryRouter>,
+      );
+      for (const id of all) expect(!!section(id), `${page} #${id}`).toBe(ids.includes(id));
+      expect(document.querySelector("h1")!.textContent).toContain("데이터");
+      await flush();
+      unmount();
+    }
+    // 시세·차트 페이지는 뉴스·지표를 부르지 않는다
+    ff.calls.length = 0;
+    const { unmount } = render(
       <MemoryRouter>
-        <Data />
+        <Data page="quotes" />
       </MemoryRouter>,
     );
-    for (const id of ["quotes", "news", "themes", "watchlist", "features"]) expect(section(id)).not.toBeNull();
     await flush();
     await flush();
+    for (const p of ["/news", "/news/events", "/features/latest", "/ml/models", "/settings/watchlist"]) expect(callsTo(p)).toHaveLength(0);
+    expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["시세·차트", "뉴스·공시", "테마·감시목록", "지표·모델"]);
+    unmount();
   });
 
   test("뉴스: 종목 칩은 이름, 「판정에 쓰임」 은 판정 링크, 라벨·이름·refs 를 2차 조회", async () => {
-    await mount(routes());
+    await mount(routes(), "news");
     const news = section("news");
     expect(callsTo("/news")[0].search).toBe("?market=KR&hours=48&limit=100");
     expect(callsTo("/news/labels")[0].searchParams.get("ids")).toBe("101,102");
@@ -157,7 +180,7 @@ describe("데이터 화면", () => {
 
   test("「지금 수집」: POST /jobs {kind: news_collect, params: {market}}", async () => {
     tokenStore.set("tok");
-    await mount(routes({ "POST /api/jobs": { id: 9, kind: "news_collect", params: { market: "KR" }, status: "queued", label: "뉴스 수집" } }));
+    await mount(routes({ "POST /api/jobs": { id: 9, kind: "news_collect", params: { market: "KR" }, status: "queued", label: "뉴스 수집" } }), "news");
     act(() => button(section("news"), "지금 수집").click());
     await act(async () => button(document.querySelector('[role="dialog"]') as HTMLElement, "확인").click());
     await flush();
@@ -166,7 +189,7 @@ describe("데이터 화면", () => {
 
   test("수동 입력: POST /news/manual {market, text, url}", async () => {
     tokenStore.set("tok");
-    await mount(routes());
+    await mount(routes(), "news");
     const news = section("news");
     type(news.querySelector('textarea[aria-label="기사 붙여 넣기"]') as HTMLTextAreaElement, "수동 기사\n메모");
     type(news.querySelector('input[aria-label="URL"]') as HTMLInputElement, "https://m.example/1");
@@ -177,7 +200,7 @@ describe("데이터 화면", () => {
   });
 
   test("감시목록 PATCH 는 토큰이 필요하다 — 없으면 오류 줄, 있으면 {tickers}", async () => {
-    await mount(routes());
+    await mount(routes(), "themes");
     const wl = section("watchlist");
     expect(wl.textContent).toContain("005930");
     type(wl.querySelector('input[aria-label="종목 추가"]') as HTMLInputElement, "AAPL");
@@ -245,9 +268,11 @@ describe("데이터 화면", () => {
   });
 
   test("테마·지표·모델: 정렬(aria-sort)·행 클릭 이력, 활성 모델·잡 버튼", async () => {
-    await mount(routes());
+    const t = await mount(routes(), "themes");
     expect(section("themes").textContent).toContain("반도체");
     expect(section("themes").textContent).toContain("거래량 급증");
+    t.unmount();
+    await mount(routes(), "features");
     const f = section("features");
     const th = f.querySelector('th[data-key="roe"]') as HTMLElement;
     expect(th.getAttribute("aria-sort")).toBe("none");
@@ -267,7 +292,7 @@ describe("데이터 화면", () => {
   test("지표·모델은 SSE features 키로 다시 읽고 market_views 로는 읽지 않는다", async () => {
     const cbs: EventsCallback[] = [];
     setEventsClient({ ...stub, subscribe: (cb) => (cbs.push(cb), () => {}) });
-    await mount(routes());
+    await mount(routes(), "features");
     act(() => (section("features").querySelector("tbody tr") as HTMLElement).click());
     await flush();
     const counts = () => ["/features/latest", "/ml/models", "/features/history"].map((p) => callsTo(p).length);
@@ -285,9 +310,11 @@ describe("데이터 화면", () => {
       routes({
         "GET /api/news": () => new Response(JSON.stringify({ detail: "뉴스 저장소 오류" }), { status: 500, headers: { "Content-Type": "application/json" } }),
       }),
+      "news",
     );
     expect(section("news").textContent).toContain("불러오지 못했습니다");
     expect(section("news").textContent).toContain("뉴스 저장소 오류");
-    expect(section("themes").textContent).toContain("반도체");
+    // 같은 절 안의 공시 표는 그대로
+    expect(section("news").textContent).toContain("주요사항보고서(유상증자결정)");
   });
 });
