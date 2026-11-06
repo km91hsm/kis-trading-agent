@@ -92,7 +92,7 @@ def zscore(s: pd.Series, *, fill: float | None = None) -> pd.Series:
     fill 이 있으면 결측을 그 값으로 채운다 (정량 점수는 0, ML 랭커는 NaN 유지)."""
     s = pd.to_numeric(s, errors="coerce")
     sd = s.std(ddof=0)
-    if not np.isfinite(sd) or sd == 0:
+    if pd.isna(sd) or not np.isfinite(sd) or sd == 0:
         return pd.Series(0.0, index=s.index)
     z = (s - s.mean()) / sd
     return z.fillna(fill) if fill is not None else z

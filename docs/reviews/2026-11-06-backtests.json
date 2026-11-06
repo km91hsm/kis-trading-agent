@@ -1,0 +1,250 @@
+{
+  "KR": {
+    "rows": 149136,
+    "start": "2023-09-06 00:00:00",
+    "end": "2026-10-20 00:00:00",
+    "results": {
+      "h5_cost1": {
+        "summary": {
+          "momentum": {
+            "windows": 150,
+            "mean": 0.004819,
+            "median": -0.001178,
+            "excess_mean": 0.002112,
+            "excess_hit": 0.4867,
+            "t_excess": 0.589
+          },
+          "screen": {
+            "windows": 150,
+            "mean": 0.006372,
+            "median": 0.004623,
+            "excess_mean": 0.003665,
+            "excess_hit": 0.5067,
+            "t_excess": 0.888
+          },
+          "universe_1n": {
+            "windows": 150,
+            "mean": 0.002707,
+            "median": 0.004132,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h5_cost2": {
+        "summary": {
+          "momentum": {
+            "windows": 150,
+            "mean": 0.001819,
+            "median": -0.004178,
+            "excess_mean": 0.002112,
+            "excess_hit": 0.4867,
+            "t_excess": 0.589
+          },
+          "screen": {
+            "windows": 150,
+            "mean": 0.003372,
+            "median": 0.001623,
+            "excess_mean": 0.003665,
+            "excess_hit": 0.5067,
+            "t_excess": 0.888
+          },
+          "universe_1n": {
+            "windows": 150,
+            "mean": -0.000293,
+            "median": 0.001132,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h20_cost1": {
+        "summary": {
+          "momentum": {
+            "windows": 37,
+            "mean": 0.028266,
+            "median": 0.010006,
+            "excess_mean": 0.005334,
+            "excess_hit": 0.4054,
+            "t_excess": 0.349
+          },
+          "screen": {
+            "windows": 37,
+            "mean": 0.016787,
+            "median": -0.016608,
+            "excess_mean": -0.006145,
+            "excess_hit": 0.4054,
+            "t_excess": -0.45
+          },
+          "universe_1n": {
+            "windows": 37,
+            "mean": 0.022932,
+            "median": 0.018242,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h20_cost2": {
+        "summary": {
+          "momentum": {
+            "windows": 37,
+            "mean": 0.025266,
+            "median": 0.007006,
+            "excess_mean": 0.005334,
+            "excess_hit": 0.4054,
+            "t_excess": 0.349
+          },
+          "screen": {
+            "windows": 37,
+            "mean": 0.013787,
+            "median": -0.019608,
+            "excess_mean": -0.006145,
+            "excess_hit": 0.4054,
+            "t_excess": -0.45
+          },
+          "universe_1n": {
+            "windows": 37,
+            "mean": 0.019932,
+            "median": 0.015242,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      }
+    },
+    "limitation": "current-universe historical data, survivorship bias, no PIT filtering"
+  },
+  "US": {
+    "rows": 38539,
+    "start": "2023-10-13 00:00:00",
+    "end": "2026-10-19 00:00:00",
+    "results": {
+      "h5_cost1": {
+        "summary": {
+          "momentum": {
+            "windows": 150,
+            "mean": 0.000456,
+            "median": 6e-06,
+            "excess_mean": 0.00139,
+            "excess_hit": 0.5467,
+            "t_excess": 0.845
+          },
+          "screen": {
+            "windows": 150,
+            "mean": -0.000981,
+            "median": -0.002042,
+            "excess_mean": -4.7e-05,
+            "excess_hit": 0.4867,
+            "t_excess": -0.028
+          },
+          "universe_1n": {
+            "windows": 150,
+            "mean": -0.000934,
+            "median": -3.2e-05,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h5_cost2": {
+        "summary": {
+          "momentum": {
+            "windows": 150,
+            "mean": -0.004544,
+            "median": -0.004994,
+            "excess_mean": 0.00139,
+            "excess_hit": 0.5467,
+            "t_excess": 0.845
+          },
+          "screen": {
+            "windows": 150,
+            "mean": -0.005981,
+            "median": -0.007042,
+            "excess_mean": -4.7e-05,
+            "excess_hit": 0.4867,
+            "t_excess": -0.028
+          },
+          "universe_1n": {
+            "windows": 150,
+            "mean": -0.005934,
+            "median": -0.005032,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h20_cost1": {
+        "summary": {
+          "momentum": {
+            "windows": 37,
+            "mean": 0.011109,
+            "median": 0.018904,
+            "excess_mean": 0.00138,
+            "excess_hit": 0.5405,
+            "t_excess": 0.238
+          },
+          "screen": {
+            "windows": 37,
+            "mean": 0.008088,
+            "median": 0.011166,
+            "excess_mean": -0.001641,
+            "excess_hit": 0.4865,
+            "t_excess": -0.252
+          },
+          "universe_1n": {
+            "windows": 37,
+            "mean": 0.009729,
+            "median": 0.012161,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      },
+      "h20_cost2": {
+        "summary": {
+          "momentum": {
+            "windows": 37,
+            "mean": 0.006109,
+            "median": 0.013904,
+            "excess_mean": 0.00138,
+            "excess_hit": 0.5405,
+            "t_excess": 0.238
+          },
+          "screen": {
+            "windows": 37,
+            "mean": 0.003088,
+            "median": 0.006166,
+            "excess_mean": -0.001641,
+            "excess_hit": 0.4865,
+            "t_excess": -0.252
+          },
+          "universe_1n": {
+            "windows": 37,
+            "mean": 0.004729,
+            "median": 0.007161,
+            "excess_mean": 0.0,
+            "excess_hit": 0.0,
+            "t_excess": null
+          }
+        },
+        "missing_total": 0
+      }
+    },
+    "limitation": "current-universe historical data, survivorship bias, no PIT filtering"
+  }
+}

@@ -83,6 +83,7 @@ def test_memory_source_folds_use_max_decision_horizon(project, conn, monkeypatch
             "fwd_return": [0.01] * 400,
             "source": "memory",
             "horizon_days": [10] * 400,
+            "fwd_date": pd.to_datetime(days) + pd.offsets.BDay(10),
         }
     )
     monkeypatch.setattr(rl_train, "build_steps", lambda *a, **k: steps)
@@ -92,3 +93,15 @@ def test_memory_source_folds_use_max_decision_horizon(project, conn, monkeypatch
         ml_api.check_no_leak(
             days, f["train_end"], f["test_start"], horizon_days=10, embargo_days=5
         )
+
+
+def test_purge_training_labels_with_realization_in_test_period():
+    from datetime import date
+
+    import pandas as pd
+
+    from trader.features.evaluation.rl.train import _purge_labels
+
+    steps = pd.DataFrame({"ticker": ["A", "HALTED", "UNKNOWN"],
+        "fwd_date": [pd.Timestamp("2026-01-09"), pd.Timestamp("2026-02-01"), pd.NaT]})
+    assert _purge_labels(steps, date(2026, 1, 12))["ticker"].tolist() == ["A"]

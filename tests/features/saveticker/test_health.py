@@ -31,7 +31,7 @@ def test_saveticker_stopped_is_warning_and_paused_lane_is_watch(project):
     got = items()
     stopped = got["saveticker.stopped"]
     assert stopped.level == "warning" and "인증 실패" in stopped.text
-    assert stopped.link == "/system#saveticker"
+    assert stopped.link == "/system/features#saveticker"
     atomic_json(runtime / "service.json", {"state": "running"})
     lane = {"community": {"reason": "AccessDenied", "at": NOW.isoformat()}}
     atomic_json(runtime / "lane-blocked.json", lane)
@@ -39,7 +39,7 @@ def test_saveticker_stopped_is_warning_and_paused_lane_is_watch(project):
     assert "saveticker.stopped" not in got
     paused = got["saveticker.lane_paused"]
     assert paused.level == "watch" and "community" in paused.text
-    assert paused.link == "/system#saveticker"
+    assert paused.link == "/system/features#saveticker"
 
 
 def test_saveticker_check_failure_surfaces_as_area_error(project, monkeypatch):
@@ -55,3 +55,9 @@ def test_saveticker_check_failure_surfaces_as_area_error(project, monkeypatch):
     items = _run_area(health.AREA, ctx(project))
     assert [(i.key, i.level) for i in items] == [("saveticker.error", "warning")]
     assert "읽기 실패" in items[0].text
+
+
+def test_disconnected_extension_is_checked_without_credentials(project):
+    atomic_json(paths.home() / "runtime/bridge-config.json", {"backend": "extension"})
+    items = health.check(ctx(project))
+    assert any(i.key == "saveticker.disconnected" and i.level == "warning" for i in items)

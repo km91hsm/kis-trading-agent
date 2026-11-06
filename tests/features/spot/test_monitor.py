@@ -967,3 +967,11 @@ def test_monitor_skips_excluded_hedge_and_park_tickers(conn, settings, ports):
     # regime 포트가 없으면 헤지 ETF 도 일반 보유로 본다(현금 운용 ETF 만 제외)
     ctx2 = _monitor_ctx(s, conn, accounts, brokers, FakeMarket(prices=prices), ports={})
     assert monitor.monitor_once(ctx2, market="KR", today=D)["skipped_excluded"] == 2
+
+
+@pytest.mark.parametrize("price,expected", [("0.109", 0.1057), ("0.005", 0.0049)])
+def test_us_subdollar_stop_limit(price, expected):
+    q = Decimal(price)
+    dec = monitor._stop_loss_decision("LOW", "US", q, Signal("stop_loss", q, {}))
+    assert dec.limit_price == expected
+    assert 0 < Decimal(str(dec.limit_price)) <= q

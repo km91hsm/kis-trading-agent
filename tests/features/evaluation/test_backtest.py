@@ -72,3 +72,14 @@ def test_backtest_hold_hit_is_small_move(project, conn):
     conn.commit()
     r = backtest.simple_backtest(conn, None, since=date(2026, 5, 1))
     assert all(d["hit"] is True for d in r["decisions"]) and "price_return" in r["decisions"][0]
+
+
+def test_held_hold_uses_same_direction_score_before_maturity(project, conn):
+    days = trading_days(10, start=date(2026, 4, 1))
+    _store({"ZZZ": [100, 101, 102, 103, 104, 110, 111, 112, 113, 114]}, days)
+    store.record_decision(conn, decision_id=9001, ticker="ZZZ", market="KR",
+        account_id="paper-main", decided_at="2026-04-01T06:00:00+00:00",
+        decision={"action": "HOLD"}, row=None, horizon_days=5,
+        vector=[0.5] * 12, held_at_decision=True)
+    result = backtest.simple_backtest(conn, project / "state", since=date(2026, 4, 1))
+    assert result["decisions"][0]["realized_return"] == pytest.approx(0.10)
