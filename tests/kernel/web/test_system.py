@@ -373,3 +373,30 @@ def test_usage_throttle_toggle_api(project):
     r = c.patch(url, json={"enabled": None}, headers=AUTH)
     assert r.json() == {"enabled": True, "source": "yaml"}
     assert len(c.get("/api/system/control-log").json()) == 2
+
+
+def test_notices_date_filter_is_kst_day(project):
+    """`date=` 는 KST 하루 [00:00, 24:00) — UTC 로는 전날 15:00 부터. kind 와 같이 쓸 수 있고
+    형식이 틀리면 422."""
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    rows = [
+        ("2026-11-01T14:30:00+00:00", "order", "a"),  # KST 11-01 23:30
+        ("2026-11-01T15:30:00+00:00", "risk", "b"),  # KST 11-02 00:30
+        ("2026-11-02T14:00:00+00:00", "order", "c"),  # KST 11-02 23:00
+        ("2026-11-02T15:00:00+00:00", "order", "d"),  # KST 11-03 00:00
+    ]
+    for at, kind, text in rows:
+        conn.execute(
+            "INSERT INTO notices(at, kind, account_id, text, channel, ok) VALUES (?,?,?,?,?,?)",
+            (at, kind, None, text, "telegram", 1),
+        )
+    conn.commit()
+    conn.close()
+    c = make_client(deps)
+    day = c.get("/api/system/notices", params={"date": "2026-11-02"}).json()
+    assert [r["text"] for r in day] == ["c", "b"]
+    both = c.get("/api/system/notices", params={"date": "2026-11-02", "kind": "order"}).json()
+    assert [r["text"] for r in both] == ["c"]
+    assert c.get("/api/system/notices", params={"date": "2026-13-40"}).status_code == 422
+    assert len(c.get("/api/system/notices").json()) == 4

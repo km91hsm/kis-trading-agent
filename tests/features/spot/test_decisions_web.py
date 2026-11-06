@@ -436,3 +436,16 @@ def test_sse_decisions_fingerprint_sees_same_day_update(client, ledger):
 def test_spot_nav_has_lane_item():
     assert NavItem("today", "spot-lane", "현물", 15) in SPOT.nav
     assert {k.key for k in SPOT.sse_keys} >= {"decisions", "orders", "triggers"}
+
+
+def test_decision_row_summary_is_first_sentence_of_rationale(client, ledger):
+    """목록의 `summary` 는 rationale 첫 문장(첫 줄의 `.`/`!`/`?` + 공백 또는 끝까지) — 전문은
+    상세에. `10.5%` 같은 소수점은 문장 끝이 아니다."""
+    long = "반도체 업황 회복으로 비중 10.5% 제안. 외국인 순매수 지속.\n둘째 줄"
+    _decide(ledger, ticker="005930", rationale=long)
+    _decide(ledger, ticker="000660", rationale="  \n줄바꿈 뒤 첫 줄! 그 다음")
+    _decide(ledger, ticker="035420", rationale="마침표 없는 한 줄")
+    by = {x["ticker"]: x for x in client.get("/api/decisions").json()["items"]}
+    assert by["005930"]["summary"] == "반도체 업황 회복으로 비중 10.5% 제안."
+    assert by["000660"]["summary"] == "줄바꿈 뒤 첫 줄!"
+    assert by["035420"]["summary"] == "마침표 없는 한 줄"

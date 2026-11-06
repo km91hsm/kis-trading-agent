@@ -64,7 +64,7 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
   const accounts = useResource<Account[]>("/accounts", undefined, ["accounts"], { enabled: !log });
   const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"], { enabled: !log });
   const [noticeKind, setNoticeKind] = useState<string | null>(null);
-  const notices = useResource<Notice[]>("/system/notices", noticeKind ? { limit: "200", kind: noticeKind } : { limit: "200" }, ["notices"]);
+  const notices = useResource<Notice[]>("/system/notices", noticeKind ? { ...day, limit: "200", kind: noticeKind } : { ...day, limit: "200" }, ["notices"]);
   const daemon = useResource<Daemon>("/system/daemon", undefined, ["jobs", "runs", "daemon"]); // 현황은 레인 「다음 예정」, 기록은 「다음 할 일」
   const pipeKr = useResource<MarketToday>("/markets/KR/today", day, ["decisions", "jobs"], { enabled: !log });
   const pipeUs = useResource<MarketToday>("/markets/US/today", day, ["decisions", "jobs"], { enabled: !log });
@@ -168,8 +168,10 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
         <h2>결정</h2>
         {decisions.error ? (
           <Empty title="결정을 불러오지 못했습니다">{decisions.error.message}</Empty>
+        ) : !decisions.data ? (
+          <Empty title="불러오는 중" />
         ) : (
-          <DecisionsList items={decisions.data?.items ?? []} partial={!!decisions.data?.partial} date={date} />
+          <DecisionsList items={decisions.data.items} partial={!!decisions.data.partial} date={date} />
         )}
       </section>
 

@@ -10,13 +10,13 @@ import { decisionRows, LANE_LABEL, type Decision, type DecisionRow, type Lane } 
 const COLUMNS: Column<DecisionRow>[] = [
   { key: "at", label: "시각", width: "88px", render: (r) => fmtTime(r.at) },
   { key: "lane", label: "레인", width: "72px", align: "chip", render: (r) => <Chip>{LANE_LABEL[r.lane as Lane] ?? r.lane}</Chip> },
-  { key: "ticker", label: "종목", width: "180px", long: true, render: (r) => (r.href ? <Link to={r.href}>{r.ticker}</Link> : r.ticker) },
+  { key: "ticker", label: "종목", width: "200px", render: (r) => (r.href ? <Link to={r.href}>{r.ticker}</Link> : r.ticker) },
   {
     key: "summary",
     label: "내용",
     width: "auto",
     long: true,
-    render: (r) => (r.summary ? <span title={r.summary}>{r.summary}</span> : "—"),
+    render: (r) => r.summary ?? "—",
   },
   { key: "side", label: "방향", width: "64px" },
   { key: "qty", label: "수량", width: "72px", align: "num", render: (r) => (r.qty ?? "—").toString() },

@@ -268,6 +268,25 @@ describe("오늘 화면", () => {
     expect(holdRow.textContent).toContain("밸류에이션 부담, 관망");
   });
 
+  test("결정이 오기 전에는 결정 절에 「불러오는 중」 — 「이 날 결정이 없습니다」가 아니다", async () => {
+    await mount(routes({ "GET /api/decisions": () => new Promise(() => {}) }));
+    const dec = section("decisions");
+    expect(dec.textContent).toContain("불러오는 중");
+    expect(dec.textContent).not.toContain("이 날 결정이 없습니다");
+  });
+
+  test("결정 표의 「내용」 칸이 말줄임(long) 열이고 종목 칸은 아니다 — 긴 요약이 행을 여러 줄로 늘리지 않게", async () => {
+    const long = "반도체 업황 회복으로 비중 확대를 제안하며 외국인 순매수와 실적 상향이 이어지고 있어 상승 여력이 남아 있다고 본다";
+    await mount(routes({ "GET /api/decisions": merged([fixtureSpotDecision({ id: 7, name: "삼성전자", summary: long })]) }));
+    const dec = section("decisions");
+    const heads = Array.from(dec.querySelectorAll("thead th"));
+    const longHeads = heads.filter((th) => th.classList.contains("cell-long")).map((th) => th.textContent);
+    expect(longHeads).toEqual(["내용"]);
+    const cell = dec.querySelector("tbody td.cell-long") as HTMLElement;
+    expect(cell.querySelector(".cell-ellipsis")!.textContent).toBe(long);
+    expect(cell.getAttribute("title")).toBe(long);
+  });
+
   test("승인 카드의 종목은 코드+이름", async () => {
     await mount(routes({ "GET /api/approvals": { approvals: [fixtureApproval({ name: "삼성전자" })] } }));
     expect(section("approvals").querySelector(".approval-head strong")!.textContent).toBe("005930 삼성전자");
@@ -307,6 +326,20 @@ describe("배치", () => {
     expect(container.querySelector("h1")?.textContent).toBe("오늘 · 기록");
     expect(container.querySelector('input[type="date"]')).not.toBeNull();
     expect(ff!.calls.map((c) => c.url)).not.toContain("/api/decisions?date=" + new Date().toISOString().slice(0, 10));
+  });
+
+  test("알림도 고른 날짜로 부른다(/system/notices?date=) — 「오늘 요약」 알림 수가 그날 건수가 되게", async () => {
+    ff = installFakeFetch(routes({ "GET /api/system/notices": [fixtureNotice()] }));
+    render(
+      <MemoryRouter initialEntries={["/?date=2026-11-04"]}>
+        <Today />
+      </MemoryRouter>,
+    );
+    await flush();
+    const urls = ff!.calls.map((c) => new URL(c.url, "http://x")).filter((u) => u.pathname === "/api/system/notices");
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.at(-1)!.searchParams.get("date")).toBe("2026-11-04");
+    expect(urls.at(-1)!.searchParams.get("limit")).toBe("200");
   });
 
   test("날짜는 ?date= 로 두 페이지가 같이 쓴다 — /?date=2026-11-04 로 들어오면 그 날을 읽고, 고르면 주소가 바뀐다", async () => {

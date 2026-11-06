@@ -109,6 +109,21 @@ describe("왼쪽 메뉴 2단", () => {
     expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["현황", "기록"]);
   });
 
+  test("오늘 메뉴의 현황·기록 링크는 고른 날짜(?date=)를 유지한다 — 데스크톱(≥1280)은 메뉴가 유일한 전환 수단", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/approvals": { approvals: [] }, "GET /api/accounts": [fixtureAccount()] });
+    const a = app("/log?date=2026-11-03");
+    await flush();
+    const links = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => [e.getAttribute("data-nav-item"), e.getAttribute("href")]);
+    expect(links).toEqual([["today", "/?date=2026-11-03"], ["log", "/log?date=2026-11-03"]]);
+    expect(a.container.querySelector('[data-nav-item="log"]')?.getAttribute("aria-current")).toBe("page");
+    a.unmount();
+    // 시스템의 ?page= 는 페이지 자체라 다른 페이지 링크로 옮기지 않는다.
+    const b = app("/system/jobs?page=2");
+    await flush();
+    const sys = Array.from(b.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("href"));
+    expect(sys).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
+  });
+
   test("시스템 화면의 하위 메뉴는 절 앵커가 아니라 페이지 4개(상태·잡·기능·관리)이고, 페이지마다 자기 절만 그린다", async () => {
     fake = installFakeFetch(ok);
     const a = app("/system");

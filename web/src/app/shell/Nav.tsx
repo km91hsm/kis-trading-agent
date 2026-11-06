@@ -163,7 +163,10 @@ function NavFoot() {
 }
 
 export function Nav() {
-  const { pathname, hash, key } = useLocation();
+  const { pathname, hash, key, search } = useLocation();
+  // 페이지 링크는 고른 날짜(?date=)만 같이 옮긴다 — ?page= 같은 페이지 자체의 상태는 옮기지 않는다.
+  const keepDate = new URLSearchParams(search).get("date");
+  const pageTo = (path: string) => (keepDate ? `${path}?date=${keepDate}` : path);
   const groups = navGroups();
   const active = screenOf(pathname);
   const detail = detailOf(pathname);
@@ -197,7 +200,7 @@ export function Nav() {
                 <ul className="nav-items">
                   {pages.map((p) => (
                     <li key={p.id}>
-                      <Link to={p.path} className="nav-item" data-nav-item={p.id} aria-current={pathname === p.path ? "page" : undefined}>
+                      <Link to={pageTo(p.path)} className="nav-item" data-nav-item={p.id} aria-current={pathname === p.path ? "page" : undefined}>
                         {p.label}
                       </Link>
                     </li>

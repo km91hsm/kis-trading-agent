@@ -46,6 +46,19 @@ RESEARCH_KEYS = (
 # --- 공통 ---------------------------------------------------------------------------------
 
 
+_SENTENCE_END = re.compile(r"^(.*?[.!?])(?=\s|$)")
+
+
+def first_sentence(text: str | None) -> str | None:
+    """rationale 의 첫 문장 — 첫 비어 있지 않은 줄에서 `.`/`!`/`?` + 공백(또는 끝)까지.
+    `10.5%` 같은 소수점은 공백이 안 따르므로 문장 끝이 아니다. 없으면 None."""
+    line = next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "")
+    if not line:
+        return None
+    m = _SENTENCE_END.match(line)
+    return m.group(1) if m else line
+
+
 def parse_date(value: str | None) -> date | None:
     """`YYYY-MM-DD` → date (빈 값 None). 형식 오류는 ValueError."""
     return date.fromisoformat(value) if value else None
@@ -144,7 +157,7 @@ def _decision_row(conn: sqlite3.Connection, r: sqlite3.Row, account_id: str | No
         "side": side_of(r["action"]),
         **_order_state(conn, r["id"], account_id),
         "at": r["created_at"], "lane": "spot", "action": r["action"],
-        "summary": r["rationale"] or None,
+        "summary": first_sentence(r["rationale"]),
         "target_weight": r["target_weight"], "confidence": r["confidence"],
         "source": r["source"],
     }  # fmt: skip

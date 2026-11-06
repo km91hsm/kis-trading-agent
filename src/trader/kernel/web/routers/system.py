@@ -9,6 +9,7 @@ import json
 import threading
 import time
 from contextlib import closing
+from datetime import date as _date
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.heartbeat import read_status
+from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger.control import delete_flag, get_flag, log_change, set_flag
 from trader.kernel.notify import commands
 from trader.kernel.notify.commands import CommandContext
@@ -178,13 +180,24 @@ def bootstrap_token(request: Request) -> dict:
 
 @router.get("/notices")
 def notices(
-    request: Request, limit: int = Query(50, ge=1, le=500), kind: str | None = None
+    request: Request,
+    limit: int = Query(50, ge=1, le=500),
+    kind: str | None = None,
+    date: str | None = Query(None, alias="date"),
 ) -> list[dict]:
-    """보낸 알림 기록(최신 순). ok 는 전달 성공 여부."""
-    sql, args = "SELECT * FROM notices", []
+    """보낸 알림 기록(최신 순). ok 는 전달 성공 여부. `date`(YYYY-MM-DD) 는 KST 하루."""
+    where, args = [], []
     if kind:
-        sql += " WHERE kind = ?"
+        where.append("kind = ?")
         args.append(kind)
+    if date:
+        try:
+            lo, hi = day_bounds(_date.fromisoformat(date), "KR")
+        except ValueError:
+            raise HTTPException(422, "date 는 YYYY-MM-DD") from None
+        where.append("at >= ? AND at < ?")
+        args += [lo, hi]
+    sql = "SELECT * FROM notices" + (" WHERE " + " AND ".join(where) if where else "")
     with closing(_deps(request).conn_factory()) as conn:
         rows = conn.execute(sql + " ORDER BY at DESC, id DESC LIMIT ?", [*args, limit]).fetchall()
     return [{**dict(r), "ok": bool(r["ok"])} for r in rows]
