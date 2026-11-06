@@ -2,6 +2,8 @@ const $ = id => document.getElementById(id);
 const errors = { api_contract_unverified: '이 항목의 API 요청 조건이 아직 확인되지 않았습니다', api_request_failed: 'API 응답 또는 저장을 확인하지 못했습니다', window_minimized: '전용 Chrome 창을 복원한 뒤 기다려 주세요', tab_activation_failed: '전용 탭을 활성화하지 못했습니다', selection_unverified: '화면의 선택 상태를 확인하지 못했습니다', begin_failed: '수집 작업을 시작하지 못했습니다', lane_busy: '이전 수집 작업의 종료를 기다립니다', state_failed: '호스트에 진행 상태를 전달하지 못했습니다', navigation_failed: '전용 탭을 열지 못했습니다', content_unavailable: '전용 탭의 화면에 연결하지 못했습니다', snapshot_failed: '화면의 선택 상태 또는 저장 요청을 확인하지 못했습니다', postprocess_failed: '수집 후 처리를 마치지 못했습니다', job_release_failed: '실패한 수집 작업을 정리하지 못했습니다', native_tick_failed: '호스트 연결을 확인해 주세요' };
 const pdfStates = { api_fetching: 'PDF 응답 확인 중', api_failed: 'PDF 수집 또는 저장 응답 미확인', button_unverified: '일치하는 PDF 버튼 하나를 확인하지 못했습니다', candidate_missing: 'PDF 버튼에서 파일 주소가 전달되지 않았습니다', handoff_aborted: 'PDF 연결이 취소되었습니다', waiting_hook: 'PDF 연결 준비 중', hook_not_ready: 'PDF 연결 도우미가 준비되지 않았습니다', url_unverified: 'PDF 주소를 확인하지 못했습니다', starting: 'PDF 다운로드 시작 중', downloading: 'PDF 다운로드 중', saved: 'PDF 저장 완료', download_start_failed: 'PDF 다운로드를 시작하지 못했습니다', download_interrupted: 'PDF 다운로드가 중단되었습니다', native_failed: 'PDF 저장 검증을 통과하지 못했습니다', filename_unverified: 'PDF 파일명을 확인하지 못했습니다', pdf_begin_busy: 'PDF 발급 대기: 이전 요청의 유효 시간이 남아 있습니다', pdf_begin_unknown_report: 'PDF 발급 실패: 현재 리포트를 확인하지 못했습니다', pdf_begin_cached: 'PDF 발급 생략: 이미 저장된 파일입니다', pdf_begin_failed: 'PDF 발급 단계에서 실패했습니다', pdf_save_ticket: 'PDF 저장 실패: 발급된 다운로드 요청을 확인하지 못했습니다', pdf_save_path: 'PDF 저장 실패: 발급된 파일 경로를 확인하지 못했습니다', pdf_save_invalid: 'PDF 저장 실패: 유효한 PDF 파일이 아닙니다', pdf_save_failed: 'PDF 저장 검증 단계에서 실패했습니다' };
 const laneNames = { news: '뉴스', community: '커뮤니티', market: '증시', background: '캘린더·리포트' };
+Object.assign(errors, { invalid_pdf_path: 'PDF 저장 경로를 확인하지 못했습니다', invalid_pdf_ticket: 'PDF 저장 요청이 만료됐거나 일치하지 않습니다', invalid_pdf: '유효한 PDF 파일이 아닙니다', api_response_unverified: '응답 형식·상태를 확인하지 못했습니다', api_shape_unverified: '데이터 구조를 확인하지 못했습니다', api_context_unverified: '기본 그룹을 확인하지 못했습니다', api_detail_unverified: '본문 응답을 확인하지 못했습니다', api_source_unverified: '출처를 확인하지 못했습니다', api_basis_unverified: '실시간·정규장 기준을 확인하지 못했습니다', api_regular_unverified: '정규장 기준을 확인하지 못했습니다', api_pdf_unverified: 'PDF 응답을 확인하지 못했습니다', api_response_too_large: '응답 크기 제한을 넘었습니다', api_busy: '이전 응답 처리를 기다립니다', api_content_unavailable: '전용 탭 응답이 없습니다', api_already_prepared: '이미 준비된 작업입니다', invalid_job: '작업이 만료됐거나 일치하지 않습니다', invalid_message: '호스트 메시지를 확인하지 못했습니다', snapshot_too_large: '저장 크기 제한을 넘었습니다', unknown_stream: '수집 항목을 확인하지 못했습니다' });
+const stages = { begin: '작업 발급', fetch: '응답 수신', prepare: '본문 준비', detail: '본문 수신', snapshot: '데이터 저장', pdf: 'PDF 처리', download: '파일 다운로드', save: '파일 저장' };
 async function render() {
     const s = await chrome.storage.local.get(null);
     const knownVersion = typeof s.workerVersion === 'string' && /^\d+\.\d+\.\d+$/.test(s.workerVersion);
@@ -43,10 +45,17 @@ async function render() {
             const code = s[key];
             if (errors[code]) {
                 const li = document.createElement('li');
-                li.textContent = name + ': ' + errors[code] + ' (' + code + ')';
+                const stage = s.backend === 'api' && key === 'lane_error_' + lane ? stages[s['lane_error_stage_' + lane]] : null;
+                li.textContent = name + (typeof stage === 'string' ? ' · ' + stage : '') + ': ' + errors[code] + ' (' + code + ')';
                 $('diagnostics').append(li);
             }
         }
+    }
+    if (s.pdfState === 'api_failed') {
+        const li = document.createElement('li'), code = Object.hasOwn(errors, s.pdfError) ? s.pdfError : 'api_request_failed';
+        const stage = stages[s.pdfErrorStage];
+        li.textContent = 'PDF' + (typeof stage === 'string' ? ' · ' + stage : '') + ': ' + errors[code] + ' (' + code + ')';
+        $('diagnostics').append(li);
     }
     if (!$('diagnostics').children.length) {
         const li = document.createElement('li');

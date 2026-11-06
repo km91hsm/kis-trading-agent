@@ -1,7 +1,7 @@
 import { maintainMinimized } from './minimized.js';
 import { recoverRecheck } from './recheck.js';
 import { beginHtmlTrial, htmlTrialStep, htmlTrialTerminal, HTML_TRIAL_MS } from './html-refresh.js';
-import { apiCycle, abortApi } from './api-runner.js';
+import { apiCycle, abortApi, apiErrorCode } from './api-runner.js';
 import { LANES, Scheduler, laneFor, marker, ownedLane, safePage, PdfPair } from './core.js';
 const WORKER_VERSION = '1.4.0';
 const scheduler = new Scheduler(), pdf = new PdfPair(), reportAttempts = new Map();
@@ -151,6 +151,7 @@ async function finishPdf(item, expected = pdf.pending) {
         releaseHandoff(pair.nonce);
     if (!enabled || !port || pending.cancelled || pending.epoch !== epoch)
         return;
+    pending.diagnosticStage = 'save';
     try {
         await request('pdf', { item_id: pair.item_id, ticket: pair.ticket, download_name: pair.download_name });
         if (enabled && pending.epoch === epoch && !pending.cancelled && !pdf.pending) {
@@ -159,6 +160,7 @@ async function finishPdf(item, expected = pdf.pending) {
         } else pending.resolve?.(false);
     }
     catch (error) {
+        pending.diagnosticError = apiErrorCode(error);
         pending.resolve?.(false);
         if (enabled && pending.epoch === epoch && !pending.cancelled && !pdf.pending)
             await store({ pdfState: nativePdfState('save', error) });
@@ -362,21 +364,23 @@ async function apiPdf(item, tab, runEpoch) {
     const nonce = ticket.job_id;
     pdf.begin({ ...ticket, item_id: item.id, direct: true, nonce, tabId: tab.id, ownerToken: token, epoch: runEpoch, cancelled: false });
     const pending = pdf.pending;
-    let timer = null;
+    let timer = null, stage = 'fetch';
     const completed = new Promise(resolve => { pending.resolve = resolve; });
     handoffReleases.set(nonce, { tabId: tab.id, token, pending, api: true, timer: null });
     try {
-        await store({ pdfState: 'api_fetching' });
+        await store({ pdfState: 'api_fetching', pdfError: null, pdfErrorStage: null });
         await new Promise(resolve => setTimeout(resolve, 2000));
         if (!currentPdf(pending)) return;
         const captured = await command(tab.id, { type: 'api_fetch', token, job: ticket });
         if (!currentPdf(pending)) return;
         if ([401, 403, 429].includes(captured?.status)) { discardPdf(pending); return captured; }
-        if (captured?.error || captured?.status !== 200 || captured.url !== ticket.request.url || captured.nonce !== nonce || captured.content_type !== 'application/pdf') throw Error('api_pdf_unverified');
+        if (captured?.error) throw Error(captured.error);
+        if (captured?.status !== 200 || captured.url !== ticket.request.url || captured.nonce !== nonce || captured.content_type !== 'application/pdf') throw Error('api_pdf_unverified');
         const url = new URL(captured.blob_url);
         if (url.protocol !== 'blob:' || url.origin !== 'https://www.saveticker.com') throw Error('api_pdf_unverified');
         pdf.expect(url.href);
         if (!currentPdf(pending)) return;
+        stage = 'download';
         const id = await chrome.downloads.download({ url: url.href, filename: 'SaveTicker/' + ticket.download_name, conflictAction: 'uniquify', saveAs: false });
         if (!currentPdf(pending)) { await cancelOwnedDownload(id); return; }
         pdf.bind(id);
@@ -391,8 +395,8 @@ async function apiPdf(item, tab, runEpoch) {
         const [download] = await chrome.downloads.search({ id });
         if (download?.state === 'complete') await finishPdf(download, pending);
         if (!await completed && enabled && runEpoch === epoch) throw Error('api_pdf_failed');
-    } catch {
-        if (enabled && runEpoch === epoch) await store({ pdfState: 'api_failed' });
+    } catch (error) {
+        if (enabled && runEpoch === epoch) await store({ pdfState: 'api_failed', pdfError: pending.diagnosticError || apiErrorCode(error), pdfErrorStage: pending.diagnosticStage || stage });
         throw Error('api_pdf_failed');
     } finally {
         clearTimeout(timer);

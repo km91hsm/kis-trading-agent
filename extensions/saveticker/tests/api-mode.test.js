@@ -40,6 +40,21 @@ function runner(response={status:200,url:URL_NEWS,content_type:'application/json
  const deps={wait:async()=>{},token:TOKEN,active:()=>current,store:async v=>Object.assign(state,v),blockHost:async()=>{blocked=true;},scheduler:{next:(_now,lane)=>views.find(v=>v.kind===lane),done:(...x)=>done.push(x),snapshot:()=>({})},request:async(type,body)=>{calls.push({type,...body});if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor,view:views[0],expires_at:new Date(Date.now()+60000).toISOString()};return {count:0,status:'partial'};},chrome:{tabs:{query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],sendMessage:async()=>{if(opts.stop)current=false;return response;}},windows:{update:()=>{throw Error('focus forbidden');}}},...opts.deps};
  return {run:()=>apiCycle(deps),calls,state,done,isBlocked:()=>blocked};
 }
+test('API failures retain a fixed cause and stage without saving arbitrary exception text', async () => {
+ for (const [cause, expected] of [['api_shape_unverified', 'api_shape_unverified'], ['PRIVATE https://secret.test?token=secret', 'api_request_failed']]) {
+  const r=runner(undefined,{deps:{request:async type=>{
+   if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor};
+   if(type==='api_prepare')throw Error(cause);
+  }}});
+  await r.run();
+  assert.equal(r.state.lane_error_news,expected);
+  assert.equal(r.state.lane_error_stage_news,'prepare');
+  assert.ok(!JSON.stringify(r.state).includes('PRIVATE'));
+ }
+ const r=runner({error:'api_response_unverified'});await r.run();
+ assert.equal(r.state.lane_error_news,'api_response_unverified');
+ assert.equal(r.state.lane_error_stage_news,'fetch');
+});
 test('API cycle never focuses/activates, saves only current job and preserves partial',async()=>{
  const r=runner();await r.run();assert.ok(r.calls.some(c=>c.type==='api_snapshot'));assert.equal(r.state.lane_news,'API 부분 수집 · 0개');
  const stale=runner(undefined,{stop:true});await stale.run();assert.ok(!stale.calls.some(c=>c.type==='api_snapshot'));

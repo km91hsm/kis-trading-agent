@@ -35,3 +35,22 @@ test('popup restores resume after start and repeated resume, and identifies cach
     assert.equal(get('resume').disabled, false);
     dom.window.close();
 });
+test('popup shows API failure stage and never reports no errors for a failed PDF', async () => {
+    const dom = new JSDOM(fs.readFileSync(new URL('../popup.html', import.meta.url), 'utf8'), { runScripts: 'outside-only' });
+    const state = { backend: 'api', pdfState: 'api_failed', pdfError: 'api_response_unverified', pdfErrorStage: 'fetch', lane_error_news: 'api_shape_unverified', lane_error_stage_news: 'prepare' };
+    let render;
+    dom.window.chrome = { storage: { local: { get: async () => ({ ...state }) }, onChanged: { addListener(fn) { render=fn; } } } };
+    dom.window.eval(fs.readFileSync(new URL('../popup.js', import.meta.url), 'utf8'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const diagnostics = () => dom.window.document.getElementById('diagnostics').textContent;
+    assert.match(diagnostics(), /api_shape_unverified/);
+    assert.match(diagnostics(), /본문 준비/);
+    assert.match(diagnostics(), /PDF.*응답 수신.*api_response_unverified/);
+    assert.doesNotMatch(diagnostics(), /오류가 없습니다/);
+    state.backend='dom';state.lane_error_news='content_unavailable';await render();assert.doesNotMatch(diagnostics(), /본문 준비/);
+    state.pdfError='PRIVATE secret';state.pdfErrorStage='PRIVATE secret';state.lane_error_stage_news='PRIVATE secret';
+    await render();
+    assert.doesNotMatch(diagnostics(), /PRIVATE/);
+    assert.doesNotMatch(diagnostics(), /오류가 없습니다/);
+    dom.window.close();
+});
