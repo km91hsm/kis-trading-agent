@@ -147,6 +147,7 @@ export function fixtureRlShadow() {
     model_version: "rl-007",
     ticker: "005930",
     market: "KR",
+    name: "삼성전자",
     decision_date: "2026-11-05",
     llm_weight: 0.08,
     proposed_weight: 0.06,

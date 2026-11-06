@@ -140,7 +140,7 @@ export function normalizeTrace(asset: "spot" | "fo", raw: unknown): TraceResp {
         signal: strOrNull(a.signal),
         confidence: typeof a.confidence === "number" ? a.confidence : null,
         summary: strOrNull(a.summary),
-        evidence: Array.isArray(a.evidence) ? a.evidence.map(String) : [],
+        evidence: Array.isArray(a.evidence) ? a.evidence.filter((x: unknown) => x != null).map(String) : [],
       })),
       debate: [],
       research: null,
@@ -165,7 +165,7 @@ export function normalizeTrace(asset: "spot" | "fo", raw: unknown): TraceResp {
       data: { target_weight: dec.target_weight, confidence: dec.confidence, horizon_days: dec.horizon_days, ...data },
     },
     quote: strOrNull(r.quote),
-    analysts: arr(r.analysts).map((a) => ({ ...a, evidence: Array.isArray(a.evidence) ? a.evidence.map(String) : [] }) as TraceAnalyst),
+    analysts: arr(r.analysts).map((a) => ({ ...a, evidence: Array.isArray(a.evidence) ? a.evidence.filter((x: unknown) => x != null).map(String) : [] }) as TraceAnalyst),
     debate: arr(r.debate).map((d) => {
       const t = d.timing;
       const obj = isObj(t) ? t : null;

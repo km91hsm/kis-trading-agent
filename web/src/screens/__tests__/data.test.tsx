@@ -1,5 +1,5 @@
 import { act } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { useLocation, MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const m = vi.hoisted(() => {
@@ -102,6 +102,10 @@ async function mount(r: Routes, page: Page = "quotes", path = "/data") {
   return out;
 }
 const section = (id: string) => document.getElementById(id) as HTMLElement;
+function LocationProbe() {
+  const { search } = useLocation();
+  return <i data-search={search} />;
+}
 const callsTo = (path: string, method = "GET") =>
   ff!.calls.filter((c) => (c.init?.method ?? "GET").toUpperCase() === method).map((c) => new URL(c.url, "http://localhost")).filter((u) => u.pathname === `/api${path}`);
 const bodiesTo = (path: string, method: string) =>
@@ -459,6 +463,24 @@ describe("데이터 화면", () => {
     expect(callsTo("/quotes/book")).toHaveLength(0);
   });
 
+  test("시장을 바꾸면 고른 차트도 내린다(US AAPL 차트에 KR 호가를 붙이지 않는다)", async () => {
+    await mount(routes({ "GET /api/names/search": [{ market: "US", ticker: "AAPL", name: "Apple", exchange: "NAS", source: "master" }] }));
+    const q = section("quotes");
+    const seg = document.querySelector("[data-market-segment]") as HTMLElement;
+    act(() => Array.from(seg.querySelectorAll("button")).find((b) => b.textContent === "US")!.click());
+    await flush();
+    type(q.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement, "AAPL");
+    act(() => button(q, "검색").click());
+    await flush();
+    act(() => button(q, "Apple AAPL").click());
+    await flush();
+    expect(q.querySelector("[data-chart-interval]")).not.toBeNull();
+    act(() => Array.from(seg.querySelectorAll("button")).find((b) => b.textContent === "KR")!.click());
+    await flush();
+    expect(q.querySelector("[data-chart-interval]")).toBeNull();
+    expect(callsTo("/quotes/book")).toHaveLength(0);
+  });
+
   test("테마·지표·모델: 정렬(aria-sort)·행 클릭 이력, 활성 모델·잡 버튼", async () => {
     const t = await mount(routes(), "themes");
     expect(section("themes").textContent).toContain("반도체");
@@ -493,6 +515,27 @@ describe("데이터 화면", () => {
     expect(f.textContent).toContain("활성 20261101_120000");
     expect(f.textContent).toContain("판정 보조 신호로만 쓴다");
     for (const label of ["지표 스냅샷", "파생 지표 계산", "지표 백필"]) expect(button(f, label)).toBeDefined();
+  });
+
+  test("지표 이력 제목은 코드+이름, 정렬을 바꾸면 ?page 를 1쪽으로", async () => {
+    ff = installFakeFetch(routes());
+    render(
+      <MemoryRouter initialEntries={["/data/features?page=2"]}>
+        <Data page="features" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    await flush();
+    await flush();
+    const f = section("features");
+    expect(document.querySelector("[data-search]")!.getAttribute("data-search")).toBe("?page=2");
+    act(() => (f.querySelector('th[data-key="roe"] button') as HTMLButtonElement).click());
+    await flush();
+    expect(document.querySelector("[data-search]")!.getAttribute("data-search")).toBe("");
+    const samsung = Array.from(f.querySelectorAll("tbody tr")).find((tr) => tr.textContent?.includes("005930")) as HTMLElement;
+    act(() => samsung.click());
+    await flush();
+    expect(f.querySelector(".data-history h3")!.textContent).toBe("005930 삼성전자 이력(120일)");
   });
 
   test("모델 행을 펼치면 /ml/models/{version} — 학습 기간·행·피처 수·지표 Stats + 중요도 표", async () => {

@@ -8,6 +8,7 @@ import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { fmtDate, fmtInt, fmtPct, fmtWhen } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
+import { tickerLabel } from "../../lib/ticker";
 import { usePaged } from "../../lib/usePaged";
 import { body } from "./ResourceView";
 import { SHADOW_KEYS, shadowLabel, shadowRows, shadowSummary, type Shadow, type ShadowRow } from "./performance.ts";
@@ -61,6 +62,7 @@ export type RlShadowRow = {
   model_version: string | null;
   ticker: string | null;
   market: string | null;
+  name: string | null;
   decision_date: string | null;
   llm_weight: number | null;
   proposed_weight: number | null;
@@ -157,7 +159,7 @@ export function RlShadowTable({ data }: { data: RlShadow }) {
   const paged = usePaged(data.rows, 30, "spage");
   const columns: Column<RlShadowRow>[] = [
     { key: "created_at", label: "시각", width: "14%", render: (r) => fmtWhen(r.created_at) },
-    { key: "ticker", label: "종목", width: "16%", long: true, render: (r) => (r.ticker ? `${r.ticker}${r.market ? ` · ${r.market}` : ""}` : "—") },
+    { key: "ticker", label: "종목", width: "16%", long: true, render: (r) => (r.ticker ? `${tickerLabel(r.ticker, r.name)}${r.market ? ` · ${r.market}` : ""}` : "—") },
     { key: "model", label: "모델", width: "14%", render: (r) => r.model_version ?? "—" },
     { key: "weights", label: "비중 LLM / RL", width: "16%", align: "num", render: (r) => `${fmtPct(r.llm_weight)} / ${fmtPct(r.proposed_weight)}` },
     { key: "applied", label: "적용", width: "10%", align: "chip", render: (r) => <Chip tone={r.applied ? "ok" : "muted"}>{r.applied ? "적용" : "제안만"}</Chip> },

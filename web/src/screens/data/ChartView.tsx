@@ -57,14 +57,15 @@ export function ChartView() {
   const deep = (sp.get("ticker") ?? "").trim(); // 뉴스 「차트 보기」 딥링크
   const [text, setText] = useState(deep);
   const [q, setQ] = useState(deep);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const prevMarket = useRef(market);
   useEffect(() => {
-    // 시장이 바뀌면 검색 결과는 뜻이 없다(첫 마운트는 딥링크 q 를 지키려 건너뜀)
+    // 시장이 바뀌면 검색 결과도 고른 차트도 뜻이 없다(첫 마운트는 딥링크 q 를 지키려 건너뜀)
     if (prevMarket.current === market) return;
     prevMarket.current = market;
     setQ("");
+    setPicked(null);
   }, [market]);
-  const [picked, setPicked] = useState<Picked | null>(null);
   const searchParams = useMemo(() => ({ q, market }), [q, market]);
   const search = useResource<NameHit[]>("/names/search", searchParams, [], { enabled: !!q });
   // 딥링크 코드로 검색한 결과가 오면 정확히 그 코드인 종목을 바로 연다(없으면 코드만으로).
