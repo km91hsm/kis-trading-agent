@@ -175,7 +175,12 @@ def test_build_rejects_job_with_unregistered_gate(project):
               markets=deps.markets, ctx=deps)  # fmt: skip
 
 
-def test_run_closes_stale_running_calls(project):
+def test_run_closes_stale_running_calls(project, monkeypatch):
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    # 기동 정리만 검증한다. 실제 시계가 과거 fixture의 잡을 즉시 실행하지 않게 한다.
+    real_start = BackgroundScheduler.start
+    monkeypatch.setattr(BackgroundScheduler, "start", lambda self: real_start(self, paused=True))
     now = datetime(2026, 10, 10, 1, 0, tzinfo=UTC)
     deps = make_deps(project, now)
     conn = deps.conn_factory()
@@ -198,7 +203,7 @@ def test_run_closes_stale_running_calls(project):
     try:
         assert d.start(install_signals=False) is True
     finally:
-        d.shutdown(wait=False)
+        d.shutdown(wait=True)
     conn = deps.conn_factory()
     rows = conn.execute("SELECT status, error FROM agent_calls ORDER BY id").fetchall()
     conn.close()
