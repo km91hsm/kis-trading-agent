@@ -31,7 +31,7 @@ export function DecisionsList({ items, partial, date }: { items: Decision[]; par
       rows={decisionRows(items)}
       rowKey={(r) => r.key}
       partial={partial}
-      csvHref={csvUrl("/decisions", { date })}
+      csvHref={items.length ? csvUrl("/decisions", { date }) : undefined}
       empty="이 날 결정이 없습니다"
     />
   );

@@ -108,7 +108,7 @@ describe("오늘 화면 ② — 주문·체결·알림·다음 할 일", () => {
     await flush();
     const urls = ff!.calls.map((c) => new URL(c.url, "http://x")).filter((u) => u.pathname === "/api/system/notices");
     expect(urls.at(-1)!.searchParams.get("kind")).toBe("approval");
-    expect(urls.at(-1)!.searchParams.get("limit")).toBe("50");
+    expect(urls.at(-1)!.searchParams.get("limit")).toBe("200");
     expect(section("notices").querySelectorAll(".notice-row")).toHaveLength(1);
     // 필터 중에도 칩 목록은 유지되고, 누른 칩이 눌림 상태
     const after = Array.from(section("notices").querySelectorAll<HTMLButtonElement>("button[data-notice-kind]"));

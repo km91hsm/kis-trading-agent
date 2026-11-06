@@ -209,6 +209,38 @@ export function timeline(orders: Order[]): TimelineLine[] {
   return out.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
 }
 
+// ── 오늘 요약·레인 다음 예정 ────────────────────────────────────────────────────
+export type TodaySummary = { decisions: number; orders: number; fills: number; failed: number; notices: number };
+const FAILED_ORDER = new Set(["failed", "rejected", "cancelled"]);
+
+/** 화면 머리 KPI: 결정·주문·체결(filled 또는 체결 수량 > 0)·실패(실패·거절·취소)·알림 건수. */
+export function todaySummary(decisions: Decision[], orders: Order[], notices: Pick<Notice, "id">[]): TodaySummary {
+  return {
+    decisions: decisions.length,
+    orders: orders.length,
+    fills: orders.filter((o) => o.status === "filled" || (o.filled_qty ?? 0) > 0).length,
+    failed: orders.filter((o) => FAILED_ORDER.has(o.status)).length,
+    notices: notices.length,
+  };
+}
+
+/** 레인 카드 「다음 예정」에 보이는 사용자 잡 — 분 단위 감시(monitor·fo_monitor)·내부 틱은 뺀다. */
+const LANE_NEXT_KINDS: Record<Lane, string[]> = {
+  spot: ["scan_analyze", "rebalance", "daily_report", "reflect", "briefing"],
+  scalp: ["scalp"],
+  fo: ["fo_session", "fo_reconcile"],
+};
+
+/** 레인의 사용자 잡 중 가장 이른 next_at(없으면 null). */
+export function laneNextAt(lane: Lane, jobs: Job[]): string | null {
+  const kinds = LANE_NEXT_KINDS[lane];
+  const ts = jobs
+    .filter((j): j is Job & { next_at: string } => kinds.includes(j.kind) && !!j.next_at)
+    .map((j) => j.next_at)
+    .sort((a, b) => (Date.parse(a) || 0) - (Date.parse(b) || 0));
+  return ts[0] ?? null;
+}
+
 // ── 다음 할 일(데몬 작업) ───────────────────────────────────────────────────────
 export type Job = { id: number | string; kind: string; next_at: string | null; last_status?: string | null };
 export type Daemon = { alive: boolean; jobs?: Job[] | null };

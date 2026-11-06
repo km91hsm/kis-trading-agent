@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { decisionHref, decisionRows, laneCards, nextJobs, noticeKinds, statusLabel, timeline } from "./today.ts";
+import { decisionHref, decisionRows, laneCards, laneNextAt, nextJobs, noticeKinds, statusLabel, timeline, todaySummary } from "./today.ts";
 import {
   fixtureAccount,
   fixtureDaemon,
@@ -62,6 +62,29 @@ describe("today 순수 함수", () => {
     expect(spotWaiting.state).toBe("waiting");
     const [part] = laneCards([fixtureAccount()], [], [fixtureSpotOrder({ status: "partial", filled_qty: 1 })], []);
     expect([part.orders, part.fills, part.open, part.state]).toEqual([1, 1, 1, "waiting"]);
+  });
+
+  test("laneNextAt: 레인의 사용자 잡(현물 스캔·리밸런스·리포트, 단타, 파생 세션) 중 가장 이른 next_at — 분 단위 감시 잡은 제외", () => {
+    const jobs = [
+      fixtureJob({ id: "kr_monitor", kind: "monitor", next_at: "2026-11-05T01:01:00+00:00" }),
+      fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T22:30:00+00:00" }),
+      fixtureJob({ id: "kr_rebalance", kind: "rebalance", next_at: "2026-11-05T05:30:00+00:00" }),
+      fixtureJob({ id: "kr_scalp", kind: "scalp", next_at: "2026-11-05T01:00:50+00:00" }),
+      fixtureJob({ id: "kr_fo_session", kind: "fo_session", next_at: null }),
+    ];
+    expect(laneNextAt("spot", jobs)).toBe("2026-11-05T05:30:00+00:00");
+    expect(laneNextAt("scalp", jobs)).toBe("2026-11-05T01:00:50+00:00");
+    expect(laneNextAt("fo", jobs)).toBeNull();
+    expect(laneNextAt("spot", [])).toBeNull();
+  });
+
+  test("todaySummary: 결정·주문·체결·실패·알림 건수", () => {
+    const s = todaySummary(
+      [fixtureSpotDecision(), fixtureScalpDecision(), fixtureFoDecision()],
+      [fixtureSpotOrder({ status: "filled" }), fixtureSpotOrder({ id: 2, status: "failed", filled_qty: 0 }), fixtureSpotOrder({ id: 3, status: "rejected", filled_qty: 0 }), fixtureSpotOrder({ id: 4, status: "accepted", filled_qty: 0 })],
+      [fixtureNotice(), fixtureNotice({ id: 2 })],
+    );
+    expect(s).toEqual({ decisions: 3, orders: 4, fills: 1, failed: 2, notices: 2 });
   });
 
   test("decisionRows: 시간 역순, scalp-12 는 href null, spot 7 은 /decisions/spot/7", () => {

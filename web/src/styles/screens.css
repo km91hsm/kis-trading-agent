@@ -44,6 +44,9 @@
 }
 .approval-actions .btn { min-height: var(--touch); }
 
+/* 오늘 요약 KPI 띠(Stats kpi) — 레인 카드 위 */
+.today-summary { margin-bottom: var(--space-4); }
+
 .lane-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
@@ -52,30 +55,6 @@
 }
 .lane-grid > .screen-section { margin-bottom: 0; }
 
-/* 오늘: 주문·체결 | 알림 2열(≥1280) */
-.section-pair {
-  display: grid;
-  gap: var(--space-4);
-  margin-bottom: var(--space-6);
-}
-.section-pair > .screen-section { margin-bottom: 0; min-width: 0; }
-@media (min-width: 1280px) {
-  .section-pair { grid-template-columns: 1fr 1fr; }
-}
-.lane-stats {
-  display: grid;
-  gap: var(--space-1);
-  margin-bottom: var(--space-2);
-}
-.lane-stats > div {
-  display: flex;
-  gap: var(--space-2);
-}
-.lane-stats dt {
-  color: var(--fg-muted);
-  min-width: 3em;
-}
-.lane-stats dd { font-variant-numeric: tabular-nums; }
 .lane-note { color: var(--fg-muted); }
 
 /* 글머리 없는 목록은 들여쓰기도 없앤다 */

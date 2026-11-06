@@ -85,7 +85,7 @@ describe("왼쪽 메뉴 2단", () => {
     const { container } = app();
     await flush();
     const items = Array.from(container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
-    expect(items).toEqual(["spot-lane"]);
+    expect(items).toEqual(["spot-lane", "decisions", "orders-timeline", "next-jobs", "notices"]); // 승인·단타·파생은 빠짐
     expect((container.querySelector("#fo-lane") as HTMLElement).hidden).toBe(true);
   });
 

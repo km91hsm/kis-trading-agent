@@ -37,7 +37,12 @@ def test_nav_ts_contains_screens_and_feature_items():
         "label": "데이터", "path": "/data", "items": [],
         "pages": [{"id": "data", "label": "데이터", "path": "/data"}],
     }
-    assert [i["id"] for i in nav["today"]["items"]] == ["spot-lane", "fo-lane"]
+    # 커널 today 절(결정·주문·체결·다음 할 일·알림)은 기능 레인 카드(10~30) 뒤 40~70
+    assert [i["id"] for i in nav["today"]["items"]] == [
+        "spot-lane", "fo-lane", "decisions", "orders-timeline", "next-jobs", "notices",
+    ]  # fmt: skip
+    labels = [i["label"] for i in nav["today"]["items"]][2:]
+    assert labels == ["결정", "주문·체결", "다음 할 일", "알림"]
     # 기능 절(국면 30…파생 60)은 운영 절(헬스…사용량) 뒤, 관리 절(설정…조작 이력) 앞에 끼어든다
     assert [i["id"] for i in nav["system"]["items"]] == [
         *KERNEL_SYSTEM_IDS[:5], "regime", *KERNEL_SYSTEM_IDS[5:],
@@ -61,7 +66,9 @@ def test_nav_ts_kernel_system_sections_order_and_without_features():
     assert all(i["order"] < 30 for i in items[:5])
     assert all(i["order"] > 60 for i in items[5:])
     assert all(i["screen"] == "system" for i in items)
-    assert nav["today"]["items"] == []
+    assert [i["id"] for i in nav["today"]["items"]] == [
+        "decisions", "orders-timeline", "next-jobs", "notices",
+    ]  # fmt: skip
 
 
 def test_nav_ts_screens_constant():

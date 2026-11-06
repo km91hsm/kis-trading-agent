@@ -35,6 +35,11 @@ SYSTEM_PAGES = (
 _SYSTEM_PAGE_OF = {sec: pid for pid, _, _, secs in SYSTEM_PAGES for sec in secs}
 
 KERNEL_NAV = (
+    # 오늘: 기능 레인 카드(10~30) 뒤에 커널 절
+    NavItem("today", "decisions", "결정", 40),
+    NavItem("today", "orders-timeline", "주문·체결", 50),
+    NavItem("today", "next-jobs", "다음 할 일", 60),
+    NavItem("today", "notices", "알림", 70),
     NavItem("system", "health", "헬스", 0),
     NavItem("system", "daemon", "데몬", 1),
     NavItem("system", "jobs", "잡 큐", 2),

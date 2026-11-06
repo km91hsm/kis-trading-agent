@@ -10,6 +10,9 @@ import { flush, render } from "../../test/render";
 import {
   fixtureAccount,
   fixtureApproval,
+  fixtureDaemon,
+  fixtureJob,
+  fixtureNotice,
   fixtureScalpDecision,
   fixtureSpotDecision,
   fixtureSpotOrder,
@@ -276,12 +279,42 @@ describe("오늘 화면", () => {
 });
 
 describe("배치", () => {
-  test("주문·체결과 알림은 한 묶음(.section-pair)으로 나란히 선다", async () => {
+  test("절 순서: 승인 → 레인 카드 → 결정 → 주문·체결 → 다음 할 일 → 알림(전체 폭, .section-pair 없음)", async () => {
     const { container } = await mount(routes());
-    const pair = container.querySelector(".section-pair") as HTMLElement;
-    expect(pair).not.toBeNull();
-    expect(pair.querySelector("#orders-timeline")).not.toBeNull();
-    expect(pair.querySelector("#notices")).not.toBeNull();
-    expect(pair.querySelector("#decisions")).toBeNull();
+    expect(container.querySelector(".section-pair")).toBeNull();
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
+      "approvals", "spot-lane", "scalp-lane", "fo-lane", "decisions", "orders-timeline", "next-jobs", "notices",
+    ]);
+  });
+
+  test("「오늘 요약」 KPI 띠: 결정·주문·체결·실패·알림 건수가 레인 카드 위에", async () => {
+    const { container } = await mount(
+      routes({
+        "GET /api/orders": merged([fixtureSpotOrder({ status: "filled" }), fixtureSpotOrder({ id: 2, status: "failed", filled_qty: 0 })]),
+        "GET /api/system/notices": [fixtureNotice(), fixtureNotice({ id: 2 }), fixtureNotice({ id: 3 })],
+      }),
+    );
+    const kpi = container.querySelector(".today-summary") as HTMLElement;
+    expect(kpi).not.toBeNull();
+    const stat = (id: string) => kpi.querySelector(`[data-stat="${id}"] dd`)?.textContent;
+    expect([stat("decisions"), stat("orders"), stat("fills"), stat("failed"), stat("notices")]).toEqual(["2", "2", "1", "1", "3"]);
+    // 레인 카드보다 앞
+    expect(kpi.compareDocumentPosition(section("spot-lane")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("레인 카드는 Stats 격자(결정·주문·다음 예정) — 다음 예정은 데몬 사용자 잡의 next_at, 「완료」 대신 「처리 완료」", async () => {
+    await mount(routes({ "GET /api/system/daemon": fixtureDaemon([fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T22:30:00+00:00" })]) }));
+    const spot = section("spot-lane");
+    expect(spot.querySelector("dl.stats")).not.toBeNull();
+    expect(spot.querySelector("dl.lane-stats")).toBeNull();
+    expect(spot.querySelector('[data-stat="next"] dd')?.textContent).toContain("07:30");
+    expect(spot.textContent).toContain("처리 완료");
+    expect(spot.textContent!.replace(/처리 완료/g, "")).not.toContain("완료");
+  });
+
+  test("결정 0건이면 CSV 링크를 숨긴다", async () => {
+    await mount(routes({ "GET /api/decisions": merged([]) }));
+    expect(section("decisions").querySelector("a[download]")).toBeNull();
+    expect(section("decisions").textContent).toContain("이 날 결정이 없습니다");
   });
 });

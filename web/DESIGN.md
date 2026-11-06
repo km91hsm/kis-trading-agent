@@ -43,7 +43,7 @@ ui-ux-pro-max 조사(design-system · color · ux)에서 고른 방향 위에 M1
 - 열은 숨기지 않는다. 화면 고유 표(지표·호가)는 좁은 폭에서도 `.table-scroll` 가로 스크롤로 남기고, 전역(`html`·`body`·본문)에 `overflow-x: hidden` 을 두지 않는다(`screens/__tests__/responsive.test.tsx` 가 고정).
 - 상단 상태 띠: 상태 점·첫 사유·「N분 전 갱신」(`/system#health` 링크) · 지수·환율 칩(`IndexChips`, 장중만·`next_poll_ms` 폴링) · 사용률 칩 · 시계 · 테마 토글(「테마: 시스템/라이트/다크」 — 메뉴 「시스템」과 헷갈리지 않게 접두어를 붙인다). <1024: 첫 줄 건강 요약 + 테마 토글, 다음 줄 칩·시계. <768: 한 줄(상태 · 더 보기 ▾ · 시각 · 테마) — 지수·사용률 칩은 `details.statusbar-more` 안, 날짜·장 세션 글자는 숨긴다(`title` 로 남김). 좌우 가장자리 16px(본문과 같음).
 - 공통 부품(`components/`, 스타일 `components.css`): 표는 `Table`(≥1024px `<table>` · 미만 `RowCard`, `useWide`), 쓰기 확인은 `Confirm`, 잡 실행은 `RunJobButton`, 라벨-값 격자는 `Stats`(`<dl class="stats" data-cols=auto|2|3|4 data-size=sm|kpi>`, <768 은 3·4열도 2열). 「값 · 값 · 값」 문자열 나열·`<dl>` 손제작·`<pre>` 덤프 대신 `Table`/`Stats` 를 쓴다. 시각은 `fmtWhen`(오늘 `HH:MM`, 다른 날 `MM.DD HH:MM`, 날짜만 `MM.DD`), 비율 필드(`*_pct` 가 0~1)는 `fmtPct`, 상태·국면·레인·환경 라벨은 `glossary` 로 통일한다. 행 카드의 제목 줄은 `long` 열 — 이름이 있는 표(계좌)는 그 열에 `long: true` 를 준다.
-- 오늘: 주문·체결과 알림은 `.section-pair`(≥1280 2열). 계좌·보유: 합계는 `.kpi-strip` 한 카드 3칸(원화·달러·환율, 세로선 구분; 768~1023 2열+환율 전폭, <768 1열), 계좌 목록은 `Table`(카드 격자 아님).
+- 오늘: 절 순서는 승인 → 「오늘 요약」 KPI(`.today-summary`, `Stats size=kpi`: 결정·주문·체결·실패·알림) → 레인 카드(`Stats cols=3`: 결정·주문·다음 예정 = 데몬 사용자 잡 `next_at`) → 결정(종목 코드+이름 · 내용 = 최종 의견 요약, 0건이면 CSV 숨김) → 주문·체결 → 다음 할 일 → 알림(기록은 맨 아래, 전체 폭). 2열 묶음은 없다. 계좌·보유: 합계는 `.kpi-strip` 한 카드 3칸(원화·달러·환율, 세로선 구분; 768~1023 2열+환율 전폭, <768 1열), 계좌 목록은 `Table`(카드 격자 아님).
 - 왼쪽 메뉴(≥1280) 216px. 본문 여백 ≥1280 에서 24/32px.
 
 ## 메뉴·앵커
