@@ -64,6 +64,7 @@ def _ledger_failed(deps: Any, now: datetime, err: Exception, features: list[str]
     reasons.append({"area": "ledger", "level": "warn", "text": f"원장 조회 실패: {err}"})
     return {
         "level": reasons[0]["level"],
+        "areas": {},
         "reasons": reasons,
         "checked_at": now.isoformat(),
         "version": version(),

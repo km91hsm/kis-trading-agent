@@ -89,16 +89,39 @@ describe("왼쪽 메뉴 2단", () => {
     expect((container.querySelector("#fo-lane") as HTMLElement).hidden).toBe(true);
   });
 
+  test("시스템 화면의 하위 메뉴는 절 앵커가 아니라 페이지 4개(상태·잡·기능·관리)이고, 페이지마다 자기 절만 그린다", async () => {
+    fake = installFakeFetch(ok);
+    const a = app("/system");
+    await flush();
+    const items = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
+    expect(items).toEqual(["status", "jobs", "features", "admin"]);
+    const hrefs = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("href"));
+    expect(hrefs).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
+    expect(a.container.querySelector('[data-nav-item="status"]')?.getAttribute("aria-current")).toBe("page");
+    expect(a.container.querySelector("#health")).not.toBeNull();
+    expect(a.container.querySelector("#runs")).toBeNull();
+    a.unmount();
+    const b = app("/system/jobs");
+    await flush();
+    expect(b.container.querySelector('[data-nav-screen="system"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="jobs"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="status"]')?.getAttribute("aria-current")).toBeNull();
+    expect(b.container.querySelector("#runs")).not.toBeNull();
+    expect(b.container.querySelector("#health")).toBeNull();
+    // 페이지 탭(좁은 폭용)도 4개
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["상태", "잡", "기능", "관리"]);
+  });
+
   test("하위 목차를 누르면 그 항목이 현재가 되고, 같은 항목을 다시 눌러도 스크롤한다", async () => {
     fake = installFakeFetch(ok);
-    const { container } = app("/system");
+    const { container } = app("/data");
     await flush();
-    const link = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+    const link = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
     expect(link.getAttribute("aria-current")).toBeNull();
     act(() => link.click());
     expect(link.getAttribute("aria-current")).toBe("location");
     expect(scroll).toHaveBeenCalledTimes(1);
-    expect((scroll.mock.instances[0] as Element).id).toBe("saveticker");
+    expect((scroll.mock.instances[0] as Element).id).toBe("themes");
     act(() => link.click());
     expect(scroll).toHaveBeenCalledTimes(2);
     expect(link.getAttribute("aria-current")).toBe("location");
@@ -106,7 +129,7 @@ describe("왼쪽 메뉴 2단", () => {
 
   test("스크롤 입력(wheel)이 오면 눌렀던 항목 대신 보이는 가장 위 섹션을 현재로 표시한다", async () => {
     const OrigIO = globalThis.IntersectionObserver;
-    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 시스템 첫 항목(usage)
+    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 데이터 첫 항목(quotes)
     globalThis.IntersectionObserver = class {
       cb: IntersectionObserverCallback;
       constructor(cb: IntersectionObserverCallback) {
@@ -123,10 +146,10 @@ describe("왼쪽 메뉴 2단", () => {
     } as unknown as typeof IntersectionObserver;
     try {
       fake = installFakeFetch(ok);
-      const { container } = app("/system");
+      const { container } = app("/data");
       await flush();
-      const regime = container.querySelector(`[data-nav-item="${NAV.system.items[0].id}"]`) as HTMLAnchorElement;
-      const save = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+      const regime = container.querySelector(`[data-nav-item="${NAV.data.items[0].id}"]`) as HTMLAnchorElement;
+      const save = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
       expect(regime.getAttribute("aria-current")).toBe("location");
       act(() => save.click());
       expect(save.getAttribute("aria-current")).toBe("location");
@@ -152,6 +175,65 @@ describe("왼쪽 메뉴 2단", () => {
   });
 });
 
+test("「N초 전 갱신」은 /system#health 링크이고, 테마 버튼 글자는 「테마: …」", async () => {
+  fake = installFakeFetch(ok);
+  const { container } = app();
+  await flush();
+  const ago = container.querySelector(".statusbar-ago") as HTMLAnchorElement;
+  expect(ago.tagName).toBe("A");
+  expect(ago.getAttribute("href")).toBe("/system#health");
+  const btn = container.querySelector("[data-theme-toggle]") as HTMLButtonElement;
+  expect(btn.textContent).toContain("테마: 시스템");
+  expect(btn.textContent).not.toMatch(/^\s*시스템/);
+});
+
+describe("지수·환율 칩", () => {
+  const indices = (session: "open" | "closed") => ({
+    session,
+    at: "2026-11-05T10:00:00+09:00",
+    indices: session === "open" ? { KOSPI: { price: "2540.12", change_pct: 0.41, at: "2026-11-05T10:00:00+09:00", stale: false, source: "rest" }, KOSDAQ: { price: "812.3", change_pct: -1.2, at: "2026-11-05T10:00:00+09:00", stale: false, source: "rest" } } : {},
+    next_poll_ms: 60000,
+  });
+  const fx = { pair: "USDKRW", rate: "1340.8", as_of: "2026-11-05", source: "kis" };
+
+  test("장중이면 KOSPI·KOSDAQ 값과 등락, 환율 칩", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/quotes/indices": indices("open"), "GET /api/quotes/fx": fx });
+    const { container } = app();
+    await flush();
+    const chips = Array.from(container.querySelectorAll("[data-index-chip]"));
+    expect(chips.map((c) => c.getAttribute("data-index-chip"))).toEqual(["KOSPI", "KOSDAQ", "USDKRW"]);
+    expect(chips[0].textContent).toContain("2,540.12");
+    expect(chips[0].textContent).toContain("▲0.41%");
+    expect(chips[0].getAttribute("data-dir")).toBe("up");
+    expect(chips[1].textContent).toContain("▼1.20%");
+    expect(chips[1].getAttribute("data-dir")).toBe("down");
+    expect(chips[2].textContent).toContain("1,340.8");
+  });
+
+  test("장 밖이면 지수 칩은 없고, 환율 404 면 환율 칩도 없다", async () => {
+    fake = installFakeFetch({ ...ok, "GET /api/quotes/indices": indices("closed"), "GET /api/quotes/fx": () => new Response(JSON.stringify({ detail: "없음" }), { status: 404 }) });
+    const { container } = app();
+    await flush();
+    expect(container.querySelectorAll("[data-index-chip]")).toHaveLength(0);
+  });
+});
+
+test("좁은 폭(<768)에서는 상단 띠가 한 줄: 사용률 칩은 details 안으로", async () => {
+  const orig = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 390 });
+  try {
+    fake = installFakeFetch(ok);
+    const { container } = app();
+    await flush();
+    const more = container.querySelector("details.statusbar-more") as HTMLDetailsElement;
+    expect(more).not.toBeNull();
+    expect(more.querySelectorAll("[data-usage-chip]")).toHaveLength(2);
+    expect(container.querySelector("[data-statusbar] > .usage-chips")).toBeNull();
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: orig });
+  }
+});
+
 test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", async () => {
   fake = installFakeFetch({
     "GET /api/system/health": () => new Response(JSON.stringify({ detail: "토큰" }), { status: 401 }),
@@ -161,7 +243,8 @@ test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", 
   await flush();
   const notice = container.querySelector("[data-auth-notice]");
   expect(notice?.textContent).toContain("쓰기 토큰이 필요합니다");
-  expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system");
+  expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system/admin#token"); // 토큰 절로 바로
+  expect(notice?.querySelector("a")?.textContent).toBe("시스템 › 관리 › 쓰기 토큰");
   act(() => (notice!.querySelector("button") as HTMLButtonElement).click());
   expect(container.querySelector("[data-auth-notice]")).toBeNull();
 });

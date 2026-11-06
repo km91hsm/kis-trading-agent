@@ -30,7 +30,7 @@ export function Shell() {
         <div className="auth-notice" role="alert" data-auth-notice>
           <Icon name="warn" />
           <span>
-            쓰기 토큰이 필요합니다 → <Link to="/system">시스템</Link>
+            쓰기 토큰이 필요합니다 → <Link to="/system/admin#token">시스템 › 관리 › 쓰기 토큰</Link>
           </span>
           <button type="button" className="auth-notice-close" aria-label="안내 닫기" onClick={() => setAuthNotice(false)}>
             <Icon name="x" />

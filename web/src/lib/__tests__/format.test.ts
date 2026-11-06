@@ -83,3 +83,16 @@ describe("agoText", () => {
     expect(agoText("nope", now)).toBe("—");
   });
 });
+
+describe("fmtWhen", () => {
+  const now = new Date("2026-11-05T22:10:00+09:00");
+  it("오늘(KST)이면 HH:MM, 다른 날이면 MM.DD HH:MM, 날짜만 있으면 MM.DD", async () => {
+    const { fmtWhen } = await import("../format");
+    expect(fmtWhen("2026-11-05T16:20:00+09:00", now)).toBe("16:20");
+    expect(fmtWhen("2026-11-04T16:20:00+09:00", now)).toBe("11.04 16:20");
+    expect(fmtWhen("2026-11-06T07:20:00+09:00", now)).toBe("11.06 07:20");
+    expect(fmtWhen("2026-11-03", now)).toBe("11.03");
+    expect(fmtWhen(null, now)).toBe("—");
+    expect(fmtWhen("abc", now)).toBe("—");
+  });
+});

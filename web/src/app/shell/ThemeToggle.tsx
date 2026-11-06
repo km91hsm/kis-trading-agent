@@ -45,7 +45,7 @@ export function ThemeToggle() {
       }}
     >
       <Icon name={resolved === "dark" ? "moon" : "sun"} />
-      <span className="theme-toggle-label">{LABEL[theme]}</span>
+      <span className="theme-toggle-label">테마: {LABEL[theme]}</span>
     </button>
   );
 }

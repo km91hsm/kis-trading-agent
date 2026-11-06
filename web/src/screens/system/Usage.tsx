@@ -1,11 +1,15 @@
 // 사용량 — 마운트 때 한 번(StrictMode 에서도 ref 로 1회)과 「새로고침」 때 POST /system/usage/ensure-fresh(토큰 없음),
-// 5시간·7일·지출 한도 미터, 사용량 조절 한 줄·켜기/끄기(Confirm → PATCH /settings/usage-throttle), kind 별 상한 표, note.
+// 「지금 확인」은 usage_probe 잡 요청(RunJobButton). 5시간·7일(·지출 한도 — 관측 있을 때만) 미터, 사용량 조절 한 줄·켜기/끄기
+// (Confirm → PATCH /settings/usage-throttle), 창 집계 Stats(세션·비용·오류·평균 소요), kind 별 상한 표, note.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Confirm } from "../../components/Confirm";
+import { RunJobButton } from "../../components/RunJobButton";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, patchJson, postPublic } from "../../lib/api";
+import { termLabel } from "../../lib/glossary";
 import { useNow, useResource } from "../../lib/hooks";
-import type { UsageResp } from "../../lib/usage";
+import type { UsageResp, UsageWindow } from "../../lib/usage";
 import { body } from "../performance/ResourceView";
 import { throttleLine, usageMeters } from "./system.ts";
 
@@ -22,10 +26,18 @@ function freshText(r: Fresh | undefined): string {
 }
 
 const CAP_COLUMNS: Column<CapRow>[] = [
-  { key: "kind", label: "잡 종류", width: "50%" },
+  { key: "kind", label: "세션 종류", width: "50%", render: (r) => termLabel(`session.${r.kind}`) },
   { key: "used", label: "오늘 사용", width: "25%", align: "num" },
   { key: "cap", label: "상한", width: "25%", align: "num", render: (r) => (r.cap === null ? "—" : String(r.cap)) },
 ];
+
+/** 「$1.50 · 오류 1 · 평균 42초」 — 0 인 항목은 뺀다(비용은 항상). */
+function windowSub(w: UsageWindow): string {
+  const parts = [`$${w.cost_usd.toFixed(2)}`];
+  if (w.errors) parts.push(`오류 ${w.errors}`);
+  if (w.avg_duration_s !== null && w.avg_duration_s !== undefined) parts.push(`평균 ${Math.round(w.avg_duration_s)}초`);
+  return parts.join(" · ");
+}
 
 export function Usage() {
   const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"]);
@@ -69,25 +81,30 @@ export function Usage() {
         <button type="button" className="btn" onClick={() => void ensure()}>
           새로고침
         </button>
+        <RunJobButton kind="usage_probe" label="지금 확인" trading={false} realAccounts={[]} onDone={() => setFresh("새 관측을 요청했습니다 — 데몬이 곧 처리합니다")} />
         {fresh ? <span className="data-muted">{fresh}</span> : null}
       </div>
       {body(usage, "사용량", (u) => (
         <>
           <ul className="sys-meters">
-            {usageMeters(u, now).map((m) => (
-              <li key={m.key} className="sys-meter" data-meter={m.key} data-level={m.level}>
-                <span className="sys-meter-label">{m.label}</span>
-                {m.used_pct === null ? (
-                  <span className="num">—</span>
-                ) : (
-                  <>
-                    <meter min={0} max={100} low={70} high={90} optimum={0} value={m.used_pct} aria-label={`${m.label} 사용률`} aria-valuenow={m.used_pct} />
-                    <span className="num">{Math.round(m.used_pct)}%</span>
-                  </>
-                )}
-                <span className="data-muted">{[m.observed ? `관측 ${m.observed}` : null, m.resets, m.source].filter(Boolean).join(" · ")}</span>
-              </li>
-            ))}
+            {usageMeters(u, now)
+              .filter((m) => m.key !== "spend" || m.used_pct !== null)
+              .map((m) => (
+                <li key={m.key} className="sys-meter" data-meter={m.key} data-level={m.level}>
+                  <span className="sys-meter-label">{m.label}</span>
+                  {m.used_pct === null ? (
+                    <span className="num">—</span>
+                  ) : (
+                    <>
+                      <meter min={0} max={100} low={70} high={90} optimum={0} value={m.used_pct} aria-label={`${m.label} 사용률`} aria-valuenow={m.used_pct} />
+                      <span className="num">{Math.round(m.used_pct)}%</span>
+                    </>
+                  )}
+                  <span className="data-muted">
+                    {[m.observed ? `관측 ${m.observed}` : null, m.resets, m.source ? termLabel(`usage.${m.source}`) : null].filter(Boolean).join(" · ")}
+                  </span>
+                </li>
+              ))}
           </ul>
           <p className="perf-note">
             {throttleLine(u.throttle)}{" "}
@@ -100,10 +117,14 @@ export function Usage() {
               {error}
             </p>
           ) : null}
-          <p className="data-muted">
-            오늘 세션 {u.windows.today.sessions} / {u.windows.today.cap} · 5시간 {u.windows.h5.sessions}회 ${u.windows.h5.cost_usd.toFixed(2)} · 7일{" "}
-            {u.windows.d7.sessions}회 ${u.windows.d7.cost_usd.toFixed(2)}
-          </p>
+          <Stats
+            cols={3}
+            items={[
+              { label: "오늘 세션", value: `${u.windows.today.sessions} / ${u.windows.today.cap}` },
+              { label: "5시간", value: `${u.windows.h5.sessions}회`, sub: windowSub(u.windows.h5) },
+              { label: "7일", value: `${u.windows.d7.sessions}회`, sub: windowSub(u.windows.d7) },
+            ]}
+          />
           <Table columns={CAP_COLUMNS} rows={u.caps_by_kind} rowKey={(r) => r.kind} empty="kind 별 상한 없음" />
           {u.note ? <p className="perf-note">{u.note}</p> : null}
           <Confirm

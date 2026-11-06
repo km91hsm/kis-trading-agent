@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+import sqlite3
 from datetime import timedelta
 
 from tests.kernel.web.conftest import NOW, SAME, ledger_deps, make_client
@@ -136,6 +138,17 @@ def test_health_live_reports_kernel_areas(project):
     out = health.evaluate(deps, live=True)
     assert out["level"] == "warn"
     assert any(r["area"] == "llm" and "10/10" in r["text"] for r in out["reasons"])
+    assert out["areas"]["llm"] == "warn" and out["areas"]["orders"] == "ok"
+
+
+def test_health_ledger_failure_has_empty_areas(project):
+    """원장을 못 읽어도 응답 모양(`areas`)은 같다."""
+    def boom():
+        raise sqlite3.OperationalError("locked")
+
+    deps = dataclasses.replace(ledger_deps(project), conn_factory=boom)
+    out = health.evaluate(deps, live=True)
+    assert out["areas"] == {} and out["level"] == "fail"
 
 
 def test_health_shape_unchanged(project):

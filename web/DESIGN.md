@@ -41,13 +41,15 @@ ui-ux-pro-max 조사(design-system · color · ux)에서 고른 방향 위에 M1
 - 확인 폭: 375 · 768 · 1024 · 1440px. 모바일 우선.
 - 넓은 표는 좁은 폭에서 행을 카드로 바꾸거나 가로 스크롤 래퍼에 담는다(표가 화면을 밀어내지 않게).
 - 열은 숨기지 않는다. 화면 고유 표(지표·호가)는 좁은 폭에서도 `.table-scroll` 가로 스크롤로 남기고, 전역(`html`·`body`·본문)에 `overflow-x: hidden` 을 두지 않는다(`screens/__tests__/responsive.test.tsx` 가 고정).
-- 상단 상태 띠(<1024): 첫 줄 건강 요약 + 테마 토글, 다음 줄 사용률·시계. 좌우 가장자리 16px(본문과 같음).
-- 공통 부품(`components/`, 스타일 `components.css`): 표는 `Table`(≥1024px `<table>` · 미만 `RowCard`, `useWide`), 쓰기 확인은 `Confirm`, 잡 실행은 `RunJobButton`. 행 카드의 제목 줄은 `long` 열 — 이름이 있는 표(계좌)는 그 열에 `long: true` 를 준다.
+- 상단 상태 띠: 상태 점·첫 사유·「N분 전 갱신」(`/system#health` 링크) · 지수·환율 칩(`IndexChips`, 장중만·`next_poll_ms` 폴링) · 사용률 칩 · 시계 · 테마 토글(「테마: 시스템/라이트/다크」 — 메뉴 「시스템」과 헷갈리지 않게 접두어를 붙인다). <1024: 첫 줄 건강 요약 + 테마 토글, 다음 줄 칩·시계. <768: 한 줄(상태 · 더 보기 ▾ · 시각 · 테마) — 지수·사용률 칩은 `details.statusbar-more` 안, 날짜·장 세션 글자는 숨긴다(`title` 로 남김). 좌우 가장자리 16px(본문과 같음).
+- 공통 부품(`components/`, 스타일 `components.css`): 표는 `Table`(≥1024px `<table>` · 미만 `RowCard`, `useWide`), 쓰기 확인은 `Confirm`, 잡 실행은 `RunJobButton`, 라벨-값 격자는 `Stats`(`<dl class="stats" data-cols=auto|2|3|4 data-size=sm|kpi>`, <768 은 3·4열도 2열). 「값 · 값 · 값」 문자열 나열·`<dl>` 손제작·`<pre>` 덤프 대신 `Table`/`Stats` 를 쓴다. 시각은 `fmtWhen`(오늘 `HH:MM`, 다른 날 `MM.DD HH:MM`, 날짜만 `MM.DD`), 비율 필드(`*_pct` 가 0~1)는 `fmtPct`, 상태·국면·레인·환경 라벨은 `glossary` 로 통일한다. 행 카드의 제목 줄은 `long` 열 — 이름이 있는 표(계좌)는 그 열에 `long: true` 를 준다.
 - 오늘: 주문·체결과 알림은 `.section-pair`(≥1280 2열). 계좌·보유: 합계는 `.kpi-strip` 한 카드 3칸(원화·달러·환율, 세로선 구분; 768~1023 2열+환율 전폭, <768 1열), 계좌 목록은 `Table`(카드 격자 아님).
 - 왼쪽 메뉴(≥1280) 216px. 본문 여백 ≥1280 에서 24/32px.
 
 ## 메뉴·앵커
 - 화면 안 섹션 컨테이너는 `id={item.id}`(자동 생성 `generated/nav.ts` 의 id)를 단다 — 하위 목차가 `<path>#<id>` 로 스크롤하고 `IntersectionObserver` 로 현재 섹션을 표시한다.
+- 화면에 페이지가 여럿이면(시스템: 상태 `/system` · 잡 `/system/jobs` · 기능 `/system/features` · 관리 `/system/admin`, `nav.ts` `pages`) 2단 메뉴는 절 앵커가 아니라 페이지 링크(`aria-current="page"`)이고, 왼쪽 메뉴가 없는 폭(<1280)은 화면 위 `.page-tabs` 알약이 같은 일을 한다. 절이 어느 페이지에 가는지는 항목의 `page`(`gen.py SYSTEM_PAGES`). 백엔드가 주는 `/system#절` 링크는 `lib/nav.ts resolveLink` 로 페이지 주소로 바꾼다. 메뉴 항목을 더 쪼개지 않는다 — 새 절은 기존 페이지 안에.
+- 긴 목록(실행 기록·조작 이력, 이후 알림·뉴스·공시·지표)은 `usePaged`(30행, `?page=N`) + `Pager`(「‹ 1 2 3 ›  31–60 / 65」). 한 페이지면 Pager 는 없다. 한 화면에 표가 둘이면 param 을 따로 준다(잡 페이지: 실행 기록 `?page`, 요청 기록 `?rpage`). 날짜·종류 필터를 바꾸면 `usePageReset()` 으로 1쪽으로 돌아간다.
 - 하위 목차는 현재 화면 것만 펼친다. 화면이 섹션을 `hidden` 으로 숨기면(승인 0건·없는 레인·파생 계좌 없음) 목차에서도 빠진다(`Nav.tsx` 가 본문 DOM 을 MutationObserver 로 본다) — 죽은 앵커를 메뉴에 두지 않는다.
 - 현재 항목은 방금 누른 항목(해시)이 우선이고, 사용자가 스크롤 입력(wheel·touchmove·방향키)을 하면 보이는 가장 위 섹션으로 넘어간다. 같은 항목을 다시 눌러도 스크롤한다(`location.key`).
 - 왼쪽 메뉴(≥1280) 위에 브랜드 「trader」, 바닥에 「데몬 정상 · v0.2.0」 푸터(`/system/health`).

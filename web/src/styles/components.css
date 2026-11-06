@@ -230,3 +230,57 @@
   border: 1px dashed var(--line);
   border-radius: var(--radius);
 }
+
+/* ── 통계 격자(Stats) — 라벨 위·값 아래. data-cols=auto 는 폭에 맞춰 흐르고, 2·3·4 는 고정 열(<768 은 2열). ── */
+.stats {
+  display: grid;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.stats[data-cols="auto"] { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+.stats[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+.stats[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+.stats[data-cols="4"] { grid-template-columns: repeat(4, 1fr); }
+.stat { min-width: 0; }
+.stat dt { color: var(--fg-muted); font-size: var(--text-xs); margin-bottom: 2px; }
+.stat dd { margin: 0; overflow-wrap: anywhere; }
+.stat dd.num { font-size: var(--text-md); font-weight: 600; }
+.stats[data-size="kpi"] .stat dd.num { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.01em; }
+.stat .stat-sub { color: var(--fg-muted); font-size: var(--text-xs); margin-top: 2px; }
+.stat .chip + .chip { margin-left: var(--space-1); }
+@media (max-width: 767px) {
+  .stats[data-cols="3"],
+  .stats[data-cols="4"] { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 링크 모양 버튼(표 안 run 번호 등) */
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, var(--fg));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-btn[aria-pressed="true"] { font-weight: 700; text-decoration: none; }
+
+/* ── 페이지 번호 줄(Pager) ── */
+.pager { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-3); flex-wrap: wrap; }
+.pager-btn {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--fg); }
+.pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pager-btn[aria-current="page"] { background: var(--bg-sunken); border-color: var(--fg-muted); font-weight: 700; }
+.pager-gap { color: var(--fg-muted); padding: 0 var(--space-1); }
+.pager-range { margin-left: auto; color: var(--fg-muted); font-size: var(--text-sm); }

@@ -21,7 +21,7 @@ export function fixtureDaemon(over: Over = {}) {
     stale_after_s: 180,
     jobs: [
       {
-        id: "spot.trade.KR",
+        id: "kr_spot_trade",
         kind: "spot_trade",
         trigger: "cron",
         schedule_key: "spot.KR",
@@ -113,7 +113,7 @@ export function fixtureSettings() {
     markets: ["KR", "US"],
     risk: null,
     debate_rounds: 2,
-    models: { bull: "sonnet", judge: "opus" },
+    models: { researcher_bull: "sonnet", orchestrator: "opus" },
     web: { bind: "127.0.0.1", port: 8000, tailscale_hosts_count: 2, tailscale_users_count: 1 },
     llm: { budget_usd: 20, daily_session_cap: 40 },
   };
@@ -140,11 +140,11 @@ export function fixtureControlLog() {
 export function fixtureRegime() {
   return {
     enabled: true,
-    max_weight_pct: 20,
+    max_weight_pct: 0.2,
     leverage: 1,
     bear_min_signals: 2,
     market_session: {},
-    min_weight_pct: 5,
+    min_weight_pct: 0.05,
     instruments: {},
     markets: [{ market: "KR", state: "bull", count: 0, since: "2026-11-01", asof: "2026-11-05", signals: {}, view: null, scorecard: null }],
     killswitch: { on: false, reason: null, source: null, accounts: [], at: null },
@@ -167,7 +167,7 @@ export function fixtureSaveticker(over: Over = {}) {
 }
 
 export function fixtureScalp() {
-  return { enabled: false, judge: false, max_weight_pct: 5, max_positions: 2, markets: {} };
+  return { enabled: false, judge: false, max_weight_pct: 0.05, max_positions: 2, markets: {} };
 }
 
 export function fixtureAccounts() {
