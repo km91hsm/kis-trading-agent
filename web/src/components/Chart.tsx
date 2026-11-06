@@ -57,6 +57,14 @@ export function Chart(props: ChartProps) {
       </div>
     );
   }
+  // 값이 전부 같아도 평평한 선에 10000000.05/9999999.95 같은 가짜 축이 생긴다 — 변동 없음을 글로.
+  if (candles === undefined && series && points >= 2 && !extra?.length && series.every((p) => p.value === series[0].value)) {
+    return (
+      <div className="chart chart-empty" data-chart-empty style={{ height }}>
+        자료 {points}일 — 변동 없음 ({series[0].value.toLocaleString("en-US")})
+      </div>
+    );
+  }
   return <LiveChart {...props} />;
 }
 

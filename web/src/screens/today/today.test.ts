@@ -210,6 +210,7 @@ describe("아침 파이프라인·리스크 게이트 순수 함수", () => {
     expect(stageLabel("20_debate_r0_bull")).toBe("토론");
     expect(stageLabel("30_decision")).toBe("결정");
     expect(stageLabel("40_risk_check_paper-1")).toBe("리스크 게이트");
+    expect(stageLabel("56_order_hedge_paper-main")).toBe("헤지 주문");
     expect(stageLabel("99_whatever")).toBe("99_whatever");
   });
 
@@ -222,6 +223,10 @@ describe("아침 파이프라인·리스크 게이트 순수 함수", () => {
     ]);
     expect(kr.decided).toBe(1);
     expect(kr.picks).toBe("005930 삼성전자 돌파(실적) · 000660 수급");
+    // 발굴 사유가 긴 문장이면 첫 절(;)까지 40자로 줄이고 원문은 picksFull 에
+    const long = pipelineOf(fixtureMarketToday("KR", { scan: { picks: [{ ticker: "000660", reason: "모멘텀 상위, 52주 고점 근접; 거래대금 상위 3개 사유 모두 충족. 점수 최상위.", discovery: null }], targets: 1, cap_hit: false, discovery: null } }))!;
+    expect(long.picks).toBe("000660 모멘텀 상위, 52주 고점 근접…");
+    expect(long.picksFull).toContain("점수 최상위");
     expect(kr.newsJobs).toBe(1);
     expect(kr.capHit).toBe(false);
     expect(pipelineOf(fixtureMarketToday("US"))).toBeNull();
@@ -233,6 +238,8 @@ describe("아침 파이프라인·리스크 게이트 순수 함수", () => {
   test("riskCheckRows: 시각·계좌·종목(코드+이름)·결과·수량 조정·사유 한 줄·결정 링크", () => {
     const rows = riskCheckRows([fixtureRiskCheck(), fixtureRiskCheck({ id: 2, approved: true, adjusted_qty: 3, reasons: [], name: null, ticker: "000660", decision_id: 9 })]);
     expect(rows[0]).toMatchObject({ id: 1, account_id: "paper-1", ticker: "005930 삼성전자", approved: false, adjusted: "—", reasons: "주간 한도 · 현금 부족", href: "/decisions/spot/1", market: "KR" });
+    // 거부면 수량 조정은 의미가 없으니 0 이어도 「—」
+    expect(riskCheckRows([fixtureRiskCheck({ adjusted_qty: 0 })])[0].adjusted).toBe("—");
     expect(rows[1]).toMatchObject({ ticker: "000660", approved: true, adjusted: "3주", reasons: "—", href: "/decisions/spot/9" });
   });
 });

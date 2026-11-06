@@ -29,7 +29,11 @@ function MarketCard({ market, res }: { market: string; res: Resource<MarketToday
           ))}
           {p.capHit ? <Chip tone="warn">분석 상한 도달</Chip> : null}
         </p>
-        {p.picks ? <p className="pipeline-line">발굴 {p.picks}</p> : null}
+        {p.picks ? (
+          <p className="pipeline-line" title={p.picksFull ?? undefined}>
+            발굴 {p.picks}
+          </p>
+        ) : null}
         {p.newsJobs ? <p className="pipeline-line">뉴스 발굴 요청 {p.newsJobs}건</p> : null}
         <Table columns={COLUMNS} rows={p.rows} rowKey={(r) => r.ticker} empty="분석한 종목 없음" />
       </>

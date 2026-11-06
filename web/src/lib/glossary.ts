@@ -52,6 +52,7 @@ export const GLOSSARY: Record<string, TermEntry> = {
   "stage.55_order_sl": { label: "손절 주문", help: "손절로 나간 주문." },
   "stage.43_rebalance": { label: "리밸런스 판정", help: "주간 리밸런스: 최근 결정 목표 비중에서 5%p 넘게 벗어난 보유의 계좌별 게이트 판정." },
   "stage.53_order_rebalance": { label: "리밸런스 주문", help: "주간 리밸런스로 나간 주문(일부 매도 먼저, 추가 매수 나중)." },
+  "stage.56_order_hedge": { label: "헤지 주문", help: "국면 헤지로 나간 계좌별 주문." },
   drift: { label: "드리프트", help: "현재 비중 − 최근 결정의 목표 비중(%p). 밴드(기본 5%p)를 넘으면 금요일 리밸런스가 되돌린다." },
   wash_sale: { label: "워시세일", help: "손실을 본 매도의 앞뒤 30일 안에 같은 종목을 다시 산 경우(미국 세법). 표시만 한다." },
   "signal.STRONG_BUY": { label: "강한 매수", help: "애널리스트 신호: 강하게 오를 근거가 많다." },

@@ -16,7 +16,14 @@ export type MarketToday = {
 
 export type PipelineStep = { id: "scan" | "market" | "analyze"; label: string; done: boolean };
 export type PipelineRow = { ticker: string; label: string; last: string; count: number };
-export type Pipeline = { steps: PipelineStep[]; rows: PipelineRow[]; decided: number; picks: string | null; newsJobs: number; capHit: boolean };
+export type Pipeline = { steps: PipelineStep[]; rows: PipelineRow[]; decided: number; picks: string | null; picksFull: string | null; newsJobs: number; capHit: boolean };
+
+const REASON_MAX = 40;
+/** 발굴 사유 한 줄 — 첫 절(`;`)까지, 40자 넘으면 말줄임. 원문은 picksFull(title)에. */
+function shortReason(reason: string | null | undefined): string {
+  const first = (reason ?? "").split(";")[0].trim();
+  return first.length > REASON_MAX ? `${first.slice(0, REASON_MAX).trimEnd()}…` : first.length < (reason ?? "").trim().length ? `${first}…` : first;
+}
 
 const STAGE_KEYS = Object.keys(GLOSSARY)
   .filter((k) => k.startsWith("stage."))
@@ -43,14 +50,17 @@ export function pipelineOf(m: MarketToday): Pipeline | null {
     count: stages.length,
   }));
   const decided = tickers.filter(([, stages]) => stages.includes("30_decision")).length;
-  const picks = m.scan?.picks?.length
-    ? m.scan.picks
-        .map((p) => {
-          const cat = p.discovery?.catalyst;
-          return `${tickerLabel(p.ticker, names[p.ticker])} ${p.reason ?? ""}${cat ? `(${cat})` : ""}`.trim();
-        })
-        .join(" · ")
-    : null;
+  const pickText = (reason: (r: string | null | undefined) => string) =>
+    m.scan?.picks?.length
+      ? m.scan.picks
+          .map((p) => {
+            const cat = p.discovery?.catalyst;
+            return `${tickerLabel(p.ticker, names[p.ticker])} ${reason(p.reason)}${cat ? `(${cat})` : ""}`.trim();
+          })
+          .join(" · ")
+      : null;
+  const picks = pickText(shortReason);
+  const picksFull = pickText((r) => (r ?? "").trim());
   return {
     steps: [
       { id: "scan", label: "스캔", done: !!m.scan || files.includes("_scan") },
@@ -60,6 +70,7 @@ export function pipelineOf(m: MarketToday): Pipeline | null {
     rows,
     decided,
     picks,
+    picksFull,
     newsJobs: jobs.length,
     capHit: !!m.scan?.cap_hit,
   };
@@ -101,7 +112,7 @@ export function riskCheckRows(checks: RiskCheck[], now: Date = new Date()): Risk
     market: c.market ?? null,
     ticker: c.ticker ? tickerLabel(c.ticker, c.name) : "—",
     approved: c.approved,
-    adjusted: c.adjusted_qty === null || c.adjusted_qty === undefined ? "—" : `${c.adjusted_qty.toLocaleString("en-US")}주`,
+    adjusted: !c.approved || c.adjusted_qty === null || c.adjusted_qty === undefined ? "—" : `${c.adjusted_qty.toLocaleString("en-US")}주`,
     reasons: c.reasons?.length ? c.reasons.join(" · ") : "—",
     href: c.decision_id ? `/decisions/spot/${c.decision_id}` : null,
   }));
