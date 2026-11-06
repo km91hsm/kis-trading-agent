@@ -61,7 +61,8 @@ export function moneyUnit(v: Amount | undefined, currency: string): string {
   const usd = currency === "USD";
   const s = fmtMoney(v ?? null, usd ? "USD" : "KRW");
   if (s === "—") return s;
-  return usd ? `$${s}` : `${s}원`;
+  if (!usd) return `${s}원`;
+  return s.startsWith("-") ? `-$${s.slice(1)}` : `$${s}`; // 부호는 기호 앞: -$12.25
 }
 
 /** 합계에 든 계좌 id 를 모의/실전으로 세어 「모의 1 · 실전 1」. 계좌 목록 전이면 「계좌 n」. */
