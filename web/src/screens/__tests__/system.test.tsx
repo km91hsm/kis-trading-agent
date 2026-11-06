@@ -364,6 +364,13 @@ describe("시스템 화면", () => {
     type(input, "secret-value-1");
     await act(async () => button(s, "저장").click());
     await flush();
+    // 확인 대화상자 — 키 이름만 보이고 값은 보이지 않는다
+    const dlg = document.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dlg.textContent).toContain("TELEGRAM_BOT_TOKEN");
+    expect(dlg.textContent).not.toContain("secret-value-1");
+    expect(bodiesTo("/settings/secrets", "POST")).toEqual([]);
+    await act(async () => button(dlg, "확인").click());
+    await flush();
     expect(bodiesTo("/settings/secrets", "POST")).toEqual([{ values: { TELEGRAM_BOT_TOKEN: "secret-value-1" } }]);
     expect((s.querySelector('input[aria-label="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement).value).toBe("");
     expect(s.textContent).not.toContain("secret-value-1");
@@ -390,6 +397,8 @@ describe("시스템 화면", () => {
     const s = section("secrets");
     type(s.querySelector('input[aria-label="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement, "v");
     await act(async () => button(s, "저장").click());
+    await flush();
+    await act(async () => button(document.querySelector('[role="dialog"]') as HTMLElement, "확인").click());
     await flush();
     expect(s.querySelector('[role="alert"]')?.textContent).toContain("이 PC 에서만");
   });

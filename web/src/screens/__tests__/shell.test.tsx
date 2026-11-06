@@ -258,6 +258,7 @@ describe("상세 화면 하위 목차(본문 DOM)", () => {
       ["orders", "오늘 주문·체결", "/accounts/paper-1#orders"],
       ["positions", "보유", "/accounts/paper-1#positions"],
       ["risk", "리스크", "/accounts/paper-1#risk"],
+      ["tax-lots", "세금 로트", "/accounts/paper-1#tax-lots"],
       ["nav-chart", "NAV 추이", "/accounts/paper-1#nav-chart"],
     ]);
   });

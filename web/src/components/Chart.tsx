@@ -31,7 +31,25 @@ export type ChartProps = {
   height?: number;
   /** 분봉 — 시간축에 시각을 보인다. */
   intraday?: boolean;
+  /** 분봉 시각의 시장 시간대(기본 Asia/Seoul). epoch 를 그대로 두면 UTC 로 찍힌다. */
+  tz?: string;
 };
+
+type TickTime = string | number | { year: number; month: number; day: number };
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** 시간축 눈금 — 일봉 날짜는 MM/DD, 분봉 epoch 는 시장 시간대의 HH:MM. */
+export function fmtTick(time: TickTime, tz = "Asia/Seoul"): string {
+  if (typeof time === "number") {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(time * 1000));
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+    return `${get("hour")}:${get("minute")}`;
+  }
+  if (typeof time === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(time);
+    return m ? `${m[2]}/${m[3]}` : time;
+  }
+  return `${pad2(time.month)}/${pad2(time.day)}`;
+}
 
 const EXTRA_COLORS = ["--fg-muted", "--warn", "--ok"];
 
@@ -80,7 +98,7 @@ export function Chart(props: ChartProps) {
   return <LiveChart {...props} />;
 }
 
-function LiveChart({ series, candles, markers, lines, extra, height = 240, intraday = false }: ChartProps) {
+function LiveChart({ series, candles, markers, lines, extra, height = 240, intraday = false, tz = "Asia/Seoul" }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRef = useRef<ISeriesApi<"Line"> | ISeriesApi<"Candlestick"> | null>(null);
@@ -124,8 +142,13 @@ function LiveChart({ series, candles, markers, lines, extra, height = 240, intra
   }, [height]);
 
   useEffect(() => {
-    chartRef.current?.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
-  }, [intraday]);
+    // 연·월 눈금(type 0·1)은 기본 라벨, 날짜·시각 눈금만 우리 형식.
+    const tick = (t: TickTime, type?: number) => (typeof type === "number" && type < 2 ? null : fmtTick(t, tz));
+    chartRef.current?.applyOptions({
+      timeScale: { timeVisible: intraday, secondsVisible: false, tickMarkFormatter: tick as never },
+      localization: { priceFormatter: fmtAxis, timeFormatter: ((t: TickTime) => (intraday ? fmtTick(t, tz) : typeof t === "string" ? t : fmtTick(t, tz))) as never },
+    });
+  }, [intraday, tz]);
 
   useEffect(() => {
     const s = lineRef.current;

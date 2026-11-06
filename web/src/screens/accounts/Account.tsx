@@ -1,8 +1,9 @@
 // 계좌별 화면 — `/accounts/:id`. 돌아가기·h1·머리 카드(모의/실전·레인 칩, Stats NAV·현금(갱신 시각), 모드 전환) →
-// 오늘 주문·체결 → 보유(현물 lot 펼침, 파생 계좌는 「파생 보유」) → 단타(합계 미포함) → 리스크(현물만) → NAV 차트(30일).
+// 오늘 주문·체결(CSV) → 보유(현물 lot 펼침, 파생 계좌는 「파생 보유」) → 단타(합계 미포함) → 리스크(현물만) →
+// 세금 로트(현물만: 연도 선택 → `/accounts/{id}/tax-lots?market&year`, 시장별 요약 Stats·실현 로트 표·CSV) → NAV 차트(30일).
 // 섹션 컨테이너는 데이터 전에 바로 그린다. 파생 계좌는 보유 절 id 가 `fo-positions`(메뉴 앵커), 아니면 `positions` + 빈 hidden `fo-positions`.
 // 계좌 단위 일시정지는 API 에 없어 그리지 않는다.
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Card } from "../../components/Card";
 import { Chart } from "../../components/Chart";
@@ -10,7 +11,7 @@ import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
-import type { ApiError } from "../../lib/api";
+import { csvUrl, type ApiError } from "../../lib/api";
 import { agoText, fmtDate, fmtInt, fmtMoney, fmtPt, fmtTime } from "../../lib/format";
 import { tickerLabel } from "../../lib/ticker";
 import { useFoQuotes, useKstDate, useNow, useQuotes, useResource } from "../../lib/hooks";
@@ -22,7 +23,9 @@ import { navSeries, splitLanes, sumEval, withLive, type LiveRow, type NavFoRepor
 import { RiskCard, type Risk } from "./RiskCard";
 
 type OpenLot = { ticker: string; qty: number; price: string | number; bought_at: string };
-type TaxLots = { open_lots: OpenLot[] };
+type RealizedLot = { ticker: string; qty: number; buy_date: string; sell_date: string; cost: string; proceeds: string; pnl: string; term: string; wash_sale: boolean };
+type TaxSummary = { realized_pnl: string; short_pnl: string; long_pnl: string; wash_sales: number; unmatched_sell_qty: number };
+type TaxLots = { open_lots: OpenLot[]; realized: RealizedLot[]; summary: TaxSummary; year: number | null };
 
 const LANE_LABEL: Record<string, string> = { spot: "현물", scalp: "단타", fo: "파생" };
 const SIDE_LABEL: Record<string, string> = { BUY: "매수", SELL: "매도", buy: "매수", sell: "매도" };
@@ -45,10 +48,14 @@ export function Account() {
   const markets = account?.markets ?? [];
 
   const positions = useResource<Merged<PositionRow>>(`/accounts/${enc}/positions`, undefined, ["positions", "fo", "scalp", "triggers"]);
-  const orders = useResource<Merged<Order>>("/orders", { date: today, account_id: id }, ["orders", "fo", "scalp"]);
+  const orderParams = { date: today, account_id: id };
+  const orders = useResource<Merged<Order>>("/orders", orderParams, ["orders", "fo", "scalp"]);
   const risk = useResource<Risk>("/positions/risk", { account_id: id, market }, ["positions"], { enabled: ready && !fo });
-  const lotsKr = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, { market: "KR" }, ["positions", "orders"], { enabled: ready && !fo && markets.includes("KR") });
-  const lotsUs = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, { market: "US" }, ["positions", "orders"], { enabled: ready && !fo && markets.includes("US") });
+  // 세금 로트 연도 — 기본 올해(KST), "" 는 전체. 보유 로트(open_lots)는 연도와 무관하게 전부 온다.
+  const [year, setYear] = useState(today.slice(0, 4));
+  const lotParams = (m: string): Record<string, string> => (year ? { market: m, year } : { market: m });
+  const lotsKr = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, lotParams("KR"), ["positions", "orders"], { enabled: ready && !fo && markets.includes("KR") });
+  const lotsUs = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, lotParams("US"), ["positions", "orders"], { enabled: ready && !fo && markets.includes("US") });
   const perf = useResource<NavPerf>("/analytics/performance", { account_id: id, market, days: "30" }, ["accounts"], { enabled: ready && !fo });
   const foReport = useResource<NavFoReport>("/analytics/fo/report", { account_id: id, days: "30" }, ["accounts"], { enabled: ready && fo });
 
@@ -92,7 +99,7 @@ export function Account() {
       <ul className="lot-list">
         {lots.map((l, i) => (
           <li key={`${l.bought_at}-${i}`}>
-            {fmtDate(l.bought_at)} · {l.qty}주 · {fmtMoney(l.price, c)}
+            {fmtDate(l.bought_at)} · {fmtInt(l.qty)}주 · {fmtMoney(l.price, c)}
           </li>
         ))}
       </ul>
@@ -125,7 +132,7 @@ export function Account() {
 
       <section id="orders" className="screen-section">
         <h2>오늘 주문·체결</h2>
-        {orders.error ? failed("주문", orders.error) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} />}
+        {orders.error ? failed("주문", orders.error) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} csvHref={orders.data.items.length ? csvUrl("/orders", orderParams) : undefined} />}
       </section>
 
       {fo ? (
@@ -164,6 +171,32 @@ export function Account() {
             <Empty title="불러오는 중" />
           ) : (
             <RiskCard risk={risk.data} names={names} />
+          )}
+        </section>
+      )}
+
+      {fo ? null : (
+        <section id="tax-lots" className="screen-section">
+          <h2>세금 로트</h2>
+          <p className="perf-filters">
+            <label>
+              연도{" "}
+              <select aria-label="연도" value={year} onChange={(e) => setYear(e.target.value)}>
+                {yearOptions(today).map((y) => (
+                  <option key={y} value={y}>
+                    {y || "전체"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="data-muted">FIFO 실현 로트·워시세일(표시 전용)</span>
+          </p>
+          {!ready ? (
+            <Empty title="불러오는 중" />
+          ) : (
+            markets.map((m) => (
+              <TaxBlock key={m} market={m} res={m === "US" ? lotsUs : lotsKr} names={names} csvHref={csvUrl(`/accounts/${enc}/tax-lots`, lotParams(m))} single={markets.length === 1} />
+            ))
           )}
         </section>
       )}
@@ -237,6 +270,52 @@ function Totals({ rows }: { rows: LiveRow<PositionRow>[] }) {
   );
 }
 
+/** 연도 선택지 — 올해부터 3년 + 전체(""). */
+function yearOptions(today: string): string[] {
+  const y = Number(today.slice(0, 4));
+  return [String(y), String(y - 1), String(y - 2), ""];
+}
+
+const TERM_LABEL: Record<string, string> = { short: "단기", long: "장기" };
+
+function TaxBlock({ market, res, names, csvHref, single }: { market: string; res: ReturnType<typeof useResource<TaxLots>>; names: Record<string, string | null | undefined>; csvHref: string; single: boolean }) {
+  const c = market === "US" ? "USD" : "KRW";
+  const columns: Column<RealizedLot & { _k: string }>[] = [
+    { key: "ticker", label: "종목", width: "20%", long: true, render: (r) => tickerLabel(r.ticker, names[r.ticker]) },
+    { key: "qty", label: "수량", width: "8%", align: "num", render: (r) => `${fmtInt(r.qty)}주` },
+    { key: "buy_date", label: "매수일", width: "11%", render: (r) => fmtDate(r.buy_date) },
+    { key: "sell_date", label: "매도일", width: "11%", render: (r) => fmtDate(r.sell_date) },
+    { key: "cost", label: "원가", width: "12%", align: "num", render: (r) => fmtMoney(r.cost, c) },
+    { key: "proceeds", label: "매도금", width: "12%", align: "num", render: (r) => fmtMoney(r.proceeds, c) },
+    { key: "pnl", label: "손익", width: "10%", align: "num", render: (r) => fmtMoney(r.pnl, c) },
+    { key: "term", label: "기간", width: "8%", align: "chip", render: (r) => <Chip>{TERM_LABEL[r.term] ?? r.term}</Chip> },
+    { key: "wash_sale", label: "워시세일", width: "8%", align: "chip", render: (r) => (r.wash_sale ? <Chip tone="warn">워시세일</Chip> : "—") },
+  ];
+  return (
+    <div data-tax-market={market} className="tax-block">
+      {single ? null : <h3 className="perf-sub">{market}</h3>}
+      {res.error ? (
+        failed("세금 로트", res.error)
+      ) : !res.data ? (
+        <Empty title="불러오는 중" />
+      ) : (
+        <>
+          <Stats
+            cols={4}
+            items={[
+              { label: "실현 손익", value: fmtMoney(res.data.summary.realized_pnl, c) },
+              { label: "단기", value: fmtMoney(res.data.summary.short_pnl, c) },
+              { label: "장기", value: fmtMoney(res.data.summary.long_pnl, c) },
+              { label: "워시세일", value: `${fmtInt(res.data.summary.wash_sales)}건` },
+            ]}
+          />
+          <Table columns={columns} rows={res.data.realized.map((r, i) => ({ ...r, _k: `${r.ticker}-${r.sell_date}-${i}` }))} rowKey={(r) => r._k} csvHref={csvHref} empty="실현 로트 없음" />
+        </>
+      )}
+    </div>
+  );
+}
+
 type OrderRow = Order & { _k: string };
 
 const FAILED_ORDER = new Set(["failed", "rejected", "cancelled"]);
@@ -253,7 +332,7 @@ function priceText(o: Order): string {
   return fmtMoney(v, o.market === "US" ? "USD" : "KRW");
 }
 
-function OrdersTable({ data }: { data: Merged<Order> }) {
+function OrdersTable({ data, csvHref }: { data: Merged<Order>; csvHref?: string }) {
   const rows: OrderRow[] = data.items.map((o, i) => ({ ...o, _k: `${o.lane}-${o.id ?? i}` }));
   const columns: Column<OrderRow>[] = [
     { key: "at", label: "시각", width: "14%", render: (o) => fmtTime(o.at ?? null) },
@@ -265,5 +344,5 @@ function OrdersTable({ data }: { data: Merged<Order> }) {
     { key: "lane", label: "레인", width: "10%", align: "chip", render: (o) => <Chip>{LANE_LABEL[o.lane] ?? o.lane}</Chip> },
     { key: "status", label: "상태", width: "12%", align: "chip", render: (o) => <Chip tone={orderTone(o.status)}>{statusLabel(o.status)}</Chip> },
   ];
-  return <Table columns={columns} rows={rows} rowKey={(o) => o._k} partial={data.partial} empty="오늘 주문 없음" />;
+  return <Table columns={columns} rows={rows} rowKey={(o) => o._k} partial={data.partial} csvHref={csvHref} empty="오늘 주문 없음" />;
 }

@@ -240,6 +240,7 @@ describe("계좌별 화면", () => {
     act(() => (pos.querySelector(".row-toggle") as HTMLButtonElement).click());
     expect(pos.textContent).toContain("69,000");
     expect(pos.textContent).toContain("71,500");
+    expect(pos.querySelector(".lot-list")!.textContent).toContain("6주");
     const orders = ff!.calls.find((c) => c.url.startsWith("/api/orders"))!;
     expect(orders.url).toContain("account_id=paper-1");
   });
@@ -290,7 +291,8 @@ describe("계좌별 화면", () => {
     expect(h.querySelector("select")).not.toBeNull();
     expect(section("mode")).toBeNull();
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
-      "orders", "positions", "fo-positions", "scalp-positions", "risk", "nav-chart",
+      "orders", "positions", "fo-positions", "scalp-positions", "risk",
+      "tax-lots", "nav-chart",
     ]);
   });
 
@@ -308,6 +310,55 @@ describe("계좌별 화면", () => {
     await mount(routes({ "GET /api/orders": { items: [fixtureSpotOrder({ name: "삼성전자" })], partial: false } }));
     const orders = section("orders")!;
     expect(orders.textContent).toContain("005930 삼성전자");
+  });
+
+  test("주문 표 CSV 링크는 주문이 있을 때만(/orders?date&account_id&format=csv)", async () => {
+    await mount(routes({ "GET /api/orders": { items: [fixtureSpotOrder({ account_id: "paper-1" })], partial: false } }));
+    const a = section("orders")!.querySelector("a.table-csv") as HTMLAnchorElement;
+    expect(a).not.toBeNull();
+    expect(a.getAttribute("href")).toMatch(/^\/api\/orders\?date=\d{4}-\d{2}-\d{2}&account_id=paper-1&format=csv$/);
+  });
+
+  test("주문이 없으면 CSV 링크도 없다", async () => {
+    await mount(routes());
+    expect(section("orders")!.querySelector("a.table-csv")).toBeNull();
+  });
+
+  test("세금 로트 절: 연도 선택(기본 올해) → tax-lots?market&year, 시장별 요약 Stats·실현 로트 표·CSV 링크; 「전체」 면 year 없이", async () => {
+    await mount(routes());
+    const year = String(new Date().getFullYear());
+    const sec = section("tax-lots")!;
+    expect(sec.querySelector("h2")!.textContent).toBe("세금 로트");
+    const sel = sec.querySelector('select[aria-label="연도"]') as HTMLSelectElement;
+    expect(sel.value).toBe(year);
+    const first = ff!.calls.filter((c) => c.url.includes("/tax-lots"));
+    expect(first.map((c) => new URL(c.url, "http://x").searchParams.get("year"))).toEqual([year, year]);
+    // 시장별 블록(KR·US) — 요약 Stats + 실현 표 + CSV
+    const blocks = sec.querySelectorAll("[data-tax-market]");
+    expect(Array.from(blocks).map((b) => b.getAttribute("data-tax-market"))).toEqual(["KR", "US"]);
+    const kr = blocks[0] as HTMLElement;
+    const dts = Array.from(kr.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(["실현 손익", "단기", "장기", "워시세일"]);
+    expect(kr.textContent).toContain("35,000");
+    const t = kr.querySelector("table")!;
+    expect(Array.from(t.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["종목", "수량", "매수일", "매도일", "원가", "매도금", "손익", "기간", "워시세일"]);
+    const row = t.querySelector("tbody")!.querySelectorAll("tr")[1];
+    expect(row.textContent).toContain("장기");
+    expect(row.querySelector('.chip[data-tone="warn"]')!.textContent).toBe("워시세일");
+    expect(kr.textContent).toContain("005930 삼성전자");
+    expect((kr.querySelector("a.table-csv") as HTMLAnchorElement).getAttribute("href")).toBe(`/api/accounts/paper-1/tax-lots?market=KR&year=${year}&format=csv`);
+    choose(sel, "");
+    await flush();
+    await flush();
+    const after = ff!.calls.filter((c) => c.url.includes("/tax-lots")).slice(2);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((c) => new URL(c.url, "http://x").searchParams.get("year") === null)).toBe(true);
+    expect((kr.querySelector("a.table-csv") as HTMLAnchorElement).getAttribute("href")).toBe("/api/accounts/paper-1/tax-lots?market=KR&format=csv");
+  });
+
+  test("파생 계좌는 세금 로트 절이 없다", async () => {
+    await mount(routes(), "paper-fo");
+    expect(section("tax-lots")).toBeNull();
   });
 
   test("「‹ 돌아가기」 는 /accounts 로, 헤더에 현금·모드 메모", async () => {

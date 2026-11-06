@@ -171,7 +171,7 @@ function PickedChart({ picked }: { picked: Picked }) {
       </div>
       {interval === "day"
         ? body(charts, "차트", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} /> : <Empty title="일봉 없음" />))
-        : body(minute, "분봉", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} intraday /> : <Empty title="오늘 분봉 없음" />))}
+        : body(minute, "분봉", () => (candles.length ? <Chart candles={candles} markers={markers} lines={lines} height={320} intraday tz={minute.data?.tz} /> : <Empty title="오늘 분봉 없음" />))}
       {market === "KR" ? <Book ticker={ticker} /> : null}
     </>
   );

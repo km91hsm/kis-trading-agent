@@ -1,8 +1,10 @@
 // 연결 키 — GET /settings/secrets(토큰 + 이 PC 직접 접속, 이름·설정 여부만)를 마운트·토큰 저장·저장 뒤에 읽고,
-// 키마다 비밀번호 입력 → 「저장」 → POST /settings/secrets {values}. 값은 화면에 되돌려 보이지 않고 저장 뒤 입력을 비운다.
+// 키마다 비밀번호 입력 → 「저장」 → 확인(바뀌는 키 이름만, 값은 안 보임) → POST /settings/secrets {values}.
+// 값은 화면에 되돌려 보이지 않고 저장 뒤 입력을 비운다.
 // 403 은 「이 PC 에서만」(quiet403 — 셸 토큰 띠는 띄우지 않는다). SSE 키가 없어 구독하지 않는다.
 import { useCallback, useEffect, useState } from "react";
 import { Chip } from "../../components/Chip";
+import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
 import { ApiError, errorText, getAuthed, postJson, tokenStore } from "../../lib/api";
 import { secretRows, type SecretsResp } from "./system.ts";
@@ -19,6 +21,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [n, setN] = useState(0);
   const hasToken = !!tokenStore.get();
   const reload = useCallback(() => setN((x) => x + 1), []);
@@ -38,9 +41,10 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
     return () => ctrl.abort();
   }, [hasToken, tokenKey, n]);
 
+  const filled = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
+  const pending = Object.keys(filled);
   const save = async () => {
-    const filled = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
-    if (!Object.keys(filled).length) return;
+    if (!pending.length) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -68,9 +72,23 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
       className="sys-secrets"
       onSubmit={(e) => {
         e.preventDefault();
-        void save();
+        if (pending.length) setConfirming(true);
       }}
     >
+      <Confirm
+        open={confirming}
+        title="연결 키 저장"
+        body={
+          <p>
+            {pending.length}개 키를 바꿉니다: <code>{pending.join(", ")}</code>. 값은 저장 뒤 화면에 보이지 않으며, 이전 값은 백업 파일에 남습니다.
+          </p>
+        }
+        onConfirm={() => {
+          setConfirming(false);
+          void save();
+        }}
+        onClose={() => setConfirming(false)}
+      />
       <ul className="sys-lines">
         {secretRows(data).map((s) => (
           <li key={s.name}>

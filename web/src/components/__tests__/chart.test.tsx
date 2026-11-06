@@ -27,7 +27,7 @@ vi.mock("lightweight-charts", () => ({
   CandlestickSeries: m.CandlestickSeries,
 }));
 
-import { Chart } from "../Chart";
+import { Chart, fmtTick } from "../Chart";
 import { render } from "../../test/render";
 
 let roCallback: ResizeObserverCallback | null = null;
@@ -117,6 +117,20 @@ describe("Chart", () => {
 });
 
 describe("빈 자료", () => {
+  test("fmtTick — 일봉 날짜는 MM/DD, 분봉 epoch 는 시장 시간대 HH:MM", () => {
+    expect(fmtTick("2026-11-05")).toBe("11/05");
+    expect(fmtTick(1762302600, "Asia/Seoul")).toBe("09:30");
+    expect(fmtTick(1762302600, "America/New_York")).toBe("19:30");
+    expect(fmtTick(1762302600)).toBe("09:30"); // 기본 KST
+  });
+
+  test("intraday 면 timeScale 에 시각 표시·눈금 포매터를 applyOptions 로 준다", () => {
+    render(<Chart candles={[{ time: 1762302600, open: 1, high: 2, low: 1, close: 2 }]} intraday tz="America/New_York" />);
+    const call = m.chart.applyOptions.mock.calls.map((c) => (c as unknown[])[0] as { timeScale?: { timeVisible?: boolean; tickMarkFormatter?: (t: unknown) => string } }).find((o) => o.timeScale?.timeVisible);
+    expect(call).toBeDefined();
+    expect(call!.timeScale!.tickMarkFormatter!(1762302600)).toBe("19:30");
+  });
+
   test("점이 없으면 차트를 만들지 않고 같은 높이의 빈 틀에 「자료 없음」을 쓴다", () => {
     const { container } = render(<Chart series={[]} height={200} />);
     expect(m.createChart).not.toHaveBeenCalled();
