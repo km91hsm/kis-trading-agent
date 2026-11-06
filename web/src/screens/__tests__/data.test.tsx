@@ -102,6 +102,10 @@ const callsTo = (path: string, method = "GET") =>
   ff!.calls.filter((c) => (c.init?.method ?? "GET").toUpperCase() === method).map((c) => new URL(c.url, "http://localhost")).filter((u) => u.pathname === `/api${path}`);
 const bodiesTo = (path: string, method: string) =>
   ff!.calls.filter((c) => c.init?.method === method && new URL(c.url, "http://localhost").pathname === `/api${path}`).map((c) => JSON.parse(String(c.init!.body)) as unknown);
+async function confirmDialog() {
+  await act(async () => button(document.querySelector('[role="dialog"]') as HTMLElement, "확인").click());
+  await flush();
+}
 function button(root: ParentNode, text: string) {
   return Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.trim() === text) as HTMLButtonElement;
 }
@@ -169,13 +173,80 @@ describe("데이터 화면", () => {
     expect(news.textContent).toContain("삼성전자 HBM 공급 확대");
     expect(news.textContent).toContain("삼성전자");
     expect(news.textContent).toContain("촉매");
+    // 출처 한글·시각 fmtWhen(다른 날이면 MM.DD HH:MM)
+    expect(news.textContent).toContain("네이버");
+    expect(news.textContent).not.toContain("naver");
+    expect(news.textContent).toContain("11.05 09:30");
+    expect(Array.from(news.querySelectorAll("thead")[0].querySelectorAll("th")).map((e) => e.textContent)).toEqual(["시각", "제목", "종목", "꼬리표", "출처"]);
     const link = Array.from(news.querySelectorAll("a")).find((a) => a.textContent === "판정에 쓰임") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/decisions/spot/7");
     expect(news.textContent).toContain("데몬이 주기적으로 수집");
     expect(button(news, "지금 수집")).toBeDefined();
-    // 이벤트(공시) — 중요도 칩
+    // 공시 — 중요도 칩 한글, 날짜만, 출처 한글
     expect(news.textContent).toContain("주요사항보고서(유상증자결정)");
-    expect(news.querySelector('.chip[data-tone="fail"]')?.textContent).toBe("critical");
+    expect(news.querySelector('.chip[data-tone="fail"]')?.textContent).toBe("긴급");
+    expect(news.textContent).toContain("전자공시(DART)");
+    const ev = news.querySelectorAll("table")[1];
+    expect(Array.from(ev.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["날짜", "중요도", "제목", "종목", "출처"]);
+    expect(ev.querySelector("tbody td")!.textContent).toBe("2026-11-05");
+    // 검색 안내 통일
+    expect(section("news").querySelector("select")).toBeNull();
+  });
+
+  test("뉴스 종목 열은 종목이 하나도 없으면 빼고, 중요도 없는 공시는 칩 대신 「—」", async () => {
+    const n = fixtureNews();
+    await mount(
+      routes({
+        "GET /api/news": { ...n, items: (n.items as { tickers: string[] }[]).map((i) => ({ ...i, tickers: [] })) },
+        "GET /api/news/events": { ...fixtureEvents(), disclosures: [{ id: 202, source: "dart", title: "기타 공시", url: null, published_at: null, received_at: "2026-11-05T01:01:00+00:00", severity: null, tickers: [] }] },
+      }),
+      "news",
+    );
+    const news = section("news");
+    const heads = Array.from(news.querySelectorAll("table")[0].querySelectorAll("thead th")).map((e) => e.textContent);
+    expect(heads).not.toContain("종목");
+    const ev = news.querySelectorAll("table")[1];
+    expect(ev.querySelector(".chip")).toBeNull();
+  });
+
+  test("뉴스·공시는 30행 페이지(?page / ?epage)", async () => {
+    const n = fixtureNews();
+    const base = n.items[0] as Record<string, unknown>;
+    const many = Array.from({ length: 31 }, (_, i) => ({ ...base, id: 1000 + i, title: `기사 ${i}` }));
+    const e = fixtureEvents();
+    const ebase = e.disclosures[0] as Record<string, unknown>;
+    const manyEv = Array.from({ length: 31 }, (_, i) => ({ ...ebase, id: 2000 + i, title: `공시 ${i}` }));
+    await mount(routes({ "GET /api/news": { ...n, items: many }, "GET /api/news/events": { ...e, disclosures: manyEv } }), "news");
+    const tables = section("news").querySelectorAll("table");
+    expect(tables[0].querySelectorAll("tbody tr")).toHaveLength(30);
+    expect(tables[1].querySelectorAll("tbody tr")).toHaveLength(30);
+    expect(section("news").querySelectorAll(".pager")).toHaveLength(2);
+  });
+
+  test("시장은 화면 머리의 세그먼트 하나(KR | US)로 고르고 ?market= 에 남는다 — 절 안에 select 없음", async () => {
+    await mount(routes(), "news");
+    const seg = document.querySelector('[data-market-segment]') as HTMLElement;
+    const us = Array.from(seg.querySelectorAll("button")).find((b) => b.textContent === "US")!;
+    expect(us.getAttribute("aria-pressed")).toBe("false");
+    act(() => us.click());
+    await flush();
+    await flush();
+    expect(us.getAttribute("aria-pressed")).toBe("true");
+    expect(callsTo("/news").at(-1)!.searchParams.get("market")).toBe("US");
+    expect(callsTo("/news/events").at(-1)!.searchParams.get("market")).toBe("US");
+    expect(document.querySelectorAll('select[aria-label="시장"]')).toHaveLength(0);
+  });
+
+  test("?market=US 로 들어오면 지표·테마도 US 로 읽는다", async () => {
+    ff = installFakeFetch(routes());
+    render(
+      <MemoryRouter initialEntries={["/data/features?market=US"]}>
+        <Data page="features" />
+      </MemoryRouter>,
+    );
+    await flush();
+    await flush();
+    expect(callsTo("/features/latest")[0].searchParams.get("market")).toBe("US");
   });
 
   test("「지금 수집」: POST /jobs {kind: news_collect, params: {market}}", async () => {
@@ -187,16 +258,24 @@ describe("데이터 화면", () => {
     expect(bodiesTo("/jobs", "POST")).toEqual([{ kind: "news_collect", params: { market: "KR" } }]);
   });
 
-  test("수동 입력: POST /news/manual {market, text, url}", async () => {
+  test("수동 입력은 접힌 details(요약 「수동 입력」) 안, 저장은 확인 뒤 POST /news/manual {market, text, url}, 최근 입력은 표(시각·제목)", async () => {
     tokenStore.set("tok");
-    await mount(routes(), "news");
+    await mount(routes({ "GET /api/news/manual": { market: "KR", items: [{ received_at: "2026-11-05T02:00:00+00:00", title: "지난 수동 기사", url: "https://m.example/0", note: "" }] } }), "news");
     const news = section("news");
+    const details = news.querySelector("details.data-manual-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")!.textContent).toContain("수동 입력");
     type(news.querySelector('textarea[aria-label="기사 붙여 넣기"]') as HTMLTextAreaElement, "수동 기사\n메모");
     type(news.querySelector('input[aria-label="URL"]') as HTMLInputElement, "https://m.example/1");
     await act(async () => button(news, "저장").click());
-    await flush();
+    expect(bodiesTo("/news/manual", "POST")).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain("수동 기사");
+    await confirmDialog();
     expect(bodiesTo("/news/manual", "POST")).toEqual([{ market: "KR", text: "수동 기사\n메모", url: "https://m.example/1" }]);
     expect(news.textContent).toContain("저장했습니다");
+    const recent = details.querySelector("table")!;
+    expect(Array.from(recent.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["시각", "제목"]);
+    expect(recent.textContent).toContain("지난 수동 기사");
   });
 
   test("감시목록 PATCH 는 토큰이 필요하다 — 없으면 오류 줄, 있으면 {tickers}", async () => {
@@ -205,15 +284,19 @@ describe("데이터 화면", () => {
     expect(wl.textContent).toContain("005930");
     type(wl.querySelector('input[aria-label="종목 추가"]') as HTMLInputElement, "AAPL");
     act(() => button(wl, "추가").click());
+    // 추가 즉시 임시 칩(저장 전 표시)
+    const draft = Array.from(wl.querySelectorAll(".chip")).find((c) => c.textContent?.startsWith("AAPL")) as HTMLElement;
+    expect(draft.getAttribute("data-draft")).toBe("true");
     await act(async () => button(wl, "저장").click());
-    await flush();
+    await confirmDialog();
     expect(callsTo("/settings/watchlist", "PATCH")).toHaveLength(0);
     expect(wl.querySelector('[role="alert"]')?.textContent).toContain("쓰기 토큰이 필요합니다");
 
     tokenStore.set("tok");
     act(() => (wl.querySelector('button[aria-label="000660 빼기"]') as HTMLButtonElement).click());
     await act(async () => button(wl, "저장").click());
-    await flush();
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain("2종목");
+    await confirmDialog();
     expect(bodiesTo("/settings/watchlist", "PATCH")).toEqual([{ tickers: ["005930", "AAPL"] }]);
     expect(wl.querySelector('[role="alert"]')).toBeNull();
   });
@@ -233,7 +316,9 @@ describe("데이터 화면", () => {
     const titles = m.series.createPriceLine.mock.calls.map((c) => ((c as unknown[])[0] as { title: string }).title);
     expect(titles).toEqual(expect.arrayContaining(["손절", "목표", "현재가"]));
     expect(callsTo("/quotes/book")[0].searchParams.get("ticker")).toBe("005930");
-    expect(section("quotes").textContent).toContain("71600");
+    expect(section("quotes").textContent).toContain("71,600");
+    expect(section("quotes").textContent).not.toContain("71600");
+    expect((section("quotes").querySelector('input[aria-label="종목 검색"]') as HTMLInputElement).placeholder).toBe("종목명 또는 코드로 검색");
   });
 
   test("호가는 next_poll_ms 마다 다시 부르고, 언마운트하면 멈춘다", async () => {
@@ -252,12 +337,9 @@ describe("데이터 화면", () => {
   test("US 는 호가를 부르지 않는다", async () => {
     await mount(routes({ "GET /api/names/search": [{ market: "US", ticker: "AAPL", name: "Apple", exchange: "NAS", source: "master" }] }));
     const q = section("quotes");
-    const sel = q.querySelector('select[aria-label="시장"]') as HTMLSelectElement;
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
-    act(() => {
-      setter.call(sel, "US");
-      sel.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const seg = document.querySelector("[data-market-segment]") as HTMLElement;
+    act(() => Array.from(seg.querySelectorAll("button")).find((b) => b.textContent === "US")!.click());
+    await flush();
     type(q.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement, "AAPL");
     act(() => button(q, "검색").click());
     await flush();
@@ -271,10 +353,16 @@ describe("데이터 화면", () => {
     const t = await mount(routes(), "themes");
     expect(section("themes").textContent).toContain("반도체");
     expect(section("themes").textContent).toContain("거래량 급증");
+    const tt = section("themes").querySelector("table")!;
+    expect(Array.from(tt.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["종목", "근거"]);
+    expect(tt.textContent).toContain("005930 삼성전자");
     t.unmount();
     await mount(routes(), "features");
     const f = section("features");
     const th = f.querySelector('th[data-key="roe"]') as HTMLElement;
+    expect(th.textContent).toBe("ROE");
+    expect((f.querySelector('th[data-key="close"]') as HTMLElement).textContent).toBe("종가");
+    expect((f.querySelector('th[data-key="flow_foreign_20d"]') as HTMLElement).textContent).toBe("외국인 20일 순매수");
     expect(th.getAttribute("aria-sort")).toBe("none");
     act(() => (th.querySelector("button") as HTMLButtonElement).click());
     expect(th.getAttribute("aria-sort")).toBe("descending");
@@ -284,9 +372,21 @@ describe("데이터 화면", () => {
     await flush();
     const hist = callsTo("/features/history")[0];
     expect(hist.search).toBe("?market=KR&ticker=000660&days=120");
+    const histTable = f.querySelector(".data-history table")!;
+    expect(Array.from(histTable.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["날짜", "종가", "10일 수익률", "52주 고점 위치", "외국인 20일 순매수", "뉴스 수"]);
     expect(f.textContent).toContain("활성 20261101_120000");
     expect(f.textContent).toContain("판정 보조 신호로만 쓴다");
     for (const label of ["지표 스냅샷", "파생 지표 계산", "지표 백필"]) expect(button(f, label)).toBeDefined();
+  });
+
+  test("지표 표는 30행 페이지(?page)", async () => {
+    const l = fixtureFeaturesLatest();
+    const base = l.rows[0] as Record<string, unknown>;
+    const many = Array.from({ length: 31 }, (_, i) => ({ ...base, ticker: String(100000 + i) }));
+    await mount(routes({ "GET /api/features/latest": { ...l, rows: many } }), "features");
+    const f = section("features");
+    expect(f.querySelectorAll("table.data-feature-table tbody tr")).toHaveLength(30);
+    expect(f.querySelector(".pager")).not.toBeNull();
   });
 
   test("지표·모델은 SSE features 키로 다시 읽고 market_views 로는 읽지 않는다", async () => {

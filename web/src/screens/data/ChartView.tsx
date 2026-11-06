@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Chart, type ChartCandle, type ChartLine, type ChartMarker } from "../../components/Chart";
 import { Empty } from "../../components/Empty";
 import { ApiError, errorText, getJson } from "../../lib/api";
+import { fmtInt } from "../../lib/format";
 import { useQuotes, useResource, useVisible } from "../../lib/hooks";
 import { body, failed } from "../performance/ResourceView";
-import { MarketSelect, type Market } from "./Data.tsx";
+import { useMarket, type Market } from "./Data.tsx";
 import { chartLines, chartMarkers, type FillMarker } from "./data.ts";
 
 type NameHit = { market: string; ticker: string; name: string | null; exchange: string | null; source: string };
@@ -35,9 +36,10 @@ function cssVar(name: string): string {
 }
 
 export function ChartView() {
-  const [market, setMarket] = useState<Market>("KR");
+  const [market] = useMarket();
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
+  useEffect(() => setQ(""), [market]); // 시장이 바뀌면 검색 결과는 뜻이 없다
   const [picked, setPicked] = useState<Picked | null>(null);
   const searchParams = useMemo(() => ({ q, market }), [q, market]);
   const search = useResource<NameHit[]>("/names/search", searchParams, [], { enabled: !!q });
@@ -51,14 +53,7 @@ export function ChartView() {
           setQ(text.trim());
         }}
       >
-        <MarketSelect
-          value={market}
-          onChange={(m) => {
-            setMarket(m);
-            setQ("");
-          }}
-        />
-        <input aria-label="종목 검색" placeholder="종목 이름·코드" value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="종목 검색" placeholder="종목명 또는 코드로 검색" value={text} onChange={(e) => setText(e.target.value)} />
         <button type="submit" className="btn">
           검색
         </button>
@@ -195,22 +190,22 @@ function Book({ ticker }: { ticker: string }) {
           <tbody>
             {asks.map(([p, qty], i) => (
               <tr key={`a${i}`} data-side="ask">
-                <td className="cell-num">{qty}</td>
-                <td className="cell-num">{p}</td>
+                <td className="cell-num">{fmtInt(qty)}</td>
+                <td className="cell-num">{fmtInt(p)}</td>
                 <td />
               </tr>
             ))}
             {bids.map(([p, qty], i) => (
               <tr key={`b${i}`} data-side="bid">
                 <td />
-                <td className="cell-num">{p}</td>
-                <td className="cell-num">{qty}</td>
+                <td className="cell-num">{fmtInt(p)}</td>
+                <td className="cell-num">{fmtInt(qty)}</td>
               </tr>
             ))}
             <tr>
-              <td className="cell-num">{data.book.total_ask}</td>
+              <td className="cell-num">{fmtInt(data.book.total_ask)}</td>
               <td className="cell-num data-muted">합계</td>
-              <td className="cell-num">{data.book.total_bid}</td>
+              <td className="cell-num">{fmtInt(data.book.total_bid)}</td>
             </tr>
           </tbody>
         </table>

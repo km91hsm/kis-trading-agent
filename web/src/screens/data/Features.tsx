@@ -1,16 +1,19 @@
-// 지표·모델 — GET /features/latest?market= 를 KEY_COLUMNS 표로(머리글 누르면 정렬, aria-sort), 행을 누르면
-// GET /features/history?days=120 종가 추이·최근 행. 모델은 GET /ml/models(활성 칩·note). 잡 버튼은 비매매(trading=false).
-import { useMemo, useState } from "react";
+// 지표·모델 — GET /features/latest?market=(화면 머리 세그먼트) 를 KEY_COLUMNS 표로(머리글 한글 `featureLabel`, `th[data-key]` 는 원문 키;
+// 누르면 정렬 aria-sort; 30행 `Pager` ?page; 가로 스크롤), 행을 누르면 GET /features/history?days=120 종가 추이·최근 행.
+// 모델은 GET /ml/models(활성 칩·note). 잡 버튼은 비매매(trading=false).
+import { useEffect, useMemo, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
+import { Pager } from "../../components/Pager";
 import { RunJobButton } from "../../components/RunJobButton";
 import { Sparkline } from "../../components/Sparkline";
 import { Table, type Column } from "../../components/Table";
 import { fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
+import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
-import { MarketSelect, type Market } from "./Data.tsx";
-import { featureRows, fmt, KEY_COLUMNS, type FeatureRow, type HistoryResp, type LatestResp, type SortDir } from "./data.ts";
+import { useMarket, type Market } from "./Data.tsx";
+import { featureLabel, featureRows, fmt, KEY_COLUMNS, type FeatureRow, type HistoryResp, type LatestResp, type SortDir } from "./data.ts";
 
 type Model = {
   name: string;
@@ -31,30 +34,23 @@ const HISTORY_COLUMNS = ["date", "close", "roc_10", "high_52w_pos", "flow_foreig
 const NO_PARAMS = {};
 
 export function Features() {
-  const [market, setMarket] = useState<Market>("KR");
+  const [market] = useMarket();
   const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: "desc" });
   const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => setPicked(null), [market]); // 시장을 바꾸면 고른 종목은 뜻이 없다
   const params = useMemo(() => ({ market }), [market]);
   const jobParams = useMemo(() => ({ market }), [market]);
   const latest = useResource<LatestResp>("/features/latest", params, ["features"]);
   const models = useResource<ModelsResp>("/ml/models", undefined, ["features"]);
   const rows = useMemo(() => (latest.data ? featureRows(latest.data, sort.key, sort.dir) : []), [latest.data, sort]);
+  const paged = usePaged(rows, 30, "page");
 
   const onSort = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
   const ariaSort = (key: string) => (sort.key !== key ? "none" : sort.dir === "asc" ? "ascending" : "descending");
 
   return (
     <>
-      <div className="perf-filters">
-        <MarketSelect
-          value={market}
-          onChange={(m) => {
-            setMarket(m);
-            setPicked(null);
-          }}
-        />
-        {latest.data?.asof ? <span className="data-muted">기준 {latest.data.asof}</span> : null}
-      </div>
+      {latest.data?.asof ? <p className="data-muted">기준 {latest.data.asof}</p> : null}
       {body(latest, "지표", () =>
         rows.length ? (
           <div className="table-scroll">
@@ -64,14 +60,14 @@ export function Features() {
                   {KEY_COLUMNS.map((c) => (
                     <th key={c} data-key={c} aria-sort={ariaSort(c)} scope="col">
                       <button type="button" className="data-sort" onClick={() => onSort(c)}>
-                        {c}
+                        {featureLabel(c)}
                       </button>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
+                {paged.rows.map((r) => {
                   const t = String(r.ticker);
                   return (
                     <tr
@@ -94,6 +90,7 @@ export function Features() {
                 })}
               </tbody>
             </table>
+            <Pager {...paged} />
           </div>
         ) : (
           <Empty title="지표 없음" />
@@ -124,7 +121,7 @@ function History({ market, ticker }: { market: Market; ticker: string }) {
         const recent = d.rows.slice(-5).reverse();
         const columns: Column<FeatureRow>[] = HISTORY_COLUMNS.map((c) => ({
           key: c,
-          label: c,
+          label: featureLabel(c),
           width: `${Math.floor(100 / HISTORY_COLUMNS.length)}%`,
           align: c === "date" ? "text" : "num",
           render: (r: FeatureRow) => fmt(r[c]),

@@ -1,11 +1,13 @@
 // 칩 — 짧은 꼬리표. live 는 실전 아이콘을 앞에 붙인다. Chips 는 max 개까지 보이고 나머지는 「+N」.
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import type { Tone } from "./Badge";
 import { Icon } from "./Icon";
 
-export function Chip({ tone = "muted", children }: { tone?: Tone; children: ReactNode }) {
+type ChipProps = { tone?: Tone; children: ReactNode } & Omit<HTMLAttributes<HTMLSpanElement>, "children"> & { "data-draft"?: string };
+
+export function Chip({ tone = "muted", children, ...rest }: ChipProps) {
   return (
-    <span className="chip" data-tone={tone}>
+    <span className="chip" data-tone={tone} {...rest}>
       {tone === "live" ? <Icon name="live" /> : null}
       {children}
     </span>
