@@ -214,3 +214,80 @@ export function fixtureJob(over: Over = {}) {
 export function fixtureDaemon(jobs: ReturnType<typeof fixtureJob>[] = [fixtureJob()], over: Over = {}) {
   return { alive: true, pid: 4242, heartbeat: "2026-11-05T01:00:00+00:00", jobs, ...over };
 }
+
+/** `GET /markets/{m}/today`(spot/decisions_view.py market_today) — KR 은 스캔·시장 세션·종목 2개, US 는 빈 날. */
+export type MarketTodayFixture = {
+  date: string;
+  market: string;
+  tickers: Record<string, string[]>;
+  names: Record<string, string | null>;
+  scan: { picks: { ticker: string; reason: string | null; discovery: { tier: string | null; catalyst: string | null } | null }[]; targets: number; cap_hit: boolean; discovery: null } | null;
+  market_files: string[];
+  news_jobs: { id: number; kind: string; ticker: string | null; status: string; requested_at: string; finished_at: string | null; error: string | null }[];
+};
+export function fixtureMarketToday(market = "KR", over: Partial<MarketTodayFixture> = {}): MarketTodayFixture {
+  if (market !== "KR") return { date: "2026-11-05", market, tickers: {}, names: {}, scan: null, market_files: [], news_jobs: [], ...over };
+  return {
+    date: "2026-11-05",
+    market: "KR",
+    tickers: {
+      "005930": ["00_inputs", "10_analyst_technical", "20_debate_r0_bull", "30_decision", "40_risk_check_paper-1"],
+      "000660": ["00_inputs", "10_analyst_technical"],
+    },
+    names: { "005930": "삼성전자", "000660": null },
+    scan: {
+      picks: [{ ticker: "005930", reason: "돌파", discovery: { tier: "A", catalyst: "실적" } }, { ticker: "000660", reason: "수급", discovery: null }],
+      targets: 2,
+      cap_hit: false,
+      discovery: null,
+    },
+    market_files: ["_market_view", "_scan", "_screen"],
+    news_jobs: [{ id: 7, kind: "analyze", ticker: "005930", status: "done", requested_at: "2026-11-05T02:00:00+00:00", finished_at: null, error: null }],
+    ...over,
+  };
+}
+
+/** `GET /risk-checks`(spot/decisions_view.py risk_checks) 한 행 — 기본은 거부(주간 한도). */
+export function fixtureRiskCheck(over: Over = {}) {
+  return {
+    id: 1,
+    decision_id: 1,
+    account_id: "paper-1",
+    approved: false,
+    adjusted_qty: null,
+    reasons: ["주간 한도", "현금 부족"],
+    created_at: "2026-11-05T01:10:00+00:00",
+    ticker: "005930",
+    name: "삼성전자",
+    market: "KR",
+    date: "2026-11-05",
+    action: "BUY",
+    ...over,
+  };
+}
+
+/** `GET /fo/today`(fo/routes.py today_view) — 아침 결정(진입 롱 선물, 확신 0.7) + 재평가 1회, 계좌 하나는 손실 한도·진입 대기. */
+export function fixtureFoToday(over: Over = {}) {
+  const dec = (round: number, over2: Over = {}) => ({
+    id: round + 1, date: "2026-11-05", account_id: null, position_id: null, round, intent: "OPEN", direction: "LONG", vehicle: "FUTURES",
+    target_leverage: 1.0, confidence: 0.7, index_at_decision: "350", stop_pt: 345, take_profit_pt: 360, horizon_days: 5,
+    rationale: "지수 반등", vs_spot: null, record_only: false, created_at: "2026-11-05T00:05:00+00:00", ...over2,
+  });  // fmt: skip
+  return {
+    date: "2026-11-05",
+    decision: dec(0),
+    reevals: [dec(1, { intent: "HOLD" })],
+    accounts: [{ id: "paper-fo", env: "paper", halted: true, pending_entry: true }],
+    checks: {},
+    ...over,
+  };
+}
+
+/** `GET /fo/legs?account_id=` 한 다리 — 진입 R0, 접수, 2계약 시장가. */
+export function fixtureFoLeg(over: Over = {}) {
+  return {
+    id: 1, position_id: 1, code: "105W11", intent: "OPEN", round: 0, attempt: 1, status: "accepted", order_no: "X1",
+    qty: 2, filled_qty: 0, price: null, order_type: "MARKET", sent_at: "2026-11-05T00:10:00+00:00", created_at: "2026-11-05T00:09:00+00:00",
+    ...over,
+  };  // fmt: skip
+}

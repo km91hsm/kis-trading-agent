@@ -3,7 +3,9 @@
 // 결정 상태 `features/spot/decisions_view.py _order_state`(pending_approval·blocked), 승인 `approvals` CHECK.
 
 import type { Tone } from "../../components/Badge";
-import { fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { fmtMoney, fmtPt, fmtTime, fmtWhen, untilText } from "../../lib/format";
+import { GLOSSARY, termLabel } from "../../lib/glossary";
+import { tickerLabel } from "../../lib/ticker";
 
 export type Lane = "spot" | "scalp" | "fo";
 export const LANES: Lane[] = ["spot", "scalp", "fo"];
@@ -18,8 +20,11 @@ export type Decision = {
   account_id?: string | null;
   market?: string | null;
   ticker?: string | null;
+  name?: string | null;
   side?: string | null;
   action?: string | null;
+  /** 최종 의견 요약(30_decision rationale). 단타·파생은 없다. */
+  summary?: string | null;
   intent?: string | null;
   direction?: string | null;
   vehicle?: string | null;
@@ -37,6 +42,7 @@ export type Order = {
   at?: string;
   market?: string | null;
   ticker?: string | null;
+  name?: string | null;
   side?: string | null;
   qty?: number | null;
   price?: string | number | null;
@@ -127,7 +133,10 @@ export type DecisionRow = {
   key: string;
   lane: string;
   at: string;
-  title: string;
+  /** 종목 칸: 「코드 이름」(파생은 의도·방향·수단) — HOLD/BUY 같은 판단은 붙이지 않는다(방향 열이 따로 있다). */
+  ticker: string;
+  /** 내용 칸: 최종 의견 요약. 없으면 null(—). */
+  summary: string | null;
   side: string;
   qty: number | null;
   account_id: string | null;
@@ -138,9 +147,9 @@ export type DecisionRow = {
 
 const SIDE_LABEL = { buy: "매수", sell: "매도", hold: "보류" } as const;
 
-function titleOf(d: Decision): string {
-  if (d.asset === "fo") return [d.intent, d.direction, d.vehicle].filter(Boolean).join(" ");
-  return [d.ticker, d.action && d.action !== d.side ? d.action : null].filter(Boolean).join(" ");
+function tickerOf(d: Decision): string {
+  if (d.asset === "fo") return [d.intent, d.direction, d.vehicle].filter(Boolean).join(" ") || "—";
+  return tickerLabel(d.ticker, d.name);
 }
 
 /** 결정 목록 행 — 시각 역순. */
@@ -151,7 +160,8 @@ export function decisionRows(decisions: Decision[]): DecisionRow[] {
       key: `${d.asset}-${d.id}`,
       lane: d.lane,
       at: d.at,
-      title: titleOf(d) || "—",
+      ticker: tickerOf(d),
+      summary: d.summary?.trim() || null,
       side: SIDE_LABEL[sideOf(d)],
       qty: d.qty ?? null,
       account_id: d.account_id ?? null,
@@ -176,7 +186,7 @@ export function timeline(orders: Order[]): TimelineLine[] {
     const px = (v: string | number | null | undefined) => (fo ? fmtPt(v) : fmtMoney(v, o.market === "US" ? "USD" : "KRW"));
     const at = (v: string | null | undefined) => (v ? { at: v, time: fmtTime(v) } : null);
     const price = o.price ?? o.order_price;
-    const head = [ORDER_SIDE[(o.side ?? "").toUpperCase()] ?? o.side, o.ticker, o.qty != null ? `${o.qty}${unit}` : null]
+    const head = [ORDER_SIDE[(o.side ?? "").toUpperCase()] ?? o.side, o.ticker ? tickerLabel(o.ticker, o.name) : null, o.qty != null ? `${o.qty}${unit}` : null]
       .filter(Boolean)
       .join(" ");
     const failed = FAILED.has(o.status);
@@ -200,29 +210,130 @@ export function timeline(orders: Order[]): TimelineLine[] {
   return out.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
 }
 
+// ── 오늘 요약·레인 다음 예정 ────────────────────────────────────────────────────
+export type TodaySummary = { decisions: number; orders: number; fills: number; failed: number; notices: number };
+const FAILED_ORDER = new Set(["failed", "rejected", "cancelled"]);
+
+/** 화면 머리 KPI: 결정·주문·체결(filled 또는 체결 수량 > 0)·실패(실패·거절·취소)·알림 건수. */
+export function todaySummary(decisions: Decision[], orders: Order[], notices: Pick<Notice, "id">[]): TodaySummary {
+  return {
+    decisions: decisions.length,
+    orders: orders.length,
+    fills: orders.filter((o) => o.status === "filled" || (o.filled_qty ?? 0) > 0).length,
+    failed: orders.filter((o) => FAILED_ORDER.has(o.status)).length,
+    notices: notices.length,
+  };
+}
+
+/** 레인 카드 「다음 예정」에 보이는 사용자 잡 — 분 단위 감시(monitor·fo_monitor)·내부 틱은 뺀다. */
+const LANE_NEXT_KINDS: Record<Lane, string[]> = {
+  spot: ["scan_analyze", "rebalance", "daily_report", "reflect", "briefing"],
+  scalp: ["scalp"],
+  fo: ["fo_session", "fo_reconcile"],
+};
+
+/** 레인의 사용자 잡 중 가장 이른 next_at(없으면 null). */
+export function laneNextAt(lane: Lane, jobs: Job[]): string | null {
+  const kinds = LANE_NEXT_KINDS[lane];
+  const ts = jobs
+    .filter((j): j is Job & { next_at: string } => kinds.includes(j.kind) && !!j.next_at)
+    .map((j) => j.next_at)
+    .sort((a, b) => (Date.parse(a) || 0) - (Date.parse(b) || 0));
+  return ts[0] ?? null;
+}
+
 // ── 다음 할 일(데몬 작업) ───────────────────────────────────────────────────────
 export type Job = { id: number | string; kind: string; next_at: string | null; last_status?: string | null };
 export type Daemon = { alive: boolean; jobs?: Job[] | null };
-export type NextJob = { id: number | string; kind: string; next_at: string; text: string };
+export type NextJob = { id: number | string; kind: string; label: string; market: string | null; next_at: string; when: string; rel: string; last: string | null };
 
-/** 다음 실행 시각이 있는 작업을 시각 오름차순으로 3개. 마지막 실행이 실패였으면 꼬리표. */
-export function nextJobs(daemon: Daemon): NextJob[] {
+/** 「다음 할 일」에 보이는 사용자 잡 — 내부 틱(큐·텔레그램·사용량…)·분 단위 감시(monitor·scalp·theme…)는 시스템 데몬 표에서만. */
+export const USER_JOB_KINDS = new Set([
+  "briefing", "scan_analyze", "rebalance", "daily_report", "reconcile", "reflect", "paper_review",
+  "fo_session", "fo_reconcile", "regime", "ml_train", "rl_train",
+]);  // prettier-ignore
+const NEXT_JOBS_MAX = 5;
+
+/** 잡 id 접두어(kr_·us_)로 시장. */
+function marketOfJob(id: number | string): string | null {
+  const m = /^(kr|us)_/.exec(String(id));
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** 사용자 잡 중 next_at 이 있는 것을 시각 오름차순으로 5개 — 한글 라벨(glossary job.*)·시장·「N시간 뒤」·마지막 상태 원문. */
+export function nextJobs(daemon: Daemon, now: Date = new Date()): NextJob[] {
   return (daemon.jobs ?? [])
-    .filter((j): j is Job & { next_at: string } => !!j.next_at)
+    .filter((j): j is Job & { next_at: string } => USER_JOB_KINDS.has(j.kind) && !!j.next_at)
     .sort((a, b) => (Date.parse(a.next_at) || 0) - (Date.parse(b.next_at) || 0))
-    .slice(0, 3)
+    .slice(0, NEXT_JOBS_MAX)
     .map((j) => ({
       id: j.id,
       kind: j.kind,
+      label: GLOSSARY[`job.${j.kind}`]?.label ?? j.kind,
+      market: marketOfJob(j.id),
       next_at: j.next_at,
-      text: `${j.kind} · ${fmtTime(j.next_at)}${j.last_status === "error" || j.last_status === "failed" ? " (마지막 실패)" : ""}`,
+      when: fmtWhen(j.next_at, now),
+      rel: untilText(j.next_at, now),
+      last: j.last_status ?? null,
     }));
 }
 
 // ── 알림 ───────────────────────────────────────────────────────────────────────
 export type Notice = { id: number; at: string; kind: string; account_id: string | null; text: string; channel?: string | null; ok: boolean };
+export type NoticeRow = { id: number; at: string; kind: string; kindLabel: string; account_id: string | null; title: string; body: string; full: string; ok: boolean };
+
+const NOTICE_KIND_LABEL: Record<string, string> = { info: "정보", approval: "승인", fill: "체결", error: "오류", warn: "경고", order: "주문", report: "리포트" };
+/** 알림 종류 원문 → 한글(모르면 원문). */
+export function noticeKindLabel(kind: string): string {
+  return NOTICE_KIND_LABEL[kind] ?? kind;
+}
 
 /** 필터 칩 목록 — 처음 본 순서, 중복 없이. */
 export function noticeKinds(notices: Pick<Notice, "kind">[]): string[] {
   return [...new Set(notices.map((n) => n.kind))];
+}
+
+const TITLED = /^\[([^\]]+)\]\s*/;
+
+/** 표 행: 본문이 「[제목] …」 꼴이면 제목을 종류 칸에, 본문은 첫 줄만(원문 전체는 full → title 속성). */
+export function noticeRows(notices: Notice[]): NoticeRow[] {
+  return notices.map((n) => {
+    const m = TITLED.exec(n.text);
+    const rest = m ? n.text.slice(m[0].length) : n.text;
+    return {
+      id: n.id,
+      at: n.at,
+      kind: n.kind,
+      kindLabel: noticeKindLabel(n.kind),
+      account_id: n.account_id,
+      title: m ? m[1] : noticeKindLabel(n.kind),
+      body: rest.split("\n")[0].trim(),
+      full: n.text,
+      ok: n.ok,
+    };
+  });
+}
+
+// --- 파생 당일(`GET /fo/today`, fo/routes.py today_view) ---------------------------------------
+export type FoTodayDecision = { round: number; intent: string | null; direction: string | null; vehicle: string | null; confidence: number | null };
+export type FoToday = { date: string; decision: FoTodayDecision | null; reevals: FoTodayDecision[]; accounts: { id: string; env: string; halted: boolean; pending_entry: boolean }[] };
+export type FoLaneInfo = { line: string | null; reevals: number; flags: { id: string; halted: boolean; pending: boolean }[] };
+
+/** 파생 레인 카드에 얹는 당일 요약 — 아침 결정 한 줄(의도·방향·수단·확신), 재평가 횟수, 계좌별 손실 한도·진입 대기. */
+export function foLaneInfo(t: FoToday): FoLaneInfo {
+  const d = t.decision;
+  let line: string | null = null;
+  if (d) {
+    const parts = [
+      [d.intent ? termLabel(`fo.intent.${d.intent}`) : null, d.direction ? termLabel(`fo.dir.${d.direction}`) : null].filter(Boolean).join(" "),
+      d.vehicle ? termLabel(`fo.vehicle.${d.vehicle}`) : null,
+      d.confidence === null || d.confidence === undefined ? null : `확신 ${Math.round(d.confidence * 100)}%`,
+    ].filter(Boolean);
+    line = parts.length ? `아침 결정 ${parts.join(" · ")}` : null;
+  }
+  return {
+    line,
+    reevals: t.reevals?.length ?? 0,
+    flags: (t.accounts ?? []).filter((a) => a.halted || a.pending_entry).map((a) => ({ id: a.id, halted: !!a.halted, pending: !!a.pending_entry })),
+  };
 }

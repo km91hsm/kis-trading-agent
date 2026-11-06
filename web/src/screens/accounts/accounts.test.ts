@@ -9,13 +9,16 @@ describe("accounts 순수 함수", () => {
     expect(none.converted).toBeNull();
 
     const t = totals(fixtureOverview());
-    expect(t.krw).toBe("13,000,000");
-    expect(t.krwPnl).toBe("+75,000");
-    expect(t.usd).toBe("2,500.50");
-    expect(t.usdPnl).toBe("-12.25");
+    expect(t.krw).toBe("13,000,000원");
+    expect(t.krwScope).toBe("계좌 2");
+    expect(totals(fixtureOverview(), fixtureAccounts()).krwScope).toBe("모의 1 · 실전 1");
+    expect(totals(fixtureOverview(), fixtureAccounts()).usdScope).toBe("모의 1");
+    expect(t.krwPnl).toBe("+75,000원");
+    expect(t.usd).toBe("$2,500.50");
+    expect(t.usdPnl).toBe("-$12.25");
     expect(t.fxLine).toBe("적용 환율 USD/KRW 1,385.50 (11월 4일 종가)");
-    expect(t.converted).toBe("환산 합계 16,464,443");
-    expect(`${t.fxLine} → ${t.converted}`).toBe("적용 환율 USD/KRW 1,385.50 (11월 4일 종가) → 환산 합계 16,464,443");
+    expect(t.converted).toBe("환산 합계 16,464,443원");
+    expect(`${t.fxLine} → ${t.converted}`).toBe("적용 환율 USD/KRW 1,385.50 (11월 4일 종가) → 환산 합계 16,464,443원");
 
     const iso = totals(fixtureOverview({ fx: { pair: "USD/KRW", rate: "1385.5", as_of: "2026-11-04T07:00:00+00:00", converted_total: "1" } }));
     expect(iso.fxLine).toBe("적용 환율 USD/KRW 1,385.50 (2026-11-04)");
@@ -38,13 +41,13 @@ describe("accounts 순수 함수", () => {
     const real = rows[1];
     expect(real.mode).toBe("자동");
     expect(real.modeNote).toBe("LIVE 확인 11-01");
-    expect(real.nav).toBe("3,000,000");
-    expect(real.dayPnl).toBe("-45,000");
+    expect(real.nav).toBe("3,000,000원");
+    expect(real.dayPnl).toBe("-45,000원");
     expect(real.positions).toBe(1);
     expect(real.pending).toBe(2);
-    expect(rows[0].dayPnl).toBe("+120,000");
+    expect(rows[0].dayPnl).toBe("+120,000원");
     expect(rows[0].mode).toBe("승인");
     expect(rows[2].mode).toBe("끔");
-    expect(rows[2].dayPnl).toBe("0");
+    expect(rows[2].dayPnl).toBe("0원");
   });
 });

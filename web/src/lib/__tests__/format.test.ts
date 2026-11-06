@@ -1,6 +1,6 @@
 // 옛 `web/src/format.test.ts` 이식
 import { describe, expect, it } from "vitest";
-import { agoText, fmtDate, fmtKrw, fmtMoney, fmtPct, fmtPt, fmtTime, fmtTimeEt, fmtUsd, kstDate } from "../format";
+import { agoText, untilText, fmtDate, fmtKrw, fmtMoney, fmtPct, fmtPt, fmtTime, fmtTimeEt, fmtUsd, kstDate } from "../format";
 
 describe("금액", () => {
   it("fmtKrw('1234567.00') === '1,234,567'; fmtUsd('12.5') === '12.50'; fmtPt('312.25')", () => {
@@ -94,5 +94,18 @@ describe("fmtWhen", () => {
     expect(fmtWhen("2026-11-03", now)).toBe("11.03");
     expect(fmtWhen(null, now)).toBe("—");
     expect(fmtWhen("abc", now)).toBe("—");
+  });
+});
+
+describe("untilText", () => {
+  const now = new Date("2026-11-05T01:00:00Z");
+  const after = (s: number) => new Date(now.getTime() + s * 1000).toISOString();
+  it("1분 미만은 「곧」, 분·시간·일 단위 「N … 뒤」, 지난 시각은 「지남」, 없으면 —", () => {
+    expect(untilText(after(30), now)).toBe("곧");
+    expect(untilText(after(90), now)).toBe("1분 뒤");
+    expect(untilText(after(2 * 3600 + 10), now)).toBe("2시간 뒤");
+    expect(untilText(after(3 * 86400), now)).toBe("3일 뒤");
+    expect(untilText(after(-5), now)).toBe("지남");
+    expect(untilText(null, now)).toBe("—");
   });
 });

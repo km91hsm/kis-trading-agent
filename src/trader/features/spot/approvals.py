@@ -19,7 +19,7 @@ from typing import Any, Literal
 from trader.features.spot import executor
 from trader.features.spot.positions_view import CURRENCY
 from trader.kernel.execution import ledger as xledger
-from trader.kernel.ledger import control
+from trader.kernel.ledger import control, names
 
 logger = logging.getLogger("trader.spot")
 
@@ -93,6 +93,7 @@ def row_of(conn: sqlite3.Connection, a: dict, accounts: Iterable[Any]) -> dict:
         "env": env_of(accounts, a["account_id"]),
         "decision": {"asset": "spot", "id": a["decision_id"] or None},
         "ticker": o.get("ticker"),
+        "name": names.resolve(conn, market, o["ticker"]) if market and o.get("ticker") else None,
         "market": market,
         "currency": CURRENCY.get(market) if market else None,
         "side": o.get("side"),

@@ -27,6 +27,7 @@ import {
   fixtureRisk,
   fixtureTaxLots,
 } from "../../test/fixtures/accounts";
+import { fixtureSpotOrder } from "../../test/fixtures/today";
 
 let ff: FakeFetch | null = null;
 const stub: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
@@ -94,6 +95,7 @@ function choose(select: HTMLSelectElement, value: string) {
 const patches = () => ff!.calls.filter((c) => c.init?.method === "PATCH");
 const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
 const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement;
+const head = () => document.querySelector(".account-head") as HTMLElement;
 
 describe("계좌별 화면", () => {
   test("실전 계좌 auto 전환은 계좌 id 재입력 뒤 PATCH /accounts/real-1 {mode:'auto', confirm:'real-1'}", async () => {
@@ -109,7 +111,7 @@ describe("계좌별 화면", () => {
       }),
       "real-1",
     );
-    const mode = section("mode")!;
+    const mode = head();
     const select = mode.querySelector("select") as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.value)).toEqual(["approve", "off", "auto"]);
     choose(select, "auto");
@@ -135,7 +137,7 @@ describe("계좌별 화면", () => {
             : { account_id: "paper-1", mode: "off" },
       }),
     );
-    const mode = section("mode")!;
+    const mode = head();
     const select = mode.querySelector("select") as HTMLSelectElement;
     expect(select.value).toBe("approve");
     choose(select, "off");
@@ -242,35 +244,77 @@ describe("계좌별 화면", () => {
     expect(orders.url).toContain("account_id=paper-1");
   });
 
-  test("리스크 카드: limits 가 있으면 「한도 대비」 막대(한도 초과는 강조)와 기여 상위 3 을 함께, 자료 부족이어도 한도는 그린다", async () => {
+  test("리스크: VaR·CVaR·베타는 Stats, 한도는 표(항목·현재·한도·판정) — 값 없는 줄은 막대 없이 「자료 없음」, 현금은 「최소」, 기여 상위 3 은 코드+이름 막대; 자료 부족은 Empty 한 줄", async () => {
     const limits = { max_position_pct: 0.25, max_positions: 5, max_sector_pct: 0.4, min_cash_pct: 0.1, daily_loss_stop_pct: -0.05 };
     const usage = { position_pct_max: 0.3, positions: 3, sector_pct_max: 0.2, cash_pct: 0.05, daily_loss_pct: null };
     const first = await mount(routes({ "GET /api/positions/risk": fixtureRisk({ limits, usage }) }));
     const risk = section("risk")!;
+    expect(risk.querySelector('dl.stats [data-stat="var95"] dd')?.textContent).toBe("2.13%");
+    expect(risk.querySelector('dl.stats [data-stat="beta"] dd')?.textContent).toBe("1.05");
     expect(risk.textContent).toContain("한도 대비");
-    const rows = Array.from(risk.querySelectorAll("li.risk-limit")) as HTMLElement[];
+    const table = risk.querySelector(".risk-limits table")!;
+    expect(Array.from(table.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["항목", "현재", "한도", "판정"]);
+    const rows = Array.from(table.querySelectorAll("tbody tr")).map((r) => r.textContent ?? "");
     expect(rows).toHaveLength(5);
-    expect(risk.querySelectorAll(".risk-contrib li")).toHaveLength(3); // 한도 막대와 기여 상위 3 을 함께(T16-R2)
-    expect(risk.querySelectorAll(".risk-bar")).toHaveLength(5 + 3);
-    const over = rows.filter((r) => r.classList.contains("over")).map((r) => r.querySelector(".risk-ticker")!.textContent);
-    expect(over).toEqual(["최대 종목 비중", "현금 비중"]); // 30% > 25%, 현금 5% < 최소 10%
-    expect(rows[0].textContent).toContain("30.00% / 25.00%");
-    expect(rows[1].textContent).toContain("3 / 5");
-    expect(rows[4].textContent).toContain("— / -5.00%");
+    expect(rows[0]).toContain("30.00%");
+    expect(rows[0]).toContain("최대 25.00%");
+    expect(rows[0]).toContain("초과");
+    expect(rows[1]).toContain("3");
+    expect(rows[1]).toContain("최대 5");
+    expect(rows[1]).toContain("정상");
+    expect(rows[3]).toContain("최소 10.00%");
+    expect(rows[3]).toContain("미달");
+    expect(rows[4]).toContain("손실 -5.00%");
+    expect(rows[4]).toContain("자료 없음");
+    expect(table.querySelectorAll('.chip[data-tone="fail"]')).toHaveLength(2);
+    expect(risk.querySelectorAll(".risk-bar")).toHaveLength(3); // 기여 상위 3 만 막대
+    expect(risk.querySelector(".risk-contrib li")!.textContent).toContain("005930 삼성전자");
     first.unmount();
     ff!.restore();
     clearResourceCache();
     await mount(routes({ "GET /api/positions/risk": fixtureRisk({ insufficient: "종가 부족(3일)", limits, usage }) }));
     const thin = section("risk")!;
-    expect(thin.textContent).toContain("자료 부족: 종가 부족(3일)");
-    expect(thin.querySelectorAll("li.risk-limit")).toHaveLength(5);
+    expect(thin.querySelector(".empty")!.textContent).toContain("종가 부족(3일)");
+    expect(thin.querySelector(".risk-insufficient")).toBeNull();
+    expect(thin.querySelectorAll(".risk-limits tbody tr")).toHaveLength(5);
+  });
+
+  test("머리: h1 「계좌 id」, Stats(NAV·현금 + 갱신 시각), 모드 전환은 머리 카드 안(#mode 절 없음); 절 순서 주문 → 보유 → 단타 → 리스크 → NAV", async () => {
+    const { container } = await mount(routes());
+    expect(container.querySelector("h1.screen-title")?.textContent).toBe("계좌 paper-1");
+    const h = head();
+    expect(h.querySelector('dl.stats [data-stat="nav"] dd')?.textContent).toBe("10,000,000");
+    expect(h.querySelector('dl.stats [data-stat="cash"] dd')?.textContent).toBe("5,000,000");
+    expect(h.querySelector('dl.stats [data-stat="cash"] .stat-sub')?.textContent).toMatch(/전$/);
+    expect(h.textContent).not.toContain("현금 현금");
+    expect(h.querySelector("select")).not.toBeNull();
+    expect(section("mode")).toBeNull();
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
+      "orders", "positions", "fo-positions", "scalp-positions", "risk", "nav-chart",
+    ]);
+  });
+
+  test("주문 표: 상태는 한글 칩(실패는 강조), 수량은 천 단위", async () => {
+    await mount(routes({ "GET /api/orders": { items: [fixtureSpotOrder({ status: "failed", qty: 18018, filled_qty: 0 }), fixtureSpotOrder({ id: 22, status: "filled", qty: 3, filled_qty: 3 })], partial: false } }));
+    const orders = section("orders")!;
+    const rows = Array.from(orders.querySelectorAll("tbody tr"));
+    expect(rows[0].querySelector('.chip[data-tone="fail"]')?.textContent).toBe("실패");
+    expect(rows[0].textContent).toContain("18,018");
+    expect(rows[1].querySelector('.chip[data-tone="ok"]')?.textContent).toBe("체결");
+    expect(orders.textContent).not.toContain("failed");
+  });
+
+  test("주문 표 「종목」 칸은 코드+이름", async () => {
+    await mount(routes({ "GET /api/orders": { items: [fixtureSpotOrder({ name: "삼성전자" })], partial: false } }));
+    const orders = section("orders")!;
+    expect(orders.textContent).toContain("005930 삼성전자");
   });
 
   test("「‹ 돌아가기」 는 /accounts 로, 헤더에 현금·모드 메모", async () => {
     const { container } = await mount(routes(), "real-1");
     const back = Array.from(container.querySelectorAll("a")).find((a) => a.textContent?.includes("돌아가기"))!;
     expect(back.getAttribute("href")).toBe("/accounts");
-    expect(container.textContent).toContain("현금 5,000,000");
+    expect(container.textContent).toContain("5,000,000");
     expect(container.textContent).toContain("LIVE 확인 11-01");
   });
 

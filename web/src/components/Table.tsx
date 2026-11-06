@@ -14,6 +14,8 @@ export type Column<T> = {
   width: string;
   align?: "num" | "text" | "chip";
   long?: boolean;
+  /** 행동 열(취소 버튼 등) — 행 카드에서는 정의 목록 밖 자기 줄에 둔다(표에서는 보통 열). */
+  action?: boolean;
   render?: (row: T) => ReactNode;
 };
 

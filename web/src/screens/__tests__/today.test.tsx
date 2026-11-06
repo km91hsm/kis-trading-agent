@@ -10,6 +10,12 @@ import { flush, render } from "../../test/render";
 import {
   fixtureAccount,
   fixtureApproval,
+  fixtureDaemon,
+  fixtureFoToday,
+  fixtureJob,
+  fixtureMarketToday,
+  fixtureNotice,
+  fixtureRiskCheck,
   fixtureScalpDecision,
   fixtureSpotDecision,
   fixtureSpotOrder,
@@ -238,6 +244,54 @@ describe("오늘 화면", () => {
     expect(spot.textContent).toContain("불러오는 중");
   });
 
+  test("결정 표: 「종목」 칸은 코드+이름 링크, 「내용」 칸은 최종 의견 요약 — HOLD 같은 판단은 방향 열에만", async () => {
+    await mount(
+      routes({
+        "GET /api/decisions": merged([
+          fixtureSpotDecision({ id: 7, name: "삼성전자", summary: "실적 상향, 외국인 순매수 지속" }),
+          fixtureSpotDecision({ id: 9, ticker: "035420", name: "NAVER", action: "HOLD", side: null, summary: "밸류에이션 부담, 관망", at: "2026-11-05T00:30:00+00:00" }),
+        ]),
+      }),
+    );
+    const dec = section("decisions");
+    const heads = Array.from(dec.querySelectorAll("thead th")).map((e) => e.textContent);
+    expect(heads).toContain("종목");
+    expect(heads).toContain("내용");
+    expect(heads).not.toContain("종목·내용");
+    const link = dec.querySelector('a[href="/decisions/spot/7"]')!;
+    expect(link.textContent).toBe("005930 삼성전자");
+    expect(dec.textContent).toContain("실적 상향, 외국인 순매수 지속");
+    const holdRow = Array.from(dec.querySelectorAll("tbody tr")).find((tr) => tr.textContent?.includes("035420"))!;
+    expect(holdRow.textContent).toContain("035420 NAVER");
+    expect(holdRow.textContent).toContain("보류");
+    expect(holdRow.textContent).not.toContain("HOLD");
+    expect(holdRow.textContent).toContain("밸류에이션 부담, 관망");
+  });
+
+  test("결정이 오기 전에는 결정 절에 「불러오는 중」 — 「이 날 결정이 없습니다」가 아니다", async () => {
+    await mount(routes({ "GET /api/decisions": () => new Promise(() => {}) }));
+    const dec = section("decisions");
+    expect(dec.textContent).toContain("불러오는 중");
+    expect(dec.textContent).not.toContain("이 날 결정이 없습니다");
+  });
+
+  test("결정 표의 「내용」 칸이 말줄임(long) 열이고 종목 칸은 아니다 — 긴 요약이 행을 여러 줄로 늘리지 않게", async () => {
+    const long = "반도체 업황 회복으로 비중 확대를 제안하며 외국인 순매수와 실적 상향이 이어지고 있어 상승 여력이 남아 있다고 본다";
+    await mount(routes({ "GET /api/decisions": merged([fixtureSpotDecision({ id: 7, name: "삼성전자", summary: long })]) }));
+    const dec = section("decisions");
+    const heads = Array.from(dec.querySelectorAll("thead th"));
+    const longHeads = heads.filter((th) => th.classList.contains("cell-long")).map((th) => th.textContent);
+    expect(longHeads).toEqual(["내용"]);
+    const cell = dec.querySelector("tbody td.cell-long") as HTMLElement;
+    expect(cell.querySelector(".cell-ellipsis")!.textContent).toBe(long);
+    expect(cell.getAttribute("title")).toBe(long);
+  });
+
+  test("승인 카드의 종목은 코드+이름", async () => {
+    await mount(routes({ "GET /api/approvals": { approvals: [fixtureApproval({ name: "삼성전자" })] } }));
+    expect(section("approvals").querySelector(".approval-head strong")!.textContent).toBe("005930 삼성전자");
+  });
+
   test("partial 응답이면 결정 표 위에 칩", async () => {
     await mount(routes({ "GET /api/decisions": merged([fixtureSpotDecision()], true) }));
     const dec = section("decisions");
@@ -247,12 +301,147 @@ describe("오늘 화면", () => {
 });
 
 describe("배치", () => {
-  test("주문·체결과 알림은 한 묶음(.section-pair)으로 나란히 선다", async () => {
+  test("현황 페이지 절 순서: 승인 → 레인 카드 → 결정 — 기록(주문·체결·다음 할 일·알림)은 /log 페이지", async () => {
     const { container } = await mount(routes());
-    const pair = container.querySelector(".section-pair") as HTMLElement;
-    expect(pair).not.toBeNull();
-    expect(pair.querySelector("#orders-timeline")).not.toBeNull();
-    expect(pair.querySelector("#notices")).not.toBeNull();
-    expect(pair.querySelector("#decisions")).toBeNull();
+    expect(container.querySelector(".section-pair")).toBeNull();
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
+      "approvals", "spot-lane", "scalp-lane", "fo-lane", "pipeline", "decisions", "risk-checks",
+    ]);
+    expect(container.querySelector("h1")?.textContent).toBe("오늘");
+    expect(Array.from(container.querySelectorAll(".page-tabs a")).map((e) => [e.textContent, e.getAttribute("href")])).toEqual([
+      ["현황", "/"],
+      ["기록", "/log"],
+    ]);
+  });
+
+  test("기록 페이지(page=log)는 주문·체결 → 다음 할 일 → 알림, h1 「오늘 · 기록」, 날짜 선택기 있음", async () => {
+    ff = installFakeFetch(routes());
+    const { container } = render(
+      <MemoryRouter initialEntries={["/log"]}>
+        <Today page="log" />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(["orders-timeline", "next-jobs", "notices"]);
+    expect(container.querySelector("h1")?.textContent).toBe("오늘 · 기록");
+    expect(container.querySelector('input[type="date"]')).not.toBeNull();
+    expect(ff!.calls.map((c) => c.url)).not.toContain("/api/decisions?date=" + new Date().toISOString().slice(0, 10));
+  });
+
+  test("알림도 고른 날짜로 부른다(/system/notices?date=) — 「오늘 요약」 알림 수가 그날 건수가 되게", async () => {
+    ff = installFakeFetch(routes({ "GET /api/system/notices": [fixtureNotice()] }));
+    render(
+      <MemoryRouter initialEntries={["/?date=2026-11-04"]}>
+        <Today />
+      </MemoryRouter>,
+    );
+    await flush();
+    const urls = ff!.calls.map((c) => new URL(c.url, "http://x")).filter((u) => u.pathname === "/api/system/notices");
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.at(-1)!.searchParams.get("date")).toBe("2026-11-04");
+    expect(urls.at(-1)!.searchParams.get("limit")).toBe("200");
+  });
+
+  test("날짜는 ?date= 로 두 페이지가 같이 쓴다 — /?date=2026-11-04 로 들어오면 그 날을 읽고, 고르면 주소가 바뀐다", async () => {
+    ff = installFakeFetch(routes());
+    const { container } = render(
+      <MemoryRouter initialEntries={["/?date=2026-11-04"]}>
+        <Today />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/decisions?date=2026-11-04");
+    expect((container.querySelector('input[type="date"]') as HTMLInputElement).value).toBe("2026-11-04");
+    expect(container.querySelector('.page-tabs a[href="/log?date=2026-11-04"]')).not.toBeNull();
+    type(container.querySelector('input[type="date"]') as HTMLInputElement, "2026-11-03");
+    await flush();
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/decisions?date=2026-11-03");
+    expect(container.querySelector('.page-tabs a[href="/log?date=2026-11-03"]')).not.toBeNull();
+  });
+
+  test("「오늘 요약」 KPI 띠: 결정·주문·체결·실패·알림 건수가 레인 카드 위에", async () => {
+    const { container } = await mount(
+      routes({
+        "GET /api/orders": merged([fixtureSpotOrder({ status: "filled" }), fixtureSpotOrder({ id: 2, status: "failed", filled_qty: 0 })]),
+        "GET /api/system/notices": [fixtureNotice(), fixtureNotice({ id: 2 }), fixtureNotice({ id: 3 })],
+      }),
+    );
+    const kpi = container.querySelector(".today-summary") as HTMLElement;
+    expect(kpi).not.toBeNull();
+    const stat = (id: string) => kpi.querySelector(`[data-stat="${id}"] dd`)?.textContent;
+    expect([stat("decisions"), stat("orders"), stat("fills"), stat("failed"), stat("notices")]).toEqual(["2", "2", "1", "1", "3"]);
+    // 레인 카드보다 앞
+    expect(kpi.compareDocumentPosition(section("spot-lane")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("레인 카드는 Stats 격자(결정·주문·다음 예정) — 다음 예정은 데몬 사용자 잡의 next_at, 「완료」 대신 「처리 완료」", async () => {
+    await mount(routes({ "GET /api/system/daemon": fixtureDaemon([fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T22:30:00+00:00" })]) }));
+    const spot = section("spot-lane");
+    expect(spot.querySelector("dl.stats")).not.toBeNull();
+    expect(spot.querySelector("dl.lane-stats")).toBeNull();
+    expect(spot.querySelector('[data-stat="next"] dd')?.textContent).toContain("07:30");
+    expect(spot.textContent).toContain("처리 완료");
+    expect(spot.textContent!.replace(/처리 완료/g, "")).not.toContain("완료");
+  });
+
+  test("결정 0건이면 CSV 링크를 숨긴다", async () => {
+    await mount(routes({ "GET /api/decisions": merged([]) }));
+    expect(section("decisions").querySelector("a[download]")).toBeNull();
+    expect(section("decisions").textContent).toContain("이 날 결정이 없습니다");
+  });
+
+  test("아침 파이프라인: 시장마다 단계 칩(스캔·시장 세션·분석)과 종목 표(코드+이름·단계), 발굴 줄; US 처럼 빈 날은 「기록 없음」", async () => {
+    await mount(routes({ "GET /api/markets/KR/today": fixtureMarketToday("KR"), "GET /api/markets/US/today": fixtureMarketToday("US") }));
+    const sec = section("pipeline");
+    expect(sec.hidden).toBe(false);
+    const kr = sec.querySelector('[data-market="KR"]') as HTMLElement;
+    expect(Array.from(kr.querySelectorAll(".pipeline-steps .chip")).map((c) => [c.textContent, c.getAttribute("data-tone")])).toEqual([
+      ["스캔", "ok"], ["시장 세션", "ok"], ["분석 2종목 · 결정 1", "ok"],
+    ]);
+    expect(kr.textContent).toContain("발굴 005930 삼성전자 돌파(실적) · 000660 수급");
+    expect(kr.textContent).toContain("뉴스 발굴 요청 1건");
+    // long 열은 말풍선(Tooltip)이 같은 글을 한 번 더 넣으므로 보이는 span 만 읽는다
+    const cells = Array.from(kr.querySelectorAll("tbody tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("td")).map((td) => (td.querySelector(".cell-ellipsis") ?? td).textContent),
+    );
+    expect(cells).toEqual([["005930 삼성전자", "리스크 게이트", "5"], ["000660", "애널리스트", "2"]]);
+    const us = sec.querySelector('[data-market="US"]') as HTMLElement;
+    expect(us.textContent).toContain("기록 없음");
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=" + new Date().toISOString().slice(0, 10));
+  });
+
+  test("리스크 게이트: 0건이면 hidden, 있으면 표(시각·계좌·종목·결과 칩·수량 조정·사유) + 결정 링크", async () => {
+    const a = await mount(routes({ "GET /api/risk-checks": [] }));
+    expect(section("risk-checks").hidden).toBe(true);
+    a.unmount();
+    clearResourceCache();
+    await mount(routes({ "GET /api/risk-checks": [fixtureRiskCheck(), fixtureRiskCheck({ id: 2, approved: true, adjusted_qty: 3, reasons: [], decision_id: 9 })] }));
+    const sec = section("risk-checks");
+    expect(sec.hidden).toBe(false);
+    const rows = Array.from(sec.querySelectorAll("tbody tr"));
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("paper-1");
+    expect(rows[0].textContent).toContain("005930 삼성전자");
+    expect(rows[0].querySelector('.chip[data-tone="fail"]')?.textContent).toBe("거부");
+    expect(rows[0].textContent).toContain("주간 한도 · 현금 부족");
+    expect(rows[0].querySelector('a[href="/decisions/spot/1"]')).not.toBeNull();
+    expect(rows[1].querySelector('.chip[data-tone="ok"]')?.textContent).toBe("통과");
+    expect(rows[1].textContent).toContain("3주");
+  });
+
+  test("파생 레인 카드: /fo/today?date= 의 아침 결정 한 줄·재평가 횟수·계좌 칩(손실 한도·진입 대기)", async () => {
+    await mount(
+      routes({
+        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-fo", lane: "fo", markets: ["KR"] })],
+        "GET /api/fo/today": fixtureFoToday(),
+      }),
+    );
+    const fo = section("fo-lane");
+    expect(fo.hidden).toBe(false);
+    expect(fo.textContent).toContain("아침 결정 진입 롱 · 선물 · 확신 70%");
+    expect(fo.textContent).toContain("재평가 1회");
+    const chips = Array.from(fo.querySelectorAll(".lane-extra .chip")).map((c) => c.textContent);
+    expect(chips).toEqual(["paper-fo 손실 한도", "paper-fo 진입 대기"]);
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=" + new Date().toISOString().slice(0, 10));
   });
 });

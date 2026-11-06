@@ -72,6 +72,7 @@ export function JobQueue() {
         key: "cancel",
         label: "",
         width: "8%",
+        action: true,
         render: (r) =>
           r.cancellable ? (
             <button type="button" className="btn" onClick={() => setCancelling(r)}>

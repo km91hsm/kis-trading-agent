@@ -1,5 +1,5 @@
-// 계좌별 화면 — `/accounts/:id`. 돌아가기·머리(모의/실전·레인·모드+메모·현금 N초 전·NAV)·NAV 차트(30일)·보유(현물 lot 펼침,
-// 파생 계좌는 「파생 보유」)·단타(합계 미포함)·오늘 주문·체결·리스크(현물만)·모드 전환.
+// 계좌별 화면 — `/accounts/:id`. 돌아가기·h1·머리 카드(모의/실전·레인 칩, Stats NAV·현금(갱신 시각), 모드 전환) →
+// 오늘 주문·체결 → 보유(현물 lot 펼침, 파생 계좌는 「파생 보유」) → 단타(합계 미포함) → 리스크(현물만) → NAV 차트(30일).
 // 섹션 컨테이너는 데이터 전에 바로 그린다. 파생 계좌는 보유 절 id 가 `fo-positions`(메뉴 앵커), 아니면 `positions` + 빈 hidden `fo-positions`.
 // 계좌 단위 일시정지는 API 에 없어 그리지 않는다.
 import type { ReactNode } from "react";
@@ -8,11 +8,13 @@ import { Card } from "../../components/Card";
 import { Chart } from "../../components/Chart";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import type { ApiError } from "../../lib/api";
-import { agoText, fmtDate, fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { agoText, fmtDate, fmtInt, fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { tickerLabel } from "../../lib/ticker";
 import { useFoQuotes, useKstDate, useNow, useQuotes, useResource } from "../../lib/hooks";
-import type { Merged, Order } from "../today/today.ts";
+import { statusLabel, type Merged, type Order } from "../today/today.ts";
 import type { Account as AccountRow } from "./accounts.ts";
 import { ModeSwitch } from "./ModeSwitch";
 import { FoPositionsTable, PositionsTable } from "./PositionsTable";
@@ -23,7 +25,6 @@ type OpenLot = { ticker: string; qty: number; price: string | number; bought_at:
 type TaxLots = { open_lots: OpenLot[] };
 
 const LANE_LABEL: Record<string, string> = { spot: "현물", scalp: "단타", fo: "파생" };
-const MODE_LABEL: Record<string, string> = { auto: "자동", approve: "승인", off: "끔" };
 const SIDE_LABEL: Record<string, string> = { BUY: "매수", SELL: "매도", buy: "매수", sell: "매도" };
 
 function failed(what: string, e: ApiError) {
@@ -101,24 +102,30 @@ export function Account() {
   const positionsBody = (body: ReactNode) =>
     positions.error ? failed("보유", positions.error) : !positions.data ? <Empty title="불러오는 중" /> : body;
 
+  const names: Record<string, string | null | undefined> = {};
+  for (const r of positions.data?.items ?? []) names[r.ticker] = r.name;
+
+  const navChart = !ready ? (
+    <Empty title="불러오는 중" />
+  ) : nav.error ? (
+    failed("NAV", nav.error)
+  ) : !nav.data ? (
+    <Empty title="불러오는 중" />
+  ) : navSeries(nav.data).length ? (
+    <Chart series={navSeries(nav.data)} />
+  ) : (
+    <Empty title="NAV 기록 없음" />
+  );
+
   return (
     <Screen>
       <BackLink />
-      {account ? <Header account={account} at={accounts.at} now={now} /> : <Empty title="불러오는 중" />}
+      <h1 className="screen-title">계좌 {id}</h1>
+      {account ? <Header account={account} at={accounts.at} now={now} onDone={accounts.reload} /> : <Empty title="불러오는 중" />}
 
-      <section id="nav-chart" className="screen-section">
-        <h2>NAV</h2>
-        {!ready ? (
-          <Empty title="불러오는 중" />
-        ) : nav.error ? (
-          failed("NAV", nav.error)
-        ) : !nav.data ? (
-          <Empty title="불러오는 중" />
-        ) : navSeries(nav.data).length ? (
-          <Chart series={navSeries(nav.data)} />
-        ) : (
-          <Empty title="NAV 기록 없음" />
-        )}
+      <section id="orders" className="screen-section">
+        <h2>오늘 주문·체결</h2>
+        {orders.error ? failed("주문", orders.error) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} />}
       </section>
 
       {fo ? (
@@ -146,11 +153,6 @@ export function Account() {
         {scalp.length ? <PositionsTable rows={scalp} empty="단타 보유 없음" /> : null}
       </section>
 
-      <section id="orders" className="screen-section">
-        <h2>오늘 주문·체결</h2>
-        {orders.error ? failed("주문", orders.error) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} />}
-      </section>
-
       {fo ? null : (
         <section id="risk" className="screen-section">
           <h2>리스크</h2>
@@ -161,18 +163,14 @@ export function Account() {
           ) : !risk.data ? (
             <Empty title="불러오는 중" />
           ) : (
-            <RiskCard risk={risk.data} />
+            <RiskCard risk={risk.data} names={names} />
           )}
         </section>
       )}
 
-      <section id="mode" className="screen-section">
-        <h2>모드</h2>
-        {account ? (
-          <ModeSwitch key={`${account.id}:${account.mode}`} id={account.id} env={account.env} mode={account.mode} modeNote={account.mode_note} onDone={accounts.reload} />
-        ) : (
-          <Empty title="불러오는 중" />
-        )}
+      <section id="nav-chart" className="screen-section">
+        <h2>NAV 추이</h2>
+        {navChart}
       </section>
     </Screen>
   );
@@ -194,36 +192,30 @@ function BackLink() {
   );
 }
 
-function Header({ account: a, at, now }: { account: AccountRow; at: number; now: Date }) {
+function Header({ account: a, at, now, onDone }: { account: AccountRow; at: number; now: Date; onDone(): void }) {
   const c = a.currency === "USD" ? "USD" : "KRW";
   const fetched = at > 0 ? new Date(at).toISOString() : null;
   return (
-    <Card
-      title={a.id}
-      right={
-        <span className="chips">
-          <Chip tone={a.env === "paper" ? "muted" : "live"}>{a.env === "paper" ? "모의" : "실전"}</Chip>
-          <Chip>{LANE_LABEL[a.lane] ?? a.lane}</Chip>
-        </span>
-      }
-    >
-      <p className="account-mode">
-        모드 {MODE_LABEL[a.mode] ?? a.mode}
-        {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
-      </p>
-      <dl className="account-stats">
-        <div>
-          <dt>NAV</dt>
-          <dd>{fmtMoney(a.nav, c)}</dd>
-        </div>
-        <div>
-          <dt>현금</dt>
-          <dd>
-            현금 {fmtMoney(a.cash ?? null, c)} · {agoText(a.cash_at ?? fetched, now)}
-          </dd>
-        </div>
-      </dl>
-    </Card>
+    <div className="account-head">
+      <Card
+        title={a.id}
+        right={
+          <span className="chips">
+            <Chip tone={a.env === "paper" ? "muted" : "live"}>{a.env === "paper" ? "모의" : "실전"}</Chip>
+            <Chip>{LANE_LABEL[a.lane] ?? a.lane}</Chip>
+          </span>
+        }
+      >
+        <Stats
+          cols={2}
+          items={[
+            { id: "nav", label: "NAV", value: fmtMoney(a.nav, c) },
+            { id: "cash", label: "현금", value: fmtMoney(a.cash ?? null, c), sub: `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
+          ]}
+        />
+        <ModeSwitch key={`${a.id}:${a.mode}`} id={a.id} env={a.env} mode={a.mode} modeNote={a.mode_note} onDone={onDone} />
+      </Card>
+    </div>
   );
 }
 
@@ -247,6 +239,13 @@ function Totals({ rows }: { rows: LiveRow<PositionRow>[] }) {
 
 type OrderRow = Order & { _k: string };
 
+const FAILED_ORDER = new Set(["failed", "rejected", "cancelled"]);
+/** 주문 상태 칩 색 — 체결은 ok, 실패·거절·취소는 fail, 나머지(접수·부분) muted. */
+function orderTone(status: string): "ok" | "fail" | "muted" {
+  if (status === "filled") return "ok";
+  return FAILED_ORDER.has(status) ? "fail" : "muted";
+}
+
 /** 주문 가격 — 파생은 지수 포인트, 현물·단타는 주문 시장 통화(US → USD). */
 function priceText(o: Order): string {
   const v = o.price ?? o.order_price;
@@ -258,13 +257,13 @@ function OrdersTable({ data }: { data: Merged<Order> }) {
   const rows: OrderRow[] = data.items.map((o, i) => ({ ...o, _k: `${o.lane}-${o.id ?? i}` }));
   const columns: Column<OrderRow>[] = [
     { key: "at", label: "시각", width: "14%", render: (o) => fmtTime(o.at ?? null) },
-    { key: "ticker", label: "종목", width: "20%", long: true, render: (o) => o.ticker ?? "—" },
+    { key: "ticker", label: "종목", width: "20%", long: true, render: (o) => tickerLabel(o.ticker, o.name) },
     { key: "side", label: "방향", width: "10%", render: (o) => SIDE_LABEL[o.side ?? ""] ?? o.side ?? "—" },
-    { key: "qty", label: "수량", width: "10%", align: "num", render: (o) => String(o.qty ?? "—") },
-    { key: "filled", label: "체결", width: "10%", align: "num", render: (o) => String(o.filled_qty ?? 0) },
+    { key: "qty", label: "수량", width: "10%", align: "num", render: (o) => fmtInt(o.qty) },
+    { key: "filled", label: "체결", width: "10%", align: "num", render: (o) => fmtInt(o.filled_qty ?? 0) },
     { key: "price", label: "가격", width: "14%", align: "num", render: (o) => priceText(o) },
     { key: "lane", label: "레인", width: "10%", align: "chip", render: (o) => <Chip>{LANE_LABEL[o.lane] ?? o.lane}</Chip> },
-    { key: "status", label: "상태", width: "12%", align: "chip", render: (o) => <Chip>{o.status}</Chip> },
+    { key: "status", label: "상태", width: "12%", align: "chip", render: (o) => <Chip tone={orderTone(o.status)}>{statusLabel(o.status)}</Chip> },
   ];
   return <Table columns={columns} rows={rows} rowKey={(o) => o._k} partial={data.partial} empty="오늘 주문 없음" />;
 }

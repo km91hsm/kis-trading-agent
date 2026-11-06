@@ -44,6 +44,23 @@
 }
 .approval-actions .btn { min-height: var(--touch); }
 
+/* 아침 파이프라인 — 시장 카드 2열(<768 1열), 단계 칩 줄, 발굴·뉴스 한 줄 */
+.pipeline-grid { display: grid; gap: var(--space-3); grid-template-columns: 1fr 1fr; }
+@media (max-width: 767px) {
+  .pipeline-grid { grid-template-columns: 1fr; }
+}
+.pipeline-steps { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); }
+.pipeline-line { margin: 0 0 var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+/* 파생 레인 카드 덧붙임 · 시스템 파생 다리 표 */
+.lane-extra { margin-top: var(--space-2); }
+.lane-extra .chips { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-1) 0 0; }
+.fo-legs { margin-top: var(--space-3); }
+.fo-legs-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--fg-muted); }
+
+/* 오늘 요약 KPI 띠(Stats kpi) — 레인 카드 위 */
+.today-summary { margin-bottom: var(--space-4); }
+
 .lane-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
@@ -52,37 +69,11 @@
 }
 .lane-grid > .screen-section { margin-bottom: 0; }
 
-/* 오늘: 주문·체결 | 알림 2열(≥1280) */
-.section-pair {
-  display: grid;
-  gap: var(--space-4);
-  margin-bottom: var(--space-6);
-}
-.section-pair > .screen-section { margin-bottom: 0; min-width: 0; }
-@media (min-width: 1280px) {
-  .section-pair { grid-template-columns: 1fr 1fr; }
-}
-.lane-stats {
-  display: grid;
-  gap: var(--space-1);
-  margin-bottom: var(--space-2);
-}
-.lane-stats > div {
-  display: flex;
-  gap: var(--space-2);
-}
-.lane-stats dt {
-  color: var(--fg-muted);
-  min-width: 3em;
-}
-.lane-stats dd { font-variant-numeric: tabular-nums; }
 .lane-note { color: var(--fg-muted); }
 
 /* 글머리 없는 목록은 들여쓰기도 없앤다 */
 .approvals,
 .timeline,
-.notice-list,
-.jobs,
 .decision-lines,
 .stage-chips,
 .data-hits,
@@ -91,14 +82,12 @@
 .sys-lines { padding: 0; }
 
 /* 주문·체결 타임라인 */
-.timeline,
-.notice-list,
-.jobs {
+.timeline {
   list-style: none;
   display: grid;
   gap: var(--space-1);
+  margin-top: var(--space-2);
 }
-.timeline { margin-top: var(--space-2); }
 .timeline-row {
   display: flex;
   gap: var(--space-3);
@@ -107,8 +96,7 @@
 }
 .timeline-row[data-tone="ok"] { border-left-color: var(--ok); }
 .timeline-row[data-tone="fail"] { border-left-color: var(--fail); color: var(--fail); }
-.timeline-time,
-.notice-time {
+.timeline-time {
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   flex: none;
@@ -136,29 +124,7 @@
   background: var(--accent);
   border-color: var(--accent);
 }
-.notice-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.notice-kind,
-.notice-account {
-  color: var(--fg-muted);
-  font-size: var(--text-sm);
-  flex: none;
-}
-.notice-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notice-row .chip { flex: none; }
 
-/* 다음 할 일 */
-.job-row { font-variant-numeric: tabular-nums; }
 
 /* ── 결정 상세 ── */
 .back-line { margin-bottom: var(--space-2); }
@@ -260,13 +226,6 @@
 }
 .account-mode { margin-bottom: var(--space-2); }
 .account-mode-note { color: var(--fg-muted); font-size: var(--text-sm); }
-.account-stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-2);
-}
-.account-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
-.account-stats dd { font-variant-numeric: tabular-nums; }
 
 /* ── 계좌별 화면(Task 10) ── */
 .positions-total {
@@ -280,17 +239,7 @@
 }
 .lot-list { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .lot-list li + li { margin-top: var(--space-1); }
-.risk-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-.risk-stats dt { color: var(--fg-muted); font-size: var(--text-sm); }
-.risk-stats dd { font-variant-numeric: tabular-nums; }
-.risk-insufficient { color: var(--fg-muted); }
-.risk-contrib li,
-.risk-limits li {
+.risk-contrib li {
   display: grid;
   grid-template-columns: 6em 1fr 5em;
   align-items: center;
@@ -301,9 +250,10 @@
 .risk-bar-fill { height: 100%; background: var(--accent); }
 .risk-pct { text-align: right; font-variant-numeric: tabular-nums; }
 .risk-limits-title { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); color: var(--fg-muted); font-weight: normal; }
-.risk-limits li { grid-template-columns: 7em 1fr 9em; }
-.risk-limit.over .risk-bar-fill { background: var(--down); }
-.risk-limit.over .risk-pct, .risk-limit.over .risk-ticker { color: var(--down); font-weight: 600; }
+.risk-limits { margin-top: var(--space-3); }
+.risk-contrib { margin-top: var(--space-3); }
+.account-head { margin-bottom: var(--space-4); }
+.account-head .mode-switch { margin-top: var(--space-3); }
 .mode-switch select { min-height: var(--touch); }
 .mode-switch .btn { min-height: var(--touch); }
 .mode-note { margin-top: var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); }

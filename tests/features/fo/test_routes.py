@@ -231,6 +231,6 @@ def test_sse_fingerprint_changes_on_leg_update(client, ledger):
 
 
 def test_fo_nav_items():
-    assert NavItem("accounts", "fo-positions", "파생 보유", 20) in FEATURE.nav
+    assert NavItem("accounts", "fo-positions", "파생 계좌", 20) in FEATURE.nav
     assert NavItem("today", "fo-lane", "파생", 30) in FEATURE.nav
     assert NavItem("system", "fo", "파생", 60) in FEATURE.nav  # 시스템 화면 「파생」 절

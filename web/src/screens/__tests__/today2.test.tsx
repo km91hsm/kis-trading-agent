@@ -58,8 +58,9 @@ function routes(over: Routes = {}): Routes {
       return kind ? NOTICES.filter((n) => n.kind === kind) : NOTICES;
     },
     "GET /api/system/daemon": fixtureDaemon([
-      fixtureJob({ id: 1, kind: "analyze", next_at: "2026-11-05T03:00:00+00:00" }),
-      fixtureJob({ id: 2, kind: "scalp", next_at: "2026-11-05T01:30:00+00:00", last_status: "failed" }),
+      fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T03:00:00+00:00" }),
+      fixtureJob({ id: "us_rebalance", kind: "rebalance", next_at: "2026-11-05T01:30:00+00:00", last_status: "failed" }),
+      fixtureJob({ id: "job_queue", kind: "job_queue", next_at: "2026-11-05T01:00:10+00:00" }),
     ]),
     ...over,
   };
@@ -68,8 +69,8 @@ function routes(over: Routes = {}): Routes {
 async function mount(r: Routes) {
   ff = installFakeFetch(r);
   render(
-    <MemoryRouter>
-      <Today />
+    <MemoryRouter initialEntries={["/log"]}>
+      <Today page="log" />
     </MemoryRouter>,
   );
   await flush();
@@ -81,8 +82,8 @@ describe("오늘 화면 ② — 주문·체결·알림·다음 할 일", () => {
   test("섹션 컨테이너는 데이터 전에 있다; 타임라인 3줄(시:분:초) + 일부 레인 칩, /orders 는 한 번만", async () => {
     ff = installFakeFetch(routes());
     render(
-      <MemoryRouter>
-        <Today />
+      <MemoryRouter initialEntries={["/log"]}>
+        <Today page="log" />
       </MemoryRouter>,
     );
     for (const id of ["orders-timeline", "notices", "next-jobs"]) expect(section(id)).not.toBeNull();
@@ -99,42 +100,63 @@ describe("오늘 화면 ② — 주문·체결·알림·다음 할 일", () => {
     expect(ff.calls.filter((c) => new URL(c.url, "http://x").pathname === "/api/orders")).toHaveLength(1);
   });
 
-  test("알림 피드 kind 필터 칩을 누르면 /system/notices?kind=approval 로 다시 부른다", async () => {
+  test("알림은 표(시각·종류·계좌·내용·전송) — kind 필터 칩(한글)을 누르면 /system/notices?kind=approval 로 다시 부른다", async () => {
     await mount(routes());
     const chips = Array.from(section("notices").querySelectorAll<HTMLButtonElement>("button[data-notice-kind]"));
-    expect(chips.map((b) => b.textContent)).toEqual(["전체", "fill", "approval"]);
-    expect(section("notices").querySelectorAll(".notice-row")).toHaveLength(3);
+    expect(chips.map((b) => b.textContent)).toEqual(["전체", "체결", "승인"]);
+    expect(chips.map((b) => b.getAttribute("data-notice-kind"))).toEqual(["", "fill", "approval"]);
+    expect(Array.from(section("notices").querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["시각", "종류", "계좌", "내용", "전송"]);
+    expect(section("notices").querySelectorAll("tbody tr")).toHaveLength(3);
     act(() => chips[2].click());
     await flush();
     const urls = ff!.calls.map((c) => new URL(c.url, "http://x")).filter((u) => u.pathname === "/api/system/notices");
     expect(urls.at(-1)!.searchParams.get("kind")).toBe("approval");
-    expect(urls.at(-1)!.searchParams.get("limit")).toBe("50");
-    expect(section("notices").querySelectorAll(".notice-row")).toHaveLength(1);
-    // 필터 중에도 칩 목록은 유지되고, 누른 칩이 눌림 상태
+    expect(urls.at(-1)!.searchParams.get("limit")).toBe("200");
+    expect(section("notices").querySelectorAll("tbody tr")).toHaveLength(1);
     const after = Array.from(section("notices").querySelectorAll<HTMLButtonElement>("button[data-notice-kind]"));
-    expect(after.map((b) => b.textContent)).toEqual(["전체", "fill", "approval"]);
+    expect(after.map((b) => b.textContent)).toEqual(["전체", "체결", "승인"]);
     expect(after[2].getAttribute("aria-pressed")).toBe("true");
   });
 
-  test("ok=false 알림은 '전송 실패' 칩", async () => {
-    await mount(routes());
-    const rows = Array.from(section("notices").querySelectorAll(".notice-row"));
+  test("ok=false 알림 행은 '전송 실패' 칩; 「[제목] 본문」 은 제목 칩 + 본문(원문은 title)", async () => {
+    await mount(routes({ "GET /api/system/notices": [...NOTICES, fixtureNotice({ id: 4, kind: "info", text: "[점검 격상] 관심 → 주의\n오류 3건" })] }));
+    const rows = Array.from(section("notices").querySelectorAll("tbody tr"));
     const failed = rows.filter((r) => r.querySelector('.chip[data-tone="fail"]')?.textContent === "전송 실패");
     expect(failed).toHaveLength(1);
     expect(failed[0].textContent).toContain("승인 요청 — 005930 매수 3주");
-    expect(failed[0].textContent).toContain("10:02:00");
+    expect(failed[0].textContent).toContain("10:02");
     expect(failed[0].textContent).toContain("paper-1");
+    const titled = rows.find((r) => r.textContent?.includes("점검 격상"))!;
+    expect(titled.textContent).toContain("관심 → 주의");
+    expect(titled.textContent).not.toContain("오류 3건");
+    expect(titled.querySelector("span[title]")!.getAttribute("title")).toContain("오류 3건");
   });
 
-  test("다음 할 일: next_at 순, 마지막 실패 표시; 데몬 꺼짐이면 한 줄", async () => {
+  test("알림 31건이면 30행 + 페이지 이동", async () => {
+    const many = Array.from({ length: 31 }, (_, i) => fixtureNotice({ id: 100 - i }));
+    await mount(routes({ "GET /api/system/notices": many }));
+    expect(section("notices").querySelectorAll("tbody tr")).toHaveLength(30);
+    expect(section("notices").querySelector("nav.pager")).not.toBeNull();
+  });
+
+  test("다음 할 일: 사용자 잡만 표(작업·예정·마지막) next_at 순, 한글 라벨·시장 칩·마지막 실패", async () => {
     await mount(routes());
-    expect(lines(section("next-jobs"), ".job-row")).toEqual(["scalp · 10:30:00 (마지막 실패)", "analyze · 12:00:00"]);
+    const rows = lines(section("next-jobs"), "tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("리밸런스");
+    expect(rows[0]).toContain("US");
+    expect(rows[0]).toContain("10:30");
+    expect(rows[0]).toContain("실패");
+    expect(rows[1]).toContain("스캔 → 분석");
+    expect(rows[1]).toContain("KR");
+    expect(section("next-jobs").textContent).not.toContain("job_queue");
+    expect(section("next-jobs").textContent).not.toContain("작업 대기열");
   });
 
   test("데몬 꺼짐이면 '데몬 꺼짐' 한 줄", async () => {
     await mount(routes({ "GET /api/system/daemon": fixtureDaemon([fixtureJob()], { alive: false }) }));
     expect(section("next-jobs").textContent).toContain("데몬 꺼짐");
-    expect(section("next-jobs").querySelectorAll(".job-row")).toHaveLength(0);
+    expect(section("next-jobs").querySelectorAll("tbody tr")).toHaveLength(0);
   });
 
   test("조회 실패는 섹션 안에 '불러오지 못했습니다' + 메시지", async () => {

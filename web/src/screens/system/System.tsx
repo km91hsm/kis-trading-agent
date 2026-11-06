@@ -3,7 +3,8 @@
 // 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다. 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목),
 // 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { PageTabs } from "../../components/PageTabs";
+import { FoLegs } from "./FoLegs";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
 import { Chip } from "../../components/Chip";
@@ -143,7 +144,6 @@ function SavetickerStatus({ s }: { s: SavetickerResp }) {
 }
 
 export function System({ page }: { page: SystemPage }) {
-  const { pathname } = useLocation();
   const pages = screenPages("system");
   const label = pages.find((p) => p.id === page)?.label ?? "";
   // 절 순서는 nav.ts 항목 순(order) — 페이지 안에서도 메뉴 생성기가 정한 순서를 따른다
@@ -213,6 +213,7 @@ export function System({ page }: { page: SystemPage }) {
               </p>
             ) : null}
             <Table columns={FO_COLUMNS} rows={f.accounts} rowKey={(a) => a.id} empty="파생 계좌 없음" />
+            <FoLegs accounts={f.accounts} />
           </>
         )}
       </FeatureStatus>
@@ -222,13 +223,7 @@ export function System({ page }: { page: SystemPage }) {
   return (
     <div className="screen" data-screen="system" data-page={page}>
       <h1 className="screen-title">시스템 · {label}</h1>
-      <nav className="page-tabs" aria-label="시스템 페이지">
-        {pages.map((p) => (
-          <Link key={p.id} to={p.path} aria-current={pathname === p.path ? "page" : undefined}>
-            {p.label}
-          </Link>
-        ))}
-      </nav>
+      <PageTabs screen="system" label="시스템 페이지" />
       {sections.map((s) => (
         <section key={s.id} id={s.id} className="screen-section">
           <h2>{s.label}</h2>

@@ -23,18 +23,49 @@ SCREENS = (
 # 시스템 화면의 커널 절(웹 `/system/*` 커널 라우트·ops).
 # 기능 항목(국면 30·저장소 40·단타 50·파생 60)보다 앞에 선다.
 # 시스템 절 순서: 지금 볼 것(0~) → 기능 절(30~60, 각 feature.py) → 관리(70~)
-# 시스템 화면의 페이지(상태·잡·기능·관리). 절은 13개지만 메뉴·주소는 이 넷이다.
-# 커널 절은 아래 표가 페이지를 정하고, 기능이 보탠 시스템 절(국면·저장소·단타·파생)은
-# 전부 「기능」 페이지로 간다. 다른 화면은 페이지 1개(자기 자신).
+# 긴 화면은 절을 페이지 몇 개(각자 주소)로 묶는다 — (페이지 id, 라벨, 경로, 그 페이지의 절 id).
+# 시스템은 절 13개를 상태·잡·기능·관리 넷으로, 오늘은 현황(승인·레인·결정)과
+# 기록(주문·체결·다음 할 일·알림) 둘로. 표에 없는 화면은 페이지 1개(자기 자신).
+# 절이 표에 없으면 절 목록이 빈 페이지(시스템 「기능」 — 기능이 보탠 국면·저장소·단타·파생 절이
+# 여기로)로, 그런 페이지가 없으면 첫 페이지(오늘 현황)로 간다.
 SYSTEM_PAGES = (
     ("status", "상태", "/system", ("health", "daemon", "usage")),
     ("jobs", "잡", "/system/jobs", ("jobs", "runs")),
     ("features", "기능", "/system/features", ()),
     ("admin", "관리", "/system/admin", ("token", "secrets", "settings", "control-log")),
 )
-_SYSTEM_PAGE_OF = {sec: pid for pid, _, _, secs in SYSTEM_PAGES for sec in secs}
+TODAY_PAGES = (
+    ("today", "현황", "/", ("approvals", "pipeline", "decisions", "risk-checks")),
+    ("log", "기록", "/log", ("orders-timeline", "next-jobs", "notices")),
+)
+SCREEN_PAGES: dict[str, tuple[tuple[str, str, str, tuple[str, ...]], ...]] = {
+    "today": TODAY_PAGES,
+    "system": SYSTEM_PAGES,
+}
+
+
+def page_of(screen: str, section_id: str) -> str:
+    """절이 들어갈 페이지 id. 페이지 표가 없는 화면은 화면 id 자신."""
+    pages = SCREEN_PAGES.get(screen)
+    if not pages:
+        return screen
+    for pid, _, _, secs in pages:
+        if section_id in secs:
+            return pid
+    for pid, _, _, secs in pages:
+        if not secs:
+            return pid
+    return pages[0][0]
 
 KERNEL_NAV = (
+    # 오늘: 기능 레인 카드(10~30) 뒤에 커널 절
+    # — 현황(파이프라인·결정·게이트) → 기록(주문·다음 할 일·알림)
+    NavItem("today", "pipeline", "아침 파이프라인", 35),
+    NavItem("today", "decisions", "결정", 40),
+    NavItem("today", "risk-checks", "리스크 게이트", 45),
+    NavItem("today", "orders-timeline", "주문·체결", 50),
+    NavItem("today", "next-jobs", "다음 할 일", 60),
+    NavItem("today", "notices", "알림", 70),
     NavItem("system", "health", "헬스", 0),
     NavItem("system", "daemon", "데몬", 1),
     NavItem("system", "jobs", "잡 큐", 2),
@@ -73,8 +104,8 @@ def _json(value: object) -> str:
 
 
 def nav_ts(features: list[Feature]) -> str:
-    """커널 고정 5 화면 + 커널 시스템 절(`KERNEL_NAV`) + 기능 `nav` 로 `nav.ts` 본문을 만든다
-    (끝에 개행 한 줄).
+    """커널 고정 5 화면(+ 페이지 표 `SCREEN_PAGES`) + 커널 절(`KERNEL_NAV`) + 기능 `nav` 로
+    `nav.ts` 본문을 만든다(끝에 개행 한 줄).
 
     항목은 (screen, order, id) 순. 알 수 없는 screen 은 KeyError 로 생성이 실패한다."""
     rank = {sid: i for i, (sid, _, _) in enumerate(SCREENS)}
@@ -85,8 +116,8 @@ def nav_ts(features: list[Feature]) -> str:
     lines = []
     for sid, label, path in SCREENS:
         pages = (
-            [{"id": pid, "label": pl, "path": pp} for pid, pl, pp, _ in SYSTEM_PAGES]
-            if sid == "system"
+            [{"id": pid, "label": pl, "path": pp} for pid, pl, pp, _ in SCREEN_PAGES[sid]]
+            if sid in SCREEN_PAGES
             else [{"id": sid, "label": label, "path": path}]
         )
         mine = [
@@ -95,7 +126,7 @@ def nav_ts(features: list[Feature]) -> str:
                 "id": n.id,
                 "label": n.label,
                 "order": n.order,
-                "page": _SYSTEM_PAGE_OF.get(n.id, "features") if sid == "system" else sid,
+                "page": page_of(sid, n.id),
             }
             for n in items
             if n.screen == sid

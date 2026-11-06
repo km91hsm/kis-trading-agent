@@ -46,6 +46,22 @@ export function fixtureOverview(over: Over = {}) {
   };
 }
 
+/** `GET /fo/summary`(fo/routes.py _account_status) — paper-fo 한 계좌, 기록만 상태. */
+export function fixtureFoSummary(over: Over = {}) {
+  return {
+    accounts: [
+      {
+        id: "paper-fo", env: "paper", mode: "off", mode_note: null, paused: false,
+        state: "record_only", enabled: true, vehicles: ["OPTION_BUY"],
+        verified: { FUTURES: false, OPTION_BUY: true }, halted: false, pending_entry: false,
+        nav_date: "2026-11-05", nav: "50500000", cash: "38500000", margin_total: "12000000",
+        add_margin: null, margin_pct: 0.2376, positions: [], decision: null,
+        ...over,
+      },
+    ],
+  };  // fmt: skip
+}
+
 // ── 계좌별 화면(Task 10) — `/accounts/{id}/positions`(merge {items, partial})·리스크·성과·tax-lots ──
 function spotRow(over: Over = {}) {
   return {

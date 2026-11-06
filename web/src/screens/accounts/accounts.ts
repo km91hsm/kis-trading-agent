@@ -1,6 +1,6 @@
 // 「계좌·보유」 통합 화면 순수 함수 — 원화·달러 합계와 환율 줄, 계좌 카드 행, 전역 재개의 실전 확인 대상.
 // 응답 정본: `features/accounts/overview.py`(account_rows·totals), `routes.py set_paused`(해제는 실전 auto 계좌 id 하나를 confirm).
-import { fmtDate, fmtKrw, fmtMoney, fmtUsd } from "../../lib/format";
+import { fmtDate, fmtMoney, fmtUsd } from "../../lib/format";
 
 type Amount = string | number | null;
 export type MarketTotal = { nav: Amount; day_pnl: Amount; accounts: string[] };
@@ -24,7 +24,59 @@ export type Account = {
   pending_approvals: number | null;
 };
 
-export type Totals = { krw: string; krwPnl: string; usd: string; usdPnl: string; fxLine: string | null; converted: string | null };
+export type Totals = {
+  krw: string;
+  krwPnl: string;
+  krwScope: string;
+  usd: string;
+  usdPnl: string;
+  usdScope: string;
+  fxLine: string | null;
+  converted: string | null;
+};
+
+/** `GET /fo/summary` 의 계좌 한 묶음(fo/routes.py _account_status) — 화면이 쓰는 키만. */
+export type FoStatus = {
+  id: string;
+  state: string;
+  nav_date?: string | null;
+  nav: Amount;
+  cash?: Amount;
+  margin_total?: Amount;
+  margin_pct?: number | null;
+};
+export type FoSummary = { accounts: FoStatus[] };
+
+export const FO_STATE_LABEL: Record<string, string> = {
+  off: "실전 꺼짐",
+  disabled: "레인 꺼짐",
+  unverified: "검증 전",
+  halted: "손실 한도",
+  record_only: "기록만",
+  active: "활성",
+};
+
+/** 금액에 통화 단위 — 원화 「10,000,000원」, 달러 「$2,500.50」. null 은 「—」. */
+export function moneyUnit(v: Amount | undefined, currency: string): string {
+  const usd = currency === "USD";
+  const s = fmtMoney(v ?? null, usd ? "USD" : "KRW");
+  if (s === "—") return s;
+  if (!usd) return `${s}원`;
+  return s.startsWith("-") ? `-$${s.slice(1)}` : `$${s}`; // 부호는 기호 앞: -$12.25
+}
+
+/** 합계에 든 계좌 id 를 모의/실전으로 세어 「모의 1 · 실전 1」. 계좌 목록 전이면 「계좌 n」. */
+export function scopeText(ids: string[], accounts: Account[] | null | undefined): string {
+  if (!accounts) return `계좌 ${ids.length}`;
+  const env = new Map(accounts.map((a) => [a.id, a.env]));
+  let paper = 0;
+  let live = 0;
+  for (const id of ids) (env.get(id) === "paper" ? paper++ : live++);
+  const parts = [];
+  if (paper) parts.push(`모의 ${paper}`);
+  if (live) parts.push(`실전 ${live}`);
+  return parts.length ? parts.join(" · ") : "계좌 없음";
+}
 export type AccountCard = {
   id: string;
   href: string;
@@ -55,20 +107,24 @@ function asOfText(asOf: string | null): string {
   return Number.isNaN(new Date(asOf).getTime()) && !/^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : fmtDate(asOf);
 }
 
-export function totals(o: Overview): Totals {
+export function totals(o: Overview, accounts?: Account[] | null): Totals {
+  const krw = (v: Amount) => moneyUnit(v, "KRW");
+  const usd = (v: Amount) => moneyUnit(v, "USD");
   return {
-    krw: fmtKrw(o.krw.nav),
-    krwPnl: signed(o.krw.day_pnl, fmtKrw),
-    usd: fmtUsd(o.usd.nav),
-    usdPnl: signed(o.usd.day_pnl, fmtUsd),
+    krw: krw(o.krw.nav),
+    krwPnl: signed(o.krw.day_pnl, krw),
+    krwScope: scopeText(o.krw.accounts, accounts),
+    usd: usd(o.usd.nav),
+    usdPnl: signed(o.usd.day_pnl, usd),
+    usdScope: scopeText(o.usd.accounts, accounts),
     fxLine: o.fx ? `적용 환율 ${o.fx.pair} ${fmtUsd(o.fx.rate)} (${asOfText(o.fx.as_of)})` : "환율 없음",
-    converted: o.fx ? `환산 합계 ${fmtKrw(o.fx.converted_total)}` : null,
+    converted: o.fx ? `환산 합계 ${moneyUnit(o.fx.converted_total, "KRW")}` : null,
   };
 }
 
 export function cardRows(accounts: Account[]): AccountCard[] {
   return accounts.map((a) => {
-    const money = (v: Amount) => fmtMoney(v, a.currency === "USD" ? "USD" : "KRW");
+    const money = (v: Amount) => moneyUnit(v, a.currency);
     return {
       id: a.id,
       href: `/accounts/${encodeURIComponent(a.id)}`,

@@ -23,6 +23,13 @@ export function fmtKrw(v: string | number | null | undefined): string {
   return (Math.round(n) || 0).toLocaleString("en-US"); // || 0: -0 을 "0" 으로
 }
 
+/** 정수 천 단위 "18,018"(수량 등). */
+export function fmtInt(v: string | number | null | undefined): string {
+  const n = num(v);
+  if (n === null) return DASH;
+  return (Math.round(n) || 0).toLocaleString("en-US");
+}
+
 /** 달러: 소수 둘째 "1,234.50". */
 export function fmtUsd(v: string | number | null | undefined): string {
   return fixed2(v);
@@ -105,4 +112,18 @@ export function agoText(iso: string | null | undefined, now: Date): string {
   const h = Math.floor(m / 60);
   if (h < 48) return `${h}시간 전`;
   return `${Math.floor(h / 24)}일 전`;
+}
+
+/** 「곧」(1분 미만)·「N분 뒤」·「N시간 뒤」·「N일 뒤」(내림). 지난 시각은 「지남」. */
+export function untilText(iso: string | null | undefined, now: Date): string {
+  const d = parse(iso);
+  if (!d) return DASH;
+  const s = Math.floor((d.getTime() - now.getTime()) / 1000);
+  if (s < 0) return "지남";
+  if (s < 60) return "곧";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}분 뒤`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}시간 뒤`;
+  return `${Math.floor(h / 24)}일 뒤`;
 }

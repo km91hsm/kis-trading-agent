@@ -1,4 +1,5 @@
 // 그날 결정 목록 — 레인 합본(`GET /decisions`), 시각 역순, 상세 링크(단타는 없음), CSV.
+// 종목 칸은 코드+이름만, 내용 칸은 최종 의견 요약(summary) — 판단(HOLD/BUY)은 방향 열에만.
 import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Table, type Column } from "../../components/Table";
@@ -9,12 +10,13 @@ import { decisionRows, LANE_LABEL, type Decision, type DecisionRow, type Lane } 
 const COLUMNS: Column<DecisionRow>[] = [
   { key: "at", label: "시각", width: "88px", render: (r) => fmtTime(r.at) },
   { key: "lane", label: "레인", width: "72px", align: "chip", render: (r) => <Chip>{LANE_LABEL[r.lane as Lane] ?? r.lane}</Chip> },
+  { key: "ticker", label: "종목", width: "200px", render: (r) => (r.href ? <Link to={r.href}>{r.ticker}</Link> : r.ticker) },
   {
-    key: "title",
-    label: "종목·내용",
+    key: "summary",
+    label: "내용",
     width: "auto",
     long: true,
-    render: (r) => (r.href ? <Link to={r.href}>{r.title}</Link> : r.title),
+    render: (r) => r.summary ?? "—",
   },
   { key: "side", label: "방향", width: "64px" },
   { key: "qty", label: "수량", width: "72px", align: "num", render: (r) => (r.qty ?? "—").toString() },
@@ -29,7 +31,7 @@ export function DecisionsList({ items, partial, date }: { items: Decision[]; par
       rows={decisionRows(items)}
       rowKey={(r) => r.key}
       partial={partial}
-      csvHref={csvUrl("/decisions", { date })}
+      csvHref={items.length ? csvUrl("/decisions", { date }) : undefined}
       empty="이 날 결정이 없습니다"
     />
   );

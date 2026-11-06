@@ -7,11 +7,23 @@ import { Card } from "../../components/Card";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, patchJson } from "../../lib/api";
-import { fmtMoney } from "../../lib/format";
+import { fmtDate, fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
-import { cardRows, resumeNeedsConfirm, totals, type Account, type AccountCard, type Overview } from "./accounts.ts";
+import {
+  FO_STATE_LABEL,
+  cardRows,
+  moneyUnit,
+  resumeNeedsConfirm,
+  totals,
+  type Account,
+  type AccountCard,
+  type FoStatus,
+  type FoSummary,
+  type Overview,
+} from "./accounts.ts";
 
 /** 계좌 표 — 첫 열의 id 가 계좌별 화면 링크(data-account-row). 숫자 열은 오른쪽 정렬·tabular. */
 const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
@@ -35,10 +47,13 @@ const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
       </>
     ),
   },
-  { key: "nav", label: "NAV", width: "16%", align: "num" },
+  { key: "nav", label: "순자산", width: "16%", align: "num" },
   { key: "dayPnl", label: "당일 손익", width: "14%", align: "num" },
   { key: "positions", label: "보유", width: "8%", align: "num", render: (c) => `${c.positions}종목` },
-  { key: "pending", label: "승인 대기", width: "10%", align: "chip", render: (c) => <Chip tone={c.pending > 0 ? "warn" : "muted"}>{c.pending}건</Chip> },
+  {
+    key: "pending", label: "승인 대기", width: "10%", align: "chip",
+    render: (c) => (c.pending > 0 ? <Chip tone="warn">{c.pending}건</Chip> : <span className="muted">없음</span>),
+  },
 ];  // fmt: skip
 
 export function Accounts() {
@@ -48,6 +63,9 @@ export function Accounts() {
   const paused = accounts.data?.length ? accounts.data.some((a) => a.paused) : (overview.data?.paused ?? false);
   const spotCards = accounts.data ? cardRows(accounts.data.filter((a) => a.lane !== "fo")) : [];
   const foAccounts = accounts.data ? accounts.data.filter((a) => a.lane === "fo") : null;
+  // 파생 NAV·증거금은 /accounts 가 아니라 fo_nav_snapshot(/fo/summary) — 실패하면 카드는 /accounts 값으로.
+  const foSummary = useResource<FoSummary>("/fo/summary", undefined, ["fo", "accounts"], { enabled: !!foAccounts?.length });
+  const foStatus = new Map((foSummary.data?.accounts ?? []).map((a) => [a.id, a]));
 
   return (
     <div className="screen" data-screen="accounts">
@@ -58,7 +76,7 @@ export function Accounts() {
         {overview.error ? (
           <Empty title="합계를 불러오지 못했습니다">{overview.error.message}</Empty>
         ) : overview.data ? (
-          <TotalsRow data={overview.data} />
+          <TotalsRow data={overview.data} accounts={accounts.data ?? null} />
         ) : (
           <Empty title="합계 불러오는 중" />
         )}
@@ -74,10 +92,10 @@ export function Accounts() {
         {accounts.error ? (
           <Empty title="계좌를 불러오지 못했습니다">{accounts.error.message}</Empty>
         ) : accounts.data ? (
-          accounts.data.length ? (
-            <Table columns={ACCOUNT_COLUMNS} rows={spotCards} rowKey={(c) => c.id} empty="계좌 없음" />
+          spotCards.length ? (
+            <Table columns={ACCOUNT_COLUMNS} rows={spotCards} rowKey={(c) => c.id} empty="현물 계좌 없음" />
           ) : (
-            <Empty title="계좌 없음" />
+            <Empty title={accounts.data.length ? "현물 계좌 없음" : "계좌 없음"} />
           )
         ) : (
           <Empty title="계좌 불러오는 중" />
@@ -89,7 +107,7 @@ export function Accounts() {
         {foAccounts ? (
           <div className="account-grid">
             {foAccounts.map((a) => (
-              <FoAccountCard key={a.id} account={a} />
+              <FoAccountCard key={a.id} account={a} status={foStatus.get(a.id)} />
             ))}
           </div>
         ) : (
@@ -102,43 +120,55 @@ export function Accounts() {
 
 const MODE_LABEL: Record<string, string> = { auto: "자동", approve: "승인", off: "끔" };
 
-/** 파생 계좌 카드 — id·모의/실전·모드(+메모)·NAV/현금·계좌별 화면 링크. 보유 상세는 계좌별 화면 「파생 보유」. */
-function FoAccountCard({ account: a }: { account: Account }) {
-  const money = (v: Account["nav"] | undefined) => fmtMoney(v ?? null, a.currency === "USD" ? "USD" : "KRW");
+/** 파생 계좌 카드 — id·모의/실전·상태 칩(/fo/summary state)·모드(+메모)·NAV/증거금(/fo/summary, 없으면 /accounts 의 NAV·현금)·
+ * 계좌별 화면 링크. 보유 상세는 계좌별 화면 「파생 보유」 절. */
+function FoAccountCard({ account: a, status }: { account: Account; status?: FoStatus }) {
+  const money = (v: Account["nav"] | undefined) => moneyUnit(v, a.currency);
   const live = a.env !== "paper";
+  const items = status
+    ? [
+        { id: "nav", label: "NAV", value: money(status.nav), sub: status.nav_date ? `기준 ${fmtDate(status.nav_date)}` : undefined },
+        {
+          id: "margin", label: "증거금", value: money(status.margin_total),
+          sub: status.margin_pct === null || status.margin_pct === undefined ? undefined : `NAV 의 ${fmtPct(status.margin_pct)}`,
+        },
+      ]
+    : [
+        { id: "nav", label: "NAV", value: money(a.nav) },
+        { id: "cash", label: "현금", value: money(a.cash) },
+      ];
   return (
-    <Card title={a.id} right={<Chip tone={live ? "live" : "muted"}>{live ? "실전" : "모의"}</Chip>}>
+    <Card
+      title={a.id}
+      right={
+        <span className="chips">
+          <Chip tone={live ? "live" : "muted"}>{live ? "실전" : "모의"}</Chip>
+          {status ? <Chip tone={status.state === "active" ? "ok" : status.state === "halted" ? "fail" : "muted"}>{FO_STATE_LABEL[status.state] ?? status.state}</Chip> : null}
+        </span>
+      }
+    >
       <p className="account-mode">
         모드 {MODE_LABEL[a.mode] ?? a.mode}
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
-      <dl className="account-stats">
-        <div>
-          <dt>NAV</dt>
-          <dd>{money(a.nav)}</dd>
-        </div>
-        <div>
-          <dt>현금</dt>
-          <dd>{money(a.cash)}</dd>
-        </div>
-      </dl>
+      <Stats cols={2} items={items} />
       <Link to={`/accounts/${encodeURIComponent(a.id)}`}>계좌별 화면 ›</Link>
     </Card>
   );
 }
 
-/** 합계 띠 — 한 묶음을 1px 선으로 세 칸(원화·달러·참고). 참고 칸은 환율·환산 합계(합계 계산에 쓰지 않음). */
-function TotalsRow({ data }: { data: Overview }) {
-  const t = totals(data);
+/** 합계 띠 — 한 묶음을 1px 선으로 세 칸(원화·달러·참고). 칸마다 범위(모의 n · 실전 n), 참고 칸은 환율·환산 합계(합계 계산에 쓰지 않음). */
+function TotalsRow({ data, accounts }: { data: Overview; accounts: Account[] | null }) {
+  const t = totals(data, accounts);
   return (
     <div className="kpi-strip">
       <div className="kpi" data-kpi="krw">
-        <span className="kpi-label">원화 합계</span>
+        <span className="kpi-label">원화 합계 · {t.krwScope}</span>
         <span className="kpi-value num">{t.krw}</span>
         <span className="kpi-sub num">당일 손익 {t.krwPnl}</span>
       </div>
       <div className="kpi" data-kpi="usd">
-        <span className="kpi-label">달러 합계</span>
+        <span className="kpi-label">달러 합계 · {t.usdScope}</span>
         <span className="kpi-value num">{t.usd}</span>
         <span className="kpi-sub num">당일 손익 {t.usdPnl}</span>
       </div>
@@ -155,7 +185,7 @@ function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; c
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const label = paused ? "재개" : "일시정지";
+  const label = paused ? "전체 자동매매 재개" : "전체 자동매매 일시정지";
 
   async function submit(confirm?: string) {
     setOpen(false);

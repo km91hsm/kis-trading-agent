@@ -44,9 +44,12 @@ describe("Table", () => {
     expect(cards).toHaveLength(2);
     expect(cards[0].querySelector(".row-card-meta")!.textContent).toContain("매수");
     expect(cards[0].querySelector(".row-card-title")!.textContent).toContain("아주 긴 메모");
-    const chips = cards[0].querySelector(".row-card-chips")!.textContent!;
-    expect(chips).toContain("삼성전자");
-    expect(chips).toContain("10");
+    // 나머지 열은 칩 줄(가로 스크롤)이 아니라 2열 정의 목록 — 값이 잘리지 않고 줄바꿈한다
+    expect(cards[0].querySelector(".row-card-chips")).toBeNull();
+    const fields = cards[0].querySelector("dl.row-card-fields")!;
+    expect(Array.from(fields.querySelectorAll("dt")).map((e) => e.textContent)).toEqual(["종목", "수량"]);
+    expect(Array.from(fields.querySelectorAll("dd")).map((e) => e.textContent)).toEqual(["삼성전자", "10"]);
+    expect(fields.querySelectorAll("dd")[1].classList.contains("num")).toBe(true);
 
     setWidth(1024);
     expect(container.querySelector("table")).not.toBeNull();
@@ -87,7 +90,16 @@ describe("Table", () => {
     expect(tds[4].querySelector(".cell-ellipsis")).toBeNull();
     setWidth(600);
     expect(container.querySelector(".row-card-title")!.textContent).toContain("아주 긴 메모");
-    expect(container.querySelector(".row-card-chips")!.textContent).toContain("id a");
+    expect(container.querySelector(".row-card-fields")!.textContent).toContain("id");
+  });
+
+  test("action 열(취소 버튼 등)은 행 카드에서 정의 목록 밖 자기 줄(.row-card-actions)에 — 잘리지 않는다", () => {
+    setWidth(600);
+    const cols: Column<Row>[] = [...columns, { key: "cancel", label: "", width: "4rem", action: true, render: (r) => <button type="button">취소 {r.id}</button> }];
+    const { container } = render(<Table columns={cols} rows={rows} rowKey={(r) => r.id} />);
+    const card = container.querySelector(".row-card")!;
+    expect(card.querySelector(".row-card-fields")!.textContent).not.toContain("취소");
+    expect(card.querySelector(".row-card-actions button")!.textContent).toBe("취소 a");
   });
 
   test("rows 가 비면 empty 문구", () => {

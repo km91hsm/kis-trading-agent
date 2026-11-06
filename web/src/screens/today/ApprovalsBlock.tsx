@@ -1,6 +1,7 @@
 // 대기 승인 — 행마다 근거 요약·승인·거절. 실전(env≠paper)은 계좌 id 재입력 뒤 confirm 을 싣는다.
 // 행·확인 본문에 금액(주문 시장 통화 row.currency — 없으면 /accounts currency, 모르면 원화)과 결정 상세 링크(스펙 §6.1-1).
 // 승인 202 는 데몬이 집행할 때까지 「집행 대기」 칩(SSE approvals·orders 로 다시 읽어 행이 사라지면 같이 사라짐).
+import { tickerLabel } from "../../lib/ticker";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/Badge";
@@ -16,6 +17,7 @@ export type Approval = {
   env: string;
   decision: { asset: string; id: number | null } | null;
   ticker: string;
+  name?: string | null;
   market?: string | null;
   currency?: string | null;
   side: string;
@@ -92,7 +94,7 @@ export function ApprovalsBlock({ items, accounts = [], onDone }: { items: Approv
             <li key={row.id} className="approval">
               <div className="approval-head">
                 {real ? <Badge tone="live">실전</Badge> : <Badge tone="muted">모의</Badge>}
-                <strong>{row.ticker}</strong>
+                <strong>{tickerLabel(row.ticker, row.name)}</strong>
                 <span>
                   {SIDE_LABEL[row.side] ?? row.side} {row.qty}주
                 </span>
@@ -134,7 +136,7 @@ export function ApprovalsBlock({ items, accounts = [], onDone }: { items: Approv
       </ul>
       <Confirm
         open={!!asking}
-        title={asking ? `${asking.row.ticker} ${ACTION_LABEL[asking.action]}` : ""}
+        title={asking ? `${tickerLabel(asking.row.ticker, asking.row.name)} ${ACTION_LABEL[asking.action]}` : ""}
         body={asking ? confirmBody(asking.row, asking.action, accounts) : null}
         live={asking && asking.row.env !== "paper" ? { accountId: asking.row.account_id } : undefined}
         onConfirm={(confirm) => asking && void decide(asking.row, asking.action, confirm)}
