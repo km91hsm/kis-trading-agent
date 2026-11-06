@@ -27,6 +27,7 @@ import {
   fixtureRisk,
   fixtureTaxLots,
 } from "../../test/fixtures/accounts";
+import { fixtureSpotOrder } from "../../test/fixtures/today";
 
 let ff: FakeFetch | null = null;
 const stub: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
@@ -264,6 +265,12 @@ describe("계좌별 화면", () => {
     const thin = section("risk")!;
     expect(thin.textContent).toContain("자료 부족: 종가 부족(3일)");
     expect(thin.querySelectorAll("li.risk-limit")).toHaveLength(5);
+  });
+
+  test("주문 표 「종목」 칸은 코드+이름", async () => {
+    await mount(routes({ "GET /api/orders": { items: [fixtureSpotOrder({ name: "삼성전자" })], partial: false } }));
+    const orders = section("orders")!;
+    expect(orders.textContent).toContain("005930 삼성전자");
   });
 
   test("「‹ 돌아가기」 는 /accounts 로, 헤더에 현금·모드 메모", async () => {

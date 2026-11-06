@@ -238,6 +238,35 @@ describe("오늘 화면", () => {
     expect(spot.textContent).toContain("불러오는 중");
   });
 
+  test("결정 표: 「종목」 칸은 코드+이름 링크, 「내용」 칸은 최종 의견 요약 — HOLD 같은 판단은 방향 열에만", async () => {
+    await mount(
+      routes({
+        "GET /api/decisions": merged([
+          fixtureSpotDecision({ id: 7, name: "삼성전자", summary: "실적 상향, 외국인 순매수 지속" }),
+          fixtureSpotDecision({ id: 9, ticker: "035420", name: "NAVER", action: "HOLD", side: null, summary: "밸류에이션 부담, 관망", at: "2026-11-05T00:30:00+00:00" }),
+        ]),
+      }),
+    );
+    const dec = section("decisions");
+    const heads = Array.from(dec.querySelectorAll("thead th")).map((e) => e.textContent);
+    expect(heads).toContain("종목");
+    expect(heads).toContain("내용");
+    expect(heads).not.toContain("종목·내용");
+    const link = dec.querySelector('a[href="/decisions/spot/7"]')!;
+    expect(link.textContent).toBe("005930 삼성전자");
+    expect(dec.textContent).toContain("실적 상향, 외국인 순매수 지속");
+    const holdRow = Array.from(dec.querySelectorAll("tbody tr")).find((tr) => tr.textContent?.includes("035420"))!;
+    expect(holdRow.textContent).toContain("035420 NAVER");
+    expect(holdRow.textContent).toContain("보류");
+    expect(holdRow.textContent).not.toContain("HOLD");
+    expect(holdRow.textContent).toContain("밸류에이션 부담, 관망");
+  });
+
+  test("승인 카드의 종목은 코드+이름", async () => {
+    await mount(routes({ "GET /api/approvals": { approvals: [fixtureApproval({ name: "삼성전자" })] } }));
+    expect(section("approvals").querySelector(".approval-head strong")!.textContent).toBe("005930 삼성전자");
+  });
+
   test("partial 응답이면 결정 표 위에 칩", async () => {
     await mount(routes({ "GET /api/decisions": merged([fixtureSpotDecision()], true) }));
     const dec = section("decisions");

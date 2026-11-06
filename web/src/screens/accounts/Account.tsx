@@ -2,6 +2,7 @@
 // 파생 계좌는 「파생 보유」)·단타(합계 미포함)·오늘 주문·체결·리스크(현물만)·모드 전환.
 // 섹션 컨테이너는 데이터 전에 바로 그린다. 파생 계좌는 보유 절 id 가 `fo-positions`(메뉴 앵커), 아니면 `positions` + 빈 hidden `fo-positions`.
 // 계좌 단위 일시정지는 API 에 없어 그리지 않는다.
+import { tickerLabel } from "../../lib/ticker";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Card } from "../../components/Card";
@@ -258,7 +259,7 @@ function OrdersTable({ data }: { data: Merged<Order> }) {
   const rows: OrderRow[] = data.items.map((o, i) => ({ ...o, _k: `${o.lane}-${o.id ?? i}` }));
   const columns: Column<OrderRow>[] = [
     { key: "at", label: "시각", width: "14%", render: (o) => fmtTime(o.at ?? null) },
-    { key: "ticker", label: "종목", width: "20%", long: true, render: (o) => o.ticker ?? "—" },
+    { key: "ticker", label: "종목", width: "20%", long: true, render: (o) => tickerLabel(o.ticker, o.name) },
     { key: "side", label: "방향", width: "10%", render: (o) => SIDE_LABEL[o.side ?? ""] ?? o.side ?? "—" },
     { key: "qty", label: "수량", width: "10%", align: "num", render: (o) => String(o.qty ?? "—") },
     { key: "filled", label: "체결", width: "10%", align: "num", render: (o) => String(o.filled_qty ?? 0) },

@@ -4,6 +4,7 @@
 
 import type { Tone } from "../../components/Badge";
 import { fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { tickerLabel } from "../../lib/ticker";
 
 export type Lane = "spot" | "scalp" | "fo";
 export const LANES: Lane[] = ["spot", "scalp", "fo"];
@@ -18,8 +19,11 @@ export type Decision = {
   account_id?: string | null;
   market?: string | null;
   ticker?: string | null;
+  name?: string | null;
   side?: string | null;
   action?: string | null;
+  /** 최종 의견 요약(30_decision rationale). 단타·파생은 없다. */
+  summary?: string | null;
   intent?: string | null;
   direction?: string | null;
   vehicle?: string | null;
@@ -37,6 +41,7 @@ export type Order = {
   at?: string;
   market?: string | null;
   ticker?: string | null;
+  name?: string | null;
   side?: string | null;
   qty?: number | null;
   price?: string | number | null;
@@ -127,7 +132,10 @@ export type DecisionRow = {
   key: string;
   lane: string;
   at: string;
-  title: string;
+  /** 종목 칸: 「코드 이름」(파생은 의도·방향·수단) — HOLD/BUY 같은 판단은 붙이지 않는다(방향 열이 따로 있다). */
+  ticker: string;
+  /** 내용 칸: 최종 의견 요약. 없으면 null(—). */
+  summary: string | null;
   side: string;
   qty: number | null;
   account_id: string | null;
@@ -138,9 +146,9 @@ export type DecisionRow = {
 
 const SIDE_LABEL = { buy: "매수", sell: "매도", hold: "보류" } as const;
 
-function titleOf(d: Decision): string {
-  if (d.asset === "fo") return [d.intent, d.direction, d.vehicle].filter(Boolean).join(" ");
-  return [d.ticker, d.action && d.action !== d.side ? d.action : null].filter(Boolean).join(" ");
+function tickerOf(d: Decision): string {
+  if (d.asset === "fo") return [d.intent, d.direction, d.vehicle].filter(Boolean).join(" ") || "—";
+  return tickerLabel(d.ticker, d.name);
 }
 
 /** 결정 목록 행 — 시각 역순. */
@@ -151,7 +159,8 @@ export function decisionRows(decisions: Decision[]): DecisionRow[] {
       key: `${d.asset}-${d.id}`,
       lane: d.lane,
       at: d.at,
-      title: titleOf(d) || "—",
+      ticker: tickerOf(d),
+      summary: d.summary?.trim() || null,
       side: SIDE_LABEL[sideOf(d)],
       qty: d.qty ?? null,
       account_id: d.account_id ?? null,
@@ -176,7 +185,7 @@ export function timeline(orders: Order[]): TimelineLine[] {
     const px = (v: string | number | null | undefined) => (fo ? fmtPt(v) : fmtMoney(v, o.market === "US" ? "USD" : "KRW"));
     const at = (v: string | null | undefined) => (v ? { at: v, time: fmtTime(v) } : null);
     const price = o.price ?? o.order_price;
-    const head = [ORDER_SIDE[(o.side ?? "").toUpperCase()] ?? o.side, o.ticker, o.qty != null ? `${o.qty}${unit}` : null]
+    const head = [ORDER_SIDE[(o.side ?? "").toUpperCase()] ?? o.side, o.ticker ? tickerLabel(o.ticker, o.name) : null, o.qty != null ? `${o.qty}${unit}` : null]
       .filter(Boolean)
       .join(" ");
     const failed = FAILED.has(o.status);

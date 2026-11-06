@@ -112,6 +112,25 @@ describe("today 순수 함수", () => {
     expect(lines.map((l) => l.tone)).toEqual(["muted", "ok", "ok"]);
   });
 
+  test("decisionRows: 종목 칸은 코드+이름만(HOLD 같은 판단은 안 붙임), 내용은 최종 의견 요약(summary)", () => {
+    const [hold, noName, scalp] = decisionRows([
+      fixtureSpotDecision({ id: 9, ticker: "035420", name: "NAVER", action: "HOLD", side: null, summary: "밸류에이션 부담, 관망", at: "2026-11-05T03:00:00+00:00" }),
+      fixtureSpotDecision({ id: 8, ticker: "000660", name: null, summary: null, at: "2026-11-05T02:30:00+00:00" }),
+      fixtureScalpDecision({ id: "scalp-12", name: "삼성전자", at: "2026-11-05T02:00:00+00:00" }),
+    ]);
+    expect(hold.ticker).toBe("035420 NAVER");
+    expect(hold.summary).toBe("밸류에이션 부담, 관망");
+    expect(hold.side).toBe("보류");
+    expect(noName.ticker).toBe("000660");
+    expect(noName.summary).toBeNull();
+    expect(scalp.ticker).toBe("005930 삼성전자");
+  });
+
+  test("timeline: 주문 줄도 종목 코드+이름", () => {
+    const [line] = timeline([fixtureSpotOrder({ name: "삼성전자", fills: [], filled_qty: 0, status: "accepted", at: "2026-11-05T01:01:00+00:00" })]);
+    expect(line.text).toBe("매수 005930 삼성전자 3주 @70,000 · 접수");
+  });
+
   test("timeline: 미국 주문은 달러, 취소는 fail, 파생 다리 체결은 sent_at 로 한 줄", () => {
     const us = fixtureSpotOrder({ id: 22, market: "US", ticker: "AAPL", side: "SELL", qty: 2, price: "190.5", status: "cancelled", filled_qty: 0, fills: [], at: "2026-11-05T00:00:00+00:00" });
     const fo = fixtureFoOrder();

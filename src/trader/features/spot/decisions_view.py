@@ -24,6 +24,7 @@ from trader.features.spot import approvals
 from trader.features.spot.tools import validate_ids
 from trader.kernel.config import KST
 from trader.kernel.execution import ledger as xledger
+from trader.kernel.ledger import names
 from trader.kernel.platform import paths
 from trader.kernel.session import run_store
 
@@ -139,9 +140,11 @@ def _touches(conn: sqlite3.Connection, did: int, account_id: str) -> bool:
 def _decision_row(conn: sqlite3.Connection, r: sqlite3.Row, account_id: str | None) -> dict:
     return {
         "asset": "spot", "id": r["id"], "date": r["date"], "market": r["market"],
-        "ticker": r["ticker"], "side": side_of(r["action"]),
+        "ticker": r["ticker"], "name": names.resolve(conn, r["market"], r["ticker"]),
+        "side": side_of(r["action"]),
         **_order_state(conn, r["id"], account_id),
         "at": r["created_at"], "lane": "spot", "action": r["action"],
+        "summary": r["rationale"] or None,
         "target_weight": r["target_weight"], "confidence": r["confidence"],
         "source": r["source"],
     }  # fmt: skip
@@ -161,9 +164,10 @@ def _scalp_rows(conn: sqlite3.Connection, m: str, d: date, account_id: str | Non
     return [
         {
             "asset": "spot", "id": f"scalp-{r['id']}", "date": d.isoformat(), "market": m,
-            "ticker": r["ticker"], "side": r["side"], "account_id": r["account_id"],
+            "ticker": r["ticker"], "name": names.resolve(conn, m, r["ticker"]),
+            "side": r["side"], "account_id": r["account_id"],
             "qty": r["qty"], "status": r["status"], "at": r["created_at"], "lane": "scalp",
-            "action": r["side"], "order_id": r["id"],
+            "action": r["side"], "order_id": r["id"], "summary": None,
         }  # fmt: skip
         for r in rows
     ]
@@ -215,7 +219,8 @@ def order_rows(deps: Any, q: dict[str, str]) -> list[dict]:
                 ]  # fmt: skip
                 out.append({
                     "asset": "spot", "id": r["id"], "account_id": r["account_id"],
-                    "market": r["market"], "ticker": r["ticker"], "side": r["side"],
+                    "market": r["market"], "ticker": r["ticker"],
+                    "name": names.resolve(conn, r["market"], r["ticker"]), "side": r["side"],
                     "qty": r["qty"], "price": r["price"], "order_type": r["order_type"],
                     "status": r["status"], "order_no": r["order_no"], "origin": r["origin"],
                     "lane": "scalp" if r["origin"] == "scalp" else "spot",

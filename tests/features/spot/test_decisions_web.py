@@ -270,6 +270,30 @@ def test_decision_rows_carry_order_state_and_scalp_lane(client, ledger):
     assert mine == []  # 현물 계좌 필터에 파생 아침 결정(account_id NULL)도 섞이지 않는다
 
 
+def test_decision_and_order_rows_carry_name_and_summary(client, ledger):
+    """결정·주문 행은 종목명(원장 `ticker_names`, 없으면 None)을 싣고, 결정 행의 `summary` 는
+    30_decision 의 rationale(최종 의견 요약) — 단타 행은 결정이 없어 None."""
+    ledger.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', '005930', '삼성전자', 'test', '2026-11-04T00:00:00+00:00')"
+    )
+    ledger.commit()
+    did = _decide(ledger, ticker="005930", rationale="반도체 업황 회복, 목표 비중 10%")
+    _decide(ledger, ticker="000660")
+    _order(ledger, decision_id=did, status="filled", qty=5)
+    _order(ledger, ticker="005930", origin="scalp", status="accepted", qty=2,
+           at="2026-11-04T02:00:00+00:00")
+    rows = client.get("/api/decisions").json()["items"]
+    by = {(x["lane"], x["ticker"]): x for x in rows}
+    assert by[("spot", "005930")]["name"] == "삼성전자"
+    assert by[("spot", "005930")]["summary"] == "반도체 업황 회복, 목표 비중 10%"
+    assert by[("spot", "000660")]["name"] is None
+    assert by[("scalp", "005930")]["name"] == "삼성전자"
+    assert by[("scalp", "005930")]["summary"] is None
+    orders = client.get("/api/orders").json()["items"]
+    assert {o["name"] for o in orders} == {"삼성전자"}
+
+
 def test_orders_isolated_per_account(client, ledger):
     did = _decide(ledger)
     oid = _order(ledger, decision_id=did)
@@ -351,7 +375,7 @@ def test_csv_format_for_orders_decisions(client, ledger):
     assert r.text.startswith("﻿") and "attachment" in r.headers["content-disposition"]
     r2 = client.get("/api/decisions", params={"format": "csv"})
     lines = r2.text.lstrip("﻿").splitlines()
-    assert lines[0].startswith("asset,id,date,market,ticker,side") and "005930" in lines[1]
+    assert lines[0].startswith("asset,id,date,market,ticker,name,side") and "005930" in lines[1]
     assert isinstance(client.get("/api/decisions").json()["items"], list)
 
 

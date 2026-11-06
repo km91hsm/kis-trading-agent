@@ -130,6 +130,18 @@ def test_get_approvals_lists_pending_with_summary_and_decision_ref(
     assert row["expires_at"] == a["expires_at"]
 
 
+def test_get_approvals_rows_carry_ticker_name(web_client, pending_approval, conn):
+    """승인 행도 종목명(원장 `ticker_names`, 없으면 None)을 싣는다 — 화면은 코드+이름 병기."""
+    conn.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', '005930', '삼성전자', 'test', '2026-11-04T00:00:00+00:00')"
+    )
+    conn.commit()
+    rows = web_client.get("/api/approvals?status=pending").json()["approvals"]
+    row = next(x for x in rows if x["id"] == pending_approval)
+    assert row["name"] == "삼성전자"
+
+
 def test_get_approvals_all_includes_decided(web_client, pending_approval):
     assert _patch(web_client, pending_approval, {"action": "reject"}).status_code == 200
     pending = web_client.get("/api/approvals").json()["approvals"]  # 기본은 pending
