@@ -110,8 +110,10 @@ describe("반응형 규칙", () => {
     const groups = Object.values(NAV);
     const checked: string[] = [];
     for (const r of ROUTES) {
-      const group = groups.find((g) => g.path === r.path);
-      const items = group ? group.items.map((i) => i.id) : [];
+      // 화면의 페이지(시스템은 4개) 경로에 맞는 항목만 — 그 페이지가 그리는 절
+      const group = groups.find((g) => g.pages.some((p) => p.path === r.path));
+      const page = group?.pages.find((p) => p.path === r.path);
+      const items = group && page ? group.items.filter((i) => i.page === page.id).map((i) => i.id) : [];
       const url = r.path.replace(":id", "x-1").replace(":asset", "spot");
       const { unmount } = render(
         <MemoryRouter initialEntries={[url]}>

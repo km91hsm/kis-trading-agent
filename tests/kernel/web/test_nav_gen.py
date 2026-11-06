@@ -29,11 +29,14 @@ def test_nav_ts_contains_screens_and_feature_items():
     out = gen.nav_ts([fixture_feature_with_nav()])
     assert "export const NAV = " in out and out.endswith(" as const;\n")
     assert out.startswith("// 자동 생성 파일")
-    assert '{"screen":"today","id":"fo-lane","label":"파생","order":30}' in out
+    assert '{"screen":"today","id":"fo-lane","label":"파생","order":30,"page":"today"}' in out
     nav = _nav_obj(out)
     assert list(nav) == ["today", "accounts", "performance", "data", "system"]
     assert nav["today"]["label"] == "오늘" and nav["today"]["path"] == "/"
-    assert nav["data"] == {"label": "데이터", "path": "/data", "items": []}
+    assert nav["data"] == {
+        "label": "데이터", "path": "/data", "items": [],
+        "pages": [{"id": "data", "label": "데이터", "path": "/data"}],
+    }
     assert [i["id"] for i in nav["today"]["items"]] == ["spot-lane", "fo-lane"]
     # 기능 절(국면 30…파생 60)은 운영 절(헬스…사용량) 뒤, 관리 절(설정…조작 이력) 앞에 끼어든다
     assert [i["id"] for i in nav["system"]["items"]] == [
@@ -69,3 +72,28 @@ def test_nav_ts_screens_constant():
         ("data", "데이터", "/data"),
         ("system", "시스템", "/system"),
     )
+
+
+SYSTEM_PAGES = [
+    {"id": "status", "label": "상태", "path": "/system"},
+    {"id": "jobs", "label": "잡", "path": "/system/jobs"},
+    {"id": "features", "label": "기능", "path": "/system/features"},
+    {"id": "admin", "label": "관리", "path": "/system/admin"},
+]
+
+
+def test_nav_ts_system_pages_group_items_into_four_pages():
+    """시스템 화면은 절 13개를 페이지 4개(상태·잡·기능·관리, 각자 주소)로 묶는다.
+    항목마다 `page` 가 붙고, 기능이 보탠 시스템 절(국면·저장소·단타·파생)은 「기능」 페이지로
+    간다. 다른 화면은 페이지 1개(자기 자신)."""
+    nav = _nav_obj(gen.nav_ts([fixture_feature_with_nav()]))
+    assert nav["system"]["pages"] == SYSTEM_PAGES
+    page_of = {i["id"]: i["page"] for i in nav["system"]["items"]}
+    assert page_of == {
+        "health": "status", "daemon": "status", "usage": "status",
+        "jobs": "jobs", "runs": "jobs",
+        "regime": "features",
+        "settings": "admin", "secrets": "admin", "token": "admin", "control-log": "admin",
+    }
+    assert nav["today"]["pages"] == [{"id": "today", "label": "오늘", "path": "/"}]
+    assert {i["page"] for i in nav["today"]["items"]} == {"today"}

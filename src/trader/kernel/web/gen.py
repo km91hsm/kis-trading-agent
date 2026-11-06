@@ -23,6 +23,17 @@ SCREENS = (
 # 시스템 화면의 커널 절(웹 `/system/*` 커널 라우트·ops).
 # 기능 항목(국면 30·저장소 40·단타 50·파생 60)보다 앞에 선다.
 # 시스템 절 순서: 지금 볼 것(0~) → 기능 절(30~60, 각 feature.py) → 관리(70~)
+# 시스템 화면의 페이지(상태·잡·기능·관리). 절은 13개지만 메뉴·주소는 이 넷이다.
+# 커널 절은 아래 표가 페이지를 정하고, 기능이 보탠 시스템 절(국면·저장소·단타·파생)은
+# 전부 「기능」 페이지로 간다. 다른 화면은 페이지 1개(자기 자신).
+SYSTEM_PAGES = (
+    ("status", "상태", "/system", ("health", "daemon", "usage")),
+    ("jobs", "잡", "/system/jobs", ("jobs", "runs")),
+    ("features", "기능", "/system/features", ()),
+    ("admin", "관리", "/system/admin", ("settings", "secrets", "token", "control-log")),
+)
+_SYSTEM_PAGE_OF = {sec: pid for pid, _, _, secs in SYSTEM_PAGES for sec in secs}
+
 KERNEL_NAV = (
     NavItem("system", "health", "헬스", 0),
     NavItem("system", "daemon", "데몬", 1),
@@ -73,12 +84,26 @@ def nav_ts(features: list[Feature]) -> str:
     )
     lines = []
     for sid, label, path in SCREENS:
+        pages = (
+            [{"id": pid, "label": pl, "path": pp} for pid, pl, pp, _ in SYSTEM_PAGES]
+            if sid == "system"
+            else [{"id": sid, "label": label, "path": path}]
+        )
         mine = [
-            {"screen": n.screen, "id": n.id, "label": n.label, "order": n.order}
+            {
+                "screen": n.screen,
+                "id": n.id,
+                "label": n.label,
+                "order": n.order,
+                "page": _SYSTEM_PAGE_OF.get(n.id, "features") if sid == "system" else sid,
+            }
             for n in items
             if n.screen == sid
         ]
-        head = f'{_json(sid)}:{{"label":{_json(label)},"path":{_json(path)},"items":'
+        head = (
+            f'{_json(sid)}:{{"label":{_json(label)},"path":{_json(path)},'
+            f'"pages":[{",".join(_json(p) for p in pages)}],"items":'
+        )
         lines.append(f"  {head}[{','.join(_json(m) for m in mine)}]}}")
     return (
         "// 자동 생성 파일 — 수정 금지. `uv run trader dev gen-nav` 로 다시 만든다.\n"

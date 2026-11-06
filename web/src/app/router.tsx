@@ -1,4 +1,4 @@
-// 경로 표 — 화면마다 NAV 섹션 컨테이너(id=item.id)를 데이터 전에 바로 그린다.
+// 경로 표 — 화면마다 NAV 섹션 컨테이너(id=item.id)를 데이터 전에 바로 그린다. 시스템은 페이지 4개(nav.ts pages)가 각자 경로.
 import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { NAV } from "../generated/nav";
@@ -17,7 +17,7 @@ export const ROUTES: { path: string; element: ReactElement }[] = [
   { path: `${NAV.accounts.path}/:id`, element: <Account /> },
   { path: NAV.performance.path, element: <Performance /> },
   { path: NAV.data.path, element: <Data /> },
-  { path: NAV.system.path, element: <System /> },
+  ...NAV.system.pages.map((p) => ({ path: p.path, element: <System page={p.id} /> })),
   { path: "/decisions/:asset/:id", element: <Decision /> },
 ];
 

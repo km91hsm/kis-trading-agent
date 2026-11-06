@@ -1,5 +1,6 @@
-// 2단 메뉴 — 화면 5개(1단)와 현재 화면의 섹션 목차(2단, 자동 생성 NAV). 폭에 따라 shell.css 가
-// 왼쪽 메뉴(≥1280)·아이콘 레일(1024~1279)·하단 탭(<1024)으로 바꾼다. 하위 목차는 `#<id>` 앵커.
+// 2단 메뉴 — 화면 5개(1단)와 현재 화면의 2단(자동 생성 NAV). 폭에 따라 shell.css 가
+// 왼쪽 메뉴(≥1280)·아이콘 레일(1024~1279)·하단 탭(<1024)으로 바꾼다.
+// 2단은 화면에 페이지가 여럿이면(시스템: 상태·잡·기능·관리) 페이지 링크, 하나면 절 `#<id>` 앵커 목차.
 // 하위 목차는 현재 화면 것만 펼치고, 화면이 `hidden` 으로 숨긴 섹션(승인 0건·없는 레인 등)은 목차에서도 뺀다.
 // 현재 항목: 방금 누른 항목(주소 해시)이 우선, 사용자가 스크롤 입력을 하면 보이는 가장 위 섹션(IntersectionObserver).
 import { useEffect, useState } from "react";
@@ -8,6 +9,7 @@ import { Icon } from "../../components/Icon";
 import { NAV } from "../../generated/nav";
 import { type Health, healthDot } from "../../lib/health";
 import { useResource } from "../../lib/hooks";
+import { screenPages } from "../../lib/nav";
 
 export type Screen = keyof typeof NAV;
 export type NavGroup = { screen: Screen; label: string; path: string; items: { id: string; label: string; order: number }[] };
@@ -123,7 +125,9 @@ export function Nav() {
   const { pathname, hash, key } = useLocation();
   const groups = navGroups();
   const active = screenOf(pathname);
-  const activeIds = groups.find((g) => g.screen === active)?.items.map((i) => i.id) ?? [];
+  const pages = active ? screenPages(active) : [];
+  const paged = pages.length > 1; // 페이지가 여럿인 화면은 2단이 페이지 링크 — 절 목차·IO 는 쓰지 않는다
+  const activeIds = paged ? [] : (groups.find((g) => g.screen === active)?.items.map((i) => i.id) ?? []);
   const shown = useShownSections(activeIds, pathname);
   const current = useCurrentSection(activeIds, hash, key);
 
@@ -141,7 +145,17 @@ export function Nav() {
                 <Icon name={g.screen} />
                 <span className="nav-label">{g.label}</span>
               </Link>
-              {on ? (
+              {on && paged ? (
+                <ul className="nav-items">
+                  {pages.map((p) => (
+                    <li key={p.id}>
+                      <Link to={p.path} className="nav-item" data-nav-item={p.id} aria-current={pathname === p.path ? "page" : undefined}>
+                        {p.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : on ? (
                 <ul className="nav-items">
                   {g.items
                     .filter((it) => shown.includes(it.id))

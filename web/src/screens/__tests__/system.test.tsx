@@ -1,7 +1,7 @@
 import { act, StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { System } from "../system/System.tsx";
+import { SYSTEM_PAGES, System } from "../system/System.tsx";
 import type { DaemonJob } from "../system/system.ts";
 import { onAuthError, tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
@@ -26,6 +26,14 @@ import {
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | null = null;
+/** 시스템 화면은 페이지 4개(상태·잡·기능·관리)다 — 테스트는 넷을 한 트리에 쌓아 절 13개를 한 번에 본다. */
+const AllPages = () => (
+  <>
+    {SYSTEM_PAGES.map((p) => (
+      <System key={p} page={p} />
+    ))}
+  </>
+);
 const stub: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
 
 beforeEach(() => {
@@ -39,7 +47,8 @@ afterEach(() => {
 });
 
 // 절 순서 = generated nav.ts 의 system 항목 순서(지금 볼 것 → 기능 → 관리)
-const SECTIONS = ["health", "daemon", "jobs", "runs", "usage", "regime", "saveticker", "scalp", "fo", "settings", "secrets", "token", "control-log"];
+// 페이지 순(상태 → 잡 → 기능 → 관리), 페이지 안은 nav.ts order 순
+const SECTIONS = ["health", "daemon", "usage", "jobs", "runs", "regime", "saveticker", "scalp", "fo", "settings", "secrets", "token", "control-log"];
 
 type Routes = Parameters<typeof installFakeFetch>[0];
 const forbidden = () => new Response(JSON.stringify({ detail: "이 PC 에서 직접 연 화면에서만 할 수 있습니다" }), { status: 403 });
@@ -82,7 +91,7 @@ async function mount(r: Routes) {
   const out = render(
     <StrictMode>
       <MemoryRouter initialEntries={["/system"]}>
-        <System />
+        <AllPages />
       </MemoryRouter>
     </StrictMode>,
   );
@@ -111,7 +120,7 @@ describe("시스템 화면", () => {
     ff = installFakeFetch(routes());
     render(
       <MemoryRouter>
-        <System />
+        <AllPages />
       </MemoryRouter>,
     );
     expect(Array.from(document.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(SECTIONS);
@@ -180,7 +189,7 @@ describe("시스템 화면", () => {
     const rows = h.querySelectorAll("table tbody tr");
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain("오류로 끝난 잡 2건");
-    expect(rows[0].querySelector("a")?.getAttribute("href")).toBe("/system#runs");
+    expect(rows[0].querySelector("a")?.getAttribute("href")).toBe("/system/jobs#runs"); // 백엔드 /system#runs → 절이 있는 페이지 주소로
     expect(rows[0].textContent).toContain("2");
     const details = h.querySelector("details") as HTMLDetailsElement;
     expect(details.querySelector("summary")?.textContent).toContain("켜진 기능 2");
@@ -230,7 +239,7 @@ describe("시스템 화면", () => {
     const models = st.querySelectorAll("table tbody tr");
     expect(models).toHaveLength(2);
     expect(models[0].textContent).toContain("sonnet");
-    expect(callsTo("/system/control-log")[0].url).toContain("limit=100");
+    expect(callsTo("/system/control-log")[0].url).toContain("limit=500");
     const log = section("control-log").querySelectorAll("table tbody tr");
     expect(log).toHaveLength(2);
     expect(log[0].textContent).toContain("web");
@@ -406,5 +415,28 @@ describe("시스템 화면", () => {
     expect(f.textContent).not.toContain("RISK_OFF");
     expect(f.textContent).not.toContain("bear");
     expect(f.querySelector("table tbody tr")?.textContent).toContain("모의");
+  });
+
+  test("페이지마다 제목에 페이지 이름, 페이지 탭 4개; 실행 기록은 30행씩 ?page=N 으로 나눈다", async () => {
+    const runs = Array.from({ length: 35 }, (_, i) => ({ id: 100 - i, kind: "spot_trade", market: "KR", started_at: "2026-11-05T09:30:00+09:00", finished_at: "2026-11-05T09:31:00+09:00", status: "ok", error: null, result_json: null }));
+    ff = installFakeFetch(routes({ "GET /api/runs": runs }));
+    const { container } = render(
+      <MemoryRouter initialEntries={["/system/jobs"]}>
+        <System page="jobs" />
+      </MemoryRouter>,
+    );
+    await flush();
+    await flush();
+    expect(container.querySelector("h1")?.textContent).toBe("시스템 · 잡");
+    expect(Array.from(container.querySelectorAll(".page-tabs a")).map((e) => e.getAttribute("href"))).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
+    expect(container.querySelector('.page-tabs a[aria-current="page"]')?.textContent).toBe("잡");
+    expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(["jobs", "runs"]);
+    const r = section("runs");
+    expect(r.querySelectorAll("table tbody tr")).toHaveLength(30);
+    const pager = r.querySelector("nav.pager") as HTMLElement;
+    expect(Array.from(pager.querySelectorAll("button[data-page]")).map((b) => b.textContent)).toEqual(["1", "2"]);
+    await act(async () => (pager.querySelector('button[data-page="2"]') as HTMLButtonElement).click());
+    expect(r.querySelectorAll("table tbody tr")).toHaveLength(5);
+    expect(r.querySelector("table tbody tr")?.textContent).toContain("#70");
   });
 });

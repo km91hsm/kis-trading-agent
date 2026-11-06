@@ -8,6 +8,7 @@ import { Table, type Column } from "../../components/Table";
 import { errorText, getJson } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
 import { areaLabel, areaLevelText, healthDot, LEVEL_TEXT, type Health as HealthResp, type HealthReason } from "../../lib/health";
+import { resolveLink } from "../../lib/nav";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 
@@ -27,7 +28,7 @@ const REASON_COLUMNS: Column<HealthReason>[] = [
     render: (r) =>
       r.link ? (
         internal(r.link) ? (
-          <Link to={r.link}>보기 ›</Link>
+          <Link to={resolveLink(r.link)}>보기 ›</Link>
         ) : (
           <a href={r.link}>보기 ›</a>
         )

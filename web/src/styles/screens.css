@@ -394,3 +394,20 @@
   .sys-meter { grid-template-columns: 5rem 1fr 3.5rem; }
   .sys-meter > .data-muted { grid-column: 1 / -1; white-space: normal; }
 }
+
+/* 시스템 페이지 탭(상태·잡·기능·관리) — 왼쪽 메뉴가 없는 폭(<1280)에서만 */
+.page-tabs { display: flex; gap: var(--space-2); margin: calc(-1 * var(--space-2)) 0 var(--space-4); flex-wrap: wrap; }
+.page-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-chip);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.page-tabs a[aria-current="page"] { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+@media (min-width: 1280px) {
+  .page-tabs { display: none; }
+}

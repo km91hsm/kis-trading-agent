@@ -265,3 +265,22 @@
   cursor: pointer;
 }
 .link-btn[aria-pressed="true"] { font-weight: 700; text-decoration: none; }
+
+/* ── 페이지 번호 줄(Pager) ── */
+.pager { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-3); flex-wrap: wrap; }
+.pager-btn {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--fg); }
+.pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pager-btn[aria-current="page"] { background: var(--bg-sunken); border-color: var(--fg-muted); font-weight: 700; }
+.pager-gap { color: var(--fg-muted); padding: 0 var(--space-1); }
+.pager-range { margin-left: auto; color: var(--fg-muted); font-size: var(--text-sm); }

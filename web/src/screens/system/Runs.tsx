@@ -1,11 +1,13 @@
-// runs·calls — 날짜(DatePicker)·kind 로 GET /runs(+ CSV 링크), run 번호(링크 모양 버튼)를 누르면 GET /calls?run_id=(비용·소요·턴, + CSV).
+// runs·calls — 날짜(DatePicker)·kind 로 GET /runs(최대 200, 30행씩 ?page=N, + CSV 링크), run 번호(링크 모양 버튼)를 누르면 GET /calls?run_id=(비용·소요·턴, + CSV).
 import { useMemo, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { DatePicker } from "../../components/DatePicker";
+import { Pager } from "../../components/Pager";
 import { Table, type Column } from "../../components/Table";
 import { csvUrl } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
 import { useKstDate, useResource } from "../../lib/hooks";
+import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { callRows, runRows, statusOf, type CallRow, type CallsResp, type JobsResp, type Run, type RunRow } from "./system.ts";
 
@@ -21,6 +23,17 @@ const CALL_COLUMNS: Column<CallRow>[] = [
   { key: "created_at", label: "시각", width: "6%", align: "num", render: (c) => fmtWhen(c.created_at) },
 ];
 
+/** 30행씩 ?page=N — body() 콜백 안에서는 훅을 못 쓰므로 부품으로 뺐다. */
+function PagedRuns({ rows, columns }: { rows: RunRow[]; columns: Column<RunRow>[] }) {
+  const paged = usePaged(rows);
+  return (
+    <>
+      <Table columns={columns} rows={paged.rows} rowKey={(r) => r.id} empty="이 날짜에 실행 기록 없음" />
+      <Pager {...paged} />
+    </>
+  );
+}
+
 export function Runs() {
   const today = useKstDate();
   const [picked, setPicked] = useState<string | null>(null);
@@ -28,7 +41,7 @@ export function Runs() {
   const setDate = (v: string) => setPicked(v === today ? null : v);
   const [kind, setKind] = useState("");
   const [run, setRun] = useState<number | null>(null);
-  const params = useMemo(() => ({ date, limit: "100", ...(kind ? { kind } : {}) }), [date, kind]);
+  const params = useMemo(() => ({ date, limit: "200", ...(kind ? { kind } : {}) }), [date, kind]);
   const callParams = useMemo(() => (run === null ? undefined : { run_id: String(run) }), [run]);
   const runs = useResource<Run[]>("/runs", params, ["runs"]);
   const jobs = useResource<JobsResp>("/jobs", undefined, ["jobs"]);
@@ -88,7 +101,7 @@ export function Runs() {
         </a>
       </div>
       {body(runs, "실행 기록", (rs) => (
-        <Table columns={columns} rows={runRows(rs)} rowKey={(r) => r.id} empty="이 날짜에 실행 기록 없음" />
+        <PagedRuns rows={runRows(rs)} columns={columns} />
       ))}
       {run !== null ? (
         <>

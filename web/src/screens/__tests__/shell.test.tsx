@@ -89,16 +89,39 @@ describe("왼쪽 메뉴 2단", () => {
     expect((container.querySelector("#fo-lane") as HTMLElement).hidden).toBe(true);
   });
 
+  test("시스템 화면의 하위 메뉴는 절 앵커가 아니라 페이지 4개(상태·잡·기능·관리)이고, 페이지마다 자기 절만 그린다", async () => {
+    fake = installFakeFetch(ok);
+    const a = app("/system");
+    await flush();
+    const items = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("data-nav-item"));
+    expect(items).toEqual(["status", "jobs", "features", "admin"]);
+    const hrefs = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("href"));
+    expect(hrefs).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
+    expect(a.container.querySelector('[data-nav-item="status"]')?.getAttribute("aria-current")).toBe("page");
+    expect(a.container.querySelector("#health")).not.toBeNull();
+    expect(a.container.querySelector("#runs")).toBeNull();
+    a.unmount();
+    const b = app("/system/jobs");
+    await flush();
+    expect(b.container.querySelector('[data-nav-screen="system"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="jobs"]')?.getAttribute("aria-current")).toBe("page");
+    expect(b.container.querySelector('[data-nav-item="status"]')?.getAttribute("aria-current")).toBeNull();
+    expect(b.container.querySelector("#runs")).not.toBeNull();
+    expect(b.container.querySelector("#health")).toBeNull();
+    // 페이지 탭(좁은 폭용)도 4개
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["상태", "잡", "기능", "관리"]);
+  });
+
   test("하위 목차를 누르면 그 항목이 현재가 되고, 같은 항목을 다시 눌러도 스크롤한다", async () => {
     fake = installFakeFetch(ok);
-    const { container } = app("/system");
+    const { container } = app("/data");
     await flush();
-    const link = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+    const link = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
     expect(link.getAttribute("aria-current")).toBeNull();
     act(() => link.click());
     expect(link.getAttribute("aria-current")).toBe("location");
     expect(scroll).toHaveBeenCalledTimes(1);
-    expect((scroll.mock.instances[0] as Element).id).toBe("saveticker");
+    expect((scroll.mock.instances[0] as Element).id).toBe("themes");
     act(() => link.click());
     expect(scroll).toHaveBeenCalledTimes(2);
     expect(link.getAttribute("aria-current")).toBe("location");
@@ -106,7 +129,7 @@ describe("왼쪽 메뉴 2단", () => {
 
   test("스크롤 입력(wheel)이 오면 눌렀던 항목 대신 보이는 가장 위 섹션을 현재로 표시한다", async () => {
     const OrigIO = globalThis.IntersectionObserver;
-    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 시스템 첫 항목(usage)
+    // 관찰을 시작하자마자 모든 섹션이 보인다고 알리는 가짜 — 보이는 가장 위 = 데이터 첫 항목(quotes)
     globalThis.IntersectionObserver = class {
       cb: IntersectionObserverCallback;
       constructor(cb: IntersectionObserverCallback) {
@@ -123,10 +146,10 @@ describe("왼쪽 메뉴 2단", () => {
     } as unknown as typeof IntersectionObserver;
     try {
       fake = installFakeFetch(ok);
-      const { container } = app("/system");
+      const { container } = app("/data");
       await flush();
-      const regime = container.querySelector(`[data-nav-item="${NAV.system.items[0].id}"]`) as HTMLAnchorElement;
-      const save = container.querySelector('[data-nav-item="saveticker"]') as HTMLAnchorElement;
+      const regime = container.querySelector(`[data-nav-item="${NAV.data.items[0].id}"]`) as HTMLAnchorElement;
+      const save = container.querySelector('[data-nav-item="themes"]') as HTMLAnchorElement;
       expect(regime.getAttribute("aria-current")).toBe("location");
       act(() => save.click());
       expect(save.getAttribute("aria-current")).toBe("location");

@@ -1,7 +1,11 @@
-// 「시스템」 화면 — `/system`. 절 순서는 generated nav.ts 의 system 항목과 같다: 지금 볼 것(헬스·데몬·잡 큐·실행 기록·사용량)
-// → 기능 상태(국면·저장소·단타·파생) → 관리(설정·연결 키·쓰기 토큰·조작 이력).
-// 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목 — 왼쪽 메뉴가 목차), 절마다 로딩·오류를 따로 보인다.
+// 「시스템」 화면 — 페이지 4개(generated nav.ts 의 system.pages): 상태 `/system`(헬스·데몬·사용량) · 잡 `/system/jobs`(잡 큐·실행 기록)
+// · 기능 `/system/features`(국면·저장소·단타·파생) · 관리 `/system/admin`(설정·연결 키·쓰기 토큰·조작 이력).
+// 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다. 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목),
+// 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { NAV } from "../../generated/nav";
+import { screenPages } from "../../lib/nav";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Stats } from "../../components/Stats";
@@ -36,6 +40,10 @@ const SECTIONS = [
   { id: "token", label: "쓰기 토큰" },
   { id: "control-log", label: "조작 이력" },
 ] as const;
+
+export type SystemPage = (typeof NAV.system.pages)[number]["id"];
+export const SYSTEM_PAGES = NAV.system.pages.map((p) => p.id) as SystemPage[];
+const PAGE_OF = new Map<string, string>(NAV.system.items.map((i) => [i.id, i.page]));
 
 const REGIME_TONE: Record<string, "ok" | "warn" | "muted"> = { bull: "ok", bear: "warn", neutral: "muted" };
 const regimeChip = (state: string | null | undefined) =>
@@ -132,7 +140,11 @@ function SavetickerStatus({ s }: { s: SavetickerResp }) {
   );
 }
 
-export function System() {
+export function System({ page }: { page: SystemPage }) {
+  const { pathname } = useLocation();
+  const pages = screenPages("system");
+  const label = pages.find((p) => p.id === page)?.label ?? "";
+  const sections = SECTIONS.filter((s) => PAGE_OF.get(s.id) === page);
   const [tokenKey, setTokenKey] = useState(0);
   const content: Record<(typeof SECTIONS)[number]["id"], ReactNode> = {
     usage: <Usage />,
@@ -205,9 +217,16 @@ export function System() {
   };
 
   return (
-    <div className="screen" data-screen="system">
-      <h1 className="screen-title">시스템</h1>
-      {SECTIONS.map((s) => (
+    <div className="screen" data-screen="system" data-page={page}>
+      <h1 className="screen-title">시스템 · {label}</h1>
+      <nav className="page-tabs" aria-label="시스템 페이지">
+        {pages.map((p) => (
+          <Link key={p.id} to={p.path} aria-current={pathname === p.path ? "page" : undefined}>
+            {p.label}
+          </Link>
+        ))}
+      </nav>
+      {sections.map((s) => (
         <section key={s.id} id={s.id} className="screen-section">
           <h2>{s.label}</h2>
           {content[s.id]}
