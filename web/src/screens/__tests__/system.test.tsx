@@ -482,6 +482,50 @@ describe("시스템 화면", () => {
     expect(Array.from(j.querySelectorAll("nav.pager button[data-page]")).map((b) => b.textContent)).toEqual(["1", "2"]);
   });
 
+  test("잡 페이지의 두 표는 쪽 번호를 따로 쓴다(실행 기록 ?page, 요청 기록 ?rpage); 「데몬 ›」는 상태 페이지 링크", async () => {
+    const runs = Array.from({ length: 35 }, (_, i) => ({ id: 100 - i, kind: "spot_trade", market: "KR", started_at: "2026-11-05T09:30:00+09:00", finished_at: "2026-11-05T09:31:00+09:00", status: "ok", error: null, result_json: null }));
+    const req = fixtureRequests();
+    req.requests = Array.from({ length: 35 }, (_, i) => ({ ...req.requests[2], id: 200 - i }));
+    ff = installFakeFetch(routes({ "GET /api/runs": runs, "GET /api/jobs/requests": req }));
+    render(
+      <MemoryRouter initialEntries={["/system/jobs?page=2"]}>
+        <System page="jobs" />
+      </MemoryRouter>,
+    );
+    await flush();
+    await flush();
+    expect(section("runs").querySelectorAll("table tbody tr")).toHaveLength(5);
+    expect(section("jobs").querySelectorAll("table tbody tr")).toHaveLength(30);
+    const jp = section("jobs").querySelector("nav.pager") as HTMLElement;
+    await act(async () => (jp.querySelector('button[data-page="2"]') as HTMLButtonElement).click());
+    expect(section("jobs").querySelectorAll("table tbody tr")).toHaveLength(5);
+    expect(section("runs").querySelectorAll("table tbody tr")).toHaveLength(5);
+    const daemonLink = Array.from(section("jobs").querySelectorAll("a")).find((a) => a.textContent?.includes("데몬"));
+    expect(daemonLink?.getAttribute("href")).toBe("/system#daemon");
+  });
+
+  test("실행 기록: 날짜·종류를 바꾸면 1쪽으로 돌아간다", async () => {
+    const runs = Array.from({ length: 35 }, (_, i) => ({ id: 100 - i, kind: "spot_trade", market: "KR", started_at: "2026-11-05T09:30:00+09:00", finished_at: "2026-11-05T09:31:00+09:00", status: "ok", error: null, result_json: null }));
+    ff = installFakeFetch(routes({ "GET /api/runs": runs }));
+    render(
+      <MemoryRouter initialEntries={["/system/jobs?page=2"]}>
+        <System page="jobs" />
+      </MemoryRouter>,
+    );
+    await flush();
+    await flush();
+    const r = section("runs");
+    expect(r.querySelectorAll("table tbody tr")).toHaveLength(5);
+    const sel = r.querySelector('select[aria-label="잡 종류"]') as HTMLSelectElement;
+    await act(async () => {
+      sel.value = "briefing";
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    await flush();
+    expect(section("runs").querySelectorAll("table tbody tr")).toHaveLength(30);
+  });
+
   test("저장소 설정 안 됨: 「설정」 칸을 반복하지 않고 서비스·수집 방식·마지막 성공, 단타 꺼짐이면 시장 칩도 「꺼짐」", async () => {
     const scalp = { ...fixtureScalp(), markets: { KR: { open: [], closed: [], halted: false } } };
     await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({ configured: false, service: null, health: "unknown" }), "GET /api/system/scalp": scalp }));

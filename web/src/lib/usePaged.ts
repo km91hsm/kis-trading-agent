@@ -25,3 +25,14 @@ export function usePaged<T>(all: T[], size = PAGE_SIZE, param = "page"): Paged<T
   );
   return { rows, page, pages, total, from: total ? (page - 1) * size + 1 : 0, to: Math.min(total, page * size), setPage };
 }
+
+/** 필터(날짜·종류)가 바뀌어 목록이 새로 올 때 1쪽으로 — `?<param>` 을 지운다. */
+export function usePageReset(param = "page"): () => void {
+  const [sp, setSp] = useSearchParams();
+  return useCallback(() => {
+    if (!sp.has(param)) return;
+    const next = new URLSearchParams(sp);
+    next.delete(param);
+    setSp(next, { replace: true });
+  }, [sp, setSp, param]);
+}

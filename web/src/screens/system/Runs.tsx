@@ -7,7 +7,7 @@ import { Table, type Column } from "../../components/Table";
 import { csvUrl } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
 import { useKstDate, useResource } from "../../lib/hooks";
-import { usePaged } from "../../lib/usePaged";
+import { usePaged, usePageReset } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { callRows, kindLabel, runRows, statusOf, type CallRow, type CallsResp, type JobsResp, type Run, type RunRow } from "./system.ts";
 
@@ -38,6 +38,7 @@ export function Runs() {
   const today = useKstDate();
   const [picked, setPicked] = useState<string | null>(null);
   const date = picked ?? today;
+  const resetPage = usePageReset();
   const setDate = (v: string) => setPicked(v === today ? null : v);
   const [kind, setKind] = useState("");
   const [run, setRun] = useState<number | null>(null);
@@ -79,6 +80,7 @@ export function Runs() {
           onChange={(v) => {
             setDate(v);
             setRun(null);
+            resetPage();
           }}
         />
         <select
@@ -87,6 +89,7 @@ export function Runs() {
           onChange={(e) => {
             setKind(e.target.value);
             setRun(null);
+            resetPage();
           }}
         >
           <option value="">전체</option>

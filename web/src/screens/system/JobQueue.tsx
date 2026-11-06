@@ -1,7 +1,8 @@
-// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests 최대 200, 30행씩 ?page=N;
+// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests 최대 200, 30행씩 ?rpage=N;
 // 상태 칩·인자 요약, 대기 중 행만 「취소」 → Confirm → DELETE /jobs/{id})(RunJobButton — trading 은 kind 값, realAccounts 는 GET /accounts 의 실전 계좌).
-// 일정 표는 데몬 절(같은 42행)에만 둔다.
+// 일정 표는 상태 페이지의 데몬 절(같은 42행)에만 둔다 — 「데몬 ›」 링크.
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Pager } from "../../components/Pager";
@@ -11,7 +12,8 @@ import { deleteJson, errorText } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
 import { termLabel } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
-import { usePaged } from "../../lib/usePaged";
+import { pagePathOf } from "../../lib/nav";
+import { PAGE_SIZE, usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { jobRows, requestRows, type JobsResp, type KindRow, type RequestRow, type RequestsResp } from "./system.ts";
 
@@ -25,9 +27,9 @@ function byLane(kinds: KindRow[]): [string, KindRow[]][] {
   return Array.from(out.entries());
 }
 
-/** 요청 기록 30행씩 ?page=N — body() 콜백 안에서는 훅을 못 쓰므로 부품으로. */
+/** 요청 기록 30행씩 ?rpage=N(같은 페이지의 실행 기록 ?page 와 따로) — body() 콜백 안에서는 훅을 못 쓰므로 부품으로. */
 function PagedRequests({ rows, columns }: { rows: RequestRow[]; columns: Column<RequestRow>[] }) {
-  const paged = usePaged(rows);
+  const paged = usePaged(rows, PAGE_SIZE, "rpage");
   return (
     <>
       <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty="최근 요청 없음" />
@@ -130,7 +132,7 @@ export function JobQueue() {
         </>
       ))}
       <p className="data-muted">
-        정기 일정과 다음 실행 시각은 <a href="#daemon">데몬 ›</a> 절에.
+        정기 일정과 다음 실행 시각은 <Link to={`${pagePathOf("system", "daemon")}#daemon`}>데몬 ›</Link> 절에.
       </p>
     </>
   );
