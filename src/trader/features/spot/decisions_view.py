@@ -291,10 +291,11 @@ def news_refs_map(conn: sqlite3.Connection, days: dict[str, date]) -> dict[str, 
 
 
 def detail(conn: sqlite3.Connection, decision_id: int) -> dict | None:
-    """결정 + 라운드(`decision_rounds`) + 요약 문단 + 쓴 뉴스 id. 없으면 None."""
+    """결정(+종목명 `name`) + 라운드(`decision_rounds`) + 요약 문단 + 쓴 뉴스 id. 없으면 None."""
     dec = get_decision(conn, decision_id)
     if dec is None:
         return None
+    dec["name"] = names.resolve(conn, dec["market"], dec["ticker"])
     rounds = [
         _hydrate(r) for r in conn.execute(
             "SELECT * FROM decision_rounds WHERE decision_id=? ORDER BY round", (decision_id,)

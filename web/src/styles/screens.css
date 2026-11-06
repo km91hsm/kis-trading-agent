@@ -138,8 +138,6 @@
 .decision-summary { margin-top: var(--space-2); color: var(--fg-muted); }
 .analyst-summary { color: var(--fg-muted); }
 .analyst-evidence { padding-left: var(--space-4); color: var(--fg-muted); }
-.round-row,
-.debate-turn { font-variant-numeric: tabular-nums; }
 .debate summary { cursor: pointer; min-height: var(--touch); display: flex; align-items: center; }
 .stage-chips { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .stage-chip {
@@ -162,7 +160,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-.decision-outcomes { margin-top: var(--space-3); }
 
 /* ── 계좌·보유 ── */
 /* 합계 3칸(원화·달러·환율) — 한 카드 안을 세로선으로 나눈다 */

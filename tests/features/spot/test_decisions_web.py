@@ -174,8 +174,14 @@ def test_decision_detail_rounds_summary_and_outcomes(client, ledger):
     did = _decide(ledger, rationale="첫 줄\n둘째 줄")
     ingest_checkpoint(ledger, D, "KR", "005930", "31_decision_r1",
                       {"data": ok_decision(action="HOLD", stop_loss=66000.0)})  # fmt: skip
+    ledger.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR','005930','삼성전자','test','2026-11-05T00:00:00+00:00')"
+    )
+    ledger.commit()
     body = client.get(f"/api/decisions/spot/{did}").json()
     assert body["decision"]["id"] == did and body["decision"]["action"] == "HOLD"
+    assert body["decision"]["name"] == "삼성전자"  # 상세 머리도 코드+이름(원장 ticker_names)
     assert [r["round"] for r in body["rounds"]] == [0, 1]
     assert body["rounds"][1]["data"]["stop_loss"] == 66000.0
     assert body["summary"] == "검증가능한 근거 요약"

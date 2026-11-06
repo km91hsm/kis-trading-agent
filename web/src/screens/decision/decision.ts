@@ -1,12 +1,14 @@
-// 「결정 상세」 화면 순수 함수 — 머리(제목·칩·근거 줄)·라운드 행.
+// 「결정 상세」 화면 순수 함수 — 머리(제목 코드+이름·칩·근거 줄)·라운드 행·토론 타이밍 라벨.
 // 응답 모양 정본: spot `features/spot/decisions_view.detail`, fo `features/fo/routes.py`(`GET /decisions/fo/{id}`).
 import { fmtTime } from "../../lib/format";
+import { tickerLabel } from "../../lib/ticker";
 
 export type SpotDecision = {
   id: number;
   date: string;
   market: string;
   ticker: string;
+  name?: string | null;
   action: string;
   confidence?: number | null;
   rationale?: string | null;
@@ -29,19 +31,6 @@ export type FoDecision = {
 export type Round = { round: number; action: string; stop_loss?: string | number | null; source?: string | null; created_at?: string | null };
 export type SpotDetail = { decision: SpotDecision; rounds: Round[]; summary?: string | null; news_refs?: unknown[] };
 export type FoDetail = { decision: FoDecision; data?: unknown; legs?: unknown[] };
-export type Outcome = {
-  account_id: string;
-  approved: boolean | null;
-  adjusted_qty?: number | null;
-  reasons?: string[];
-  checked_at?: string | null;
-  order_status?: string | null;
-  order_no?: string | null;
-  order_qty?: number | null;
-  order_price?: string | null;
-  order_mode?: string | null;
-};
-export type OutcomesResp = { outcomes: Outcome[] };
 
 export const ACTION_LABEL: Record<string, string> = { BUY: "매수", ADD: "추가", SELL: "매도", TRIM: "축소", HOLD: "보류" };
 export const actionLabel = (a: string | null | undefined) => (a ? (ACTION_LABEL[a] ?? a) : "—");
@@ -53,11 +42,14 @@ export function decisionHeader(d: SpotDecision | FoDecision): { title: string; c
   const fo = d.asset === "fo";
   const body = fo
     ? [d.intent, d.direction, d.vehicle].filter(Boolean).join(" ")
-    : `${(d as SpotDecision).ticker} ${actionLabel((d as SpotDecision).action)}`;
+    : `${tickerLabel((d as SpotDecision).ticker, (d as SpotDecision).name ?? null)} ${actionLabel((d as SpotDecision).action)}`;
   const conf = typeof d.confidence === "number" ? `확신 ${Math.round(d.confidence * 100)}%` : null;
   const chips = [d.date, fo ? null : (d as SpotDecision).market, conf, fo ? null : (d as SpotDecision).source, d.status];
   return { title: body, chips: chips.filter((c): c is string => !!c), summaryLines: lines(d.rationale) };
 }
+
+const TIMING_LABEL: Record<string, string> = { NOW: "지금", WAIT: "대기", NEVER: "안 함" };
+export const timingLabel = (t: string | null | undefined) => (t ? (TIMING_LABEL[t] ?? t) : "—");
 
 export type RoundRow = { round: number; action: string; stop_loss: string; source: string; at: string };
 

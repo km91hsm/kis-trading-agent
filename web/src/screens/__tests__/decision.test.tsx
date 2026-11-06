@@ -57,7 +57,8 @@ const section = (id: string) => document.getElementById(id) as HTMLElement | nul
 describe("결정 상세 순수 함수", () => {
   test("decisionHeader — spot 제목·칩·근거 줄", () => {
     const h = decisionHeader(fixtureSpotDecisionRow());
-    expect(h.title).toBe("005930 매수");
+    expect(h.title).toBe("005930 삼성전자 매수");
+    expect(decisionHeader(fixtureSpotDecisionRow({ name: null })).title).toBe("005930 매수");
     expect(h.chips).toEqual(["2026-11-05", "KR", "확신 72%", "session"]);
     expect(h.summaryLines).toEqual(["실적 상향 기대", "외국인 순매수 지속"]);
   });
@@ -75,16 +76,44 @@ describe("결정 상세 순수 함수", () => {
 });
 
 describe("결정 상세 화면", () => {
-  test("spot 상세는 라운드 2개·토론 턴 3개를 그린다", async () => {
+  const heads = (t: Element) => Array.from(t.querySelectorAll("thead th")).map((e) => e.textContent);
+  const bodyRows = (t: Element) => t.querySelector("tbody")!.querySelectorAll("tr");
+
+  test("spot 상세는 라운드·토론 턴·게이트·주문을 표로 그리고, 근거는 산문 그대로", async () => {
     await mount(spotRoutes, "/decisions/spot/7");
-    expect(document.body.textContent).toContain("005930 매수");
-    expect(section("rounds")!.querySelectorAll("li.round-row")).toHaveLength(2);
-    expect(section("debate")!.querySelectorAll("li.debate-turn")).toHaveLength(3);
+    expect(document.body.textContent).toContain("005930 삼성전자 매수");
+    // 라운드 표
+    const rounds = section("rounds")!.querySelector("table")!;
+    expect(heads(rounds)).toEqual(["라운드", "판단", "손절", "출처", "시각"]);
+    expect(bodyRows(rounds)).toHaveLength(2);
+    expect(bodyRows(rounds)[0].textContent).toContain("보류");
+    expect(bodyRows(rounds)[0].textContent).toContain("65,000");
+    expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
+    // 토론 턴 — details 안 표
+    const debate = section("debate")!.querySelector("details table")!;
+    expect(heads(debate)).toEqual(["라운드", "측", "판단", "확신", "타이밍"]);
+    expect(bodyRows(debate)).toHaveLength(3);
+    expect(bodyRows(debate)[1].textContent).toContain("강세 측");
+    expect(bodyRows(debate)[1].textContent).toContain("80%");
+    expect(bodyRows(debate)[1].textContent).toContain("지금");
+    // 근거 산문
     expect(section("rationale")!.textContent).toContain("외국인 순매수 지속");
     expect(section("rationale")!.textContent).toContain("승인 요약 — 합성 문단");
-    expect(section("gate")!.textContent).toContain("paper-1: 통과 3주 · 한도 안");
-    expect(section("orders")!.textContent).toContain("paper-1: 매수 3주 @70000 → 접수 #1");
-    expect(section("orders")!.textContent).toContain("체결");
+    // 게이트 표
+    const gate = section("gate")!.querySelector("table")!;
+    expect(heads(gate)).toEqual(["계좌", "결과", "수량", "사유", "비고"]);
+    expect(bodyRows(gate)[0].textContent).toContain("paper-1");
+    expect(gate.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("통과");
+    expect(bodyRows(gate)[0].textContent).toContain("한도 안");
+    // 주문 표 — 결과 표는 중복이라 없고 /outcomes 도 부르지 않는다
+    const orders = section("orders")!.querySelector("table")!;
+    expect(heads(orders)).toEqual(["계좌", "방향", "수량", "가격", "상태", "주문번호", "메시지"]);
+    expect(bodyRows(orders)[0].textContent).toContain("매수");
+    expect(bodyRows(orders)[0].textContent).toContain("70,000");
+    expect(bodyRows(orders)[0].querySelector("code")!.textContent).toBe("1");
+    expect(Array.from(orders.querySelectorAll(".chip")).map((c) => c.textContent)).toEqual(["매수", "접수"]);
+    expect(section("outcomes")).toBeNull();
+    expect(ff!.calls.some((c) => c.url.includes("/outcomes"))).toBe(false);
     expect(section("analysts")!.textContent).toContain("강세");
   });
 
@@ -121,7 +150,10 @@ describe("결정 상세 화면", () => {
     expect(section("debate")).toBeNull();
     expect(section("outcomes")).toBeNull();
     expect(section("analysts")!.textContent).toContain("macro");
-    expect(section("checks")!.textContent).toContain("_fo_risk_check_paper-fo");
+    const checks = section("checks")!.querySelector("table")!;
+    expect(heads(checks)).toEqual(["단계", "결과", "사유", "오류"]);
+    expect(bodyRows(checks)[0].textContent).toContain("_fo_risk_check_paper-fo");
+    expect(checks.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("통과");
     expect(ff!.calls.some((c) => c.url.includes("/outcomes"))).toBe(false);
   });
 

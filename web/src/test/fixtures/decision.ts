@@ -9,6 +9,7 @@ export function fixtureSpotDecisionRow(over: Over = {}) {
     date: "2026-11-05",
     market: "KR",
     ticker: "005930",
+    name: "삼성전자",
     action: "BUY",
     target_weight: 0.1,
     order_type: "LIMIT",
