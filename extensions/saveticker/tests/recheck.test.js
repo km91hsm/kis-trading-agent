@@ -28,3 +28,21 @@ test('a new incident after ten healthy minutes gets one new reload, but an immed
  f.d.now=done+601010;Object.assign(f.state,{blockedAt:f.d.now,blockedCause:'cloudflare_challenge',apiHealthySince:done+1,lastApiHealthyAt:f.d.now-1000});await f.run();assert.equal(f.calls.filter(x=>x==='reload').length,2);assert.equal(f.state.recheckRecovery.reloadCount,2);
  f.d.now+=1000;await f.run();f.state.blockedAt=f.d.now;await f.run();assert.equal(f.calls.at(-1),'stop');assert.equal(f.calls.filter(x=>x==='reload').length,2);
 });
+
+test('terminal reason is reported before disconnect; failed diagnostics still stop',async()=>{
+ for (const fails of [false, true]) {
+  const f=fixture();f.state.recheckRecovery={attempted:true,pendingAt:NOW-45000,tabId:7,reloadCount:2};
+  f.d.report=async result=>{f.calls.push(result);if(fails)throw Error('disconnected');};
+  await f.run();
+  assert.deepEqual(f.calls,[ 'store', {category:'recheck',reason:'recovery_timeout',reload_count:2}, 'stop' ]);
+ }
+});
+test('cancellation during diagnostic delivery cannot stop a new session',async()=>{
+ const f=fixture();f.state.recheckRecovery={attempted:true,pendingAt:NOW-45000,tabId:7};
+ f.d.report=async()=>f.cancel();await f.run();assert.ok(!f.calls.includes('stop'));
+});
+test('a failed reload reports the newly reserved attempt count',async()=>{
+ const f=fixture();f.d.chrome.tabs.reload=async()=>{throw Error('reload failed');};let diagnostic;
+ f.d.report=async value=>{diagnostic=value;};await f.run();
+ assert.equal(diagnostic.reason,'reload_failed');assert.equal(diagnostic.reload_count,1);assert.equal(f.state.recheckRecovery.reloadCount,1);
+});

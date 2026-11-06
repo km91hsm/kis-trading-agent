@@ -1,13 +1,17 @@
 import { repeatEligible } from './recovery-health.js';
 import { ownsApiTab } from './core.js';
-export async function recoverRecheck({ chrome, state, token, active, store, stop, resume, busy = false, now = Date.now(), clock }) {
+export async function recoverRecheck({ chrome, state, token, active, store, stop, resume, report = async () => {}, busy = false, now = Date.now(), clock }) {
     if (!active() || !state.autoRecheck || state.backend !== 'api' || !state.hostBlocked) return false;
     const began = performance.now();
     clock ||= () => now + Math.max(0, performance.now() - began);
-    const old = state.recheckRecovery;
+    let old = state.recheckRecovery;
     const halt = async reason => {
         if (active()) {
             await store({ recheckRecovery: { ...old, attempted: true, pendingAt: null, reason }, connection: '재확인 자동 복구 중지 · 직접 확인 필요' });
+            if (active()) {
+                try { await report({ category: 'recheck', reason, reload_count: old?.reloadCount ?? 0 }); }
+                catch { /* 진단 전송 실패도 수집 중지를 막지 않는다. */ }
+            }
             if (active()) await stop();
         }
         return true;
@@ -55,7 +59,8 @@ export async function recoverRecheck({ chrome, state, token, active, store, stop
     }
     if (!(response?.status === 403 && response.page_state === 'app_recheck') && !(normal && explicitChallenge)) return halt('not_app_recheck');
     // A persisted reservation survives worker restart and prevents reload loops.
-    await store({ recheckRecovery: { attempted: true, pendingAt: now, tabId: tab.id, reloadCount: (Number.isInteger(old?.reloadCount) && old.reloadCount >= 0 ? old.reloadCount : 0) + 1, trigger: explicitChallenge ? 'challenged_response' : 'app_recheck' }, connection: explicitChallenge ? '서버 보안 확인 응답 · 1회 새로고침 중' : '재확인 안내 · 1회 새로고침 중' });
+    old = { attempted: true, pendingAt: now, tabId: tab.id, reloadCount: (Number.isInteger(old?.reloadCount) && old.reloadCount >= 0 ? old.reloadCount : 0) + 1, trigger: explicitChallenge ? 'challenged_response' : 'app_recheck' };
+    await store({ recheckRecovery: old, connection: explicitChallenge ? '서버 보안 확인 응답 · 1회 새로고침 중' : '재확인 안내 · 1회 새로고침 중' });
     if (!active()) return true;
     try { await chrome.tabs.reload(tab.id); }
     catch { return halt('reload_failed'); }

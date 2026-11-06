@@ -20,3 +20,33 @@ test('production worker persists the challenged-response marker before one norma
 test('repeat policy and window preference are stopped-only and successful saves persist health',async()=>{
  const state={enabled:false,backend:'api',ownerToken:TOKEN,autoRecheck:true};const f=setup(state);const worker=await import('../worker.js?repeat-settings');assert.deepEqual(await f.action({action:'set_repeat_recheck',value:true}),{ok:true});assert.equal(state.repeatRecheck,true);assert.equal(state.lastApiHealthyAt,0);assert.deepEqual(await f.action({action:'set_keep_minimized',value:true}),{ok:true});assert.equal(state.keepMinimized,true);state.enabled=true;assert.deepEqual(await f.action({action:'set_repeat_recheck',value:false}),{ok:false});assert.deepEqual(await f.action({action:'set_keep_minimized',value:false}),{ok:false});state.keepMinimized=false;await worker.tick();assert.ok(state.apiHealthySince>0);assert.ok(state.lastApiHealthyAt>=state.apiHealthySince);await f.action({action:'stop'});
 });
+
+test('worker sends the terminal diagnostic to the existing Native port before closing it',async()=>{
+ const state={enabled:false,backend:'api',ownerToken:TOKEN,autoRecheck:true};const f=setup(state);
+ const original=chrome.runtime.connectNative;chrome.runtime.connectNative=()=>{const p=original();p.disconnect=()=>f.calls.push({type:'disconnect'});return p;};
+ const worker=await import('../worker.js?terminal-diagnostic');state.enabled=true;await worker.tick();
+ state.hostBlocked=true;state.recheckRecovery={attempted:true,pendingAt:Date.now()-45001,tabId:7,reloadCount:1};
+ await worker.tick();
+ const diagnostic=f.calls.find(m=>m.type==='diagnostics');
+ assert.ok(diagnostic);assert.equal(diagnostic.reason,'recovery_timeout');assert.equal(diagnostic.reload_count,1);
+ assert.ok(f.calls.indexOf(diagnostic)<f.calls.findIndex(m=>m.type==='disconnect'));assert.equal(state.enabled,false);
+});
+
+test('an unresponsive or older Native host cannot prevent automatic stopping', {timeout:8000}, async()=>{
+ for (const silent of [true,false]) {
+  const state={enabled:false,backend:'api',ownerToken:TOKEN,autoRecheck:true};const f=setup(state);
+  const original=chrome.runtime.connectNative;chrome.runtime.connectNative=()=>{const p=original(),post=p.postMessage;p.postMessage=m=>{if(m.type!=='diagnostics')return post(m);f.calls.push(m);if(!silent)queueMicrotask(()=>p.onMessage.listeners.forEach(fn=>fn({id:m.id,ok:false,error:'invalid_message'})));};return p;};
+  const worker=await import('../worker.js?diagnostic-host-'+silent);state.enabled=true;await worker.tick();
+  state.hostBlocked=true;state.recheckRecovery={attempted:true,pendingAt:Date.now()-45001,tabId:7,reloadCount:1};
+  await worker.tick();assert.equal(state.enabled,false);assert.equal(state.recheckRecovery.reason,'recovery_timeout');
+ }
+});
+test('direct Resume during diagnostic delivery invalidates the old automatic stop',async()=>{
+ const state={enabled:false,backend:'api',ownerToken:TOKEN,autoRecheck:true};const f=setup(state);
+ let enter;const entered=new Promise(r=>enter=r),original=chrome.runtime.connectNative;
+ chrome.runtime.connectNative=()=>{const p=original(),post=p.postMessage;p.postMessage=m=>{if(m.type==='diagnostics'){enter();return;}post(m);};return p;};
+ const worker=await import('../worker.js?recheck-direct-resume');state.enabled=true;await worker.tick();
+ state.hostBlocked=true;state.recheckRecovery={attempted:true,pendingAt:Date.now()-45001,tabId:7,reloadCount:1};
+ const running=worker.tick();await entered;await f.action({action:'resume'});await running;
+ assert.equal(state.enabled,true);assert.equal(state.recheckRecovery,null);await f.action({action:'stop'});
+});
