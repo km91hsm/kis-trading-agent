@@ -57,7 +57,9 @@ export function News() {
   );
   const paged = usePaged(rows, 30, "page");
   const hasTickers = rows.some((r) => r.tickers.length);
-  const hasChips = rows.some((r) => r.chips.length);
+  // 전 행의 꼬리표가 같고(판정 링크 없음) 하나라도 있으면 열 대신 머리줄에 한 번 — 「촉매」 만 100줄 반복하지 않게.
+  const sameChips = rows.length > 0 && rows.every((r) => r.chips.join("|") === rows[0].chips.join("|")) && rows[0].chips.length > 0 && !rows[0].chips.includes(USED_CHIP) ? rows[0].chips : null;
+  const hasChips = !sameChips && rows.some((r) => r.chips.length);
   const filterName = filterTicker ? (names.data?.[`${market}:${filterTicker}`] ?? rows.flatMap((r) => r.tickers).find((t) => t.ticker === filterTicker)?.name ?? null) : null;
   const chartHref = filterTicker ? (market === "US" ? `/data?ticker=${filterTicker}&market=US` : `/data?ticker=${filterTicker}`) : null;
   const columns: Column<NewsRow>[] = [
@@ -116,6 +118,16 @@ export function News() {
         <span className="data-muted">
           {news.data?.asof ? `기준 ${fmtWhen(news.data.asof)} · ` : ""}데몬이 주기적으로 수집
         </span>
+        {sameChips ? (
+          <span className="chips" data-news-chips-note title="전 행의 꼬리표가 같아 열 대신 한 번만 보입니다">
+            <span className="data-muted">꼬리표(전부)</span>
+            {sameChips.map((c) => (
+              <Chip key={c} tone={c === "촉매" ? "warn" : "muted"}>
+                {c}
+              </Chip>
+            ))}
+          </span>
+        ) : null}
         <RunJobButton kind="news_collect" params={collectParams} label="지금 수집" trading={false} realAccounts={[]} />
       </div>
       {filterTicker ? (

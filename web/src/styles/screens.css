@@ -315,7 +315,8 @@
 .segment-btn[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
 .data-watchlist { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
 .data-chip-x { margin-left: var(--space-1); border: 0; background: none; color: inherit; cursor: pointer; min-width: var(--space-6); }
-.data-feature-table { table-layout: auto; min-width: 64rem; }
+.data-feature-table { table-layout: auto; width: max-content; min-width: 100%; }
+.data-feature-table th, .data-feature-table td { white-space: nowrap; }
 .data-feature-row { cursor: pointer; }
 .data-feature-row[aria-selected="true"] > td { background: var(--bg-sunken); }
 .data-feature-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

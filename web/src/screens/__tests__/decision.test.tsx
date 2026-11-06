@@ -91,11 +91,16 @@ describe("결정 상세 화면", () => {
     expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
     // 토론 턴 — details 안 표
     const debate = section("debate")!.querySelector("details table")!;
-    expect(heads(debate)).toEqual(["라운드", "측", "판단", "확신", "타이밍"]);
+    expect(heads(debate)).toEqual(["라운드", "측", "판단", "확신", "타이밍", "조건"]);
     expect(bodyRows(debate)).toHaveLength(3);
     expect(bodyRows(debate)[1].textContent).toContain("강세 측");
     expect(bodyRows(debate)[1].textContent).toContain("80%");
     expect(bodyRows(debate)[1].textContent).toContain("지금");
+    // 타이밍이 객체({action, condition})인 턴 — 크래시 없이 action 라벨 + 조건
+    expect(bodyRows(debate)[2].textContent).toContain("대기");
+    expect(bodyRows(debate)[2].textContent).toContain("194,415 회복 뒤 진입");
+    expect(section("analysts")!.textContent).toContain("매도");
+    expect(section("analysts")!.textContent).not.toContain("SELL");
     // 근거 산문
     expect(section("rationale")!.textContent).toContain("외국인 순매수 지속");
     expect(section("rationale")!.textContent).toContain("승인 요약 — 합성 문단");

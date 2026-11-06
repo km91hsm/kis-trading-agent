@@ -12,10 +12,11 @@ import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { fmtInt, fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
+import { tickerLabel } from "../../lib/ticker";
 import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { useMarket, type Market } from "./Data.tsx";
-import { featureLabel, featureRows, fmt, KEY_COLUMNS, type FeatureRow, type HistoryResp, type LatestResp, type SortDir } from "./data.ts";
+import { featureLabel, featureRows, fmtFeature, KEY_COLUMNS, type FeatureRow, type HistoryResp, type LatestResp, type Names, type SortDir } from "./data.ts";
 
 type Model = {
   name: string;
@@ -47,6 +48,10 @@ export function Features() {
   const models = useResource<ModelsResp>("/ml/models", undefined, ["features"]);
   const rows = useMemo(() => (latest.data ? featureRows(latest.data, sort.key, sort.dir) : []), [latest.data, sort]);
   const paged = usePaged(rows, 30, "page");
+  // 종목 이름은 이 쪽 30행만(/names) — 코드+이름 규칙
+  const pageTickers = useMemo(() => paged.rows.map((r) => String(r.ticker)).join(","), [paged.rows]);
+  const nameParams = useMemo(() => ({ tickers: pageTickers, market }), [pageTickers, market]);
+  const names = useResource<Names>("/names", nameParams, ["accounts"], { enabled: !!pageTickers });
 
   const onSort = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
   const ariaSort = (key: string) => (sort.key !== key ? "none" : sort.dir === "asc" ? "ascending" : "descending");
@@ -85,7 +90,7 @@ export function Features() {
                     >
                       {KEY_COLUMNS.map((c) => (
                         <td key={c} className={typeof r[c] === "number" ? "cell-num" : "cell-text"}>
-                          {fmt(r[c])}
+                          {c === "ticker" ? tickerLabel(String(r.ticker), names.data?.[`${market}:${String(r.ticker)}`] ?? null) : fmtFeature(c, r[c])}
                         </td>
                       ))}
                     </tr>
@@ -127,7 +132,7 @@ function History({ market, ticker }: { market: Market; ticker: string }) {
           label: featureLabel(c),
           width: `${Math.floor(100 / HISTORY_COLUMNS.length)}%`,
           align: c === "date" ? "text" : "num",
-          render: (r: FeatureRow) => fmt(r[c]),
+          render: (r: FeatureRow) => fmtFeature(c, r[c]),
         }));
         return (
           <>

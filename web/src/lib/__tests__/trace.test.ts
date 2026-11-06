@@ -8,8 +8,8 @@ const T: TraceResp = {
   quote: "70000",
   analysts: [{ role: "technical", label: "차트", signal: "BULLISH", confidence: 0.7, summary: "s", evidence: ["a", "b"] }],
   debate: [
-    { round: 0, side: "bear", stance: "BEARISH", conviction: 0.4, timing: "WAIT" },
-    { round: 0, side: "bull", stance: "BULLISH", conviction: 0.8, timing: "NOW" },
+    { round: 0, side: "bear", stance: "BEARISH", conviction: 0.4, timing: "WAIT", timing_note: null },
+    { round: 0, side: "bull", stance: "BULLISH", conviction: 0.8, timing: "NOW", timing_note: null },
   ],
   research: { rounds: 1, gap_round0: 0.4, gap_final: 0.1, sycophantic: true, preferred: "round0" },
   gate: [{ stage: "40_risk_check_paper-main", account_id: "paper-main", approved: true, qty: 3, reasons: ["r"], note: "n" }],

@@ -45,7 +45,8 @@ const STATUS_TONE: Record<string, "ok" | "warn" | "fail" | "muted"> = { filled: 
 const statusChip = (s: string | null | undefined) => (s ? <Chip tone={STATUS_TONE[s] ?? "muted"}>{statusLabel(s)}</Chip> : "—");
 const gateChip = (approved: boolean | null | undefined) =>
   approved === true ? <Chip tone="ok">{termLabel("gate.pass")}</Chip> : approved === false ? <Chip tone="fail">{termLabel("gate.reject")}</Chip> : "—";
-const signalChip = (s: string | null | undefined) => <Chip tone={s === "BULLISH" ? "ok" : s === "BEARISH" ? "fail" : "muted"}>{SIGNAL[s ?? ""] ?? s ?? "—"}</Chip>;
+const SIGNAL_TONE: Record<string, "ok" | "fail" | "muted"> = { BULLISH: "ok", BUY: "ok", BEARISH: "fail", SELL: "fail" };
+const signalChip = (s: string | null | undefined) => <Chip tone={SIGNAL_TONE[s ?? ""] ?? "muted"}>{SIGNAL[s ?? ""] ?? s ?? "—"}</Chip>;
 
 const ROUND_COLUMNS: Column<RoundRow>[] = [
   { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round}` },
@@ -59,8 +60,9 @@ const DEBATE_COLUMNS: Column<DebateRow>[] = [
   { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round ?? 0}` },
   { key: "side", label: "측", width: "18%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{r.side === "bull" ? "강세 측" : "약세 측"}</Chip> },
   { key: "stance", label: "판단", width: "20%", align: "chip", render: (r) => signalChip(r.stance) },
-  { key: "conviction", label: "확신", width: "20%", align: "num", render: (r) => pct(r.conviction) },
-  { key: "timing", label: "타이밍", width: "28%", render: (r) => timingLabel(r.timing) },
+  { key: "conviction", label: "확신", width: "12%", align: "num", render: (r) => pct(r.conviction) },
+  { key: "timing", label: "타이밍", width: "12%", render: (r) => timingLabel(r.timing) },
+  { key: "timing_note", label: "조건", width: "auto", long: true, render: (r) => r.timing_note ?? "—" },
 ];
 type GateRow = TraceGate & { key: number };
 const GATE_COLUMNS: Column<GateRow>[] = [

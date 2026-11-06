@@ -171,8 +171,9 @@ describe("데이터 화면", () => {
     const news = section("news");
     expect(callsTo("/news")[0].search).toBe("?market=KR&hours=48&limit=100");
     expect(callsTo("/news/labels")[0].searchParams.get("ids")).toBe("101,102");
-    expect(callsTo("/names")[0].searchParams.get("tickers")).toBe("005930,000660");
-    expect(callsTo("/names")[0].searchParams.get("market")).toBe("KR");
+    // 뉴스·공시가 각자 이름을 읽는다 — 뉴스 쪽 호출은 두 종목
+    const nm = callsTo("/names").find((u) => u.searchParams.get("tickers") === "005930,000660")!;
+    expect(nm.searchParams.get("market")).toBe("KR");
     expect(callsTo("/decisions/spot/news-refs")[0].searchParams.get("date")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(news.textContent).toContain("삼성전자 HBM 공급 확대");
     expect(news.textContent).toContain("삼성전자");
@@ -195,6 +196,29 @@ describe("데이터 화면", () => {
     expect(ev.querySelector("tbody td")!.textContent).toBe("2026-11-05");
     // 검색 안내 통일
     expect(section("news").querySelector("select")).toBeNull();
+  });
+
+  test("꼬리표가 전 행 같으면(전부 「촉매」) 열을 빼고 머리줄에 한 번만; 공시 중요도가 전부 없으면 중요도 열도 뺀다; 공시 종목은 코드+이름", async () => {
+    const n = fixtureNews();
+    const same = Object.fromEntries((n.items as { id: number }[]).map((i) => [String(i.id), { catalyst: true, themes: [] }]));
+    const e = fixtureEvents();
+    await mount(
+      routes({
+        "GET /api/news": { ...n, items: (n.items as { id: number }[]).map((i) => ({ ...i, tickers: ["005930"] })) },
+        "GET /api/news/labels": same,
+        "GET /api/decisions/spot/news-refs": {},
+        "GET /api/news/events": { ...e, disclosures: (e.disclosures as { severity: string | null }[]).map((d) => ({ ...d, severity: null })) },
+      }),
+      "news",
+      "/data/news",
+    );
+    const news = section("news");
+    const heads = (t: Element) => Array.from(t.querySelectorAll("thead th")).map((x) => x.textContent);
+    expect(heads(news.querySelectorAll("table")[0])).toEqual(["시각", "제목", "종목", "출처"]);
+    expect(news.querySelector("[data-news-chips-note]")!.textContent).toContain("촉매");
+    const ev = news.querySelectorAll("table")[1];
+    expect(heads(ev)).toEqual(["날짜", "제목", "종목", "출처"]);
+    expect(ev.textContent).toContain("005930 삼성전자");
   });
 
   test("뉴스 종목 칩을 누르면 ?ticker= 로 다시 읽고, 필터 줄에 「차트 보기」 링크와 해제 버튼", async () => {
@@ -430,6 +454,12 @@ describe("데이터 화면", () => {
     expect(th.getAttribute("aria-sort")).toBe("descending");
     const firstRow = f.querySelector("tbody tr") as HTMLElement;
     expect(firstRow.textContent).toContain("000660");
+    // 종목은 코드+이름(/names, 이 쪽 30행만), 숫자는 규칙대로(종가 천 단위·비율 %·순매수 천 단위)
+    expect(callsTo("/names")[0].searchParams.get("tickers")).toBe("005930,000660,035420");
+    expect(f.textContent).toContain("005930 삼성전자");
+    const cells = (tr: Element) => Array.from(tr.querySelectorAll("td")).map((c) => c.textContent);
+    const samsung = Array.from(f.querySelectorAll("tbody tr")).find((tr) => tr.textContent?.includes("005930"))!;
+    expect(cells(samsung)).toEqual(expect.arrayContaining(["71,500", "3.12%", "80.00%", "10.00%", "0.1", "3"]));
     act(() => firstRow.click());
     await flush();
     const hist = callsTo("/features/history")[0];

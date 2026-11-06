@@ -159,6 +159,18 @@ const FEATURE_LABEL: Record<string, string> = {
 };
 export const featureLabel = (c: string): string => FEATURE_LABEL[c] ?? c;
 
+/** 지표 값 형식 — 비율 열은 %, 가격·건수는 천 단위 정수, 순매수 같은 수치는 천 단위(소수 ≤2). 모르는 열은 fmt. */
+const PCT_COLS = new Set(["roc_10", "high_52w_pos", "op_margin", "roe", "debt_ratio", "op_margin_vs_sector", "roe_vs_sector", "debt_ratio_vs_sector"]);
+const INT_COLS = new Set(["close", "volume", "news_count", "community_count"]);
+export function fmtFeature(col: string, v: Cell | undefined): string {
+  if (v == null) return "—";
+  if (typeof v !== "number") return String(v);
+  if (PCT_COLS.has(col)) return `${(v * 100).toFixed(2)}%`;
+  if (INT_COLS.has(col)) return Math.round(v).toLocaleString("en-US");
+  if (col.startsWith("flow_")) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return fmt(v);
+}
+
 /** key 열로 정렬한 새 배열. null 은 방향과 무관하게 항상 마지막(결측이 '최대' 로 보이지 않게). */
 export function sortRows<T extends FeatureRow>(rows: T[], key: string, dir: SortDir): T[] {
   const sign = dir === "asc" ? 1 : -1;
