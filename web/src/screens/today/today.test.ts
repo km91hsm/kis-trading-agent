@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { decisionHref, decisionRows, laneCards, laneNextAt, nextJobs, noticeKinds, statusLabel, timeline, todaySummary } from "./today.ts";
+import { decisionHref, decisionRows, laneCards, laneNextAt, nextJobs, noticeKinds, noticeRows, statusLabel, timeline, todaySummary } from "./today.ts";
 import {
   fixtureAccount,
   fixtureDaemon,
@@ -165,19 +165,34 @@ describe("today 순수 함수", () => {
     ]);
   });
 
-  test("nextJobs: next_at 오름차순 3개, null 제외", () => {
+  test("nextJobs: 사용자 잡만(내부 틱·분 단위 감시 제외) next_at 오름차순 5개 — 한글 라벨·시장·상대 시각·마지막 상태", () => {
+    const now = new Date("2026-11-05T01:00:00Z");
     const daemon = fixtureDaemon([
-      fixtureJob({ id: 1, kind: "analyze", next_at: "2026-11-05T03:00:00+00:00" }),
-      fixtureJob({ id: 2, kind: "fo", next_at: null }),
-      fixtureJob({ id: 3, kind: "scalp", next_at: "2026-11-05T01:30:00+00:00", last_status: "error" }),
-      fixtureJob({ id: 4, kind: "news", next_at: "2026-11-05T02:00:00+00:00" }),
-      fixtureJob({ id: 5, kind: "report", next_at: "2026-11-05T05:00:00+00:00" }),
+      fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T03:00:00+00:00" }),
+      fixtureJob({ id: "kr_fo_session", kind: "fo_session", next_at: null }),
+      fixtureJob({ id: "us_rebalance", kind: "rebalance", next_at: "2026-11-05T01:30:00+00:00", last_status: "error" }),
+      fixtureJob({ id: "job_queue", kind: "job_queue", next_at: "2026-11-05T01:00:10+00:00" }),
+      fixtureJob({ id: "kr_monitor", kind: "monitor", next_at: "2026-11-05T01:01:00+00:00" }),
+      fixtureJob({ id: "reflect", kind: "reflect", next_at: "2026-11-05T05:00:00+00:00" }),
+      fixtureJob({ id: "morning_briefing", kind: "briefing", next_at: "2026-11-05T22:20:00+00:00" }),
+      fixtureJob({ id: "paper_review", kind: "paper_review", next_at: "2026-11-06T00:00:00+00:00" }),
+      fixtureJob({ id: "kr_daily_report", kind: "daily_report", next_at: "2026-11-06T07:20:00+00:00" }),
     ]);
-    expect(nextJobs(daemon)).toEqual([
-      { id: 3, kind: "scalp", next_at: "2026-11-05T01:30:00+00:00", text: "scalp · 10:30:00 (마지막 실패)" },
-      { id: 4, kind: "news", next_at: "2026-11-05T02:00:00+00:00", text: "news · 11:00:00" },
-      { id: 1, kind: "analyze", next_at: "2026-11-05T03:00:00+00:00", text: "analyze · 12:00:00" },
+    const rows = nextJobs(daemon, now);
+    expect(rows.map((r) => r.id)).toEqual(["us_rebalance", "kr_scan_analyze", "reflect", "morning_briefing", "paper_review"]);
+    expect(rows[0]).toMatchObject({ label: "리밸런스", market: "US", rel: "30분 뒤", last: "error" });
+    expect(rows[1]).toMatchObject({ label: "스캔 → 분석", market: "KR", rel: "2시간 뒤" });
+    expect(rows[2].market).toBeNull();
+  });
+
+  test("noticeRows: 「[제목] 본문」 꼴이면 제목·첫 줄 본문, 아니면 종류 한글 라벨 + 첫 줄; 원문은 full", () => {
+    const [a, b] = noticeRows([
+      fixtureNotice({ id: 9, kind: "info", text: "[점검 격상] 관심 → 주의\n24시간 안에 오류로 끝난 잡 3건" }),
+      fixtureNotice({ id: 8, kind: "approval", text: "승인 요청 — 005930 매수 3주" }),
     ]);
+    expect(a).toMatchObject({ id: 9, title: "점검 격상", body: "관심 → 주의", kindLabel: "정보" });
+    expect(a.full).toBe("[점검 격상] 관심 → 주의\n24시간 안에 오류로 끝난 잡 3건");
+    expect(b).toMatchObject({ id: 8, title: "승인", body: "승인 요청 — 005930 매수 3주", kindLabel: "승인" });
   });
 
   test("noticeKinds: 처음 본 순서대로 중복 없이", () => {

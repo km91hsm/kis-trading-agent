@@ -3,7 +3,8 @@
 // 결정 상태 `features/spot/decisions_view.py _order_state`(pending_approval·blocked), 승인 `approvals` CHECK.
 
 import type { Tone } from "../../components/Badge";
-import { fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { fmtMoney, fmtPt, fmtTime, fmtWhen, untilText } from "../../lib/format";
+import { GLOSSARY } from "../../lib/glossary";
 import { tickerLabel } from "../../lib/ticker";
 
 export type Lane = "spot" | "scalp" | "fo";
@@ -244,26 +245,71 @@ export function laneNextAt(lane: Lane, jobs: Job[]): string | null {
 // ── 다음 할 일(데몬 작업) ───────────────────────────────────────────────────────
 export type Job = { id: number | string; kind: string; next_at: string | null; last_status?: string | null };
 export type Daemon = { alive: boolean; jobs?: Job[] | null };
-export type NextJob = { id: number | string; kind: string; next_at: string; text: string };
+export type NextJob = { id: number | string; kind: string; label: string; market: string | null; next_at: string; when: string; rel: string; last: string | null };
 
-/** 다음 실행 시각이 있는 작업을 시각 오름차순으로 3개. 마지막 실행이 실패였으면 꼬리표. */
-export function nextJobs(daemon: Daemon): NextJob[] {
+/** 「다음 할 일」에 보이는 사용자 잡 — 내부 틱(큐·텔레그램·사용량…)·분 단위 감시(monitor·scalp·theme…)는 시스템 데몬 표에서만. */
+export const USER_JOB_KINDS = new Set([
+  "briefing", "scan_analyze", "rebalance", "daily_report", "reconcile", "reflect", "paper_review",
+  "fo_session", "fo_reconcile", "regime", "ml_train", "rl_train",
+]);  // prettier-ignore
+const NEXT_JOBS_MAX = 5;
+
+/** 잡 id 접두어(kr_·us_)로 시장. */
+function marketOfJob(id: number | string): string | null {
+  const m = /^(kr|us)_/.exec(String(id));
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** 사용자 잡 중 next_at 이 있는 것을 시각 오름차순으로 5개 — 한글 라벨(glossary job.*)·시장·「N시간 뒤」·마지막 상태 원문. */
+export function nextJobs(daemon: Daemon, now: Date = new Date()): NextJob[] {
   return (daemon.jobs ?? [])
-    .filter((j): j is Job & { next_at: string } => !!j.next_at)
+    .filter((j): j is Job & { next_at: string } => USER_JOB_KINDS.has(j.kind) && !!j.next_at)
     .sort((a, b) => (Date.parse(a.next_at) || 0) - (Date.parse(b.next_at) || 0))
-    .slice(0, 3)
+    .slice(0, NEXT_JOBS_MAX)
     .map((j) => ({
       id: j.id,
       kind: j.kind,
+      label: GLOSSARY[`job.${j.kind}`]?.label ?? j.kind,
+      market: marketOfJob(j.id),
       next_at: j.next_at,
-      text: `${j.kind} · ${fmtTime(j.next_at)}${j.last_status === "error" || j.last_status === "failed" ? " (마지막 실패)" : ""}`,
+      when: fmtWhen(j.next_at, now),
+      rel: untilText(j.next_at, now),
+      last: j.last_status ?? null,
     }));
 }
 
 // ── 알림 ───────────────────────────────────────────────────────────────────────
 export type Notice = { id: number; at: string; kind: string; account_id: string | null; text: string; channel?: string | null; ok: boolean };
+export type NoticeRow = { id: number; at: string; kind: string; kindLabel: string; account_id: string | null; title: string; body: string; full: string; ok: boolean };
+
+const NOTICE_KIND_LABEL: Record<string, string> = { info: "정보", approval: "승인", fill: "체결", error: "오류", warn: "경고", order: "주문", report: "리포트" };
+/** 알림 종류 원문 → 한글(모르면 원문). */
+export function noticeKindLabel(kind: string): string {
+  return NOTICE_KIND_LABEL[kind] ?? kind;
+}
 
 /** 필터 칩 목록 — 처음 본 순서, 중복 없이. */
 export function noticeKinds(notices: Pick<Notice, "kind">[]): string[] {
   return [...new Set(notices.map((n) => n.kind))];
+}
+
+const TITLED = /^\[([^\]]+)\]\s*/;
+
+/** 표 행: 본문이 「[제목] …」 꼴이면 제목을 종류 칸에, 본문은 첫 줄만(원문 전체는 full → title 속성). */
+export function noticeRows(notices: Notice[]): NoticeRow[] {
+  return notices.map((n) => {
+    const m = TITLED.exec(n.text);
+    const rest = m ? n.text.slice(m[0].length) : n.text;
+    return {
+      id: n.id,
+      at: n.at,
+      kind: n.kind,
+      kindLabel: noticeKindLabel(n.kind),
+      account_id: n.account_id,
+      title: m ? m[1] : noticeKindLabel(n.kind),
+      body: rest.split("\n")[0].trim(),
+      full: n.text,
+      ok: n.ok,
+    };
+  });
 }

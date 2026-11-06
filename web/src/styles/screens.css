@@ -60,8 +60,6 @@
 /* 글머리 없는 목록은 들여쓰기도 없앤다 */
 .approvals,
 .timeline,
-.notice-list,
-.jobs,
 .decision-lines,
 .stage-chips,
 .data-hits,
@@ -70,14 +68,12 @@
 .sys-lines { padding: 0; }
 
 /* 주문·체결 타임라인 */
-.timeline,
-.notice-list,
-.jobs {
+.timeline {
   list-style: none;
   display: grid;
   gap: var(--space-1);
+  margin-top: var(--space-2);
 }
-.timeline { margin-top: var(--space-2); }
 .timeline-row {
   display: flex;
   gap: var(--space-3);
@@ -86,8 +82,7 @@
 }
 .timeline-row[data-tone="ok"] { border-left-color: var(--ok); }
 .timeline-row[data-tone="fail"] { border-left-color: var(--fail); color: var(--fail); }
-.timeline-time,
-.notice-time {
+.timeline-time {
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   flex: none;
@@ -115,29 +110,7 @@
   background: var(--accent);
   border-color: var(--accent);
 }
-.notice-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.notice-kind,
-.notice-account {
-  color: var(--fg-muted);
-  font-size: var(--text-sm);
-  flex: none;
-}
-.notice-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notice-row .chip { flex: none; }
 
-/* 다음 할 일 */
-.job-row { font-variant-numeric: tabular-nums; }
 
 /* ── 결정 상세 ── */
 .back-line { margin-bottom: var(--space-2); }
