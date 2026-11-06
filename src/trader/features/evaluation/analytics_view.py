@@ -21,6 +21,7 @@ from typing import Any
 from trader.features.evaluation import performance, readiness, shadow
 from trader.features.evaluation.memory import store
 from trader.features.ml import api as ml_api
+from trader.kernel.ledger import names
 
 CACHE_TTL_S = 300.0
 CACHE_MAX = 64  # 리포트 캐시 상한(LRU) — 계좌·시장·days 조합이 프로세스 수명 동안 늘지 않게
@@ -142,16 +143,18 @@ def calibration_runs(conn: sqlite3.Connection, *, limit: int) -> list[dict]:
     return out
 
 
-def _public(entry: dict) -> dict:
-    """화면용: 상황 벡터(12차원 숫자)는 뺀다."""
-    return {k: v for k, v in entry.items() if k != "situation_vector"}
+def _public(conn: sqlite3.Connection, entry: dict) -> dict:
+    """화면용: 상황 벡터(12차원 숫자)는 빼고 종목명(원장 ticker_names, 없으면 None)을 더한다."""
+    out = {k: v for k, v in entry.items() if k != "situation_vector"}
+    out["name"] = names.resolve(conn, entry.get("market"), entry.get("ticker"))
+    return out
 
 
 def memory_recent(conn: sqlite3.Connection, *, limit: int) -> dict:
     rows = conn.execute(
         "SELECT * FROM memory_entries ORDER BY decided_at DESC, id DESC LIMIT ?", (limit,)
     ).fetchall()
-    return {"query": None, "entries": [_public(store._hydrate(r)) for r in rows]}
+    return {"query": None, "entries": [_public(conn, store._hydrate(r)) for r in rows]}
 
 
 def memory_search(
@@ -177,7 +180,7 @@ def memory_search(
     )
     return {
         "query": {"ticker": ticker, "entry_id": ref["id"], "market": ref["market"]},
-        "entries": [_public(e) for e in r["entries"]],
+        "entries": [_public(conn, e) for e in r["entries"]],
         "warmup": r["warmup"],
         "breaker": r["breaker"],
     }

@@ -137,6 +137,7 @@ function memoryEntry(over: Over = {}) {
   return {
     id: 1,
     ticker: "005930",
+    name: "삼성전자",
     market: "KR",
     account_id: "paper-1",
     decision_id: 101,
@@ -165,7 +166,7 @@ function memoryEntry(over: Over = {}) {
 export function fixtureMemory(over: Over = {}) {
   return {
     query: null,
-    entries: [memoryEntry(), memoryEntry({ id: 2, ticker: "AAPL", market: "US", decision: {}, price_return: null, situation_summary: null })],
+    entries: [memoryEntry(), memoryEntry({ id: 2, ticker: "AAPL", name: null, market: "US", decision: {}, price_return: null, situation_summary: null, tier: "long" })],
     ...over,
   };
 }

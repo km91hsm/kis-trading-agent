@@ -251,7 +251,7 @@ export function Decision() {
         <section id="memory" className="screen-section">
           <h2>복기 메모리</h2>
           {ticker ? (
-            <Link to={`/performance#memory?ticker=${encodeURIComponent(ticker)}`}>{ticker} 복기 메모리 보기</Link>
+            <Link to={`/performance/memory?ticker=${encodeURIComponent(ticker)}`}>{ticker} 복기 메모리 보기</Link>
           ) : (
             <Pending res={detail} what="결정" />
           )}

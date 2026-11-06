@@ -3,9 +3,9 @@
 // 파생 성적표 — fo 계좌가 없으면 hidden). 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다.
 // 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목), 절마다 로딩·오류를 따로 보인다.
 import { useMemo, useState, type ReactNode } from "react";
-import { Card } from "../../components/Card";
 import { Empty } from "../../components/Empty";
 import { PageTabs } from "../../components/PageTabs";
+import { Stats } from "../../components/Stats";
 import { NAV } from "../../generated/nav";
 import { fmtKrw, fmtPct } from "../../lib/format";
 import { useResource, type Resource } from "../../lib/hooks";
@@ -14,7 +14,7 @@ import { CalibrationTable } from "./CalibrationTable";
 import { CompareTable } from "./CompareTable";
 import { MemoryBlock } from "./MemoryBlock";
 import { FilterBar, OverviewBody } from "./Overview";
-import { defaultFilters, type Calibration, type Compare, type FilterAccount, type Filters, type Perf, type Shadow } from "./performance.ts";
+import { compareAllEmpty, defaultFilters, type Calibration, type Compare, type FilterAccount, type Filters, type Perf, type Shadow } from "./performance.ts";
 import { body, failed } from "./ResourceView";
 import { RlExperimentsTable, RlSummary, ShadowTables, type RlExperiments, type RlReport } from "./ShadowTables";
 
@@ -56,7 +56,7 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
 
   const sections: Record<SectionId, { title: string; body: ReactNode; hidden?: boolean }> = {
     "performance-overview": {
-      title: "성과",
+      title: "수익률·위험",
       body: (
         <>
           {accounts.data ? <FilterBar accounts={list} filters={f} onChange={(next) => setOver((o) => ({ ...o, ...next }))} /> : null}
@@ -64,7 +64,7 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
         </>
       ),
     },
-    compare: { title: "계좌 비교", body: body(compare, "계좌 비교", (d) => <CompareTable data={d} />) },
+    compare: { title: "계좌 비교", body: body(compare, "계좌 비교", (d) => (compareAllEmpty(d) ? <Empty title={`${d.days}일 기록 없음`} /> : <CompareTable data={d} />)) },
     memory: { title: "복기", body: <MemoryBlock /> },
     calibration: { title: "보정", body: body(calib, "보정", (d) => <CalibrationTable data={d} />) },
     shadow: { title: "섀도 기준선", body: needsAccount(shadow, "섀도", (d) => <ShadowTables data={d} />) },
@@ -83,20 +83,16 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
       hidden: !hasFo,
       body: hasFo
         ? body(fo, "파생 성적표", (d) => (
-            <div className="perf-stats">
-              <Card title="결정">
-                <p className="perf-stat-value">{d.decisions}</p>
-              </Card>
-              <Card title="만기">
-                <p className="perf-stat-value">{d.matured}</p>
-              </Card>
-              <Card title="적중률">
-                <p className="perf-stat-value">{fmtPct(d.hit_rate)}</p>
-              </Card>
-              <Card title="계약 손익">
-                <p className="perf-stat-value">{fmtKrw(d.contract_pnl)}</p>
-              </Card>
-            </div>
+            <Stats
+              size="kpi"
+              cols={4}
+              items={[
+                { label: "결정", value: String(d.decisions) },
+                { label: "만기", value: String(d.matured) },
+                { label: "적중률", value: fmtPct(d.hit_rate) },
+                { label: "계약 손익", value: fmtKrw(d.contract_pnl) },
+              ]}
+            />
           ))
         : null,
     },

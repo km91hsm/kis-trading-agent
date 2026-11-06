@@ -67,10 +67,10 @@ function routes(over: Routes = {}): Routes {
 }
 
 type Page = Parameters<typeof Performance>[0]["page"];
-async function mount(r: Routes, page: Page = "performance") {
+async function mount(r: Routes, page: Page = "performance", path = "/performance") {
   ff = installFakeFetch(r);
   const out = render(
-    <MemoryRouter initialEntries={["/performance"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Performance page={page} />
     </MemoryRouter>,
   );
@@ -105,9 +105,14 @@ describe("성과 화면", () => {
     await flush();
     for (const p of ["/analytics/calibration", "/analytics/shadow", "/analytics/rl/report", "/analytics/rl/experiments", "/analytics/memory"]) expect(callsTo(p)).toHaveLength(0);
     const overview = section("performance-overview")!;
+    expect(overview.querySelector("h2")!.textContent).toBe("수익률·위험");
+    const kpi = overview.querySelector('dl.stats[data-size="kpi"]')!;
+    expect(Array.from(kpi.querySelectorAll("dt")).map((e) => e.textContent)).toEqual(["수익률", "최대 낙폭(MDD)", "Sortino", "회전율", "토론 수렴율"]);
     expect(overview.textContent).toContain("5.23%");
     expect(overview.textContent).toContain("42.00%");
     expect(overview.textContent).toContain("75.00%");
+    expect(overview.textContent).toContain("판정 분포");
+    expect(overview.textContent).toContain("매수 3");
     // 본 NAV 1개 + 벤치마크 2개(quant null 은 건너뜀)
     expect(m.chart.addSeries).toHaveBeenCalledTimes(3);
     // 벤치마크가 있으면 NAV 를 시작=1.0 으로 정규화해 같은 축에(첫 setData 가 본선)
@@ -115,9 +120,27 @@ describe("성과 화면", () => {
     expect(navData[0].value).toBe(1);
     expect(navData.at(-1)!.value).toBeCloseTo(1.0523);
     expect(overview.textContent).toContain("시작=1.0");
-    expect(section("compare")!.textContent).toContain("NAV 없음");
+    expect(section("compare")!.textContent).toContain("기록 없음");
+    expect(section("compare")!.querySelector("table")).not.toBeNull();
     const perf = callsTo("/analytics/performance")[0];
     expect(perf.search).toBe("?account_id=paper-1&market=KR&days=30");
+  });
+
+  test("지표가 null 이면 「—」 아래 「산출 자료 부족」, 판정 분포가 비면 줄을 그리지 않고, 계좌 비교가 전부 비면 표 대신 「30일 기록 없음」", async () => {
+    const none = { return: null, mdd: null, sortino: null, days: null, start: null, end: null };
+    const c = fixtureCompare();
+    await mount(
+      routes({
+        "GET /api/analytics/performance": fixturePerformance({ metrics: none, turnover: null, convergence_rate: null, decision_distribution: {} }),
+        "GET /api/analytics/performance/compare": { ...c, rows: (c.rows as { metrics: unknown }[]).map((r) => ({ ...r, metrics: null })) },
+      }),
+    );
+    const overview = section("performance-overview")!;
+    expect(overview.querySelectorAll("dl.stats .stat-sub").length).toBe(5);
+    expect(overview.querySelector("dl.stats .stat-sub")!.textContent).toBe("산출 자료 부족");
+    expect(overview.textContent).not.toContain("판정 분포");
+    expect(section("compare")!.querySelector("table")).toBeNull();
+    expect(section("compare")!.textContent).toContain("30일 기록 없음");
   });
 
   test("추가 분석 페이지: 보정·섀도·RL(·파생 성적표 hidden) 절만 — 개요·복기는 부르지 않는다", async () => {
@@ -128,12 +151,25 @@ describe("성과 화면", () => {
     expect(callsTo("/analytics/memory")).toHaveLength(0);
     expect(section("calibration")!.textContent).toContain("표본 부족");
     expect(section("shadow")!.textContent).toContain("표본 부족(n < 20)");
-    expect(section("rl")!.textContent).toContain("rl-007");
+    // RL 은 Stats 격자(모델: 버전·백엔드·스텝·저장일 / 섀도 집계)
+    const rl = section("rl")!;
+    expect(rl.textContent).toContain("rl-007");
+    const dts = Array.from(rl.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(expect.arrayContaining(["버전", "백엔드", "스텝", "저장일", "제안", "적용", "만기", "평균 비중 LLM / RL", "실현 합 RL / LLM"]));
     // realized_*_sum 은 weight × price_return 합(분수 수익률) → 퍼센트
-    expect(section("rl")!.textContent).toContain("실현 합 RL 2.10% · LLM 1.50%");
+    expect(rl.textContent).toContain("2.10% / 1.50%");
     // bias 는 signal 평균 − realized_sign 평균(차이값, 퍼센트 아님)
     expect(section("calibration")!.textContent).toContain("+0.12");
     expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
+  });
+
+  test("섀도 기준선이 전부 표본 부족이면 표 대신 한 줄 「기준선 n개 · 표본 x/20 — 20쌍부터 집계」", async () => {
+    const few = fixtureShadow({ pairs: { candidates_1n: { n: 5, mean_diff: null, ci_low: null, ci_high: null }, quant_topn: { n: 2, mean_diff: null, ci_low: null, ci_high: null } } });
+    await mount(routes({ "GET /api/analytics/shadow": few }), "analysis");
+    const sh = section("shadow")!;
+    expect(sh.textContent).toContain("기준선 2개 · 표본 5/20 — 20쌍부터 집계");
+    expect(sh.textContent).not.toContain("표본 부족(n <");
+    expect(sh.querySelectorAll("table")).toHaveLength(1); // 최근 10일 표만
   });
 
   test("기간 「90일」 을 누르면 days=90 으로 다시 부른다", async () => {
@@ -159,7 +195,7 @@ describe("성과 화면", () => {
     expect(callsTo("/analytics/performance").at(-1)!.searchParams.get("market")).toBe("US");
   });
 
-  test("복기 메모리: 처음엔 q 없이, 「005930」 검색하면 q=005930 으로 부르고 warmup·breaker 를 보인다", async () => {
+  test("복기 메모리: 처음엔 q 없이, 「005930」 검색하면 q=005930 으로 부르고 warmup·breaker 를 보인다 — 표는 종목 코드+이름·층 한글·중요도(0~1)", async () => {
     await mount(routes(), "memory");
     expect(section("performance-overview")).toBeNull();
     const first = callsTo("/analytics/memory")[0];
@@ -167,6 +203,10 @@ describe("성과 화면", () => {
     expect(first.searchParams.get("limit")).toBe("20");
     const mem = section("memory")!;
     expect(mem.textContent).toContain("반도체 업황 반등 기대");
+    expect(Array.from(mem.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["결정일", "종목", "판정", "결과", "층", "중요도(0~1)", "상황 요약"]);
+    expect(mem.textContent).toContain("005930 삼성전자");
+    expect(mem.textContent).toContain("단기");
+    expect(mem.textContent).not.toContain("short");
     type(mem.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement, "005930");
     act(() => button(mem, "검색").click());
     await flush();
@@ -175,6 +215,14 @@ describe("성과 화면", () => {
     expect(last.searchParams.get("q")).toBe("005930");
     expect(mem.textContent).toContain("워밍업");
     expect(mem.textContent).toContain("임베딩 장애");
+  });
+
+  test("복기 페이지에 ?ticker=005930 으로 들어오면 처음부터 q=005930 으로 부르고 검색창에 채운다(결정 상세 딥링크)", async () => {
+    await mount(routes(), "memory", "/performance/memory?ticker=005930");
+    const first = callsTo("/analytics/memory")[0];
+    expect(first.searchParams.get("q")).toBe("005930");
+    expect((section("memory")!.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement).value).toBe("005930");
+    expect(section("memory")!.textContent).toContain("워밍업");
   });
 
   test("벤치마크가 없으면 NAV 는 금액 그대로", async () => {
@@ -196,6 +244,7 @@ describe("성과 화면", () => {
     const fo = section("fo-scorecard")!;
     expect(fo.hidden).toBe(false);
     expect(fo.textContent).toContain("55.56%");
+    expect(Array.from(fo.querySelectorAll('dl.stats[data-size="kpi"] dt')).map((e) => e.textContent)).toEqual(["결정", "만기", "적중률", "계약 손익"]);
     expect(callsTo("/analytics/fo/scorecard")).toHaveLength(1);
   });
 

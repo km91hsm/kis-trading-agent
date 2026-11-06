@@ -146,3 +146,23 @@ describe("점 1개", () => {
     expect(m.createChart).not.toHaveBeenCalled();
   });
 });
+
+describe("축 축약·1점 가드(벤치마크 있어도)", () => {
+  test("선 시리즈 점이 1개면 벤치마크 선이 있어도 「자료 1일」 빈 틀", () => {
+    const { container } = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={[{ label: "1/N", data: [{ time: "2026-11-05", value: 1 }] }]} />);
+    expect(container.querySelector("[data-chart-empty]")!.textContent).toContain("자료 1일");
+    expect(m.createChart).not.toHaveBeenCalled();
+  });
+
+  test("가격축은 큰 금액을 「1,235만」「1.5억」 으로 줄이고 작은 값은 그대로", () => {
+    render(<Chart series={[{ time: "2026-11-04", value: 10_000_000 }, { time: "2026-11-05", value: 10_500_000 }]} />);
+    const opts = (m.createChart.mock.calls[0] as unknown[])[1] as { localization: { priceFormatter: (v: number) => string } };
+    const f = opts.localization.priceFormatter;
+    expect(f(12_345_678)).toBe("1,235만");
+    expect(f(10_000_000)).toBe("1,000만");
+    expect(f(150_000_000)).toBe("1.5억");
+    expect(f(70_500)).toBe("70,500");
+    expect(f(1.0523)).toBe("1.05");
+    expect(f(-2_500_000)).toBe("-250만");
+  });
+});

@@ -1,5 +1,7 @@
-// 복기 메모리 — 종목 검색(「검색」 → q, 비우면 q 생략) + 항목 표. q 응답의 warmup·breaker 를 칩·한 줄로.
+// 복기 메모리 — 종목 검색(「검색」 → q, 비우면 q 생략; `?ticker=` 로 들어오면 그걸로 시작 — 결정 상세 딥링크) + 항목 표.
+// q 응답의 warmup·breaker 를 칩·한 줄로. 종목은 코드+이름, 층은 한글(glossary tier.*), 중요도는 0~1.
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Table, type Column } from "../../components/Table";
 import { useResource } from "../../lib/hooks";
@@ -8,18 +10,20 @@ import { memoryRows, type MemoryResp, type MemoryRow } from "./performance.ts";
 import { body } from "./ResourceView";
 
 export function MemoryBlock() {
-  const [text, setText] = useState("");
-  const [q, setQ] = useState("");
+  const [search] = useSearchParams();
+  const initial = (search.get("ticker") ?? "").trim();
+  const [text, setText] = useState(initial);
+  const [q, setQ] = useState(initial);
   const params = useMemo((): Record<string, string> => (q ? { q, limit: "20" } : { limit: "20" }), [q]);
   const mem = useResource<MemoryResp>("/analytics/memory", params, ["memory"]);
   const columns: Column<MemoryRow>[] = [
     { key: "decided_at", label: "결정일", width: "12%", render: (r) => r.decided_at },
-    { key: "ticker", label: "종목", width: "12%", render: (r) => `${r.ticker} · ${r.market}` },
+    { key: "ticker", label: "종목", width: "18%", render: (r) => `${r.ticker} · ${r.market}` },
     { key: "action", label: "판정", width: "10%", align: "chip", render: (r) => <Chip>{r.action === "—" ? "—" : actionLabel(r.action.toUpperCase())}</Chip> },
     { key: "outcome", label: "결과", width: "10%", align: "num", render: (r) => r.outcome },
-    { key: "tier", label: "단계", width: "10%", align: "chip", render: (r) => <Chip>{r.tier}</Chip> },
-    { key: "importance", label: "중요도", width: "10%", align: "num", render: (r) => (r.importance === null ? "—" : r.importance.toFixed(2)) },
-    { key: "summary", label: "상황 요약", width: "36%", long: true, render: (r) => r.summary || "—" },
+    { key: "tier", label: "층", width: "8%", align: "chip", render: (r) => <Chip>{r.tier}</Chip> },
+    { key: "importance", label: "중요도(0~1)", width: "10%", align: "num", render: (r) => (r.importance === null ? "—" : r.importance.toFixed(2)) },
+    { key: "summary", label: "상황 요약", width: "32%", long: true, render: (r) => r.summary || "—" },
   ];
   return (
     <>
@@ -30,7 +34,7 @@ export function MemoryBlock() {
           setQ(text.trim());
         }}
       >
-        <input aria-label="종목 검색" placeholder="종목 코드" value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="종목 검색" placeholder="종목 코드(예: 005930)" value={text} onChange={(e) => setText(e.target.value)} />
         <button type="submit" className="btn">
           검색
         </button>

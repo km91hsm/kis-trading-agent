@@ -280,16 +280,15 @@
   background: var(--accent);
   border-color: var(--accent);
 }
-.perf-stats {
+.perf-cards {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
-@media (min-width: 640px) {
-  .perf-stats { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+@media (min-width: 768px) {
+  .perf-cards { grid-template-columns: repeat(2, 1fr); }
 }
-.perf-stat-value { font-size: var(--text-kpi); font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .perf-legend,
 .perf-note { color: var(--fg-muted); font-size: var(--text-sm); margin: var(--space-2) 0; }
 .perf-dist { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }

@@ -235,10 +235,19 @@ def _warm(client):
 def test_memory_recent_and_retrieve(client, conn):
     assert client.get("/api/analytics/memory").json()["entries"] == []
     seed_matured(conn, 3)
+    conn.execute(
+        "INSERT INTO ticker_names(market, ticker, name, source, updated_at) "
+        "VALUES ('KR', 'T002', '테스트 둘', 'test', '2026-11-04T00:00:00+00:00')"
+    )
+    conn.commit()
     recent = client.get("/api/analytics/memory?limit=2").json()
     assert recent["query"] is None and len(recent["entries"]) == 2
     assert recent["entries"][0]["decided_at"] >= recent["entries"][1]["decided_at"]
     assert "situation_vector" not in recent["entries"][0]
+    # 종목명(원장 ticker_names, 없으면 None) — 화면이 코드+이름으로 보이게
+    assert [(e["ticker"], e["name"]) for e in recent["entries"]] == [
+        ("T002", "테스트 둘"), ("T001", None),
+    ]
     # q = 종목: 그 종목의 최근 엔트리 상황으로 검색(워밍업 전이면 빈 목록 + warmup)
     r = client.get("/api/analytics/memory?q=T001").json()
     assert r["warmup"] is True and r["entries"] == [] and r["query"]["ticker"] == "T001"

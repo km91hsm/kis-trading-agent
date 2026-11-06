@@ -92,8 +92,8 @@ describe("결정 상세 화면", () => {
     const { container } = await mount(spotRoutes, "/decisions/spot/7");
     const links = Array.from(container.querySelectorAll("a"));
     expect(links.find((a) => a.textContent?.includes("‹ 돌아가기"))).toBeTruthy();
-    const mem = links.find((a) => (a.getAttribute("href") ?? "").startsWith("/performance#memory"));
-    expect(mem!.getAttribute("href")).toContain("ticker=005930");
+    const mem = links.find((a) => (a.getAttribute("href") ?? "").startsWith("/performance/memory?"));
+    expect(mem!.getAttribute("href")).toBe("/performance/memory?ticker=005930");
   });
 
   test("체크포인트 칩을 누르면 그 단계 JSON 을 보인다", async () => {

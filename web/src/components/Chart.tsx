@@ -32,6 +32,15 @@ export type ChartProps = {
 
 const EXTRA_COLORS = ["--fg-muted", "--warn", "--ok"];
 
+/** 가격축 숫자 — 백만 이상은 「1,235만」, 억 이상은 「1.5억」(원화 NAV 축이 10,000,000.00 처럼 길어지지 않게), 작은 값은 소수 둘째까지. */
+export function fmtAxis(v: number): string {
+  const a = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (a >= 1e8) return `${sign}${(a / 1e8).toLocaleString("en-US", { maximumFractionDigits: 1 })}억`;
+  if (a >= 1e6) return `${sign}${Math.round(a / 1e4).toLocaleString("en-US")}만`;
+  return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
 function cssVar(name: string): string | undefined {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || undefined;
@@ -49,8 +58,8 @@ export function Chart(props: ChartProps) {
       </div>
     );
   }
-  // 선 시리즈 점이 하나면 평평한 선·가짜 축이 된다 — 내일부터 추이가 생긴다고 알린다.
-  if (candles === undefined && points === 1 && !extra?.length) {
+  // 선 시리즈 점이 하나면(벤치마크 선이 있어도) 평평한 선·가짜 축이 된다 — 내일부터 추이가 생긴다고 알린다.
+  if (candles === undefined && points === 1) {
     return (
       <div className="chart chart-empty" data-chart-empty style={{ height }}>
         자료 1일 — 추이는 내일부터
@@ -81,6 +90,7 @@ function LiveChart({ series, candles, markers, lines, extra, height = 240 }: Cha
       width: host.clientWidth,
       height,
       layout: { background: { color: "transparent" }, textColor: cssVar("--fg-muted"), fontFamily: cssVar("--font") },
+      localization: { priceFormatter: fmtAxis },
       grid: { vertLines: { color: cssVar("--line") }, horzLines: { color: cssVar("--line") } },
     });
     chartRef.current = chart;

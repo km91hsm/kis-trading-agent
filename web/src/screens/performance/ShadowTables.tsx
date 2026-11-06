@@ -2,9 +2,10 @@
 import { Card } from "../../components/Card";
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
+import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
-import { fmtDate, fmtPct } from "../../lib/format";
-import { SHADOW_KEYS, shadowLabel, shadowRows, type Shadow, type ShadowRow } from "./performance.ts";
+import { fmtDate, fmtInt, fmtPct } from "../../lib/format";
+import { SHADOW_KEYS, shadowLabel, shadowRows, shadowSummary, type Shadow, type ShadowRow } from "./performance.ts";
 
 export function ShadowTables({ data }: { data: Shadow }) {
   const pairCols: Column<ShadowRow>[] = [
@@ -20,10 +21,12 @@ export function ShadowTables({ data }: { data: Shadow }) {
     { key: "llm", label: "LLM", width: "16%", align: "num", render: (r) => fmtPct(r.llm ?? null) },
     ...SHADOW_KEYS.map((k) => ({ key: k, label: shadowLabel(k), width: "16%", align: "num" as const, render: (r: Recent) => fmtPct(r[k] ?? null) })),
   ];
+  // 기준선이 전부 표본 부족이면 같은 메모가 네 줄 반복되는 표 대신 한 줄.
+  const summary = shadowSummary(data);
   return (
     <>
       <p className="perf-note">LLM − 기준선 선행 수익률 차 · 최소 쌍 {data.min_pairs}</p>
-      <Table columns={pairCols} rows={shadowRows(data)} rowKey={(r) => r.key} empty="만기 쌍 없음" />
+      {summary ? <Empty title={summary} /> : <Table columns={pairCols} rows={shadowRows(data)} rowKey={(r) => r.key} empty="만기 쌍 없음" />}
       <h3 className="perf-sub">최근 10일</h3>
       <Table columns={recentCols} rows={data.recent ?? []} rowKey={(r) => r.date} empty="최근 기록 없음" />
     </>
@@ -41,26 +44,33 @@ export function RlSummary({ report }: { report: RlReport }) {
   const m = report.model;
   const s = report.shadow;
   return (
-    <div className="perf-stats">
+    <div className="perf-cards">
       <Card title="모델" right={m ? <Chip tone={m.promoted ? "ok" : "muted"}>{m.promoted ? "승격" : "미승격"}</Chip> : null}>
         {m ? (
-          <p>
-            {m.version} · {m.backend} · {m.steps ?? "—"}스텝 · {fmtDate(m.saved_at)}
-          </p>
+          <Stats
+            cols={4}
+            items={[
+              { label: "버전", value: m.version, num: false },
+              { label: "백엔드", value: m.backend, num: false },
+              { label: "스텝", value: fmtInt(m.steps) },
+              { label: "저장일", value: fmtDate(m.saved_at) },
+            ]}
+          />
         ) : (
           <Empty title="활성 모델 없음" />
         )}
       </Card>
       <Card title="섀도 집계">
-        <p>
-          제안 {s.n} · 적용 {s.applied} · 만기 {s.matured}
-        </p>
-        <p>
-          평균 비중 LLM {fmtPct(s.avg_llm_weight)} · RL {fmtPct(s.avg_proposed_weight)}
-        </p>
-        <p>
-          실현 합 RL {fmtPct(s.realized_rl_sum)} · LLM {fmtPct(s.realized_llm_sum)}
-        </p>
+        <Stats
+          cols={3}
+          items={[
+            { label: "제안", value: String(s.n) },
+            { label: "적용", value: String(s.applied) },
+            { label: "만기", value: String(s.matured) },
+            { label: "평균 비중 LLM / RL", value: `${fmtPct(s.avg_llm_weight)} / ${fmtPct(s.avg_proposed_weight)}` },
+            { label: "실현 합 RL / LLM", value: `${fmtPct(s.realized_rl_sum)} / ${fmtPct(s.realized_llm_sum)}` },
+          ]}
+        />
       </Card>
     </div>
   );

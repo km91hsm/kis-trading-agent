@@ -2,6 +2,8 @@
 // 보정 run×역할 행(report null → 「표본 부족」), 복기 메모리 행, 벤치마크 선, 섀도 기준선 행.
 // 응답 정본: `features/evaluation/analytics_routes.py`·`analytics_view.py`·`calibration.py`, `fo/analytics_routes.py`.
 import { fmtDate, fmtPct } from "../../lib/format";
+import { termLabel } from "../../lib/glossary";
+import { tickerLabel } from "../../lib/ticker";
 import { navSeries } from "../accounts/positions.ts";
 
 type Num = number | null;
@@ -41,6 +43,7 @@ export type Shadow = {
 export type MemoryEntry = {
   id: number;
   ticker: string;
+  name?: string | null;
   market: string;
   decided_at: string | null;
   situation_summary: string | null;
@@ -83,8 +86,13 @@ export function compareRows(compare: Compare): CompareRow[] {
     ret: fmtPct(r.metrics?.return ?? null),
     mdd: fmtPct(r.metrics?.mdd ?? null),
     sortino: fixed2(r.metrics?.sortino ?? null),
-    note: r.metrics ? "" : "NAV 없음",
+    note: r.metrics ? "" : "기록 없음",
   }));
+}
+
+/** 비교 행이 없거나 전부 NAV 기록이 없으면 표 대신 한 줄(「N일 기록 없음」). */
+export function compareAllEmpty(compare: Compare): boolean {
+  return compare.rows.every((r) => !r.metrics);
 }
 
 export type CalibrationRow = {
@@ -134,12 +142,12 @@ export type MemoryRow = {
 export function memoryRows(mem: MemoryResp): MemoryRow[] {
   return mem.entries.map((e) => ({
     id: e.id,
-    ticker: e.ticker,
+    ticker: tickerLabel(e.ticker, e.name),
     market: e.market,
     decided_at: fmtDate(e.decided_at),
     action: e.decision?.action ?? "—",
     outcome: fmtPct(e.price_return),
-    tier: e.tier ?? "—",
+    tier: e.tier ? termLabel(`tier.${e.tier}`) : "—",
     importance: e.importance,
     summary: e.situation_summary ?? "",
   }));
@@ -185,4 +193,12 @@ export function shadowRows(shadow: Shadow): ShadowRow[] {
     const ci = s.ci_low === null || s.ci_high === null ? "—" : `${fmtPct(s.ci_low)} ~ ${fmtPct(s.ci_high)}`;
     return [{ key, label: SHADOW_LABEL[key], n: s.n, mean: fmtPct(s.mean_diff), ci, note: s.n < shadow.min_pairs ? `표본 부족(n < ${shadow.min_pairs})` : "" }];
   });
+}
+
+/** 기준선이 전부 min_pairs 미만(또는 하나도 없음)이면 표 대신 한 줄 — 「기준선 n개 · 표본 x/min — min쌍부터 집계」. 하나라도 채웠으면 null. */
+export function shadowSummary(shadow: Shadow): string | null {
+  const stats = SHADOW_KEYS.flatMap((k) => (shadow.pairs?.[k] ? [shadow.pairs[k]!] : []));
+  const best = Math.max(0, ...stats.map((s) => s.n));
+  if (stats.length && best >= shadow.min_pairs) return null;
+  return `기준선 ${stats.length}개 · 표본 ${best}/${shadow.min_pairs} — ${shadow.min_pairs}쌍부터 집계`;
 }
