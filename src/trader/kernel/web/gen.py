@@ -30,7 +30,7 @@ SYSTEM_PAGES = (
     ("status", "상태", "/system", ("health", "daemon", "usage")),
     ("jobs", "잡", "/system/jobs", ("jobs", "runs")),
     ("features", "기능", "/system/features", ()),
-    ("admin", "관리", "/system/admin", ("settings", "secrets", "token", "control-log")),
+    ("admin", "관리", "/system/admin", ("token", "secrets", "settings", "control-log")),
 )
 _SYSTEM_PAGE_OF = {sec: pid for pid, _, _, secs in SYSTEM_PAGES for sec in secs}
 
@@ -40,9 +40,9 @@ KERNEL_NAV = (
     NavItem("system", "jobs", "잡 큐", 2),
     NavItem("system", "runs", "실행 기록", 3),
     NavItem("system", "usage", "사용량", 4),
-    NavItem("system", "settings", "설정", 70),
+    NavItem("system", "token", "쓰기 토큰", 70),
     NavItem("system", "secrets", "연결 키", 71),
-    NavItem("system", "token", "쓰기 토큰", 72),
+    NavItem("system", "settings", "설정", 72),
     NavItem("system", "control-log", "조작 이력", 73),
 )
 

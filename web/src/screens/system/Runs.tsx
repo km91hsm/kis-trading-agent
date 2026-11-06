@@ -6,6 +6,7 @@ import { Pager } from "../../components/Pager";
 import { Table, type Column } from "../../components/Table";
 import { csvUrl } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
+import { GLOSSARY } from "../../lib/glossary";
 import { useKstDate, useResource } from "../../lib/hooks";
 import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
@@ -52,7 +53,7 @@ export function Runs() {
     () => [
       {
         key: "id",
-        label: "run",
+        label: "실행 번호",
         width: "8%",
         align: "num",
         render: (r) => (
@@ -61,7 +62,7 @@ export function Runs() {
           </button>
         ),
       },
-      { key: "kind", label: "종류", width: "18%", render: (r) => labels.get(r.kind) || r.kind },
+      { key: "kind", label: "종류", width: "18%", render: (r) => labels.get(r.kind) || GLOSSARY[`job.${r.kind}`]?.label || r.kind },
       { key: "market", label: "시장", width: "8%" },
       { key: "status", label: "상태", width: "10%", align: "chip", render: (r) => <Chip tone={r.tone}>{r.status}</Chip> },
       { key: "started_at", label: "시작", width: "12%", align: "num", render: (r) => fmtWhen(r.started_at) },

@@ -45,18 +45,18 @@ def test_nav_ts_contains_screens_and_feature_items():
 
 
 KERNEL_SYSTEM_IDS = [
-    "health", "daemon", "jobs", "runs", "usage", "settings", "secrets", "token", "control-log",
+    "health", "daemon", "jobs", "runs", "usage", "token", "secrets", "settings", "control-log",
 ]
 
 
 def test_nav_ts_kernel_system_sections_order_and_without_features():
     """시스템 화면의 커널 절은 기능 없이도 목차에 있고, 「지금 볼 것(헬스·데몬·잡·실행·사용량)
-    → 기능(30~60) → 관리(설정·연결 키·토큰·이력)」 순이다."""
+    → 기능(30~60) → 관리(토큰·연결 키·설정·이력 — 권한부터)」 순이다."""
     nav = _nav_obj(gen.nav_ts([]))
     items = nav["system"]["items"]
     assert [i["id"] for i in items] == KERNEL_SYSTEM_IDS
     assert [i["label"] for i in items] == [
-        "헬스", "데몬", "잡 큐", "실행 기록", "사용량", "설정", "연결 키", "쓰기 토큰", "조작 이력",
+        "헬스", "데몬", "잡 큐", "실행 기록", "사용량", "쓰기 토큰", "연결 키", "설정", "조작 이력",
     ]
     assert all(i["order"] < 30 for i in items[:5])
     assert all(i["order"] > 60 for i in items[5:])

@@ -243,7 +243,8 @@ test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", 
   await flush();
   const notice = container.querySelector("[data-auth-notice]");
   expect(notice?.textContent).toContain("쓰기 토큰이 필요합니다");
-  expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system");
+  expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system/admin#token"); // 토큰 절로 바로
+  expect(notice?.querySelector("a")?.textContent).toBe("시스템 › 관리 › 쓰기 토큰");
   act(() => (notice!.querySelector("button") as HTMLButtonElement).click());
   expect(container.querySelector("[data-auth-notice]")).toBeNull();
 });

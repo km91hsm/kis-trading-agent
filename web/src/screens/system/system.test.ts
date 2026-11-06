@@ -76,6 +76,8 @@ describe("시스템 순수 함수", () => {
     expect(summarizeArgs({ market: null, seeds: null })).toBe("");
     expect(summarizeArgs({ market: "KR" })).toBe("KR");
     expect(summarizeArgs({ market: null, years: 3 })).toBe("3년");
+    // 빈 배열·false 는 잡음이라 뺀다(trigger_ids=[] · dry_run=false)
+    expect(summarizeArgs({ ticker: "MRVL", trigger_ids: [], dry_run: false, exchange: "NAS" })).toBe("ticker=MRVL · exchange=NAS");
     expect(summarizeArgs({ ticker: "005930", market: "KR" })).toBe("KR · ticker=005930");
     expect(summarizeArgs(null)).toBe("");
   });

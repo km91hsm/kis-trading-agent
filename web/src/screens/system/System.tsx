@@ -43,7 +43,6 @@ const SECTIONS = [
 
 export type SystemPage = (typeof NAV.system.pages)[number]["id"];
 export const SYSTEM_PAGES = NAV.system.pages.map((p) => p.id) as SystemPage[];
-const PAGE_OF = new Map<string, string>(NAV.system.items.map((i) => [i.id, i.page]));
 
 const REGIME_TONE: Record<string, "ok" | "warn" | "muted"> = { bull: "ok", bear: "warn", neutral: "muted" };
 const regimeChip = (state: string | null | undefined) =>
@@ -66,14 +65,17 @@ const FO_COLUMNS: Column<FoAccount>[] = [
   { key: "triggers", label: "트리거", width: "15%", align: "num", render: (a) => String(a.triggers.length) },
 ];
 
-type ScalpMarketRow = { market: string; open: number; closed: number; halted: boolean };
+type ScalpMarketRow = { market: string; open: number; closed: number; halted: boolean; enabled: boolean };
+const scalpChip = (m: ScalpMarketRow) =>
+  !m.enabled ? <Chip tone="muted">꺼짐</Chip> : m.halted ? <Chip tone="warn">중단</Chip> : <Chip tone="ok">정상</Chip>;
 const SCALP_COLUMNS: Column<ScalpMarketRow>[] = [
   { key: "market", label: "시장", width: "25%" },
   { key: "open", label: "보유", width: "25%", align: "num" },
   { key: "closed", label: "청산", width: "25%", align: "num" },
-  { key: "halted", label: "상태", width: "25%", align: "chip", render: (m) => <Chip tone={m.halted ? "warn" : "ok"}>{m.halted ? "중단" : "정상"}</Chip> },
+  { key: "halted", label: "상태", width: "25%", align: "chip", render: scalpChip },
 ];
 
+const BACKEND_LABEL: Record<string, string> = { extension: "Chrome 확장", playwright: "자동 브라우저(Playwright)" };
 const SERVICE_STATE: Record<string, { text: string; tone: "ok" | "warn" | "fail" | "muted" }> = {
   running: { text: "실행 중", tone: "ok" },
   stopped: { text: "멈춤", tone: "warn" },
@@ -114,8 +116,8 @@ function SavetickerStatus({ s }: { s: SavetickerResp }) {
         cols={4}
         items={[
           { label: "상태", value: <Chip tone={state.tone}>{state.text}</Chip>, num: false },
-          { label: "설정", value: s.configured ? "설정됨" : "설정 안 됨", num: false },
-          { label: "백엔드", value: s.backend, num: false },
+          { label: "서비스", value: s.service?.state ? (SERVICE_STATE[s.service.state]?.text ?? s.service.state) : "—", sub: s.service?.at ? fmtWhen(s.service.at) : undefined, num: false },
+          { label: "수집 방식", value: BACKEND_LABEL[s.backend] ?? s.backend, num: false },
           { label: "마지막 성공", value: fmtWhen(s.last_success_at) },
         ]}
       />
@@ -144,7 +146,8 @@ export function System({ page }: { page: SystemPage }) {
   const { pathname } = useLocation();
   const pages = screenPages("system");
   const label = pages.find((p) => p.id === page)?.label ?? "";
-  const sections = SECTIONS.filter((s) => PAGE_OF.get(s.id) === page);
+  // 절 순서는 nav.ts 항목 순(order) — 페이지 안에서도 메뉴 생성기가 정한 순서를 따른다
+  const sections = NAV.system.items.filter((i) => i.page === page).flatMap((i) => SECTIONS.filter((s) => s.id === i.id));
   const [tokenKey, setTokenKey] = useState(0);
   const content: Record<(typeof SECTIONS)[number]["id"], ReactNode> = {
     usage: <Usage />,
@@ -190,7 +193,7 @@ export function System({ page }: { page: SystemPage }) {
             />
             <Table
               columns={SCALP_COLUMNS}
-              rows={Object.entries(s.markets).map(([market, v]) => ({ market, open: v.open.length, closed: v.closed.length, halted: v.halted }))}
+              rows={Object.entries(s.markets).map(([market, v]) => ({ market, open: v.open.length, closed: v.closed.length, halted: v.halted, enabled: s.enabled }))}
               rowKey={(m) => m.market}
               empty="운영 중인 시장 없음"
             />
@@ -204,7 +207,7 @@ export function System({ page }: { page: SystemPage }) {
           <>
             {f.context ? (
               <p className="sys-head">
-                <span className="data-muted">국면</span> {regimeChip(f.context.regime?.state)}
+                <span className="data-muted">KR 국면</span> {regimeChip(f.context.regime?.state)}
                 <span className="data-muted">시장 판단</span>{" "}
                 {f.context.market_view?.stance ? <Chip>{termLabel(`view.${f.context.market_view.stance}`)}</Chip> : <Chip>자료 없음</Chip>}
               </p>

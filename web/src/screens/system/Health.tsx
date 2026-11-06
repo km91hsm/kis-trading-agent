@@ -18,9 +18,10 @@ const toneOf = (level: string | null | undefined) => (level === "info" ? "muted"
 const internal = (link: string) => link.startsWith("/") && !link.startsWith("//");
 
 const REASON_COLUMNS: Column<HealthReason>[] = [
-  { key: "area", label: "영역", width: "14%", align: "chip", render: (r) => <Chip tone={toneOf(r.level)}>{areaLabel(r.area)}</Chip> },
-  { key: "text", label: "내용", width: "58%", long: true, render: (r) => r.text.split("\n")[0] },
-  { key: "count", label: "건", width: "10%", align: "num", render: (r) => (r.count === null || r.count === undefined ? "" : String(r.count)) },
+  { key: "area", label: "영역", width: "12%", align: "chip", render: (r) => <Chip>{areaLabel(r.area)}</Chip> },
+  { key: "level", label: "단계", width: "10%", align: "chip", render: (r) => <Chip tone={toneOf(r.level)}>{areaLevelText(r.level)}</Chip> },
+  { key: "text", label: "내용", width: "52%", long: true, render: (r) => r.text.split("\n")[0] },
+  { key: "count", label: "건", width: "8%", align: "num", render: (r) => (r.count === null || r.count === undefined ? "" : String(r.count)) },
   {
     key: "link",
     label: "바로가기",

@@ -103,7 +103,7 @@ export function summarizeArgs(params: Record<string, unknown> | null | undefined
   const head: string[] = [];
   const rest: string[] = [];
   for (const [k, v] of Object.entries(params)) {
-    if (v === null || v === undefined || v === "") continue;
+    if (v === null || v === undefined || v === "" || v === false || (Array.isArray(v) && v.length === 0)) continue; // 잡음(trigger_ids=[] · dry_run=false)
     if (k === "market") head.unshift(String(v));
     else if (k === "years") head.push(`${v}년`);
     else rest.push(`${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);

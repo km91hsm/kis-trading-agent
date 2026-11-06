@@ -1,19 +1,21 @@
-// 잡 큐 — GET /jobs/requests(상태 칩·인자 요약, 대기 중 행만 「취소」 → Confirm → DELETE /jobs/{id}),
-// 수동 실행은 GET /jobs kind 를 레인별 버튼 묶음으로(RunJobButton — trading 은 kind 값, realAccounts 는 GET /accounts 의 실전 계좌).
+// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests 최대 200, 30행씩 ?page=N;
+// 상태 칩·인자 요약, 대기 중 행만 「취소」 → Confirm → DELETE /jobs/{id})(RunJobButton — trading 은 kind 값, realAccounts 는 GET /accounts 의 실전 계좌).
 // 일정 표는 데몬 절(같은 42행)에만 둔다.
 import { useMemo, useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
+import { Pager } from "../../components/Pager";
 import { RunJobButton } from "../../components/RunJobButton";
 import { Table, type Column } from "../../components/Table";
 import { deleteJson, errorText } from "../../lib/api";
 import { fmtWhen } from "../../lib/format";
 import { termLabel } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
+import { usePaged } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { jobRows, requestRows, type JobsResp, type KindRow, type RequestRow, type RequestsResp } from "./system.ts";
 
-const REQ_PARAMS = { limit: "30" };
+const REQ_PARAMS = { limit: "200" };
 type AccountLite = { id: string; env: string };
 
 /** 레인별 묶음(등장 순서 유지). */
@@ -21,6 +23,17 @@ function byLane(kinds: KindRow[]): [string, KindRow[]][] {
   const out = new Map<string, KindRow[]>();
   for (const k of kinds) out.set(k.lane, [...(out.get(k.lane) ?? []), k]);
   return Array.from(out.entries());
+}
+
+/** 요청 기록 30행씩 ?page=N — body() 콜백 안에서는 훅을 못 쓰므로 부품으로. */
+function PagedRequests({ rows, columns }: { rows: RequestRow[]; columns: Column<RequestRow>[] }) {
+  const paged = usePaged(rows);
+  return (
+    <>
+      <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty="최근 요청 없음" />
+      <Pager {...paged} />
+    </>
+  );
 }
 
 export function JobQueue() {
@@ -70,26 +83,6 @@ export function JobQueue() {
 
   return (
     <>
-      {body(requests, "잡 요청", (r) => (
-        <>
-          <p className="data-muted">
-            {r.alive ? "데몬 동작 중" : "데몬 꺼짐"} · 진행 중 {r.active}
-          </p>
-          <Table columns={reqColumns} rows={requestRows(r.requests)} rowKey={(x) => x.id} empty="최근 요청 없음" />
-          {error ? (
-            <p className="data-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <Confirm
-            open={cancelling !== null}
-            title={`${cancelling?.label ?? ""} 취소`}
-            body={<p>대기열에서 뺍니다. 이미 시작한 잡은 멈추지 않습니다.</p>}
-            onConfirm={() => cancelling && void cancel(cancelling.id)}
-            onClose={() => setCancelling(null)}
-          />
-        </>
-      ))}
       <h3 className="perf-sub">수동 실행</h3>
       {body(jobs, "잡 목록", (j) => {
         const rows = jobRows(j);
@@ -115,6 +108,27 @@ export function JobQueue() {
           </div>
         );
       })}
+      <h3 className="perf-sub">요청 기록</h3>
+      {body(requests, "잡 요청", (r) => (
+        <>
+          <p className="data-muted">
+            {r.alive ? "데몬 동작 중" : "데몬 꺼짐"} · 진행 중 {r.active}
+          </p>
+          <PagedRequests rows={requestRows(r.requests)} columns={reqColumns} />
+          {error ? (
+            <p className="data-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <Confirm
+            open={cancelling !== null}
+            title={`${cancelling?.label ?? ""} 취소`}
+            body={<p>대기열에서 뺍니다. 이미 시작한 잡은 멈추지 않습니다.</p>}
+            onConfirm={() => cancelling && void cancel(cancelling.id)}
+            onClose={() => setCancelling(null)}
+          />
+        </>
+      ))}
       <p className="data-muted">
         정기 일정과 다음 실행 시각은 <a href="#daemon">데몬 ›</a> 절에.
       </p>

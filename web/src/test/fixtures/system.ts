@@ -113,7 +113,7 @@ export function fixtureSettings() {
     markets: ["KR", "US"],
     risk: null,
     debate_rounds: 2,
-    models: { bull: "sonnet", judge: "opus" },
+    models: { researcher_bull: "sonnet", orchestrator: "opus" },
     web: { bind: "127.0.0.1", port: 8000, tailscale_hosts_count: 2, tailscale_users_count: 1 },
     llm: { budget_usd: 20, daily_session_cap: 40 },
   };

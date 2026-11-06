@@ -48,7 +48,7 @@ afterEach(() => {
 
 // 절 순서 = generated nav.ts 의 system 항목 순서(지금 볼 것 → 기능 → 관리)
 // 페이지 순(상태 → 잡 → 기능 → 관리), 페이지 안은 nav.ts order 순
-const SECTIONS = ["health", "daemon", "usage", "jobs", "runs", "regime", "saveticker", "scalp", "fo", "settings", "secrets", "token", "control-log"];
+const SECTIONS = ["health", "daemon", "usage", "jobs", "runs", "regime", "saveticker", "scalp", "fo", "token", "secrets", "settings", "control-log"];
 
 type Routes = Parameters<typeof installFakeFetch>[0];
 const forbidden = () => new Response(JSON.stringify({ detail: "이 PC 에서 직접 연 화면에서만 할 수 있습니다" }), { status: 403 });
@@ -193,7 +193,9 @@ describe("시스템 화면", () => {
     const rows = h.querySelectorAll("table tbody tr");
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain("오류로 끝난 잡 2건");
-    expect(rows[0].querySelector("a")?.getAttribute("href")).toBe("/system/jobs#runs"); // 백엔드 /system#runs → 절이 있는 페이지 주소로
+    expect(rows[0].querySelector("a")?.getAttribute("href")).toBe("/system/jobs#runs");
+    // 사유 행마다 단계 칩(주의/관심) — 전체 「정상」과 개별 사유의 범위를 구분
+    expect(Array.from(rows[0].querySelectorAll(".chip")).map((c) => c.textContent)).toEqual(["잡", "주의"]); // 백엔드 /system#runs → 절이 있는 페이지 주소로
     expect(rows[0].textContent).toContain("2");
     const details = h.querySelector("details") as HTMLDetailsElement;
     expect(details.querySelector("summary")?.textContent).toContain("켜진 기능 2");
@@ -241,10 +243,15 @@ describe("시스템 화면", () => {
   test("설정: Stats 격자 + 모델 표, 조작 이력: 표 행", async () => {
     await mount(routes());
     const st = section("settings");
-    expect(st.querySelector("dl.stats")?.textContent).toContain("Tailscale 호스트");
-    const models = st.querySelectorAll("table tbody tr");
+    expect(st.textContent).toContain("Tailscale 호스트");
+    // 설정은 세 묶음(AI 사용 한도 · 거래 리스크 · 접속 환경), 역할별 모델은 details 안 표(역할은 한글, role.* 원문 없음)
+    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["AI 사용 한도", "거래 리스크", "접속 환경"]);
+    expect(st.querySelector("details summary")?.textContent).toContain("역할별 모델 2");
+    const models = st.querySelectorAll("details table tbody tr");
     expect(models).toHaveLength(2);
     expect(models[0].textContent).toContain("sonnet");
+    expect(models[0].textContent).toContain("강세 리서처");
+    expect(st.textContent).not.toContain("role.");
     expect(callsTo("/system/control-log")[0].url).toContain("limit=500");
     const log = section("control-log").querySelectorAll("table tbody tr");
     expect(log).toHaveLength(2);
@@ -276,7 +283,19 @@ describe("시스템 화면", () => {
     expect(button(grid, "현물 매매")).toBeTruthy();
     expect(button(grid, "지표 스냅샷")).toBeTruthy();
     expect(Array.from(j.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("일정");
+    // 수동 실행(행동)이 요청 기록 위에 온다
+    expect(j.querySelector("h3")?.textContent).toBe("수동 실행");
+    expect(j.querySelector(".job-grid")!.compareDocumentPosition(j.querySelector("table")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(j.textContent).toContain("데몬"); // 일정은 데몬 절로
+  });
+
+  test("runs: 열 이름 「실행 번호」, 종류는 /jobs 라벨 없으면 glossary job.* 한글", async () => {
+    const runs = [...fixtureRuns(), { id: 29, kind: "briefing", market: null, started_at: "2026-11-05T07:20:00+09:00", finished_at: "2026-11-05T07:20:12+09:00", status: "ok", error: null, result_json: null }];
+    await mount(routes({ "GET /api/runs": runs }));
+    const r = section("runs");
+    expect(Array.from(r.querySelectorAll("table thead th")).map((e) => e.textContent)).toContain("실행 번호");
+    expect(r.textContent).toContain("아침 브리핑");
+    expect(r.textContent).not.toContain("briefing");
   });
 
   test("runs: 날짜 필터·CSV 링크, 행의 run 을 누르면 /calls?run_id= 와 CSV", async () => {
@@ -396,7 +415,7 @@ describe("시스템 화면", () => {
   });
 
   test("국면·단타·파생: 비율은 퍼센트로, 상태는 한글 칩, 단타 시장은 표", async () => {
-    const scalp = { ...fixtureScalp(), markets: { KR: { open: [1, 2], closed: [], halted: false }, US: { open: [], closed: [3], halted: true } } };
+    const scalp = { ...fixtureScalp(), enabled: true, markets: { KR: { open: [1, 2], closed: [], halted: false }, US: { open: [], closed: [3], halted: true } } };
     const fo = {
       accounts: [{ id: "paper-fo", env: "paper", mode: "auto", paused: false, state: "idle", enabled: true, triggers: [] }],
       context: { regime: { state: "bear" }, market_view: { stance: "RISK_OFF" } },
@@ -416,6 +435,7 @@ describe("시스템 화면", () => {
     expect(rows[0].textContent).toContain("2");
     expect(rows[1].querySelector(".chip")?.textContent).toBe("중단");
     const f = section("fo");
+    expect(f.textContent).toContain("KR 국면"); // 어느 시장의 국면인지
     expect(f.textContent).toContain("하락");
     expect(f.textContent).toContain("위험 회피");
     expect(f.textContent).not.toContain("RISK_OFF");
@@ -444,5 +464,24 @@ describe("시스템 화면", () => {
     await act(async () => (pager.querySelector('button[data-page="2"]') as HTMLButtonElement).click());
     expect(r.querySelectorAll("table tbody tr")).toHaveLength(5);
     expect(r.querySelector("table tbody tr")?.textContent).toContain("#70");
+  });
+
+  test("잡 큐 요청 기록은 30행씩 ?page=N", async () => {
+    const r = fixtureRequests();
+    r.requests = Array.from({ length: 35 }, (_, i) => ({ ...r.requests[2], id: 200 - i }));
+    await mount(routes({ "GET /api/jobs/requests": r }));
+    const j = section("jobs");
+    expect(j.querySelectorAll("table tbody tr")).toHaveLength(30);
+    expect(Array.from(j.querySelectorAll("nav.pager button[data-page]")).map((b) => b.textContent)).toEqual(["1", "2"]);
+  });
+
+  test("저장소 설정 안 됨: 「설정」 칸을 반복하지 않고 서비스·수집 방식·마지막 성공, 단타 꺼짐이면 시장 칩도 「꺼짐」", async () => {
+    const scalp = { ...fixtureScalp(), markets: { KR: { open: [], closed: [], halted: false } } };
+    await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({ configured: false, service: null, health: "unknown" }), "GET /api/system/scalp": scalp }));
+    const st = section("saveticker");
+    expect(Array.from(st.querySelectorAll("dl.stats dt")).map((e) => e.textContent)).toEqual(["상태", "서비스", "수집 방식", "마지막 성공"]);
+    expect(st.textContent).not.toContain("설정 안 됨설정 안 됨");
+    const sc = section("scalp");
+    expect(sc.querySelector("table tbody tr .chip")?.textContent).toBe("꺼짐");
   });
 });
