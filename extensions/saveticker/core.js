@@ -113,6 +113,16 @@ export class PdfPair {
     }
     bind(id) { if (!this.pending?.direct || !Number.isInteger(id) || id < 0 || this.pending.downloadId !== null)
         throw Error('pdf_id'); this.pending.downloadId = id; }
+    filename(item, extensionId, now = Date.now()) {
+        const p = this.pending, at = Date.parse(item.startTime);
+        const expiresAt = p?.expires_at === undefined ? p?.at + 120000 : Math.min(p.at + 120000, Date.parse(p.expires_at));
+        if (!p?.direct || p.cancelled || !p.expectedUrl || !extensionId || item.byExtensionId !== extensionId || item.url !== p.expectedUrl
+            || !Number.isInteger(item.id) || item.id < 0 || (p.downloadId !== null && item.id !== p.downloadId)
+            || item.mime !== 'application/pdf' || !Number.isFinite(at) || at < p.at || at >= expiresAt
+            || !Number.isFinite(expiresAt) || !Number.isFinite(now) || now < p.at || now >= expiresAt)
+            return null;
+        return 'SaveTicker/' + p.download_name;
+    }
     claim(item) {
         const p = this.pending;
         if (!p || p.direct || !p.expectedUrl || item.url !== p.expectedUrl || p.downloadId !== null)

@@ -47,7 +47,13 @@ test('popup shows API failure stage and never reports no errors for a failed PDF
     assert.match(diagnostics(), /본문 준비/);
     assert.match(diagnostics(), /PDF.*응답 수신.*api_response_unverified/);
     assert.doesNotMatch(diagnostics(), /오류가 없습니다/);
+    state.pdfError='filename_unverified';state.pdfErrorStage='download';await render();
+    assert.match(diagnostics(), /파일 다운로드.*실제 다운로드 파일명이 다릅니다.*filename_unverified/);
     state.backend='dom';state.lane_error_news='content_unavailable';await render();assert.doesNotMatch(diagnostics(), /본문 준비/);
+    state.pdfState='filename_unverified';await render();
+    assert.match(diagnostics(), /PDF.*파일 다운로드.*filename_unverified/);
+    assert.doesNotMatch(diagnostics(), /오류가 없습니다/);
+    state.pdfState='api_failed';
     state.pdfError='PRIVATE secret';state.pdfErrorStage='PRIVATE secret';state.lane_error_stage_news='PRIVATE secret';
     await render();
     assert.doesNotMatch(diagnostics(), /PRIVATE/);

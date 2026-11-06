@@ -3,7 +3,7 @@ import { recoverRecheck } from './recheck.js';
 import { beginHtmlTrial, htmlTrialStep, htmlTrialTerminal, HTML_TRIAL_MS } from './html-refresh.js';
 import { apiCycle, abortApi, apiErrorCode } from './api-runner.js';
 import { LANES, Scheduler, laneFor, marker, ownedLane, safePage, PdfPair } from './core.js';
-const WORKER_VERSION = '1.4.0';
+const WORKER_VERSION = '1.4.1';
 const scheduler = new Scheduler(), pdf = new PdfPair(), reportAttempts = new Map();
 let limits = { max_scrolls: 2, max_details: 2, max_reports: 2 };
 let port = null, requests = new Map(), seq = 0, enabled = false, token = '', ticking = null, retryAt = 0, failures = 0, planAt = 0, epoch = 0, nextTimer = null, presentRequested = false;
@@ -142,6 +142,7 @@ async function finishPdf(item, expected = pdf.pending) {
     const pending = expected, pair = pdf.complete(item || {});
     if (!pair) {
         if (item?.id === pending.downloadId && item.state === 'complete') {
+            pending.diagnosticError = 'filename_unverified';
             discardPdf(pending);
             await store({ pdfState: 'filename_unverified' });
         }
@@ -783,7 +784,12 @@ const restore = async (present = false) => {
 chrome.runtime.onStartup.addListener(() => restore(true));
 chrome.runtime.onInstalled.addListener(() => restore(false));
 void restore();
-// The download API return is the sole ID binding; no global filename observer.
+// 파일명만 제안한다. 다운로드 ID는 download() 반환값으로만 연결한다.
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    const filename = currentPdf(pdf.pending) ? pdf.filename(item, chrome.runtime.id) : null;
+    if (filename) suggest({ filename, conflictAction: 'uniquify' });
+    else suggest();
+});
 chrome.downloads.onChanged.addListener(async (delta) => {
     const pending = pdf.pending;
     if (!currentPdf(pending) || delta.id !== pending.downloadId)

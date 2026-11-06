@@ -4,11 +4,12 @@ const pdfStates = { api_fetching: 'PDF 응답 확인 중', api_failed: 'PDF 수�
 const laneNames = { news: '뉴스', community: '커뮤니티', market: '증시', background: '캘린더·리포트' };
 Object.assign(errors, { invalid_pdf_path: 'PDF 저장 경로를 확인하지 못했습니다', invalid_pdf_ticket: 'PDF 저장 요청이 만료됐거나 일치하지 않습니다', invalid_pdf: '유효한 PDF 파일이 아닙니다', api_response_unverified: '응답 형식·상태를 확인하지 못했습니다', api_shape_unverified: '데이터 구조를 확인하지 못했습니다', api_context_unverified: '기본 그룹을 확인하지 못했습니다', api_detail_unverified: '본문 응답을 확인하지 못했습니다', api_source_unverified: '출처를 확인하지 못했습니다', api_basis_unverified: '실시간·정규장 기준을 확인하지 못했습니다', api_regular_unverified: '정규장 기준을 확인하지 못했습니다', api_pdf_unverified: 'PDF 응답을 확인하지 못했습니다', api_response_too_large: '응답 크기 제한을 넘었습니다', api_busy: '이전 응답 처리를 기다립니다', api_content_unavailable: '전용 탭 응답이 없습니다', api_already_prepared: '이미 준비된 작업입니다', invalid_job: '작업이 만료됐거나 일치하지 않습니다', invalid_message: '호스트 메시지를 확인하지 못했습니다', snapshot_too_large: '저장 크기 제한을 넘었습니다', unknown_stream: '수집 항목을 확인하지 못했습니다' });
 const stages = { begin: '작업 발급', fetch: '응답 수신', prepare: '본문 준비', detail: '본문 수신', snapshot: '데이터 저장', pdf: 'PDF 처리', download: '파일 다운로드', save: '파일 저장' };
+errors.filename_unverified = '지정한 PDF 파일명과 실제 다운로드 파일명이 다릅니다';
 async function render() {
     const s = await chrome.storage.local.get(null);
     const knownVersion = typeof s.workerVersion === 'string' && /^\d+\.\d+\.\d+$/.test(s.workerVersion);
     const workerVersion = knownVersion ? s.workerVersion : s.enabled ? '연결 중' : '시작 전';
-    $('version').textContent = '확장 1.4.0 · 수집기 ' + workerVersion + (knownVersion && workerVersion !== '1.4.0' ? ' · 확장 새로고침 필요' : '');
+    $('version').textContent = '확장 1.4.1 · 수집기 ' + workerVersion + (knownVersion && workerVersion !== '1.4.1' ? ' · 확장 새로고침 필요' : '');
     $('pdf-state').textContent = Object.hasOwn(pdfStates, s.pdfState) ? pdfStates[s.pdfState] + ' (' + s.pdfState + ')' : '';
     $('api-mode').checked = s.backend === 'api';
     $('api-mode').disabled = !!s.enabled;
@@ -51,9 +52,9 @@ async function render() {
             }
         }
     }
-    if (s.pdfState === 'api_failed') {
-        const li = document.createElement('li'), code = Object.hasOwn(errors, s.pdfError) ? s.pdfError : 'api_request_failed';
-        const stage = stages[s.pdfErrorStage];
+    if (s.pdfState === 'api_failed' || s.pdfState === 'filename_unverified') {
+        const li = document.createElement('li'), code = s.pdfState === 'filename_unverified' ? 'filename_unverified' : Object.hasOwn(errors, s.pdfError) ? s.pdfError : 'api_request_failed';
+        const stage = stages[s.pdfState === 'filename_unverified' ? 'download' : s.pdfErrorStage];
         li.textContent = 'PDF' + (typeof stage === 'string' ? ' · ' + stage : '') + ': ' + errors[code] + ' (' + code + ')';
         $('diagnostics').append(li);
     }
