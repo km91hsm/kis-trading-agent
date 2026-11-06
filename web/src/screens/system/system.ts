@@ -8,6 +8,12 @@ import { resetsIn, usageLevel, type LimitWindow, type Throttle, type UsageLevel,
 const DASH = "—";
 
 // ── 사용량 ───────────────────────────────────────────────────────────────────
+
+/** 잡·실행 종류 한글 라벨 — /jobs 의 라벨 → glossary job.* → session.*(LLM 세션 run) → 원문. */
+export function kindLabel(kind: string, labels: Map<string, string>): string {
+  return labels.get(kind) || GLOSSARY[`job.${kind}`]?.label || GLOSSARY[`session.${kind}`]?.label || kind;
+}
+
 export type UsageMeter = {
   key: "5h" | "7d" | "spend";
   label: string;
@@ -296,7 +302,7 @@ export function daemonRows(jobs: DaemonJob[], labels: Map<string, string>): { us
     const schedule = j.trigger === "interval" && j.interval_s ? intervalText(j.interval_s) : j.next_at ? fmtTime(j.next_at).slice(0, 5) : "—";
     return {
       id: j.id,
-      label: labels.get(j.kind) || GLOSSARY[`job.${j.kind}`]?.label || j.kind,
+      label: kindLabel(j.kind, labels),
       market: prefix ? MARKET_PREFIX[prefix] : "",
       status: st.text,
       tone: st.tone,

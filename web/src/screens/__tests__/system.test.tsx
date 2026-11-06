@@ -290,12 +290,19 @@ describe("시스템 화면", () => {
   });
 
   test("runs: 열 이름 「실행 번호」, 종류는 /jobs 라벨 없으면 glossary job.* 한글", async () => {
-    const runs = [...fixtureRuns(), { id: 29, kind: "briefing", market: null, started_at: "2026-11-05T07:20:00+09:00", finished_at: "2026-11-05T07:20:12+09:00", status: "ok", error: null, result_json: null }];
+    const runs = [
+      ...fixtureRuns(),
+      { id: 29, kind: "briefing", market: null, started_at: "2026-11-05T07:20:00+09:00", finished_at: "2026-11-05T07:20:12+09:00", status: "ok", error: null, result_json: null },
+      { id: 28, kind: "analyze", market: "KR", started_at: "2026-11-05T07:30:00+09:00", finished_at: "2026-11-05T07:39:00+09:00", status: "ok", error: null, result_json: null },
+    ];
     await mount(routes({ "GET /api/runs": runs }));
     const r = section("runs");
     expect(Array.from(r.querySelectorAll("table thead th")).map((e) => e.textContent)).toContain("실행 번호");
     expect(r.textContent).toContain("아침 브리핑");
     expect(r.textContent).not.toContain("briefing");
+    // LLM 세션 run(analyze·scan·market)은 session.* 라벨
+    expect(r.textContent).toContain("종목 분석");
+    expect(r.textContent).not.toContain("analyze");
   });
 
   test("runs: 날짜 필터·CSV 링크, 행의 run 을 누르면 /calls?run_id= 와 CSV", async () => {
