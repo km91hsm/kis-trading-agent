@@ -193,13 +193,16 @@ export function fixtureTaxLots() {
     account_id: "paper-1",
     market: "KR",
     year: 2026,
-    realized: [],
+    realized: [
+      { ticker: "005930", qty: 2, buy_date: "2026-03-02", sell_date: "2026-09-01", cost: "130000", proceeds: "150000", pnl: "20000", term: "short", wash_sale: false },
+      { ticker: "005930", qty: 1, buy_date: "2024-05-02", sell_date: "2026-09-01", cost: "60000", proceeds: "75000", pnl: "15000", term: "long", wash_sale: true },
+    ],
     open_lots: [
       { ticker: "005930", qty: 6, price: "69000", bought_at: "2026-10-01T01:00:00+00:00" },
       { ticker: "005930", qty: 4, price: "71500", bought_at: "2026-10-15T01:00:00+00:00" },
       { ticker: "AAPL", qty: 2, price: "200.5", bought_at: "2026-10-02T14:00:00+00:00" },
     ],
-    summary: { realized_pnl: "0", short_pnl: "0", long_pnl: "0", wash_sales: 0, unmatched_sell_qty: 0 },
+    summary: { realized_pnl: "35000", short_pnl: "20000", long_pnl: "15000", wash_sales: 1, unmatched_sell_qty: 0 },
     note: null,
   };
 }

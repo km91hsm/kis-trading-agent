@@ -34,7 +34,7 @@ def check(ctx: OpsContext) -> list[Item]:
                     f"ingest.disclosure.{market}",
                     "critical",
                     f"{market} 보유 종목 중요 공시 {len(rows)}건 — {rows[-1]['title']}",
-                    link="/data",
+                    link="/data#news",
                     count=len(rows),
                 )
             )

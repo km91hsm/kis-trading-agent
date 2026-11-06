@@ -57,7 +57,8 @@ const section = (id: string) => document.getElementById(id) as HTMLElement | nul
 describe("결정 상세 순수 함수", () => {
   test("decisionHeader — spot 제목·칩·근거 줄", () => {
     const h = decisionHeader(fixtureSpotDecisionRow());
-    expect(h.title).toBe("005930 매수");
+    expect(h.title).toBe("005930 삼성전자 매수");
+    expect(decisionHeader(fixtureSpotDecisionRow({ name: null })).title).toBe("005930 매수");
     expect(h.chips).toEqual(["2026-11-05", "KR", "확신 72%", "session"]);
     expect(h.summaryLines).toEqual(["실적 상향 기대", "외국인 순매수 지속"]);
   });
@@ -75,25 +76,71 @@ describe("결정 상세 순수 함수", () => {
 });
 
 describe("결정 상세 화면", () => {
-  test("spot 상세는 라운드 2개·토론 턴 3개를 그린다", async () => {
+  const heads = (t: Element) => Array.from(t.querySelectorAll("thead th")).map((e) => e.textContent);
+  const bodyRows = (t: Element) => t.querySelector("tbody")!.querySelectorAll("tr");
+
+  test("spot 상세는 라운드·토론 턴·게이트·주문을 표로 그리고, 근거는 산문 그대로", async () => {
     await mount(spotRoutes, "/decisions/spot/7");
-    expect(document.body.textContent).toContain("005930 매수");
-    expect(section("rounds")!.querySelectorAll("li.round-row")).toHaveLength(2);
-    expect(section("debate")!.querySelectorAll("li.debate-turn")).toHaveLength(3);
+    expect(document.body.textContent).toContain("005930 삼성전자 매수");
+    // 라운드 표
+    const rounds = section("rounds")!.querySelector("table")!;
+    expect(heads(rounds)).toEqual(["라운드", "판단", "손절", "출처", "시각"]);
+    expect(bodyRows(rounds)).toHaveLength(2);
+    expect(bodyRows(rounds)[0].textContent).toContain("보류");
+    expect(bodyRows(rounds)[0].textContent).toContain("65,000");
+    expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
+    // 토론 턴 — details 안 표
+    const debate = section("debate")!.querySelector("details table")!;
+    expect(heads(debate)).toEqual(["라운드", "측", "판단", "확신", "타이밍", "조건"]);
+    expect(bodyRows(debate)).toHaveLength(3);
+    expect(bodyRows(debate)[1].textContent).toContain("강세 측");
+    expect(bodyRows(debate)[1].textContent).toContain("80%");
+    expect(bodyRows(debate)[1].textContent).toContain("지금");
+    // 타이밍이 객체({action, condition})인 턴 — 크래시 없이 action 라벨 + 조건
+    expect(bodyRows(debate)[2].textContent).toContain("대기");
+    expect(bodyRows(debate)[2].textContent).toContain("194,415 회복 뒤 진입");
+    expect(section("analysts")!.textContent).toContain("매도");
+    expect(section("analysts")!.textContent).not.toContain("SELL");
+    // 근거 산문
     expect(section("rationale")!.textContent).toContain("외국인 순매수 지속");
     expect(section("rationale")!.textContent).toContain("승인 요약 — 합성 문단");
-    expect(section("gate")!.textContent).toContain("paper-1: 통과 3주 · 한도 안");
-    expect(section("orders")!.textContent).toContain("paper-1: 매수 3주 @70000 → 접수 #1");
-    expect(section("orders")!.textContent).toContain("체결");
+    // 게이트 표
+    const gate = section("gate")!.querySelector("table")!;
+    expect(heads(gate)).toEqual(["계좌", "결과", "수량", "사유", "비고"]);
+    expect(bodyRows(gate)[0].textContent).toContain("paper-1");
+    expect(gate.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("통과");
+    expect(bodyRows(gate)[0].textContent).toContain("한도 안");
+    // 주문 표 — 결과 표는 중복이라 없고 /outcomes 도 부르지 않는다
+    const orders = section("orders")!.querySelector("table")!;
+    expect(heads(orders)).toEqual(["계좌", "방향", "수량", "가격", "상태", "주문번호", "메시지"]);
+    expect(bodyRows(orders)[0].textContent).toContain("매수");
+    expect(bodyRows(orders)[0].textContent).toContain("70,000");
+    expect(bodyRows(orders)[0].querySelector("code")!.textContent).toBe("1");
+    expect(Array.from(orders.querySelectorAll(".chip")).map((c) => c.textContent)).toEqual(["매수", "접수"]);
+    expect(section("outcomes")).toBeNull();
+    expect(ff!.calls.some((c) => c.url.includes("/outcomes"))).toBe(false);
     expect(section("analysts")!.textContent).toContain("강세");
+  });
+
+  test("US 결정은 손절·주문 가격을 센트까지(185.50·189.35) — 정수 반올림 금지", async () => {
+    const us = { ...fixtureSpotDecisionRow(), market: "US", ticker: "AAPL", name: "Apple", limit_price: "189.35", stop_loss: "185.50", take_profit: "200.00" };
+    const detail = fixtureSpotDetail({ decision: us, rounds: [{ id: 1, decision_id: 7, round: 1, action: "HOLD", stop_loss: "185.50", source: "reeval", skipped_debate: 0, data: {}, created_at: "2026-11-05T02:00:00+00:00" }] });
+    const trace = fixtureSpotTrace({ decision: us });
+    trace.orders[0].price = "189.35";
+    await mount({ "GET /api/decisions/spot/7": detail, "GET /api/decisions/spot/7/trace": trace }, "/decisions/spot/7");
+    const rounds = section("rounds")!.querySelector("table")!;
+    expect(bodyRows(rounds)[0].textContent).toContain("185.50");
+    expect(bodyRows(rounds)[0].textContent).not.toContain("186");
+    const orders = section("orders")!.querySelector("table")!;
+    expect(bodyRows(orders)[0].textContent).toContain("189.35"); // KR 정수(70,000)는 위 spot 테스트가 검증
   });
 
   test("「‹ 돌아가기」 와 복기 메모리 링크(ticker=005930)", async () => {
     const { container } = await mount(spotRoutes, "/decisions/spot/7");
     const links = Array.from(container.querySelectorAll("a"));
     expect(links.find((a) => a.textContent?.includes("‹ 돌아가기"))).toBeTruthy();
-    const mem = links.find((a) => (a.getAttribute("href") ?? "").startsWith("/performance#memory"));
-    expect(mem!.getAttribute("href")).toContain("ticker=005930");
+    const mem = links.find((a) => (a.getAttribute("href") ?? "").startsWith("/performance/memory?"));
+    expect(mem!.getAttribute("href")).toBe("/performance/memory?ticker=005930");
   });
 
   test("체크포인트 칩을 누르면 그 단계 JSON 을 보인다", async () => {
@@ -121,7 +168,10 @@ describe("결정 상세 화면", () => {
     expect(section("debate")).toBeNull();
     expect(section("outcomes")).toBeNull();
     expect(section("analysts")!.textContent).toContain("macro");
-    expect(section("checks")!.textContent).toContain("_fo_risk_check_paper-fo");
+    const checks = section("checks")!.querySelector("table")!;
+    expect(heads(checks)).toEqual(["단계", "결과", "사유", "오류"]);
+    expect(bodyRows(checks)[0].textContent).toContain("_fo_risk_check_paper-fo");
+    expect(checks.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("통과");
     expect(ff!.calls.some((c) => c.url.includes("/outcomes"))).toBe(false);
   });
 

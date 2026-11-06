@@ -1,6 +1,7 @@
-// 「결정 상세」 화면 — `/decisions/:asset/:id`. 돌아가기·머리·근거 전문·라운드(spot)·에이전트 보고·토론 턴(spot)·
-// 체크포인트·리스크 체크·이어진 주문·체결·결과(spot)·복기 메모리 연결(spot).
-// 섹션은 데이터 전에 바로 그리고, fo 응답에 없는 절(라운드·토론·체크포인트 JSON·주문·결과)은 그리지 않는다.
+// 「결정 상세」 화면 — `/decisions/:asset/:id`. 돌아가기·머리(코드+이름)·근거 전문(산문)·라운드 표(spot)·에이전트 보고(산문, 신호 칩)·
+// 토론 턴 details 안 표(spot)·체크포인트·리스크 체크 표(spot 게이트 / fo 체크)·이어진 주문·체결 표(spot)·복기 메모리 연결(spot).
+// 계좌별 「결과」 표는 게이트·주문 표와 같은 내용이라 두지 않는다(/outcomes 는 부르지 않음).
+// 섹션은 데이터 전에 바로 그리고, fo 응답에 없는 절(라운드·토론·체크포인트 JSON·주문)은 그리지 않는다.
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Card } from "../../components/Card";
@@ -8,11 +9,11 @@ import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Table, type Column } from "../../components/Table";
 import { ApiError, getJson } from "../../lib/api";
-import { fmtTime } from "../../lib/format";
-import { GLOSSARY, termLabel } from "../../lib/glossary";
+import { fmtInt, fmtMoney } from "../../lib/format";
+import { GLOSSARY, sideLabel, termLabel } from "../../lib/glossary";
 import { useResource, type Resource } from "../../lib/hooks";
-import { checkLine, gateLine, normalizeTrace, orderLine, SIGNAL, type TraceResp } from "../../lib/trace";
-import { actionLabel, decisionHeader, roundRows, type FoDetail, type Outcome, type OutcomesResp, type SpotDetail } from "./decision.ts";
+import { normalizeTrace, SIGNAL, type FoCheck, type TraceDebate, type TraceGate, type TraceOrder, type TraceResp } from "../../lib/trace";
+import { actionLabel, decisionHeader, roundRows, timingLabel, type FoDetail, type RoundRow, type SpotDetail } from "./decision.ts";
 
 function BackLink() {
   const navigate = useNavigate();
@@ -40,16 +41,67 @@ function Pending({ res, what }: { res: Resource<unknown>; what: string }) {
 
 const pct = (v: number | null | undefined) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "—");
 const statusLabel = (s: string | null | undefined) => (s ? (GLOSSARY[`status.${s}`]?.label ?? s) : "—");
+const STATUS_TONE: Record<string, "ok" | "warn" | "fail" | "muted"> = { filled: "ok", accepted: "ok", failed: "fail", rejected: "fail", cancelled: "muted", pending: "warn" };
+const statusChip = (s: string | null | undefined) => (s ? <Chip tone={STATUS_TONE[s] ?? "muted"}>{statusLabel(s)}</Chip> : "—");
+const gateChip = (approved: boolean | null | undefined) =>
+  approved === true ? <Chip tone="ok">{termLabel("gate.pass")}</Chip> : approved === false ? <Chip tone="fail">{termLabel("gate.reject")}</Chip> : "—";
+const SIGNAL_TONE: Record<string, "ok" | "fail" | "muted"> = { BULLISH: "ok", BUY: "ok", BEARISH: "fail", SELL: "fail" };
+const signalChip = (s: string | null | undefined) => <Chip tone={SIGNAL_TONE[s ?? ""] ?? "muted"}>{SIGNAL[s ?? ""] ?? s ?? "—"}</Chip>;
 
-type OutcomeRow = Outcome & { key: string };
-const OUTCOME_COLUMNS: Column<OutcomeRow>[] = [
-  { key: "account_id", label: "계좌", width: "112px" },
-  { key: "approved", label: "게이트", width: "72px", align: "chip", render: (r) => (r.approved ? termLabel("gate.pass") : termLabel("gate.reject")) },
-  { key: "adjusted_qty", label: "수량", width: "72px", align: "num", render: (r) => String(r.order_qty ?? r.adjusted_qty ?? "—") },
-  { key: "order_price", label: "가격", width: "96px", align: "num", render: (r) => r.order_price ?? "시장가" },
-  { key: "order_status", label: "주문", width: "72px", align: "chip", render: (r) => statusLabel(r.order_status) },
+// 가격·손절은 결정의 시장 통화로(US 는 센트까지, KR 은 정수) — 열 정의가 market 을 받는다.
+const currencyOf = (market: string | null | undefined): "KRW" | "USD" => (market === "US" ? "USD" : "KRW");
+const roundColumns = (market: string | null | undefined): Column<RoundRow>[] => [
+  { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round}` },
+  { key: "action", label: "판단", width: "18%", align: "chip", render: (r) => <Chip>{actionLabel(r.action)}</Chip> },
+  { key: "stop_loss", label: "손절", width: "20%", align: "num", render: (r) => (r.stop_loss === "—" ? "—" : fmtMoney(r.stop_loss, currencyOf(market))) },
+  { key: "source", label: "출처", width: "24%", render: (r) => r.source },
+  { key: "at", label: "시각", width: "24%", render: (r) => r.at },
+];
+type DebateRow = TraceDebate & { key: number };
+const DEBATE_COLUMNS: Column<DebateRow>[] = [
+  { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round ?? 0}` },
+  { key: "side", label: "측", width: "18%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{r.side === "bull" ? "강세 측" : "약세 측"}</Chip> },
+  { key: "stance", label: "판단", width: "20%", align: "chip", render: (r) => signalChip(r.stance) },
+  { key: "conviction", label: "확신", width: "12%", align: "num", render: (r) => pct(r.conviction) },
+  { key: "timing", label: "타이밍", width: "12%", render: (r) => timingLabel(r.timing) },
+  { key: "timing_note", label: "조건", width: "auto", long: true, render: (r) => r.timing_note ?? "—" },
+];
+type GateRow = TraceGate & { key: number };
+const GATE_COLUMNS: Column<GateRow>[] = [
+  { key: "account_id", label: "계좌", width: "18%" },
+  { key: "approved", label: "결과", width: "12%", align: "chip", render: (r) => gateChip(r.approved) },
+  { key: "qty", label: "수량", width: "12%", align: "num", render: (r) => (r.qty === null || r.qty === undefined ? "—" : `${fmtInt(r.qty)}주`) },
   { key: "reasons", label: "사유", width: "auto", long: true, render: (r) => (r.reasons ?? []).join("; ") || "—" },
-  { key: "checked_at", label: "시각", width: "88px", render: (r) => fmtTime(r.checked_at) },
+  {
+    key: "note",
+    label: "비고",
+    width: "20%",
+    align: "chip",
+    render: (r) => (
+      <span className="chips">
+        {r.dry_run ? <Chip tone="warn">{termLabel("dry_run")}</Chip> : null}
+        {r.note ? <span className="data-muted">{r.note}</span> : null}
+        {!r.dry_run && !r.note ? "—" : null}
+      </span>
+    ),
+  },
+];
+type CheckRow = FoCheck & { stage: string };
+const CHECK_COLUMNS: Column<CheckRow>[] = [
+  { key: "stage", label: "단계", width: "28%", long: true, render: (r) => r.stage },
+  { key: "approved", label: "결과", width: "14%", align: "chip", render: (r) => (r.approved === true || r.approved === false ? gateChip(r.approved) : r.status ? statusChip(r.status) : "—") },
+  { key: "reasons", label: "사유", width: "auto", render: (r) => [(r.reasons ?? []).join("; "), r.note ? `(${r.note})` : ""].filter(Boolean).join(" ") || "—" },
+  { key: "error", label: "오류", width: "22%", render: (r) => r.error ?? "—" },
+];
+type OrderRow = TraceOrder & { key: number };
+const orderColumns = (market: string | null | undefined): Column<OrderRow>[] => [
+  { key: "account_id", label: "계좌", width: "16%" },
+  { key: "side", label: "방향", width: "10%", align: "chip", render: (r) => (r.side ? <Chip tone={r.side.toUpperCase() === "BUY" ? "ok" : "fail"}>{sideLabel(r.side)}</Chip> : "—") },
+  { key: "qty", label: "수량", width: "10%", align: "num", render: (r) => (r.qty === null || r.qty === undefined ? "—" : `${fmtInt(r.qty)}주`) },
+  { key: "price", label: "가격", width: "12%", align: "num", render: (r) => (r.price ? fmtMoney(r.price, currencyOf(market)) : "시장가") },
+  { key: "status", label: "상태", width: "12%", align: "chip", render: (r) => statusChip(r.status) },
+  { key: "order_no", label: "주문번호", width: "14%", render: (r) => (r.order_no ? <code>{r.order_no}</code> : "—") },
+  { key: "message", label: "메시지", width: "auto", long: true, render: (r) => r.message ?? "—" },
 ];
 
 function Checkpoints({ asset, id, stages }: { asset: string; id: string; stages: string[] }) {
@@ -99,7 +151,6 @@ export function Decision() {
   const spot = asset === "spot";
   const detail = useResource<SpotDetail | FoDetail>(`/decisions/${asset}/${id}`, undefined, ["decisions"]);
   const rawTrace = useResource<unknown>(`/decisions/${asset}/${id}/trace`, undefined, ["decisions", "orders"]);
-  const outcomes = useResource<OutcomesResp>(`/decisions/${asset}/${id}/outcomes`, undefined, ["orders", "decisions"], { enabled: spot });
 
   const notFound = [detail.error, rawTrace.error].find((e) => e?.status === 404);
   if (notFound) {
@@ -116,6 +167,7 @@ export function Decision() {
   const t: TraceResp | null = rawTrace.data ? normalizeTrace(spot ? "spot" : "fo", rawTrace.data) : null;
   const spotDetail = spot && d ? (d as SpotDetail) : null;
   const ticker = spotDetail?.decision.ticker;
+  const market = spotDetail?.decision.market ?? "KR"; // 파생은 KR(원화)
 
   return (
     <div className="screen" data-screen="decision">
@@ -148,17 +200,7 @@ export function Decision() {
         <section id="rounds" className="screen-section">
           <h2>라운드</h2>
           {spotDetail ? (
-            spotDetail.rounds.length ? (
-              <ol className="decision-lines">
-                {roundRows(spotDetail.rounds).map((r) => (
-                  <li key={r.round} className="round-row">
-                    r{r.round} · {actionLabel(r.action)} · 손절 {r.stop_loss} · {r.source} · {r.at}
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <Empty title="재평가 라운드 없음" />
-            )
+            <Table columns={roundColumns(market)} rows={roundRows(spotDetail.rounds)} rowKey={(r) => r.round} empty="재평가 라운드 없음" />
           ) : (
             <Pending res={detail} what="결정" />
           )}
@@ -171,7 +213,7 @@ export function Decision() {
           <ul className="decision-lines">
             {t.analysts.map((a) => (
               <li key={a.role}>
-                <strong>{a.label}</strong> {SIGNAL[a.signal ?? ""] ?? a.signal ?? "—"} · 확신 {pct(a.confidence)}
+                <strong>{a.label}</strong> {signalChip(a.signal)} <span className="data-muted">확신 {pct(a.confidence)}</span>
                 {a.summary ? <p className="analyst-summary">{a.summary}</p> : null}
                 {a.evidence.length ? <ul className="analyst-evidence">{a.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul> : null}
               </li>
@@ -188,14 +230,7 @@ export function Decision() {
           {t ? (
             <details className="debate">
               <summary>토론 턴 {t.debate.length}개</summary>
-              <ol className="decision-lines">
-                {t.debate.map((x, i) => (
-                  <li key={i} className="debate-turn">
-                    r{x.round ?? 0} · {x.side === "bull" ? "강세 측" : "약세 측"} · {SIGNAL[x.stance ?? ""] ?? x.stance ?? "—"} · 확신 {pct(x.conviction)}
-                    {x.timing ? ` · ${x.timing}` : ""}
-                  </li>
-                ))}
-              </ol>
+              <Table columns={DEBATE_COLUMNS} rows={t.debate.map((x, i) => ({ ...x, key: i }))} rowKey={(r) => r.key} />
             </details>
           ) : (
             <Pending res={rawTrace} what="추적" />
@@ -212,11 +247,9 @@ export function Decision() {
         <h2>리스크 체크</h2>
         {t ? (
           spot ? (
-            t.gate.length ? <ul className="decision-lines">{t.gate.map((g, i) => <li key={i}>{gateLine(g)}</li>)}</ul> : <Empty title="리스크 체크 없음" />
-          ) : Object.keys(t.checks ?? {}).length ? (
-            <ul className="decision-lines">{Object.entries(t.checks ?? {}).map(([s, c]) => <li key={s}>{checkLine(s, c)}</li>)}</ul>
+            <Table columns={GATE_COLUMNS} rows={t.gate.map((g, i) => ({ ...g, key: i }))} rowKey={(r) => r.key} empty="리스크 체크 없음" />
           ) : (
-            <Empty title="리스크 체크 없음" />
+            <Table columns={CHECK_COLUMNS} rows={Object.entries(t.checks ?? {}).map(([stage, c]) => ({ ...c, stage }))} rowKey={(r) => r.stage} empty="리스크 체크 없음" />
           )
         ) : (
           <Pending res={rawTrace} what="추적" />
@@ -226,24 +259,7 @@ export function Decision() {
       {spot ? (
         <section id="orders" className="screen-section">
           <h2>이어진 주문·체결</h2>
-          {t ? (
-            t.orders.length ? <ul className="decision-lines">{t.orders.map((o, i) => <li key={i}>{orderLine(o)}</li>)}</ul> : <Empty title="주문 없음" />
-          ) : (
-            <Pending res={rawTrace} what="추적" />
-          )}
-          <div id="outcomes" className="decision-outcomes">
-            <h3>결과</h3>
-            {outcomes.data ? (
-              <Table
-                columns={OUTCOME_COLUMNS}
-                rows={outcomes.data.outcomes.map((o, i) => ({ ...o, key: `${o.account_id}-${i}` }))}
-                rowKey={(r) => r.key}
-                empty="결과 없음"
-              />
-            ) : (
-              <Pending res={outcomes} what="결과" />
-            )}
-          </div>
+          {t ? <Table columns={orderColumns(market)} rows={t.orders.map((o, i) => ({ ...o, key: i }))} rowKey={(r) => r.key} empty="주문 없음" /> : <Pending res={rawTrace} what="추적" />}
         </section>
       ) : null}
 
@@ -251,7 +267,7 @@ export function Decision() {
         <section id="memory" className="screen-section">
           <h2>복기 메모리</h2>
           {ticker ? (
-            <Link to={`/performance#memory?ticker=${encodeURIComponent(ticker)}`}>{ticker} 복기 메모리 보기</Link>
+            <Link to={`/performance/memory?ticker=${encodeURIComponent(ticker)}`}>{ticker} 복기 메모리 보기</Link>
           ) : (
             <Pending res={detail} what="결정" />
           )}

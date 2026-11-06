@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { fixtureCalibration, fixtureCompare, fixtureMemory, fixturePerfAccounts, fixturePerformance, fixtureShadow } from "../../test/fixtures/performance";
-import { benchmarkLines, calibrationBins, normalizeNav, compareRows, defaultFilters, memoryRows, shadowRows, type Compare, type Calibration, type MemoryResp, type Perf, type Shadow } from "./performance.ts";
+import { benchmarkLines, calibrationBins, compareAllEmpty, normalizeNav, compareRows, defaultFilters, memoryRows, shadowRows, shadowSummary, type Compare, type Calibration, type MemoryResp, type Perf, type Shadow } from "./performance.ts";
 
 describe("성과 순수 함수", () => {
   test("defaultFilters: 첫 계좌·그 첫 시장·30일, 계좌 없으면 빈 값", () => {
@@ -8,10 +8,14 @@ describe("성과 순수 함수", () => {
     expect(defaultFilters([])).toEqual({ account_id: "", market: "", days: "30" });
   });
 
-  test("compareRows: metrics null 이면 「NAV 없음」 과 「—」", () => {
+  test("compareRows: metrics null 이면 「기록 없음」 과 「—」; 전부 null 이면 compareAllEmpty", () => {
     const rows = compareRows(fixtureCompare() as Compare);
     expect(rows[0]).toMatchObject({ key: "paper-1-KR", account_id: "paper-1", market: "KR", ret: "5.23%", mdd: "-8.10%", sortino: "1.23", note: "" });
-    expect(rows[1]).toMatchObject({ key: "paper-1-US", market: "US", currency: "USD", ret: "—", mdd: "—", sortino: "—", note: "NAV 없음" });
+    expect(rows[1]).toMatchObject({ key: "paper-1-US", market: "US", currency: "USD", ret: "—", mdd: "—", sortino: "—", note: "기록 없음" });
+    expect(compareAllEmpty(fixtureCompare() as Compare)).toBe(false);
+    const c = fixtureCompare() as Compare;
+    expect(compareAllEmpty({ ...c, rows: c.rows.map((r) => ({ ...r, metrics: null })) })).toBe(true);
+    expect(compareAllEmpty({ ...c, rows: [] })).toBe(true);
   });
 
   test("calibrationBins: run×역할 행, report null 이면 「표본 부족」 한 줄", () => {
@@ -26,10 +30,10 @@ describe("성과 순수 함수", () => {
     expect(rows[2]).toMatchObject({ active: false, hit_rate: "—", note: "표본 부족" });
   });
 
-  test("memoryRows: 결정 action·결과 수익률(없으면 —)·요약", () => {
+  test("memoryRows: 종목 코드+이름·결정 action·결과 수익률(없으면 —)·층 한글·요약", () => {
     const rows = memoryRows(fixtureMemory() as MemoryResp);
-    expect(rows[0]).toMatchObject({ id: 1, ticker: "005930", market: "KR", action: "buy", outcome: "3.40%", tier: "short", importance: 0.7, summary: "반도체 업황 반등 기대" });
-    expect(rows[1]).toMatchObject({ ticker: "AAPL", action: "—", outcome: "—", summary: "" });
+    expect(rows[0]).toMatchObject({ id: 1, ticker: "005930 삼성전자", market: "KR", action: "buy", outcome: "3.40%", tier: "단기", importance: 0.7, summary: "반도체 업황 반등 기대" });
+    expect(rows[1]).toMatchObject({ ticker: "AAPL", action: "—", outcome: "—", tier: "장기", summary: "" });
   });
 
   test("benchmarkLines: null·빈 시리즈는 건너뛴다", () => {
@@ -44,6 +48,13 @@ describe("성과 순수 함수", () => {
     const rows = shadowRows(fixtureShadow() as Shadow);
     expect(rows[0]).toMatchObject({ key: "candidates_1n", label: "같은 후보 균등(1/N)", n: 25, mean: "0.40%", ci: "0.10% ~ 0.70%", note: "" });
     expect(rows[1]).toMatchObject({ key: "quant_topn", n: 5, ci: "—", note: "표본 부족(n < 20)" });
+  });
+
+  test("shadowSummary: 기준선이 전부 min_pairs 미만(또는 없음)이면 한 줄 요약, 하나라도 채우면 null", () => {
+    expect(shadowSummary(fixtureShadow() as Shadow)).toBeNull();
+    const few = fixtureShadow({ pairs: { candidates_1n: { n: 5, mean_diff: null, ci_low: null, ci_high: null }, quant_topn: { n: 2, mean_diff: null, ci_low: null, ci_high: null } } }) as Shadow;
+    expect(shadowSummary(few)).toBe("기준선 2개 · 표본 5/20 — 20쌍부터 집계");
+    expect(shadowSummary(fixtureShadow({ pairs: {} }) as Shadow)).toBe("기준선 0개 · 표본 0/20 — 20쌍부터 집계");
   });
 
   test("normalizeNav: 첫 값 기준 1.0, 첫 값 0·빈 입력은 빈 배열", () => {

@@ -31,7 +31,9 @@ import {
   fixtureMemory,
   fixturePerfAccounts,
   fixturePerformance,
+  fixtureRlExperimentDetail,
   fixtureRlExperiments,
+  fixtureRlShadow,
   fixtureRlReport,
   fixtureShadow,
 } from "../../test/fixtures/performance";
@@ -59,6 +61,8 @@ function routes(over: Routes = {}): Routes {
     "GET /api/analytics/shadow": fixtureShadow(),
     "GET /api/analytics/rl/report": fixtureRlReport(),
     "GET /api/analytics/rl/experiments": fixtureRlExperiments(),
+    "GET /api/analytics/rl/experiments/rl-007": fixtureRlExperimentDetail(),
+    "GET /api/analytics/rl/shadow": fixtureRlShadow(),
     "GET /api/analytics/memory": (u: URL) =>
       u.searchParams.get("q") ? fixtureMemory({ query: { ticker: "005930", entry_id: 1, market: "KR" }, warmup: true, breaker: "임베딩 장애" }) : fixtureMemory(),
     "GET /api/analytics/fo/scorecard": fixtureFoScorecard(),
@@ -66,11 +70,12 @@ function routes(over: Routes = {}): Routes {
   };
 }
 
-async function mount(r: Routes) {
+type Page = Parameters<typeof Performance>[0]["page"];
+async function mount(r: Routes, page: Page = "performance", path = "/performance") {
   ff = installFakeFetch(r);
   const out = render(
-    <MemoryRouter initialEntries={["/performance"]}>
-      <Performance />
+    <MemoryRouter initialEntries={[path]}>
+      <Performance page={page} />
     </MemoryRouter>,
   );
   await flush();
@@ -91,20 +96,27 @@ function type(input: HTMLInputElement, value: string) {
 }
 
 describe("성과 화면", () => {
-  test("섹션은 데이터 전에 바로 그려지고, 로드 뒤 지표·비교 「NAV 없음」·벤치마크 선이 보인다", async () => {
+  test("성과 페이지: 섹션(개요·계좌 비교)은 데이터 전에 바로 그려지고, 로드 뒤 지표·비교 「NAV 없음」·벤치마크 선이 보인다 — 다른 페이지 절은 없고 부르지도 않는다", async () => {
     ff = installFakeFetch(routes());
     render(
       <MemoryRouter>
         <Performance />
       </MemoryRouter>,
     );
-    for (const id of ["performance-overview", "compare", "calibration", "shadow", "rl", "memory"]) expect(section(id)).not.toBeNull();
+    for (const id of ["performance-overview", "compare"]) expect(section(id)).not.toBeNull();
+    for (const id of ["calibration", "shadow", "rl", "memory", "fo-scorecard"]) expect(section(id)).toBeNull();
     await flush();
     await flush();
+    for (const p of ["/analytics/calibration", "/analytics/shadow", "/analytics/rl/report", "/analytics/rl/experiments", "/analytics/memory"]) expect(callsTo(p)).toHaveLength(0);
     const overview = section("performance-overview")!;
+    expect(overview.querySelector("h2")!.textContent).toBe("수익률·위험");
+    const kpi = overview.querySelector('dl.stats[data-size="kpi"]')!;
+    expect(Array.from(kpi.querySelectorAll("dt")).map((e) => e.textContent)).toEqual(["수익률", "최대 낙폭(MDD)", "Sortino", "회전율", "토론 수렴율"]);
     expect(overview.textContent).toContain("5.23%");
     expect(overview.textContent).toContain("42.00%");
     expect(overview.textContent).toContain("75.00%");
+    expect(overview.textContent).toContain("판정 분포");
+    expect(overview.textContent).toContain("매수 3");
     // 본 NAV 1개 + 벤치마크 2개(quant null 은 건너뜀)
     expect(m.chart.addSeries).toHaveBeenCalledTimes(3);
     // 벤치마크가 있으면 NAV 를 시작=1.0 으로 정규화해 같은 축에(첫 setData 가 본선)
@@ -112,16 +124,96 @@ describe("성과 화면", () => {
     expect(navData[0].value).toBe(1);
     expect(navData.at(-1)!.value).toBeCloseTo(1.0523);
     expect(overview.textContent).toContain("시작=1.0");
-    expect(section("compare")!.textContent).toContain("NAV 없음");
-    expect(section("calibration")!.textContent).toContain("표본 부족");
-    expect(section("shadow")!.textContent).toContain("표본 부족(n < 20)");
-    expect(section("rl")!.textContent).toContain("rl-007");
-    // realized_*_sum 은 weight × price_return 합(분수 수익률) → 퍼센트
-    expect(section("rl")!.textContent).toContain("실현 합 RL 2.10% · LLM 1.50%");
-    // bias 는 signal 평균 − realized_sign 평균(차이값, 퍼센트 아님)
-    expect(section("calibration")!.textContent).toContain("+0.12");
+    expect(section("compare")!.textContent).toContain("기록 없음");
+    expect(section("compare")!.querySelector("table")).not.toBeNull();
     const perf = callsTo("/analytics/performance")[0];
     expect(perf.search).toBe("?account_id=paper-1&market=KR&days=30");
+  });
+
+  test("지표가 null 이면 「—」 아래 「산출 자료 부족」, 판정 분포가 비면 줄을 그리지 않고, 계좌 비교가 전부 비면 표 대신 「30일 기록 없음」", async () => {
+    const none = { return: null, mdd: null, sortino: null, days: null, start: null, end: null };
+    const c = fixtureCompare();
+    await mount(
+      routes({
+        "GET /api/analytics/performance": fixturePerformance({ metrics: none, turnover: null, convergence_rate: null, decision_distribution: {} }),
+        "GET /api/analytics/performance/compare": { ...c, rows: (c.rows as { metrics: unknown }[]).map((r) => ({ ...r, metrics: null })) },
+      }),
+    );
+    const overview = section("performance-overview")!;
+    expect(overview.querySelectorAll("dl.stats .stat-sub").length).toBe(5);
+    expect(overview.querySelector("dl.stats .stat-sub")!.textContent).toBe("산출 자료 부족");
+    expect(overview.textContent).not.toContain("판정 분포");
+    expect(section("compare")!.querySelector("table")).toBeNull();
+    expect(section("compare")!.textContent).toContain("30일 기록 없음");
+  });
+
+  test("추가 분석 페이지: 보정·섀도·RL(·파생 성적표 hidden) 절만 — 개요·복기는 부르지 않는다", async () => {
+    await mount(routes(), "analysis");
+    for (const id of ["calibration", "shadow", "rl", "fo-scorecard"]) expect(section(id)).not.toBeNull();
+    for (const id of ["performance-overview", "compare", "memory"]) expect(section(id)).toBeNull();
+    expect(callsTo("/analytics/performance")).toHaveLength(0);
+    expect(callsTo("/analytics/memory")).toHaveLength(0);
+    expect(section("calibration")!.textContent).toContain("표본 부족");
+    expect(section("shadow")!.textContent).toContain("표본 부족(n < 20)");
+    // RL 은 Stats 격자(모델: 버전·백엔드·스텝·저장일 / 섀도 집계)
+    const rl = section("rl")!;
+    expect(rl.textContent).toContain("rl-007");
+    const dts = Array.from(rl.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(expect.arrayContaining(["버전", "백엔드", "스텝", "저장일", "제안", "적용", "만기", "평균 비중 LLM / RL", "실현 합 RL / LLM"]));
+    // realized_*_sum 은 weight × price_return 합(분수 수익률) → 퍼센트
+    expect(rl.textContent).toContain("2.10% / 1.50%");
+    // bias 는 signal 평균 − realized_sign 평균(차이값, 퍼센트 아님)
+    expect(section("calibration")!.textContent).toContain("+0.12");
+    expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
+  });
+
+  test("추가 분석 페이지에도 계좌·시장 필터가 있고, 시장을 US 로 바꾸면 섀도·RL 을 US 로 다시 읽는다", async () => {
+    await mount(routes(), "analysis");
+    const select = document.querySelector('[data-page="analysis"] select[aria-label="시장"]') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(document.querySelector('[data-page="analysis"] select[aria-label="계좌"]')).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(select, "US");
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    expect(callsTo("/analytics/shadow").at(-1)!.search).toBe("?market=US");
+    expect(callsTo("/analytics/rl/report").at(-1)!.search).toBe("?account_id=paper-1&market=US");
+  });
+
+  test("RL 섀도 거래 표(/analytics/rl/shadow?account_id=&days=30)와 실험 행 펼침(/rl/experiments/{version})", async () => {
+    await mount(routes(), "analysis");
+    const rl = section("rl")!;
+    expect(callsTo("/analytics/rl/shadow")[0].search).toBe("?account_id=paper-1&days=30");
+    const tables = rl.querySelectorAll("table");
+    const shadow = Array.from(tables).find((t) => t.textContent?.includes("005930"))!;
+    expect(Array.from(shadow.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["시각", "종목", "모델", "비중 LLM / RL", "적용", "수익률", "실현 RL / LLM"]);
+    expect(shadow.textContent).toContain("8.00% / 6.00%");
+    expect(shadow.querySelector('.chip[data-tone="ok"]')!.textContent).toBe("적용");
+    // 실험 펼침
+    const exp = Array.from(tables).find((t) => t.textContent?.includes("rl-006"))!;
+    expect(callsTo("/analytics/rl/experiments/rl-007")).toHaveLength(0);
+    await act(async () => (exp.querySelector('button[aria-label="펼치기"]') as HTMLButtonElement).click());
+    await flush();
+    expect(callsTo("/analytics/rl/experiments/rl-007")).toHaveLength(1);
+    const ex = exp.querySelector(".table-expand") as HTMLElement;
+    const dts = Array.from(ex.querySelectorAll("dl.stats dt")).map((e) => e.textContent);
+    expect(dts).toEqual(expect.arrayContaining(["학습 기간", "스텝", "시드", "폴드", "지평(일)"]));
+    expect(ex.textContent).toContain("2025-01-02 ~ 2026-10-31");
+    const sum = ex.querySelector("table")!;
+    expect(Array.from(sum.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["정책", "표본 수(n)", "수익 평균", "수익 표준편차", "최대 낙폭(MDD) 평균", "소르티노 평균"]);
+    expect(sum.textContent).toContain("RL");
+    expect(sum.textContent).toContain("3.10%");
+  });
+
+  test("섀도 기준선이 전부 표본 부족이면 표 대신 한 줄 「기준선 n개 · 표본 x/20 — 20쌍부터 집계」", async () => {
+    const few = fixtureShadow({ pairs: { candidates_1n: { n: 5, mean_diff: null, ci_low: null, ci_high: null }, quant_topn: { n: 2, mean_diff: null, ci_low: null, ci_high: null } } });
+    await mount(routes({ "GET /api/analytics/shadow": few }), "analysis");
+    const sh = section("shadow")!;
+    expect(sh.textContent).toContain("기준선 2개 · 표본 5/20 — 20쌍부터 집계");
+    expect(sh.textContent).not.toContain("표본 부족(n <");
+    expect(sh.querySelectorAll("table")).toHaveLength(1); // 최근 10일 표만
   });
 
   test("기간 「90일」 을 누르면 days=90 으로 다시 부른다", async () => {
@@ -145,16 +237,20 @@ describe("성과 화면", () => {
     });
     await flush();
     expect(callsTo("/analytics/performance").at(-1)!.searchParams.get("market")).toBe("US");
-    expect(callsTo("/analytics/shadow").at(-1)!.searchParams.get("market")).toBe("US");
   });
 
-  test("복기 메모리: 처음엔 q 없이, 「005930」 검색하면 q=005930 으로 부르고 warmup·breaker 를 보인다", async () => {
-    await mount(routes());
+  test("복기 메모리: 처음엔 q 없이, 「005930」 검색하면 q=005930 으로 부르고 warmup·breaker 를 보인다 — 표는 종목 코드+이름·층 한글·중요도(0~1)", async () => {
+    await mount(routes(), "memory");
+    expect(section("performance-overview")).toBeNull();
     const first = callsTo("/analytics/memory")[0];
     expect(first.searchParams.has("q")).toBe(false);
     expect(first.searchParams.get("limit")).toBe("20");
     const mem = section("memory")!;
     expect(mem.textContent).toContain("반도체 업황 반등 기대");
+    expect(Array.from(mem.querySelectorAll("thead th")).map((e) => e.textContent)).toEqual(["결정일", "종목", "판정", "결과", "층", "중요도(0~1)", "상황 요약"]);
+    expect(mem.textContent).toContain("005930 삼성전자");
+    expect(mem.textContent).toContain("단기");
+    expect(mem.textContent).not.toContain("short");
     type(mem.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement, "005930");
     act(() => button(mem, "검색").click());
     await flush();
@@ -165,6 +261,14 @@ describe("성과 화면", () => {
     expect(mem.textContent).toContain("임베딩 장애");
   });
 
+  test("복기 페이지에 ?ticker=005930 으로 들어오면 처음부터 q=005930 으로 부르고 검색창에 채운다(결정 상세 딥링크)", async () => {
+    await mount(routes(), "memory", "/performance/memory?ticker=005930");
+    const first = callsTo("/analytics/memory")[0];
+    expect(first.searchParams.get("q")).toBe("005930");
+    expect((section("memory")!.querySelector('input[aria-label="종목 검색"]') as HTMLInputElement).value).toBe("005930");
+    expect(section("memory")!.textContent).toContain("워밍업");
+  });
+
   test("벤치마크가 없으면 NAV 는 금액 그대로", async () => {
     const none = { one_over_n: { return: null, series: [] }, buy_and_hold: { return: null, series: [] }, quant: null, benchmark_universe: [] };
     await mount(routes({ "GET /api/analytics/performance": fixturePerformance({ benchmarks: none }) }));
@@ -173,17 +277,18 @@ describe("성과 화면", () => {
     expect(navData[0].value).toBe(10_000_000);
   });
 
-  test("fo 계좌가 없으면 파생 scorecard 절을 숨기고 부르지 않는다", async () => {
-    await mount(routes());
-    expect(section("fo-scorecard")).toBeNull();
+  test("fo 계좌가 없으면 파생 성적표 절은 hidden 이고 부르지 않는다", async () => {
+    await mount(routes(), "analysis");
+    expect(section("fo-scorecard")!.hidden).toBe(true);
     expect(callsTo("/analytics/fo/scorecard")).toHaveLength(0);
   });
 
-  test("fo 계좌가 있으면 파생 scorecard 를 보인다", async () => {
-    await mount(routes({ "GET /api/accounts": fixturePerfAccounts(true) }));
+  test("fo 계좌가 있으면 파생 성적표를 보인다", async () => {
+    await mount(routes({ "GET /api/accounts": fixturePerfAccounts(true) }), "analysis");
     const fo = section("fo-scorecard")!;
-    expect(fo).not.toBeNull();
+    expect(fo.hidden).toBe(false);
     expect(fo.textContent).toContain("55.56%");
+    expect(Array.from(fo.querySelectorAll('dl.stats[data-size="kpi"] dt')).map((e) => e.textContent)).toEqual(["결정", "만기", "적중률", "계약 손익"]);
     expect(callsTo("/analytics/fo/scorecard")).toHaveLength(1);
   });
 
@@ -192,10 +297,11 @@ describe("성과 화면", () => {
       routes({
         "GET /api/analytics/calibration": () => new Response(JSON.stringify({ detail: "보정 계산 실패" }), { status: 500, headers: { "Content-Type": "application/json" } }),
       }),
+      "analysis",
     );
     const cal = section("calibration")!;
     expect(cal.textContent).toContain("불러오지 못했습니다");
     expect(cal.textContent).toContain("보정 계산 실패");
-    expect(section("compare")!.textContent).toContain("NAV 없음");
+    expect(section("shadow")!.textContent).toContain("표본 부족(n < 20)");
   });
 });

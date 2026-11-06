@@ -1,7 +1,8 @@
-// 감시목록 — GET /settings/watchlist 를 칩 목록으로 고치고(빼기·추가) 「저장」 → PATCH /settings/watchlist {tickers}(목록 전체 교체).
-// 쓰기라 토큰이 필요하다 — 없거나 401/403 이면 오류 줄(api.ts 가 전역 안내도 띄운다).
+// 감시목록 — GET /settings/watchlist 를 칩 목록으로 고치고(빼기·추가 — 추가 즉시 임시 칩 `data-draft`) 「저장」 → 확인 →
+// PATCH /settings/watchlist {tickers}(목록 전체 교체). 쓰기라 토큰이 필요하다 — 없거나 401/403 이면 오류 줄(api.ts 가 전역 안내도 띄운다).
 import { useState } from "react";
 import { Chip } from "../../components/Chip";
+import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
 import { errorText, patchJson } from "../../lib/api";
 import { useResource } from "../../lib/hooks";
@@ -15,8 +16,10 @@ export function Watchlist() {
   const [draft, setDraft] = useState<string[] | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const list = draft ?? res.data?.tickers ?? [];
+  const saved = res.data?.tickers ?? [];
+  const list = draft ?? saved;
 
   const add = () => {
     const t = text.trim().toUpperCase();
@@ -45,7 +48,7 @@ export function Watchlist() {
         <ul className="data-watchlist">
           {list.map((t) => (
             <li key={t}>
-              <Chip>
+              <Chip tone={saved.includes(t) ? undefined : "warn"} data-draft={saved.includes(t) ? undefined : "true"}>
                 {t}
                 <button type="button" className="data-chip-x" aria-label={`${t} 빼기`} onClick={() => remove(t)}>
                   ×
@@ -68,10 +71,20 @@ export function Watchlist() {
         <button type="submit" className="btn">
           추가
         </button>
-        <button type="button" className="btn btn-primary" disabled={busy || draft === null} onClick={() => void save()}>
+        <button type="button" className="btn btn-primary" disabled={busy || draft === null} onClick={() => setConfirming(true)}>
           저장
         </button>
       </form>
+      <Confirm
+        open={confirming}
+        title="감시목록 저장"
+        body={<p>감시목록을 {list.length}종목으로 바꿉니다({list.join(", ") || "비움"}). 데몬이 다음 스캔부터 이 목록을 씁니다.</p>}
+        onConfirm={() => {
+          setConfirming(false);
+          void save();
+        }}
+        onClose={() => setConfirming(false)}
+      />
       {error ? (
         <p className="data-error" role="alert">
           {error}

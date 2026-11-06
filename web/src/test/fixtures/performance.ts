@@ -123,6 +123,42 @@ export function fixtureRlExperiments() {
   return { experiments: [experiment(), experiment({ version: "rl-006", promoted: false, promote_reason: null })], active: experiment() };
 }
 
+export function fixtureRlExperimentDetail(over: Over = {}) {
+  const policy = (ret: number) => ({ n: 3, return_mean: ret, return_std: 0.01, mdd_mean: -0.02, sortino_mean: 1.1 });
+  return {
+    ...experiment(),
+    market: "KR",
+    horizon_days: 10,
+    embargo_horizon_days: 10,
+    train_range: ["2025-01-02", "2026-10-31"],
+    folds: [{ index: 0, train_steps: 800, test_steps: 200, train_end: "2026-06-30", test_start: "2026-07-15", test_end: "2026-10-31", seeds: [], baselines: {} }],
+    summary: { rl: policy(0.031), fixed: policy(0.012), llm: policy(0.015), vol_target: policy(0.02) },
+    obs_columns: ["position_weight", "drawdown"],
+    ...over,
+  };
+}
+
+export function fixtureRlShadow() {
+  const row = (over: Over = {}) => ({
+    id: 1,
+    decision_id: 7,
+    account_id: "paper-1",
+    created_at: "2026-11-05T00:30:00+00:00",
+    model_version: "rl-007",
+    ticker: "005930",
+    market: "KR",
+    decision_date: "2026-11-05",
+    llm_weight: 0.08,
+    proposed_weight: 0.06,
+    applied: true,
+    price_return: 0.05,
+    realized_rl: 0.003,
+    realized_llm: 0.004,
+    ...over,
+  });
+  return { rows: [row(), row({ id: 2, decision_id: 8, ticker: "000660", applied: false, price_return: null, realized_rl: null, realized_llm: null })] };
+}
+
 export function fixtureRlReport() {
   return {
     weeks: 8,
@@ -137,6 +173,7 @@ function memoryEntry(over: Over = {}) {
   return {
     id: 1,
     ticker: "005930",
+    name: "삼성전자",
     market: "KR",
     account_id: "paper-1",
     decision_id: 101,
@@ -165,7 +202,7 @@ function memoryEntry(over: Over = {}) {
 export function fixtureMemory(over: Over = {}) {
   return {
     query: null,
-    entries: [memoryEntry(), memoryEntry({ id: 2, ticker: "AAPL", market: "US", decision: {}, price_return: null, situation_summary: null })],
+    entries: [memoryEntry(), memoryEntry({ id: 2, ticker: "AAPL", name: null, market: "US", decision: {}, price_return: null, situation_summary: null, tier: "long" })],
     ...over,
   };
 }

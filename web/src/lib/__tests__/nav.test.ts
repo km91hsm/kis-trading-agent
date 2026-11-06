@@ -16,7 +16,10 @@ describe("nav 페이지", () => {
     expect(pagePathOf("system", "runs")).toBe("/system/jobs");
     expect(pagePathOf("system", "regime")).toBe("/system/features");
     expect(pagePathOf("system", "health")).toBe("/system");
-    expect(pagePathOf("data", "news")).toBe("/data");
+    expect(pagePathOf("data", "news")).toBe("/data/news");
+    expect(pagePathOf("data", "watchlist")).toBe("/data/themes");
+    expect(pagePathOf("performance", "shadow")).toBe("/performance/analysis");
+    expect(pagePathOf("performance", "compare")).toBe("/performance");
     expect(pagePathOf("system", "nope")).toBeNull();
   });
   test("백엔드 링크 /system#절 은 페이지 주소로 바꾼다(절 없는 링크·다른 화면은 그대로)", () => {

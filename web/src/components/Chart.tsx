@@ -16,10 +16,11 @@ import {
 } from "lightweight-charts";
 
 export type ChartPoint = { time: string; value: number };
-export type ChartMarker = { time: string; text: string; color: string };
+export type ChartMarker = { time: string | number; text: string; color: string };
 export type ChartLine = { price: number; label: string; color: string };
 export type ChartExtra = { label: string; data: ChartPoint[] };
-export type ChartCandle = { time: string; open: number; high: number; low: number; close: number };
+/** time 은 일봉이면 "YYYY-MM-DD", 분봉이면 epoch 초. */
+export type ChartCandle = { time: string | number; open: number; high: number; low: number; close: number };
 
 export type ChartProps = {
   series?: ChartPoint[];
@@ -28,9 +29,38 @@ export type ChartProps = {
   lines?: ChartLine[];
   extra?: ChartExtra[];
   height?: number;
+  /** 분봉 — 시간축에 시각을 보인다. */
+  intraday?: boolean;
+  /** 분봉 시각의 시장 시간대(기본 Asia/Seoul). epoch 를 그대로 두면 UTC 로 찍힌다. */
+  tz?: string;
 };
 
+type TickTime = string | number | { year: number; month: number; day: number };
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** 시간축 눈금 — 일봉 날짜는 MM/DD, 분봉 epoch 는 시장 시간대의 HH:MM. */
+export function fmtTick(time: TickTime, tz = "Asia/Seoul"): string {
+  if (typeof time === "number") {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(time * 1000));
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+    return `${get("hour")}:${get("minute")}`;
+  }
+  if (typeof time === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(time);
+    return m ? `${m[2]}/${m[3]}` : time;
+  }
+  return `${pad2(time.month)}/${pad2(time.day)}`;
+}
+
 const EXTRA_COLORS = ["--fg-muted", "--warn", "--ok"];
+
+/** 가격축 숫자 — 백만 이상은 「1,235만」, 억 이상은 「1.5억」(원화 NAV 축이 10,000,000.00 처럼 길어지지 않게), 작은 값은 소수 둘째까지. */
+export function fmtAxis(v: number): string {
+  const a = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (a >= 1e8) return `${sign}${(a / 1e8).toLocaleString("en-US", { maximumFractionDigits: 1 })}억`;
+  if (a >= 1e6) return `${sign}${Math.round(a / 1e4).toLocaleString("en-US")}만`;
+  return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
 
 function cssVar(name: string): string | undefined {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -49,8 +79,8 @@ export function Chart(props: ChartProps) {
       </div>
     );
   }
-  // 선 시리즈 점이 하나면 평평한 선·가짜 축이 된다 — 내일부터 추이가 생긴다고 알린다.
-  if (candles === undefined && points === 1 && !extra?.length) {
+  // 선 시리즈 점이 하나면(벤치마크 선이 있어도) 평평한 선·가짜 축이 된다 — 내일부터 추이가 생긴다고 알린다.
+  if (candles === undefined && points === 1) {
     return (
       <div className="chart chart-empty" data-chart-empty style={{ height }}>
         자료 1일 — 추이는 내일부터
@@ -68,7 +98,7 @@ export function Chart(props: ChartProps) {
   return <LiveChart {...props} />;
 }
 
-function LiveChart({ series, candles, markers, lines, extra, height = 240 }: ChartProps) {
+function LiveChart({ series, candles, markers, lines, extra, height = 240, intraday = false, tz = "Asia/Seoul" }: ChartProps) {
   const el = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRef = useRef<ISeriesApi<"Line"> | ISeriesApi<"Candlestick"> | null>(null);
@@ -81,6 +111,7 @@ function LiveChart({ series, candles, markers, lines, extra, height = 240 }: Cha
       width: host.clientWidth,
       height,
       layout: { background: { color: "transparent" }, textColor: cssVar("--fg-muted"), fontFamily: cssVar("--font") },
+      localization: { priceFormatter: fmtAxis },
       grid: { vertLines: { color: cssVar("--line") }, horzLines: { color: cssVar("--line") } },
     });
     chartRef.current = chart;
@@ -109,6 +140,15 @@ function LiveChart({ series, candles, markers, lines, extra, height = 240 }: Cha
   useEffect(() => {
     chartRef.current?.applyOptions({ height });
   }, [height]);
+
+  useEffect(() => {
+    // 연·월 눈금(type 0·1)은 기본 라벨, 날짜·시각 눈금만 우리 형식.
+    const tick = (t: TickTime, type?: number) => (typeof type === "number" && type < 2 ? null : fmtTick(t, tz));
+    chartRef.current?.applyOptions({
+      timeScale: { timeVisible: intraday, secondsVisible: false, tickMarkFormatter: tick as never },
+      localization: { priceFormatter: fmtAxis, timeFormatter: ((t: TickTime) => (intraday ? fmtTick(t, tz) : typeof t === "string" ? t : fmtTick(t, tz))) as never },
+    });
+  }, [intraday, tz]);
 
   useEffect(() => {
     const s = lineRef.current;

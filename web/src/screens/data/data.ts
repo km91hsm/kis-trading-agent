@@ -37,6 +37,32 @@ export type NewsRow = {
 
 export const USED_CHIP = "판정에 쓰임";
 
+/** 출처 원문(naver·google_rss·dart…) → 한글. 모르는 출처는 원문. */
+const SOURCE_LABEL: Record<string, string> = {
+  naver: "네이버",
+  google_rss: "Google 뉴스 RSS",
+  google: "Google 뉴스",
+  manual: "수동 입력",
+  dart: "전자공시(DART)",
+  edgar: "EDGAR",
+  kind: "KIND",
+  saveticker: "세이브티커",
+  blog: "블로그",
+};
+export const sourceLabel = (s: string | null | undefined): string => (s ? (SOURCE_LABEL[s] ?? s) : "—");
+
+/** 공시 중요도 → 한글 라벨·칩 색. 값이 없으면 null(칩을 그리지 않는다). */
+const SEVERITY: Record<string, { label: string; tone: "fail" | "warn" | "muted" }> = {
+  critical: { label: "긴급", tone: "fail" },
+  high: { label: "중요", tone: "warn" },
+  medium: { label: "보통", tone: "muted" },
+  low: { label: "낮음", tone: "muted" },
+};
+export function severityChip(s: string | null | undefined): { label: string; tone: "fail" | "warn" | "muted" } | null {
+  if (!s) return null;
+  return SEVERITY[s] ?? { label: s, tone: "muted" };
+}
+
 export function newsRows(news: NewsItem[], labels: NewsLabels, refs: NewsRefs, names: Names): NewsRow[] {
   return news.map((n) => {
     const label = labels[String(n.id)];
@@ -110,6 +136,42 @@ export const KEY_COLUMNS = [
   "news_count",
 ];
 
+/** 지표 열 한글 라벨(`th[data-key]` 는 원문 키를 유지한다). 모르는 열은 원문. */
+const FEATURE_LABEL: Record<string, string> = {
+  ticker: "종목",
+  sector: "업종",
+  date: "날짜",
+  close: "종가",
+  volume: "거래량",
+  roc_10: "10일 수익률",
+  high_52w_pos: "52주 고점 위치",
+  op_margin: "영업이익률",
+  roe: "ROE",
+  debt_ratio: "부채비율",
+  op_margin_vs_sector: "영업이익률(업종 대비)",
+  roe_vs_sector: "ROE(업종 대비)",
+  debt_ratio_vs_sector: "부채비율(업종 대비)",
+  flow_foreign_20d: "외국인 20일 순매수",
+  flow_inst_20d: "기관 20일 순매수",
+  flow_indiv_20d: "개인 20일 순매수",
+  news_count: "뉴스 수",
+  community_count: "커뮤니티 수",
+};
+export const featureLabel = (c: string): string => FEATURE_LABEL[c] ?? c;
+
+/** 지표 값 형식 — 비율 열은 %, 가격·건수는 천 단위 정수, 순매수 같은 수치는 천 단위(소수 ≤2). 모르는 열은 fmt. */
+const PCT_COLS = new Set(["roc_10", "high_52w_pos", "op_margin", "roe", "debt_ratio", "op_margin_vs_sector", "roe_vs_sector", "debt_ratio_vs_sector"]);
+const INT_COLS = new Set(["volume", "news_count", "community_count"]);
+export function fmtFeature(col: string, v: Cell | undefined): string {
+  if (v == null) return "—";
+  if (typeof v !== "number") return String(v);
+  if (PCT_COLS.has(col)) return `${(v * 100).toFixed(2)}%`;
+  if (col === "close") return v.toLocaleString("en-US", { maximumFractionDigits: 2 }); // KR 정수는 그대로, US 는 센트까지
+  if (INT_COLS.has(col)) return Math.round(v).toLocaleString("en-US");
+  if (col.startsWith("flow_")) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return fmt(v);
+}
+
 /** key 열로 정렬한 새 배열. null 은 방향과 무관하게 항상 마지막(결측이 '최대' 로 보이지 않게). */
 export function sortRows<T extends FeatureRow>(rows: T[], key: string, dir: SortDir): T[] {
   const sign = dir === "asc" ? 1 : -1;
@@ -145,7 +207,7 @@ export function featureRows(latest: LatestResp, sortKey: string | null, dir: Sor
 
 // ── 차트 ─────────────────────────────────────────────────────────────────────
 /** `/charts` markers 한 항목(체결). side 는 buy|sell(대소문자 무관). */
-export type FillMarker = { time: string; kind?: string; side: string; text: string };
+export type FillMarker = { time: string | number; kind?: string; side: string; text: string };
 
 /** 체결 표식 — 매수 --up(적)·매도 --down(청). color 는 CSS 변수 이름(화면이 값으로 푼다). */
 export function chartMarkers(markers: FillMarker[]): ChartMarker[] {

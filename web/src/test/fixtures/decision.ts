@@ -9,6 +9,7 @@ export function fixtureSpotDecisionRow(over: Over = {}) {
     date: "2026-11-05",
     market: "KR",
     ticker: "005930",
+    name: "삼성전자",
     action: "BUY",
     target_weight: 0.1,
     order_type: "LIMIT",
@@ -46,11 +47,12 @@ export function fixtureSpotTrace(over: Over = {}) {
     analysts: [
       { role: "technical", label: "차트", signal: "BULLISH", confidence: 0.7, summary: "s", evidence: ["추세 상승", "거래량 증가"], news_refs: [] },
       { role: "news", label: "뉴스", signal: "NEUTRAL", confidence: 0.5, summary: "s", evidence: [], news_refs: [] },
+      { role: "fundamental", label: "회사가치", signal: "SELL", confidence: 0.3, summary: "s", evidence: [], news_refs: [] },
     ],
     debate: [
       { round: 0, side: "bear", stance: "BEARISH", conviction: 0.4, timing: "WAIT" },
       { round: 0, side: "bull", stance: "BULLISH", conviction: 0.8, timing: "NOW" },
-      { round: 1, side: "bull", stance: "BULLISH", conviction: 0.7, timing: "NOW" },
+      { round: 1, side: "bull", stance: "BULLISH", conviction: 0.7, timing: { action: "WAIT", condition: "194,415 회복 뒤 진입", price_zone: "손절 172,500" } },
     ],
     research: null,
     gate: [{ account_id: "paper-1", approved: true, qty: 3, reasons: ["한도 안"], checked_at: "2026-11-05T00:11:00+00:00" }],

@@ -124,7 +124,7 @@ def test_sse_snapshot_includes_theme_and_watchlist(project):
 
 def test_nav_item():
     assert [(n.screen, n.id, n.label, n.order) for n in FEATURE.nav] == [
-        ("data", "themes", "테마·감시목록", 20)
+        ("data", "themes", "테마", 20), ("data", "watchlist", "감시목록", 21),
     ]
 
 

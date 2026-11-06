@@ -27,7 +27,7 @@ vi.mock("lightweight-charts", () => ({
   CandlestickSeries: m.CandlestickSeries,
 }));
 
-import { Chart } from "../Chart";
+import { Chart, fmtTick } from "../Chart";
 import { render } from "../../test/render";
 
 let roCallback: ResizeObserverCallback | null = null;
@@ -117,6 +117,20 @@ describe("Chart", () => {
 });
 
 describe("빈 자료", () => {
+  test("fmtTick — 일봉 날짜는 MM/DD, 분봉 epoch 는 시장 시간대 HH:MM", () => {
+    expect(fmtTick("2026-11-05")).toBe("11/05");
+    expect(fmtTick(1762302600, "Asia/Seoul")).toBe("09:30");
+    expect(fmtTick(1762302600, "America/New_York")).toBe("19:30");
+    expect(fmtTick(1762302600)).toBe("09:30"); // 기본 KST
+  });
+
+  test("intraday 면 timeScale 에 시각 표시·눈금 포매터를 applyOptions 로 준다", () => {
+    render(<Chart candles={[{ time: 1762302600, open: 1, high: 2, low: 1, close: 2 }]} intraday tz="America/New_York" />);
+    const call = m.chart.applyOptions.mock.calls.map((c) => (c as unknown[])[0] as { timeScale?: { timeVisible?: boolean; tickMarkFormatter?: (t: unknown) => string } }).find((o) => o.timeScale?.timeVisible);
+    expect(call).toBeDefined();
+    expect(call!.timeScale!.tickMarkFormatter!(1762302600)).toBe("19:30");
+  });
+
   test("점이 없으면 차트를 만들지 않고 같은 높이의 빈 틀에 「자료 없음」을 쓴다", () => {
     const { container } = render(<Chart series={[]} height={200} />);
     expect(m.createChart).not.toHaveBeenCalled();
@@ -144,5 +158,25 @@ describe("점 1개", () => {
     const { container } = render(<Chart series={[{ time: "2026-11-04", value: 10000000 }, { time: "2026-11-05", value: 10000000 }]} />);
     expect(container.querySelector("[data-chart-empty]")?.textContent).toBe("자료 2일 — 변동 없음 (10,000,000)");
     expect(m.createChart).not.toHaveBeenCalled();
+  });
+});
+
+describe("축 축약·1점 가드(벤치마크 있어도)", () => {
+  test("선 시리즈 점이 1개면 벤치마크 선이 있어도 「자료 1일」 빈 틀", () => {
+    const { container } = render(<Chart series={[{ time: "2026-11-05", value: 1 }]} extra={[{ label: "1/N", data: [{ time: "2026-11-05", value: 1 }] }]} />);
+    expect(container.querySelector("[data-chart-empty]")!.textContent).toContain("자료 1일");
+    expect(m.createChart).not.toHaveBeenCalled();
+  });
+
+  test("가격축은 큰 금액을 「1,235만」「1.5억」 으로 줄이고 작은 값은 그대로", () => {
+    render(<Chart series={[{ time: "2026-11-04", value: 10_000_000 }, { time: "2026-11-05", value: 10_500_000 }]} />);
+    const opts = (m.createChart.mock.calls[0] as unknown[])[1] as { localization: { priceFormatter: (v: number) => string } };
+    const f = opts.localization.priceFormatter;
+    expect(f(12_345_678)).toBe("1,235만");
+    expect(f(10_000_000)).toBe("1,000만");
+    expect(f(150_000_000)).toBe("1.5억");
+    expect(f(70_500)).toBe("70,500");
+    expect(f(1.0523)).toBe("1.05");
+    expect(f(-2_500_000)).toBe("-250만");
   });
 });

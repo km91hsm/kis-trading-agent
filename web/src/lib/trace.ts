@@ -4,7 +4,8 @@
 import { GLOSSARY, sideLabel, termLabel } from "./glossary";
 
 export type TraceAnalyst = { role: string; label: string; signal: string | null; confidence: number | null; summary: string | null; evidence: string[] };
-export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null };
+/** timing 은 세션에 따라 문자열("NOW")이거나 객체({action, condition, price_zone}) — 정규화해 action 은 timing, 조건은 timing_note. */
+export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null; timing_note: string | null };
 export type TraceGate = { stage: string; account_id: string; approved?: boolean; qty?: number | null; reasons?: string[]; note?: string | null; mode?: string | null; dry_run?: boolean | null };
 export type TraceOrder = { stage: string; account_id: string; status?: string | null; order_no?: string | null; message?: string | null; side?: string | null; qty?: number | null; price?: string | null; mode?: string | null };
 /** fo 게이트·주문 체크포인트 요약(`fo/routes._checks` 값). */
@@ -26,7 +27,7 @@ export type TraceResp = {
   checkpoint?: Record<string, unknown> | null;
 };
 
-export const SIGNAL = { BULLISH: "강세", NEUTRAL: "중립", BEARISH: "약세", UNKNOWN: "판단불가" } as Record<string, string>;
+export const SIGNAL = { BULLISH: "강세", NEUTRAL: "중립", BEARISH: "약세", UNKNOWN: "판단불가", BUY: "매수", SELL: "매도", HOLD: "보류" } as Record<string, string>;
 
 export type TraceStep = { key: string; title: string; lines: string[] };
 
@@ -165,7 +166,18 @@ export function normalizeTrace(asset: "spot" | "fo", raw: unknown): TraceResp {
     },
     quote: strOrNull(r.quote),
     analysts: arr(r.analysts).map((a) => ({ ...a, evidence: Array.isArray(a.evidence) ? a.evidence.map(String) : [] }) as TraceAnalyst),
-    debate: arr(r.debate) as TraceDebate[],
+    debate: arr(r.debate).map((d) => {
+      const t = d.timing;
+      const obj = isObj(t) ? t : null;
+      return {
+        round: typeof d.round === "number" ? d.round : null,
+        side: strOrNull(d.side),
+        stance: strOrNull(d.stance),
+        conviction: typeof d.conviction === "number" ? d.conviction : null,
+        timing: obj ? strOrNull(obj.action) : strOrNull(t),
+        timing_note: obj ? [strOrNull(obj.condition), strOrNull(obj.price_zone)].filter(Boolean).join(" · ") || null : null,
+      };
+    }),
     research: isObj(r.research) ? (r.research as TraceResp["research"]) : null,
     gate: withStage<TraceGate>(r.gate, "risk"),
     orders: withStage<TraceOrder>(r.orders, "order"),

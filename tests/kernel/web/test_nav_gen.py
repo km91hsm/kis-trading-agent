@@ -33,10 +33,13 @@ def test_nav_ts_contains_screens_and_feature_items():
     nav = _nav_obj(out)
     assert list(nav) == ["today", "accounts", "performance", "data", "system"]
     assert nav["today"]["label"] == "오늘" and nav["today"]["path"] == "/"
-    assert nav["data"] == {
-        "label": "데이터", "path": "/data", "items": [],
-        "pages": [{"id": "data", "label": "데이터", "path": "/data"}],
+    assert nav["accounts"] == {
+        "label": "계좌·보유", "path": "/accounts", "items": [],
+        "pages": [{"id": "accounts", "label": "계좌·보유", "path": "/accounts"}],
     }
+    assert nav["data"]["items"] == [] and [p["id"] for p in nav["data"]["pages"]] == [
+        "quotes", "news", "themes", "features",
+    ]
     # 커널 today 절(결정·주문·체결·다음 할 일·알림)은 기능 레인 카드(10~30) 뒤 40~70
     assert [i["id"] for i in nav["today"]["items"]] == [
         "spot-lane", "fo-lane", "pipeline", "decisions", "risk-checks",
@@ -130,3 +133,55 @@ def test_nav_ts_today_pages_split_status_and_log():
     assert gen.page_of("today", "unknown-section") == "today"
     assert gen.page_of("system", "unknown-section") == "features"
     assert gen.page_of("accounts", "overview") == "accounts"
+
+
+PERFORMANCE_PAGES = [
+    {"id": "performance", "label": "성과", "path": "/performance"},
+    {"id": "memory", "label": "복기", "path": "/performance/memory"},
+    {"id": "analysis", "label": "추가 분석", "path": "/performance/analysis"},
+]
+DATA_PAGES = [
+    {"id": "quotes", "label": "시세·차트", "path": "/data"},
+    {"id": "news", "label": "뉴스·공시", "path": "/data/news"},
+    {"id": "themes", "label": "테마·감시목록", "path": "/data/themes"},
+    {"id": "features", "label": "지표·모델", "path": "/data/features"},
+]
+
+
+def test_nav_ts_performance_and_data_pages():
+    """성과는 페이지 3개(성과: 개요·계좌 비교 / 복기 / 추가 분석: 보정·섀도·RL·파생 성적표),
+    데이터는 4개(시세·차트 / 뉴스·공시 / 테마·감시목록 / 지표·모델 — 하위 메뉴마다 한 페이지)."""
+    nav = _nav_obj(gen.nav_ts([]))
+    assert nav["performance"]["pages"] == PERFORMANCE_PAGES
+    assert nav["data"]["pages"] == DATA_PAGES
+    assert gen.page_of("performance", "performance-overview") == "performance"
+    assert gen.page_of("performance", "compare") == "performance"
+    assert gen.page_of("performance", "memory") == "memory"
+    for sid in ("calibration", "shadow", "rl", "fo-scorecard"):
+        assert gen.page_of("performance", sid) == "analysis"
+    assert gen.page_of("performance", "unknown-section") == "performance"
+    for sid, page in (("quotes", "quotes"), ("news", "news"), ("themes", "themes"),
+                      ("watchlist", "themes"), ("features", "features")):
+        assert gen.page_of("data", sid) == page
+    assert gen.page_of("data", "unknown-section") == "quotes"
+
+
+def test_feature_nav_items_cover_performance_and_data_pages():
+    """실제 기능의 nav 로 만든 nav.ts — 성과 항목(개요·계좌 비교·복기·보정·섀도·RL·파생 성적표)과
+    데이터 항목(시세·차트·뉴스·공시·테마·감시목록·지표·모델)이 다 있고 라벨은 한글."""
+    from trader.kernel.registry import discover
+
+    nav = _nav_obj(gen.nav_ts(discover()))
+    perf = {i["id"]: (i["label"], i["page"]) for i in nav["performance"]["items"]}
+    assert perf == {
+        "performance-overview": ("성과", "performance"), "compare": ("계좌 비교", "performance"),
+        "memory": ("복기", "memory"),
+        "calibration": ("보정", "analysis"), "shadow": ("섀도 기준선", "analysis"),
+        "rl": ("RL", "analysis"), "fo-scorecard": ("파생 성적표", "analysis"),
+    }
+    data = {i["id"]: (i["label"], i["page"]) for i in nav["data"]["items"]}
+    assert data == {
+        "quotes": ("시세·차트", "quotes"), "news": ("뉴스·공시", "news"),
+        "themes": ("테마", "themes"), "watchlist": ("감시목록", "themes"),
+        "features": ("지표·모델", "features"),
+    }
