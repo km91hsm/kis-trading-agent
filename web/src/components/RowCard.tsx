@@ -1,4 +1,5 @@
-// 행 카드 — 좁은 폭에서 표의 한 행. 1줄 메타(align:"chip" 열), 2줄 제목(long 열, 말줄임), 3줄 나머지 열을 칩으로.
+// 행 카드 — 좁은 폭에서 표의 한 행. 1줄 메타(align:"chip" 열), 2줄 제목(long 열, 말줄임), 3줄 나머지 열을 2열 정의 목록(라벨·값,
+// 값은 줄바꿈 — 가로 스크롤 칩 줄로 잘리지 않게), 4줄 행동 열(action: 취소 버튼 등)은 자기 줄.
 import type { ReactNode } from "react";
 import type { Column } from "./Table";
 
@@ -37,7 +38,8 @@ export function RowCard<T>({
   const columns = oneLong(given);
   const meta = columns.filter((c) => c.align === "chip");
   const long = columns.find((c) => c.long && c.align !== "chip");
-  const rest = columns.filter((c) => c !== long && c.align !== "chip");
+  const actions = columns.filter((c) => c.action);
+  const rest = columns.filter((c) => c !== long && c.align !== "chip" && !c.action);
   return (
     <li className="row-card">
       {meta.length ? (
@@ -53,11 +55,19 @@ export function RowCard<T>({
         </div>
       ) : null}
       {rest.length ? (
-        <div className="row-card-chips">
+        <dl className="row-card-fields">
           {rest.map((c) => (
-            <span key={c.key} className={c.align === "num" ? "chip num" : "chip"} data-tone="muted">
-              <span className="row-card-label">{c.label}</span> {cellOf(c, row)}
-            </span>
+            <div key={c.key} className="row-card-field">
+              <dt>{c.label}</dt>
+              <dd className={c.align === "num" ? "num" : undefined}>{cellOf(c, row)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {actions.length ? (
+        <div className="row-card-actions">
+          {actions.map((c) => (
+            <span key={c.key}>{cellOf(c, row)}</span>
           ))}
         </div>
       ) : null}
