@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { decisionHref, decisionRows, laneCards, laneNextAt, nextJobs, noticeKinds, noticeRows, statusLabel, timeline, todaySummary } from "./today.ts";
+import { decisionHref, decisionRows, foLaneInfo, laneCards, laneNextAt, nextJobs, noticeKinds, noticeRows, statusLabel, timeline, todaySummary } from "./today.ts";
 import { pipelineOf, riskCheckRows, stageLabel } from "./morning.ts";
-import { fixtureMarketToday, fixtureRiskCheck } from "../../test/fixtures/today";
+import { fixtureFoToday, fixtureMarketToday, fixtureRiskCheck } from "../../test/fixtures/today";
 import {
   fixtureAccount,
   fixtureDaemon,
@@ -234,5 +234,16 @@ describe("아침 파이프라인·리스크 게이트 순수 함수", () => {
     const rows = riskCheckRows([fixtureRiskCheck(), fixtureRiskCheck({ id: 2, approved: true, adjusted_qty: 3, reasons: [], name: null, ticker: "000660", decision_id: 9 })]);
     expect(rows[0]).toMatchObject({ id: 1, account_id: "paper-1", ticker: "005930 삼성전자", approved: false, adjusted: "—", reasons: "주간 한도 · 현금 부족", href: "/decisions/spot/1", market: "KR" });
     expect(rows[1]).toMatchObject({ ticker: "000660", approved: true, adjusted: "3주", reasons: "—", href: "/decisions/spot/9" });
+  });
+});
+
+describe("파생 당일(foLaneInfo)", () => {
+  test("아침 결정 한 줄(의도·방향·수단·확신)·재평가 횟수·계좌 플래그, 결정 없으면 line null", () => {
+    const i = foLaneInfo(fixtureFoToday());
+    expect(i.line).toBe("아침 결정 진입 롱 · 선물 · 확신 70%");
+    expect(i.reevals).toBe(1);
+    expect(i.flags).toEqual([{ id: "paper-fo", halted: true, pending: true }]);
+    const none = foLaneInfo(fixtureFoToday({ decision: null, reevals: [], accounts: [] }));
+    expect(none).toEqual({ line: null, reevals: 0, flags: [] });
   });
 });

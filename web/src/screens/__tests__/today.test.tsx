@@ -11,6 +11,7 @@ import {
   fixtureAccount,
   fixtureApproval,
   fixtureDaemon,
+  fixtureFoToday,
   fixtureJob,
   fixtureMarketToday,
   fixtureNotice,
@@ -393,5 +394,21 @@ describe("배치", () => {
     expect(rows[0].querySelector('a[href="/decisions/spot/1"]')).not.toBeNull();
     expect(rows[1].querySelector('.chip[data-tone="ok"]')?.textContent).toBe("통과");
     expect(rows[1].textContent).toContain("3주");
+  });
+
+  test("파생 레인 카드: /fo/today?date= 의 아침 결정 한 줄·재평가 횟수·계좌 칩(손실 한도·진입 대기)", async () => {
+    await mount(
+      routes({
+        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-fo", lane: "fo", markets: ["KR"] })],
+        "GET /api/fo/today": fixtureFoToday(),
+      }),
+    );
+    const fo = section("fo-lane");
+    expect(fo.hidden).toBe(false);
+    expect(fo.textContent).toContain("아침 결정 진입 롱 · 선물 · 확신 70%");
+    expect(fo.textContent).toContain("재평가 1회");
+    const chips = Array.from(fo.querySelectorAll(".lane-extra .chip")).map((c) => c.textContent);
+    expect(chips).toEqual(["paper-fo 손실 한도", "paper-fo 진입 대기"]);
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=" + new Date().toISOString().slice(0, 10));
   });
 });

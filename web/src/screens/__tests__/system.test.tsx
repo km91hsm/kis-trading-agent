@@ -23,6 +23,7 @@ import {
   fixtureSettings,
   fixtureStatus,
 } from "../../test/fixtures/system";
+import { fixtureFoLeg } from "../../test/fixtures/today";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | null = null;
@@ -419,6 +420,23 @@ describe("시스템 화면", () => {
     expect(st.querySelector(".chip")?.textContent).toBe("설정 안 됨");
     expect(st.textContent).not.toContain("알 수 없음");
     expect(button(st, "다시 시작").disabled).toBe(true);
+  });
+
+  test("파생 절: 계좌마다 /fo/legs?account_id= 다리 표(다리·상태 칩·수량 체결/주문·가격·시각)", async () => {
+    const fo = {
+      accounts: [{ id: "paper-fo", env: "paper", mode: "auto", paused: false, state: "idle", enabled: true, triggers: [] }],
+      context: null,
+    };
+    await mount(routes({ "GET /api/system/fo": fo, "GET /api/fo/legs": (url: URL) => (url.searchParams.get("account_id") === "paper-fo" ? [fixtureFoLeg()] : []) }));
+    const legs = section("fo").querySelector('[data-legs="paper-fo"]') as HTMLElement;
+    expect(legs).not.toBeNull();
+    const rows = legs.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("진입");
+    expect(rows[0].textContent).toContain("R0");
+    expect(rows[0].querySelector(".chip")?.textContent).toBe("접수");
+    expect(rows[0].textContent).toContain("0/2");
+    expect(rows[0].textContent).toContain("시장가");
   });
 
   test("국면·단타·파생: 비율은 퍼센트로, 상태는 한글 칩, 단타 시장은 표", async () => {

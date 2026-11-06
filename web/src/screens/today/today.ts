@@ -4,7 +4,7 @@
 
 import type { Tone } from "../../components/Badge";
 import { fmtMoney, fmtPt, fmtTime, fmtWhen, untilText } from "../../lib/format";
-import { GLOSSARY } from "../../lib/glossary";
+import { GLOSSARY, termLabel } from "../../lib/glossary";
 import { tickerLabel } from "../../lib/ticker";
 
 export type Lane = "spot" | "scalp" | "fo";
@@ -312,4 +312,28 @@ export function noticeRows(notices: Notice[]): NoticeRow[] {
       ok: n.ok,
     };
   });
+}
+
+// --- 파생 당일(`GET /fo/today`, fo/routes.py today_view) ---------------------------------------
+export type FoTodayDecision = { round: number; intent: string | null; direction: string | null; vehicle: string | null; confidence: number | null };
+export type FoToday = { date: string; decision: FoTodayDecision | null; reevals: FoTodayDecision[]; accounts: { id: string; env: string; halted: boolean; pending_entry: boolean }[] };
+export type FoLaneInfo = { line: string | null; reevals: number; flags: { id: string; halted: boolean; pending: boolean }[] };
+
+/** 파생 레인 카드에 얹는 당일 요약 — 아침 결정 한 줄(의도·방향·수단·확신), 재평가 횟수, 계좌별 손실 한도·진입 대기. */
+export function foLaneInfo(t: FoToday): FoLaneInfo {
+  const d = t.decision;
+  let line: string | null = null;
+  if (d) {
+    const parts = [
+      [d.intent ? termLabel(`fo.intent.${d.intent}`) : null, d.direction ? termLabel(`fo.dir.${d.direction}`) : null].filter(Boolean).join(" "),
+      d.vehicle ? termLabel(`fo.vehicle.${d.vehicle}`) : null,
+      d.confidence === null || d.confidence === undefined ? null : `확신 ${Math.round(d.confidence * 100)}%`,
+    ].filter(Boolean);
+    line = parts.length ? `아침 결정 ${parts.join(" · ")}` : null;
+  }
+  return {
+    line,
+    reevals: t.reevals?.length ?? 0,
+    flags: (t.accounts ?? []).filter((a) => a.halted || a.pending_entry).map((a) => ({ id: a.id, halted: !!a.halted, pending: !!a.pending_entry })),
+  };
 }

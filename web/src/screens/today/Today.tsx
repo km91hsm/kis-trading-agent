@@ -14,14 +14,28 @@ import type { NavPage } from "../../lib/nav";
 import type { UsageResp } from "../../lib/usage";
 import { ApprovalsBlock, type Approval } from "./ApprovalsBlock";
 import { DecisionsList } from "./DecisionsList";
-import { LaneCardView, type LaneFetch } from "./LaneCards";
+import { FoLaneExtra, LaneCardView, type LaneFetch } from "./LaneCards";
 import { NextJobs } from "./NextJobs";
 import { NoticesFeed } from "./NoticesFeed";
 import { OrdersTimeline } from "./OrdersTimeline";
 import { Pipeline } from "./Pipeline";
 import { RiskChecks } from "./RiskChecks";
 import type { MarketToday, RiskCheck } from "./morning.ts";
-import { LANE_LABEL, LANES, laneCards, laneNextAt, todaySummary, type Account, type Daemon, type Decision, type Merged, type Notice, type Order } from "./today.ts";
+import {
+  LANE_LABEL,
+  LANES,
+  foLaneInfo,
+  laneCards,
+  laneNextAt,
+  todaySummary,
+  type Account,
+  type Daemon,
+  type Decision,
+  type FoToday,
+  type Merged,
+  type Notice,
+  type Order,
+} from "./today.ts";
 
 export type TodayPage = NavPage["id"];
 
@@ -55,6 +69,8 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
   const pipeKr = useResource<MarketToday>("/markets/KR/today", day, ["decisions", "jobs"], { enabled: !log });
   const pipeUs = useResource<MarketToday>("/markets/US/today", day, ["decisions", "jobs"], { enabled: !log });
   const riskChecks = useResource<RiskCheck[]>("/risk-checks", day, ["decisions", "orders"], { enabled: !log });
+  const hasFo = !!accounts.data?.some((a) => a.lane === "fo");
+  const foToday = useResource<FoToday>("/fo/today", day, ["fo", "decisions"], { enabled: !log && hasFo });
 
   const pending = approvals.data?.approvals ?? [];
   const cards = accounts.data
@@ -127,7 +143,12 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
           return (
             <section key={lane} id={`${lane}-lane`} className="screen-section" hidden={!!cards && !card} aria-label={LANE_LABEL[lane]}>
               {card ? (
-                <LaneCardView card={card} fetch={laneFetch} nextAt={laneNextAt(lane, jobs)} />
+                <LaneCardView
+                  card={card}
+                  fetch={laneFetch}
+                  nextAt={laneNextAt(lane, jobs)}
+                  extra={lane === "fo" && foToday.data ? <FoLaneExtra info={foLaneInfo(foToday.data)} /> : null}
+                />
               ) : accounts.error ? (
                 <Empty title="계좌를 불러오지 못했습니다">{accounts.error.message}</Empty>
               ) : (

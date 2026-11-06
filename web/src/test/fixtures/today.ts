@@ -265,3 +265,29 @@ export function fixtureRiskCheck(over: Over = {}) {
     ...over,
   };
 }
+
+/** `GET /fo/today`(fo/routes.py today_view) — 아침 결정(진입 롱 선물, 확신 0.7) + 재평가 1회, 계좌 하나는 손실 한도·진입 대기. */
+export function fixtureFoToday(over: Over = {}) {
+  const dec = (round: number, over2: Over = {}) => ({
+    id: round + 1, date: "2026-11-05", account_id: null, position_id: null, round, intent: "OPEN", direction: "LONG", vehicle: "FUTURES",
+    target_leverage: 1.0, confidence: 0.7, index_at_decision: "350", stop_pt: 345, take_profit_pt: 360, horizon_days: 5,
+    rationale: "지수 반등", vs_spot: null, record_only: false, created_at: "2026-11-05T00:05:00+00:00", ...over2,
+  });  // fmt: skip
+  return {
+    date: "2026-11-05",
+    decision: dec(0),
+    reevals: [dec(1, { intent: "HOLD" })],
+    accounts: [{ id: "paper-fo", env: "paper", halted: true, pending_entry: true }],
+    checks: {},
+    ...over,
+  };
+}
+
+/** `GET /fo/legs?account_id=` 한 다리 — 진입 R0, 접수, 2계약 시장가. */
+export function fixtureFoLeg(over: Over = {}) {
+  return {
+    id: 1, position_id: 1, code: "105W11", intent: "OPEN", round: 0, attempt: 1, status: "accepted", order_no: "X1",
+    qty: 2, filled_qty: 0, price: null, order_type: "MARKET", sent_at: "2026-11-05T00:10:00+00:00", created_at: "2026-11-05T00:09:00+00:00",
+    ...over,
+  };  // fmt: skip
+}

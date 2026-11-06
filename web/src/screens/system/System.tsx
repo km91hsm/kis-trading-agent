@@ -4,6 +4,7 @@
 // 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
 import { PageTabs } from "../../components/PageTabs";
+import { FoLegs } from "./FoLegs";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
 import { Chip } from "../../components/Chip";
@@ -212,6 +213,7 @@ export function System({ page }: { page: SystemPage }) {
               </p>
             ) : null}
             <Table columns={FO_COLUMNS} rows={f.accounts} rowKey={(a) => a.id} empty="파생 계좌 없음" />
+            <FoLegs accounts={f.accounts} />
           </>
         )}
       </FeatureStatus>

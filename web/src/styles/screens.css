@@ -52,6 +52,12 @@
 .pipeline-steps { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0 0 var(--space-2); }
 .pipeline-line { margin: 0 0 var(--space-2); color: var(--fg-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
+/* 파생 레인 카드 덧붙임 · 시스템 파생 다리 표 */
+.lane-extra { margin-top: var(--space-2); }
+.lane-extra .chips { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-1) 0 0; }
+.fo-legs { margin-top: var(--space-3); }
+.fo-legs-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--fg-muted); }
+
 /* 오늘 요약 KPI 띠(Stats kpi) — 레인 카드 위 */
 .today-summary { margin-bottom: var(--space-4); }
 
