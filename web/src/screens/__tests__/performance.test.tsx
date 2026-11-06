@@ -167,6 +167,21 @@ describe("성과 화면", () => {
     expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
   });
 
+  test("추가 분석 페이지에도 계좌·시장 필터가 있고, 시장을 US 로 바꾸면 섀도·RL 을 US 로 다시 읽는다", async () => {
+    await mount(routes(), "analysis");
+    const select = document.querySelector('[data-page="analysis"] select[aria-label="시장"]') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(document.querySelector('[data-page="analysis"] select[aria-label="계좌"]')).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(select, "US");
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    expect(callsTo("/analytics/shadow").at(-1)!.search).toBe("?market=US");
+    expect(callsTo("/analytics/rl/report").at(-1)!.search).toBe("?account_id=paper-1&market=US");
+  });
+
   test("RL 섀도 거래 표(/analytics/rl/shadow?account_id=&days=30)와 실험 행 펼침(/rl/experiments/{version})", async () => {
     await mount(routes(), "analysis");
     const rl = section("rl")!;

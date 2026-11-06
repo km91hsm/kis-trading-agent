@@ -164,9 +164,13 @@ function NavFoot() {
 
 export function Nav() {
   const { pathname, hash, key, search } = useLocation();
-  // 페이지 링크는 고른 날짜(?date=)만 같이 옮긴다 — ?page= 같은 페이지 자체의 상태는 옮기지 않는다.
-  const keepDate = new URLSearchParams(search).get("date");
-  const pageTo = (path: string) => (keepDate ? `${path}?date=${keepDate}` : path);
+  // 페이지 링크는 화면 머리의 상태(오늘 ?date=, 데이터 ?market=)만 같이 옮긴다 — ?page= 같은 페이지 자체의 상태는 옮기지 않는다.
+  const keep = new URLSearchParams();
+  for (const k of ["date", "market"]) {
+    const v = new URLSearchParams(search).get(k);
+    if (v) keep.set(k, v);
+  }
+  const pageTo = (path: string) => (keep.size ? `${path}?${keep.toString()}` : path);
   const groups = navGroups();
   const active = screenOf(pathname);
   const detail = detailOf(pathname);

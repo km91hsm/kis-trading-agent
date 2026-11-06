@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { fixtureFeaturesLatest, fixtureLabels, fixtureNames, fixtureNews, fixtureRefs, fixtureThemes } from "../../test/fixtures/data";
-import { chartLines, chartMarkers, featureRows, fmt, KEY_COLUMNS, newsRows, sortRows, themeRows } from "./data.ts";
+import { chartLines, chartMarkers, featureRows, fmt, fmtFeature, KEY_COLUMNS, newsRows, sortRows, themeRows } from "./data.ts";
 
 describe("newsRows", () => {
   test("종목 칩은 이름을 쓰고, 촉매·테마·「판정에 쓰임」 칩과 첫 판정 id 를 단다", () => {
@@ -70,5 +70,15 @@ describe("chartMarkers·chartLines", () => {
     ]);
     expect(chartLines([{ ticker: "005930", stop: { level: null, source: "atr" }, target: null }], "005930")).toEqual([]);
     expect(chartLines(positions, "AAPL")).toEqual([]);
+  });
+});
+
+describe("fmtFeature", () => {
+  test("종가는 US 소수(189.35)를 살리고 KR 정수(70,500)는 천 단위, 거래량은 정수, 비율 열은 %", () => {
+    expect(fmtFeature("close", 189.35)).toBe("189.35");
+    expect(fmtFeature("close", 70500)).toBe("70,500");
+    expect(fmtFeature("volume", 1234567.0)).toBe("1,234,567");
+    expect(fmtFeature("roe", 0.1234)).toBe("12.34%");
+    expect(fmtFeature("close", null)).toBe("—");
   });
 });

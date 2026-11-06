@@ -122,6 +122,19 @@ describe("결정 상세 화면", () => {
     expect(section("analysts")!.textContent).toContain("강세");
   });
 
+  test("US 결정은 손절·주문 가격을 센트까지(185.50·189.35) — 정수 반올림 금지", async () => {
+    const us = { ...fixtureSpotDecisionRow(), market: "US", ticker: "AAPL", name: "Apple", limit_price: "189.35", stop_loss: "185.50", take_profit: "200.00" };
+    const detail = fixtureSpotDetail({ decision: us, rounds: [{ id: 1, decision_id: 7, round: 1, action: "HOLD", stop_loss: "185.50", source: "reeval", skipped_debate: 0, data: {}, created_at: "2026-11-05T02:00:00+00:00" }] });
+    const trace = fixtureSpotTrace({ decision: us });
+    trace.orders[0].price = "189.35";
+    await mount({ "GET /api/decisions/spot/7": detail, "GET /api/decisions/spot/7/trace": trace }, "/decisions/spot/7");
+    const rounds = section("rounds")!.querySelector("table")!;
+    expect(bodyRows(rounds)[0].textContent).toContain("185.50");
+    expect(bodyRows(rounds)[0].textContent).not.toContain("186");
+    const orders = section("orders")!.querySelector("table")!;
+    expect(bodyRows(orders)[0].textContent).toContain("189.35"); // KR 정수(70,000)는 위 spot 테스트가 검증
+  });
+
   test("「‹ 돌아가기」 와 복기 메모리 링크(ticker=005930)", async () => {
     const { container } = await mount(spotRoutes, "/decisions/spot/7");
     const links = Array.from(container.querySelectorAll("a"));

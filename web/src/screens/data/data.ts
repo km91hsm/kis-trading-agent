@@ -161,11 +161,12 @@ export const featureLabel = (c: string): string => FEATURE_LABEL[c] ?? c;
 
 /** 지표 값 형식 — 비율 열은 %, 가격·건수는 천 단위 정수, 순매수 같은 수치는 천 단위(소수 ≤2). 모르는 열은 fmt. */
 const PCT_COLS = new Set(["roc_10", "high_52w_pos", "op_margin", "roe", "debt_ratio", "op_margin_vs_sector", "roe_vs_sector", "debt_ratio_vs_sector"]);
-const INT_COLS = new Set(["close", "volume", "news_count", "community_count"]);
+const INT_COLS = new Set(["volume", "news_count", "community_count"]);
 export function fmtFeature(col: string, v: Cell | undefined): string {
   if (v == null) return "—";
   if (typeof v !== "number") return String(v);
   if (PCT_COLS.has(col)) return `${(v * 100).toFixed(2)}%`;
+  if (col === "close") return v.toLocaleString("en-US", { maximumFractionDigits: 2 }); // KR 정수는 그대로, US 는 센트까지
   if (INT_COLS.has(col)) return Math.round(v).toLocaleString("en-US");
   if (col.startsWith("flow_")) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
   return fmt(v);

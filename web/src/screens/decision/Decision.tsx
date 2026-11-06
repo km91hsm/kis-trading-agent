@@ -9,7 +9,7 @@ import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Table, type Column } from "../../components/Table";
 import { ApiError, getJson } from "../../lib/api";
-import { fmtInt } from "../../lib/format";
+import { fmtInt, fmtMoney } from "../../lib/format";
 import { GLOSSARY, sideLabel, termLabel } from "../../lib/glossary";
 import { useResource, type Resource } from "../../lib/hooks";
 import { normalizeTrace, SIGNAL, type FoCheck, type TraceDebate, type TraceGate, type TraceOrder, type TraceResp } from "../../lib/trace";
@@ -48,10 +48,12 @@ const gateChip = (approved: boolean | null | undefined) =>
 const SIGNAL_TONE: Record<string, "ok" | "fail" | "muted"> = { BULLISH: "ok", BUY: "ok", BEARISH: "fail", SELL: "fail" };
 const signalChip = (s: string | null | undefined) => <Chip tone={SIGNAL_TONE[s ?? ""] ?? "muted"}>{SIGNAL[s ?? ""] ?? s ?? "—"}</Chip>;
 
-const ROUND_COLUMNS: Column<RoundRow>[] = [
+// 가격·손절은 결정의 시장 통화로(US 는 센트까지, KR 은 정수) — 열 정의가 market 을 받는다.
+const currencyOf = (market: string | null | undefined): "KRW" | "USD" => (market === "US" ? "USD" : "KRW");
+const roundColumns = (market: string | null | undefined): Column<RoundRow>[] => [
   { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round}` },
   { key: "action", label: "판단", width: "18%", align: "chip", render: (r) => <Chip>{actionLabel(r.action)}</Chip> },
-  { key: "stop_loss", label: "손절", width: "20%", align: "num", render: (r) => (r.stop_loss === "—" ? "—" : fmtInt(r.stop_loss)) },
+  { key: "stop_loss", label: "손절", width: "20%", align: "num", render: (r) => (r.stop_loss === "—" ? "—" : fmtMoney(r.stop_loss, currencyOf(market))) },
   { key: "source", label: "출처", width: "24%", render: (r) => r.source },
   { key: "at", label: "시각", width: "24%", render: (r) => r.at },
 ];
@@ -92,11 +94,11 @@ const CHECK_COLUMNS: Column<CheckRow>[] = [
   { key: "error", label: "오류", width: "22%", render: (r) => r.error ?? "—" },
 ];
 type OrderRow = TraceOrder & { key: number };
-const ORDER_COLUMNS: Column<OrderRow>[] = [
+const orderColumns = (market: string | null | undefined): Column<OrderRow>[] => [
   { key: "account_id", label: "계좌", width: "16%" },
   { key: "side", label: "방향", width: "10%", align: "chip", render: (r) => (r.side ? <Chip tone={r.side.toUpperCase() === "BUY" ? "ok" : "fail"}>{sideLabel(r.side)}</Chip> : "—") },
   { key: "qty", label: "수량", width: "10%", align: "num", render: (r) => (r.qty === null || r.qty === undefined ? "—" : `${fmtInt(r.qty)}주`) },
-  { key: "price", label: "가격", width: "12%", align: "num", render: (r) => (r.price ? fmtInt(r.price) : "시장가") },
+  { key: "price", label: "가격", width: "12%", align: "num", render: (r) => (r.price ? fmtMoney(r.price, currencyOf(market)) : "시장가") },
   { key: "status", label: "상태", width: "12%", align: "chip", render: (r) => statusChip(r.status) },
   { key: "order_no", label: "주문번호", width: "14%", render: (r) => (r.order_no ? <code>{r.order_no}</code> : "—") },
   { key: "message", label: "메시지", width: "auto", long: true, render: (r) => r.message ?? "—" },
@@ -165,6 +167,7 @@ export function Decision() {
   const t: TraceResp | null = rawTrace.data ? normalizeTrace(spot ? "spot" : "fo", rawTrace.data) : null;
   const spotDetail = spot && d ? (d as SpotDetail) : null;
   const ticker = spotDetail?.decision.ticker;
+  const market = spotDetail?.decision.market ?? "KR"; // 파생은 KR(원화)
 
   return (
     <div className="screen" data-screen="decision">
@@ -197,7 +200,7 @@ export function Decision() {
         <section id="rounds" className="screen-section">
           <h2>라운드</h2>
           {spotDetail ? (
-            <Table columns={ROUND_COLUMNS} rows={roundRows(spotDetail.rounds)} rowKey={(r) => r.round} empty="재평가 라운드 없음" />
+            <Table columns={roundColumns(market)} rows={roundRows(spotDetail.rounds)} rowKey={(r) => r.round} empty="재평가 라운드 없음" />
           ) : (
             <Pending res={detail} what="결정" />
           )}
@@ -256,7 +259,7 @@ export function Decision() {
       {spot ? (
         <section id="orders" className="screen-section">
           <h2>이어진 주문·체결</h2>
-          {t ? <Table columns={ORDER_COLUMNS} rows={t.orders.map((o, i) => ({ ...o, key: i }))} rowKey={(r) => r.key} empty="주문 없음" /> : <Pending res={rawTrace} what="추적" />}
+          {t ? <Table columns={orderColumns(market)} rows={t.orders.map((o, i) => ({ ...o, key: i }))} rowKey={(r) => r.key} empty="주문 없음" /> : <Pending res={rawTrace} what="추적" />}
         </section>
       ) : null}
 

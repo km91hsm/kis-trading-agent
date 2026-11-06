@@ -59,6 +59,6 @@ def test_disclosure_area_critical_for_held(conn, project):
     conn.commit()
     items = health.check(ctx(conn, project))
     assert [(i.key, i.level, i.count, i.link) for i in items] == [
-        ("ingest.disclosure.KR", "critical", 1, "/data")
+        ("ingest.disclosure.KR", "critical", 1, "/data#news")
     ]
     assert "유상증자 결정" in items[0].text

@@ -64,13 +64,14 @@ const SECTIONS: Record<SectionId, { title: string; body: ReactNode }> = {
 };
 
 export function Data({ page = "quotes" }: { page?: DataPage }) {
+  const [market] = useMarket();
   const pages = screenPages("data");
   const pageLabel = pages.find((p) => p.id === page)?.label ?? "";
   const ids = NAV.data.items.filter((i) => i.page === page).map((i) => i.id as SectionId);
   return (
     <div className="screen" data-screen="data" data-page={page}>
       <h1 className="screen-title">데이터 · {pageLabel}</h1>
-      <PageTabs screen="data" label="데이터 페이지" />
+      <PageTabs screen="data" label="데이터 페이지" search={market === "US" ? "?market=US" : ""} />
       <MarketSegment />
       {ids.map((id) => (
         <section key={id} id={id} className="screen-section">

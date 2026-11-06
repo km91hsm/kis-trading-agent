@@ -284,6 +284,30 @@ describe("데이터 화면", () => {
     expect(document.querySelectorAll('select[aria-label="시장"]')).toHaveLength(0);
   });
 
+  test("?market=US 는 페이지 탭 링크에도 붙는다(KR 기본이면 안 붙음)", async () => {
+    ff = installFakeFetch(routes());
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/data/news?market=US"]}>
+        <Data page="news" />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.getAttribute("href"))).toEqual([
+      "/data?market=US",
+      "/data/news?market=US",
+      "/data/themes?market=US",
+      "/data/features?market=US",
+    ]);
+    unmount();
+    render(
+      <MemoryRouter initialEntries={["/data/news"]}>
+        <Data page="news" />
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(Array.from(document.querySelectorAll(".page-tabs a")).map((e) => e.getAttribute("href"))).toEqual(["/data", "/data/news", "/data/themes", "/data/features"]);
+  });
+
   test("?market=US 로 들어오면 지표·테마도 US 로 읽는다", async () => {
     ff = installFakeFetch(routes());
     render(

@@ -11,7 +11,7 @@ import { benchmarkLines, normalizeNav, type Days, type FilterAccount, type Filte
 
 const PERIODS: Days[] = ["30", "90", "365"];
 
-export function FilterBar({ accounts, filters, onChange }: { accounts: FilterAccount[]; filters: Filters; onChange(next: Partial<Filters>): void }) {
+export function FilterBar({ accounts, filters, onChange, periods = true }: { accounts: FilterAccount[]; filters: Filters; onChange(next: Partial<Filters>): void; periods?: boolean }) {
   const markets = accounts.find((a) => a.id === filters.account_id)?.markets ?? [];
   return (
     <div className="perf-filters">
@@ -36,13 +36,15 @@ export function FilterBar({ accounts, filters, onChange }: { accounts: FilterAcc
           </option>
         ))}
       </select>
-      <span className="perf-periods">
-        {PERIODS.map((d) => (
-          <button key={d} type="button" className="btn" aria-pressed={filters.days === d} onClick={() => onChange({ days: d })}>
-            {d}일
-          </button>
-        ))}
-      </span>
+      {periods ? (
+        <span className="perf-periods">
+          {PERIODS.map((d) => (
+            <button key={d} type="button" className="btn" aria-pressed={filters.days === d} onClick={() => onChange({ days: d })}>
+              {d}일
+            </button>
+          ))}
+        </span>
+      ) : null}
     </div>
   );
 }

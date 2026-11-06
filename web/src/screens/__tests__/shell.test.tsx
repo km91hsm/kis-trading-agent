@@ -117,6 +117,12 @@ describe("왼쪽 메뉴 2단", () => {
     expect(links).toEqual([["today", "/?date=2026-11-03"], ["log", "/log?date=2026-11-03"]]);
     expect(a.container.querySelector('[data-nav-item="log"]')?.getAttribute("aria-current")).toBe("page");
     a.unmount();
+    // 데이터의 ?market=US 도 페이지 링크가 같이 옮긴다(화면 머리 세그먼트 하나).
+    const d = app("/data/themes?market=US");
+    await flush();
+    const dl = Array.from(d.container.querySelectorAll("[data-nav-item]")).map((e) => e.getAttribute("href"));
+    expect(dl).toEqual(["/data?market=US", "/data/news?market=US", "/data/themes?market=US", "/data/features?market=US"]);
+    d.unmount();
     // 시스템의 ?page= 는 페이지 자체라 다른 페이지 링크로 옮기지 않는다.
     const b = app("/system/jobs?page=2");
     await flush();

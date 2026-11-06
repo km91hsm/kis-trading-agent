@@ -106,6 +106,10 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
     <div className="screen" data-screen="performance" data-page={page}>
       <h1 className="screen-title">{page === "performance" ? "성과" : `성과 · ${pageLabel}`}</h1>
       <PageTabs screen="performance" label="성과 페이지" />
+      {/* 섀도·RL 은 계좌·시장에 묶이는데 개요 절(필터 줄)이 다른 페이지에 있으면 고를 수 없다 → 그 페이지 머리에 같은 필터(기간 없이) */}
+      {!on("performance-overview") && (on("shadow") || on("rl")) && accounts.data ? (
+        <FilterBar accounts={list} filters={f} onChange={(next) => setOver((o) => ({ ...o, ...next }))} periods={false} />
+      ) : null}
       {ids.map((id) => (
         <section key={id} id={id} className="screen-section" hidden={sections[id].hidden || undefined}>
           <h2>{sections[id].title}</h2>
