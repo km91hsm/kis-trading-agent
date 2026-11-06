@@ -7,7 +7,7 @@ import { clearResourceCache } from "../../lib/cache";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { flush, render } from "../../test/render";
-import { fixtureAccounts, fixtureOverview } from "../../test/fixtures/accounts";
+import { fixtureAccounts, fixtureFoSummary, fixtureOverview } from "../../test/fixtures/accounts";
 
 let ff: FakeFetch | null = null;
 const stub: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
@@ -27,6 +27,7 @@ function routes(over: Routes = {}): Routes {
   return {
     "GET /api/accounts/overview": fixtureOverview(),
     "GET /api/accounts": fixtureAccounts(),
+    "GET /api/fo/summary": fixtureFoSummary(),
     ...over,
   };
 }
@@ -103,7 +104,7 @@ describe("계좌·보유 통합 화면", () => {
       }),
     );
     const ov = section("overview");
-    act(() => button(ov, "재개").click());
+    act(() => button(ov, "전체 자동매매 재개").click());
     expect(button(dialog(), "확인").disabled).toBe(true);
     type(dialog().querySelector("input") as HTMLInputElement, "real-1");
     act(() => button(dialog(), "확인").click());
@@ -115,13 +116,13 @@ describe("계좌·보유 통합 화면", () => {
     expect(accountGets).toBe(2);
     expect(dialog()).toBeNull();
 
-    act(() => button(ov, "일시정지").click());
+    act(() => button(ov, "전체 자동매매 일시정지").click());
     expect(dialog().querySelector("input")).toBeNull();
     act(() => button(dialog(), "확인").click());
     await flush();
     expect(patches()).toHaveLength(2);
     expect(bodyOf(patches()[1])).toEqual({ value: true });
-    expect(button(ov, "재개")).toBeTruthy();
+    expect(button(ov, "전체 자동매매 재개")).toBeTruthy();
   });
 
   test("모의만이면 재개는 confirm 없이 {value:false}; 400 이면 버튼 아래 한 줄 오류", async () => {
@@ -135,7 +136,7 @@ describe("계좌·보유 통합 화면", () => {
       }),
     );
     const ov = section("overview");
-    act(() => button(ov, "재개").click());
+    act(() => button(ov, "전체 자동매매 재개").click());
     expect(dialog().querySelector("input")).toBeNull();
     act(() => button(dialog(), "확인").click());
     await flush();
@@ -187,8 +188,48 @@ describe("계좌·보유 통합 화면", () => {
     expect(fo.textContent).toContain("paper-fo");
     expect(fo.textContent).toContain("모의");
     expect(fo.textContent).toContain("모드 끔");
-    expect(fo.textContent).toContain("50,000,000");
+    // NAV·증거금은 /fo/summary(fo_nav_snapshot) — /accounts 의 nav(50,000,000) 가 아니라 50,500,000
+    expect(fo.textContent).toContain("50,500,000원");
+    expect(fo.textContent).not.toContain("50,000,000");
+    expect(fo.textContent).toContain("증거금");
+    expect(fo.textContent).toContain("12,000,000원");
+    expect(fo.textContent).toContain("23.76%");
+    expect(Array.from(fo.querySelectorAll(".chip")).map((c) => c.textContent)).toContain("기록만");
+  });
+
+  test("/fo/summary 가 실패하면 파생 카드는 /accounts 의 NAV·현금으로 그린다", async () => {
+    await mount(routes({ "GET /api/fo/summary": json({ detail: "x" }, 500) }));
+    const fo = section("fo-positions");
+    expect(fo.textContent).toContain("50,000,000원");
     expect(fo.textContent).toContain("현금");
+  });
+
+  test("합계 띠 칸마다 범위(모의 n · 실전 n), 값에 통화 단위", async () => {
+    const { container } = await mount(routes());
+    const cells = Array.from(container.querySelectorAll("#overview .kpi-strip [data-kpi]"));
+    expect(cells[0].textContent).toContain("모의 1 · 실전 1");
+    expect(cells[0].textContent).toContain("13,000,000원");
+    expect(cells[1].textContent).toContain("모의 1");
+    expect(cells[1].textContent).not.toContain("실전");
+    expect(cells[1].textContent).toContain("$2,500.50");
+  });
+
+  test("계좌 표: 헤더 「순자산」, 값에 통화 단위, 승인 대기 0건은 「없음」(경고 칩 아님)", async () => {
+    const { container } = await mount(routes());
+    const heads = Array.from(container.querySelectorAll("#overview thead th")).map((t) => t.textContent);
+    expect(heads).toContain("순자산");
+    expect(heads).not.toContain("NAV");
+    const rows = Array.from(container.querySelectorAll("#overview tbody tr"));
+    expect(rows[0].textContent).toContain("10,000,000원");
+    expect(rows[0].textContent).toContain("없음");
+    expect(rows[0].querySelector('.chip[data-tone="warn"]')).toBeNull();
+    expect(rows[1].textContent).toContain("2건");
+  });
+
+  test("파생 계좌만 있으면 표 대신 「현물 계좌 없음」", async () => {
+    await mount(routes({ "GET /api/accounts": fixtureAccounts().filter((a) => a.lane === "fo") }));
+    expect(section("overview").textContent).toContain("현물 계좌 없음");
+    expect(section("overview").querySelector("table")).toBeNull();
   });
 
   test("파생 계좌가 없으면 #fo-positions 는 hidden", async () => {
@@ -205,7 +246,7 @@ describe("계좌·보유 통합 화면", () => {
     );
     const ov = section("overview");
     expect(ov.textContent).toContain("합계를 불러오지 못했습니다");
-    act(() => button(ov, "일시정지").click());
+    act(() => button(ov, "전체 자동매매 일시정지").click());
     act(() => button(dialog(), "확인").click());
     await flush();
     expect(bodyOf(patches()[0])).toEqual({ value: true });

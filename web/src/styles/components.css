@@ -284,3 +284,6 @@
 .pager-btn[aria-current="page"] { background: var(--bg-sunken); border-color: var(--fg-muted); font-weight: 700; }
 .pager-gap { color: var(--fg-muted); padding: 0 var(--space-1); }
 .pager-range { margin-left: auto; color: var(--fg-muted); font-size: var(--text-sm); }
+
+/* 흐린 보조 글자(표 안 「없음」 등) */
+.muted { color: var(--fg-muted); }
