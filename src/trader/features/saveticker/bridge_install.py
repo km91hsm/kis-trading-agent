@@ -9,9 +9,7 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import sys
-import time
 from pathlib import Path
 
 from trader.features.saveticker.settings import load_cfg
@@ -162,7 +160,7 @@ def prepare(destination: Path, *, project_home: Path | None = None) -> dict:
         "  로컬 프로그램 연결, 리포트 다운로드\n"
         "- 비밀번호·쿠키 내보내기·다른 사이트 접근·AI·브로커 호출 없음\n"
         "- Chrome과 컴퓨터가 켜져 있어야 수집합니다. 만료/재확인은 직접 완료해야 합니다.\n"
-        "- Native host 등록과 기존 자동로그인 backend 전환은 별도 install-host 명령입니다.\n"
+        "- Native host 등록은 별도 install-host 명령입니다.\n"
         "- 설치 후 chrome://extensions에서 개발자 모드 → 압축해제된 확장 로드 → extension 폴더\n",
     )
     return metadata
@@ -238,48 +236,11 @@ def _remove_registration(target: Path, *, register_windows: bool = True) -> None
     target.unlink(missing_ok=True)
 
 
-def _stop_legacy(root: Path) -> None:
-    """검증된 수집 서비스만 종료한다. 매매 데몬은 절대 건드리지 않는다."""
-    from trader.features.saveticker import automation
-    from trader.kernel.daemon.lock import Lock
-
-    if not Lock(root / "runtime/service.lock").held():
-        automation.kill_leftovers(root)
-        return
-    row = automation.read(root / "runtime/service.json") or {}
-    pid = row.get("pid")
-    if os.name == "nt" or not isinstance(pid, int) or pid == os.getpid():
-        raise InstallError("stop_legacy_collector_first")
-    import subprocess
-
-    command = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=5,
-    ).stdout
-    if "trader saveticker service" not in command:
-        raise InstallError("unverified_legacy_process")
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 70
-    while Lock(root / "runtime/service.lock").held():
-        if time.monotonic() >= deadline:
-            raise InstallError("legacy_stop_timeout")
-        time.sleep(0.2)
-    automation.kill_leftovers(root)
-
-
 def install_host(folder: Path, *, user_home: Path | None = None) -> dict:
     folder = folder.resolve()
-    _, project, root = _prepared(folder)
+    _, _, root = _prepared(folder)
     registration = registration_path(user_home or Path.home())
     config = root / "runtime/bridge-config.json"
-    env = project / "secrets/saveticker.env"
-    backup = env.with_name(env.name + ".extension-backup")
-    if backup.exists():
-        raise InstallError("backup_exists")
     windows_registry = sys.platform == "win32" and user_home is None
     if (
         registration.exists()
@@ -287,12 +248,7 @@ def install_host(folder: Path, *, user_home: Path | None = None) -> dict:
         or (windows_registry and _registry_value() is not None)
     ):
         raise InstallError("registration_exists")
-    _stop_legacy(root)
-    moved = False
     try:
-        if env.is_file():
-            env.rename(backup)
-            moved = True
         host = json.loads((folder / "native-host.json").read_text(encoding="utf-8"))
         _write_registration(registration, host, register_windows=windows_registry)
         atomic_json(
@@ -302,32 +258,25 @@ def install_host(folder: Path, *, user_home: Path | None = None) -> dict:
                 "extension_id": EXTENSION_ID,
                 "package": str(folder),
                 "registration": str(registration),
-                "credentials_backed_up": moved,
             },
         )
     except Exception:
         _remove_registration(registration, register_windows=windows_registry)
         config.unlink(missing_ok=True)
-        if moved and backup.exists() and not env.exists():
-            backup.rename(env)
         raise InstallError("registration_failed") from None
     return {"ok": True, "registration": str(registration), "backend": "extension"}
 
 
 def uninstall_host(folder: Path, *, user_home: Path | None = None) -> dict:
-    _, project, root = _prepared(folder.resolve(), check_config=False)
+    _, _, root = _prepared(folder.resolve(), check_config=False)
     registration = registration_path(user_home or Path.home())
     config = root / "runtime/bridge-config.json"
-    env = project / "secrets/saveticker.env"
-    backup = env.with_name(env.name + ".extension-backup")
     try:
         installed = json.loads(config.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise InstallError("not_installed") from None
     if installed.get("package") != str(folder.resolve()):
         raise InstallError("registration_owner_mismatch")
-    if env.exists() and backup.exists():
-        raise InstallError("credentials_conflict")
     # 활성 네이티브 호스트는 먼저 팝업에서 연결을 끊어야 한다.
     from trader.kernel.daemon.lock import Lock
 
@@ -343,9 +292,7 @@ def uninstall_host(folder: Path, *, user_home: Path | None = None) -> dict:
             raise InstallError("registration_owner_mismatch")
     _remove_registration(registration, register_windows=user_home is None)
     config.unlink(missing_ok=True)
-    if backup.exists():
-        backup.rename(env)
-    return {"ok": True, "backend": "legacy", "credentials_restored": env.exists()}
+    return {"ok": True, "backend": None}
 
 
 def native_entry(origin: str) -> int:

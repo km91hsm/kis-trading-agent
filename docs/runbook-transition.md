@@ -43,9 +43,9 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
    FAKE_CLAUDE=1 uv run trader daemon --dry-run
    ```
    웹은 다른 터미널에서 `uv run trader web --port 8788`.
-   - **세이브티커 경합**: 새 데몬의 `saveticker` 잡은 계정 파일이 있으면 수집 서비스를 띄워 옛 데몬과 같은
-     계정 세션을 다툴 수 있다. 리허설 동안 새 저장소 `config/sources.yaml` 의 `saveticker.collect: false` 로
-     끄거나(이미 쌓인 데이터는 계속 읽는다), 옛 데몬의 세이브티커 수집을 먼저 멈춘다.
+   - **세이브티커**: 새 데몬의 `saveticker` 잡은 수집 프로세스를 띄우지 않는다(수집은 Chrome 확장만, 2026-11
+     Playwright 수집기 제거). 확장이 등록돼 있으면 장애 감시 알림만 보내므로, 리허설 중 중복 알림이 싫으면
+     새 저장소 `config/sources.yaml` 의 `saveticker.collect: false` 로 끈다(이미 쌓인 데이터는 계속 읽는다).
 4. **판정**(하루 뒤, 전부 만족해야 전환):
    - 웹 `/system`(또는 `GET /api/system/daemon`)의 잡 표에서 **그날 예정 시각이 지난 잡 전부**가 1회 이상
      실행됐다(`last_start` 가 있음; 시장 게이트로 `skipped` 된 잡은 사유가 휴장·창 밖인지 확인).

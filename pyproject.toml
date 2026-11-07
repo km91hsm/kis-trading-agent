@@ -11,7 +11,6 @@ dependencies = [
     "joblib>=1.4",
     "numpy>=1.26",
     "pandas>=2",
-    "playwright>=1.56,<2",
     "pyarrow>=17",
     "pydantic>=2",
     "pypdf>=6,<7",
@@ -41,7 +40,9 @@ rl = [
 trader = "trader.kernel.cli.main:app"
 
 [dependency-groups]
+# playwright: 확장 JS 를 실제 Chromium 으로 시험하는 tests/features/saveticker/test_*_browser.py 전용
 dev = [
+    "playwright>=1.56,<2",
     "pytest",
     "respx",
     "ruff",

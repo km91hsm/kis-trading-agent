@@ -14,7 +14,7 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, Request
 
 from trader.features.saveticker import automation
-from trader.features.saveticker.paths import credentials_path, home
+from trader.features.saveticker.paths import home
 from trader.features.saveticker.restart import EXTENSION_NOTE, RESTART_FLAG
 from trader.features.saveticker.web_status import read_status
 from trader.kernel.ledger import control
@@ -31,18 +31,17 @@ system_saveticker_router = APIRouter(prefix="/system", tags=["system"])
 
 @system_saveticker_router.get("/saveticker")
 def saveticker_status(request: Request) -> dict:
-    """수집기 상태: 계정 파일 유무(확장 모드는 계정 불필요)·서비스 상태·멈춘 이유·작업별 상태·
-    쉬는 작업·마지막 수집 시각."""
-    state = read_status(home(), now=request.app.state.deps.now())
-    return {
-        "configured": credentials_path().is_file() or state.get("backend") == "extension",
-        **state,
-    }
+    """수집기 상태: 확장 등록 여부(`configured`)·Native host 연결 상태·멈춘 이유·작업별 상태·
+    마지막 수집 시각."""
+    root = home()
+    state = read_status(root, now=request.app.state.deps.now())
+    return {"configured": automation.registered(root), **state}
 
 
 @system_saveticker_router.post("/saveticker/restart", dependencies=WRITE)
 def saveticker_restart(request: Request) -> dict:
-    """'다시 시작' 요청을 남긴다(데몬 잡이 소비). 확장 모드면 화면 안내(`note`)를 붙인다."""
+    """'다시 시작' 요청을 남긴다(데몬 잡이 소비). 재개는 Chrome 확장 팝업에서 하므로 화면
+    안내(`note`)를 붙인다."""
     deps = request.app.state.deps
     actor = actor_of(request)
     at = deps.now().astimezone(UTC).isoformat()
@@ -54,12 +53,7 @@ def saveticker_restart(request: Request) -> dict:
             conn, channel="web", actor=actor, key=RESTART_FLAG, old=old, new=value, at=at
         )
     logger.info("세이브티커 다시 시작 요청(웹, %s)", actor)
-    backend = (automation.read(home() / "runtime" / "bridge-config.json") or {}).get("backend")
-    return {
-        "ok": True,
-        "requested": value,
-        "note": EXTENSION_NOTE if backend == "extension" else None,
-    }
+    return {"ok": True, "requested": value, "note": EXTENSION_NOTE}
 
 
 ROUTERS = (system_saveticker_router,)

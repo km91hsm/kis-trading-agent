@@ -21,6 +21,28 @@ def client(project):
     return web_client(project, [FEATURE], now=NOW)
 
 
+def connect_bridge(monkeypatch, *, state="collecting", reason=None):
+    """등록된 확장 + 살아 있는 Native host(합성 pid 999 가 잠금을 쥐고 최근에 기록)."""
+    runtime = home() / "runtime"
+    atomic_json(runtime / "bridge-config.json", {"backend": "extension"})
+    row = {"backend": "extension", "state": state, "pid": 999, "at": SECOND, "updated_at": SECOND}
+    if reason:
+        row["reason"] = reason
+    atomic_json(runtime / "bridge.json", row)
+    atomic_json(runtime / "bridge-host.lock", {"pid": 999, "proc_start": "synthetic-start"})
+    monkeypatch.setattr("trader.features.saveticker.web_status.pid_alive", lambda pid: pid == 999)
+    monkeypatch.setattr(
+        "trader.features.saveticker.web_status.same_process",
+        lambda pid, start: pid == 999 and start == "synthetic-start",
+    )
+
+
+@pytest.fixture(autouse=True)
+def live_bridge(project, monkeypatch):
+    """기본은 확장이 연결돼 수집 중 — 저장 기록만으로 상태를 판정하는지 본다."""
+    connect_bridge(monkeypatch)
+
+
 def save(*, when=FIRST, stream="news_all", status="ok", items=None, reason=None):
     Store(home() / "data").save(
         Capture(
@@ -53,8 +75,6 @@ def test_missing_collection_is_waiting_without_invented_expected_streams(project
 def test_success_response_and_value_change_are_separate(project, client):
     save()
     save(when=SECOND)
-    atomic_json(home() / "runtime/service.json", {"state": "collecting", "at": SECOND})
-    atomic_json(home() / "runtime/alert-monitor.json", {"health": "healthy"})
     data = get(client)
     stream = data["streams"][0]
     assert stream["last_attempt_at"] == SECOND
@@ -77,92 +97,6 @@ def test_zero_item_response_does_not_replace_last_useful_success(project, client
     assert stream["last_success_at"] == FIRST
     assert stream["last_change_at"] == FIRST
     assert stream["change_state"] == "empty"
-
-
-def test_partial_lane_is_reported_without_hiding_other_successes(project, client):
-    save()
-    save(stream="market_gain_live", status="partial", reason="scroll_limit")
-    atomic_json(
-        home() / "runtime/lane-blocked.json",
-        {
-            "market": {"reason": "AccessDenied", "at": FIRST},
-        },
-    )
-    data = get(client)
-    streams = {s["id"]: s for s in data["streams"]}
-    assert streams["news_all"]["state"] == "normal"
-    assert streams["market_gain_live"]["state"] == "stopped"
-    assert data["summary"]["state"] == "partial"
-    assert data["recovery"]["lanes"][0]["lane"] == "market"
-    assert data["recovery"]["lanes"][0]["state"] == "waiting"
-
-
-@pytest.mark.parametrize(
-    "blocked_at, success_at, expected_stream, expected_recovery",
-    [
-        (SECOND, FIRST, "stopped", "waiting"),
-        ("2026-11-04T00:58:00+00:00", FIRST, "stopped", "waiting"),
-        ("2026-11-03T18:00:00+00:00", FIRST, "normal", "recovered"),
-        ("2026-11-03T19:00:00+00:00", FIRST, "normal", "recovered"),
-        (
-            "2026-11-03T18:00:00+00:00",
-            "2026-11-03T17:59:00+00:00",
-            "delayed",
-            "unknown",
-        ),
-        (None, FIRST, "normal", "unknown"),
-        ("2026-11-05T01:00:00+00:00", FIRST, "normal", "unknown"),
-    ],
-    ids=[
-        "active-old-success",
-        "active-new-success",
-        "expired-new-success",
-        "expiry-boundary",
-        "expired-old-success",
-        "missing-time",
-        "future-time",
-    ],
-)
-def test_lane_cooldown_only_stops_streams_during_a_valid_retry_window(
-    project, client, blocked_at, success_at, expected_stream, expected_recovery
-):
-    save(stream="market_gain_live", when=success_at)
-    block = {"reason": "AccessDenied"}
-    if blocked_at is not None:
-        block["at"] = blocked_at
-    block_path = home() / "runtime/lane-blocked.json"
-    atomic_json(block_path, {"market": block})
-    before = block_path.read_bytes()
-
-    data = get(client)
-    assert data["streams"][0]["state"] == expected_stream
-    assert data["summary"]["state"] == expected_stream
-    assert data["recovery"]["lanes"][0]["state"] == expected_recovery
-    if expected_recovery != "waiting":
-        assert data["recovery"]["state"] == expected_recovery
-        assert "대기 중" not in data["recovery"]["text"]
-    assert block_path.read_bytes() == before
-
-
-def test_expired_block_with_zero_item_response_does_not_claim_recovery(project, client):
-    save(stream="market_gain_live", when="2026-11-03T17:59:00+00:00")
-    save(
-        stream="market_gain_live",
-        when=FIRST,
-        status="partial",
-        items=[],
-        reason="empty_or_unavailable",
-    )
-    atomic_json(
-        home() / "runtime/lane-blocked.json",
-        {
-            "market": {"reason": "AccessDenied", "at": "2026-11-03T18:00:00+00:00"},
-        },
-    )
-    data = get(client)
-    assert data["streams"][0]["state"] == "empty"
-    assert data["recovery"]["lanes"][0]["state"] == "unknown"
-    assert data["recovery"]["state"] == "unknown"
 
 
 def test_latest_failure_keeps_last_response_and_sanitizes_reason(project, client):
@@ -207,7 +141,7 @@ def test_invalid_timestamps_are_not_shown_as_recent_success(project, client, sta
 def test_corrupt_or_oversized_status_is_bounded_and_reported(project, client, content):
     root = home() / "data"
     root.mkdir(parents=True, exist_ok=True)
-    (root / "status.json").write_text(content)
+    (root / "status.json").write_text(content, encoding="utf-8")
     data = get(client)
     assert data["streams"] == []
     assert data["summary"]["state"] == "unknown"
@@ -236,11 +170,10 @@ def test_stale_success_is_delayed_and_partial_is_not_normal(project, client):
 def test_lane_failure_is_visible_with_healthy_process_and_recent_old_values(project, client):
     save()
     save(stream="market_gain_live")
-    atomic_json(home() / "runtime/service.json", {"state": "collecting"})
-    atomic_json(home() / "runtime/alert-monitor.json", {"health": "healthy"})
     atomic_json(
         home() / "runtime/runner-market.json",
         {
+            "backend": "extension",
             "state": "error",
             "error_type": "TimeoutError",
             "updated_at": SECOND,
@@ -255,9 +188,9 @@ def test_lane_failure_is_visible_with_healthy_process_and_recent_old_values(proj
 
 def test_newer_history_cannot_be_mixed_with_an_older_status_snapshot(project, client):
     save()
-    previous = (home() / "data/status.json").read_text()
+    previous = (home() / "data/status.json").read_text(encoding="utf-8")
     save(when=SECOND, items=[{"id": "sample", "title": "합성 기사 수정"}])
-    (home() / "data/status.json").write_text(previous)
+    (home() / "data/status.json").write_text(previous, encoding="utf-8")
     stream = get(client)["streams"][0]
     assert stream["last_attempt_at"] == FIRST
     assert stream["last_change_at"] == FIRST
@@ -341,8 +274,6 @@ def test_old_calendar_and_unconfirmed_targets_do_not_create_current_outage(proje
     save(stream="calendar_2026-08", when="2026-08-01T00:00:00+00:00")
     save(stream="calendar_2026-12", when="2026-10-01T00:00:00+00:00")
     save(stream="market_turnover_regular", when="2026-10-01T00:00:00+00:00")
-    atomic_json(home() / "runtime/service.json", {"state": "collecting"})
-    atomic_json(home() / "runtime/alert-monitor.json", {"health": "healthy"})
     data = get(client)
     streams = {s["id"]: s for s in data["streams"]}
     assert streams["news_all"]["scope"] == "active"
@@ -365,19 +296,46 @@ def test_only_historical_collection_is_waiting_without_active_target_evidence(pr
 
 
 @pytest.mark.parametrize(
-    "service, expected",
+    "bridge, expected",
     [
-        ({"state": "blocked", "reason": "authentication"}, "login_required"),
-        ({"state": "stopped"}, "stopped"),
-        ({"state": "waiting_chrome"}, "waiting"),
+        ({"state": "auth_required", "reason": "login_required"}, "login_required"),
+        ({"state": "waiting_verification", "reason": "verification_required"}, "login_required"),
+        ({"state": "paused"}, "stopped"),
+        ({"state": "connecting"}, "waiting"),
     ],
 )
 def test_summary_does_not_hide_stopped_service_behind_recent_data(
-    project, client, service, expected
+    project, client, monkeypatch, bridge, expected
 ):
     save(when=SECOND)
-    atomic_json(home() / "runtime/service.json", service)
+    connect_bridge(monkeypatch, **bridge)
     assert get(client)["summary"]["state"] == expected
+
+
+def test_disconnected_extension_is_waiting_and_pauses_lanes(project, client):
+    save(when=SECOND)
+    (home() / "runtime/bridge.json").unlink()
+    data = get(client)
+    assert data["configured"] is True
+    assert data["service"]["state"] == "waiting_chrome" and data["health"] == "waiting_chrome"
+    assert data["summary"]["state"] == "waiting"
+    assert data["recovery"]["state"] == "waiting" and "Chrome" in data["recovery"]["text"]
+    assert {lane["state"] for lane in data["lanes"].values()} == {"paused"}
+
+
+def test_blocked_extension_reports_manual_recovery_without_legacy_fields(
+    project, client, monkeypatch
+):
+    connect_bridge(monkeypatch, state="waiting_verification", reason="verification_required")
+    data = get(client)
+    assert data["blocked"] is True and data["health"] == "blocked"
+    assert data["recovery"]["state"] == "manual" and "재확인" in data["recovery"]["text"]
+    assert "backend" not in data and "lane_blocks" not in data
+
+
+def test_unregistered_extension_is_not_configured(project, client):
+    (home() / "runtime/bridge-config.json").unlink()
+    assert get(client)["configured"] is False
 
 
 def test_current_lane_error_is_visible_even_without_a_saved_stream(project, client):
@@ -385,6 +343,7 @@ def test_current_lane_error_is_visible_even_without_a_saved_stream(project, clie
     atomic_json(
         home() / "runtime/runner-background.json",
         {
+            "backend": "extension",
             "state": "error",
             "error_type": "TimeoutError",
             "updated_at": SECOND,

@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from trader.features.saveticker import automation
@@ -17,23 +17,19 @@ MAX_JSON_BYTES = 1_048_576
 MAX_STREAMS = 64
 MAX_REVISIONS = 5000
 STREAM_ID = re.compile(r"(?:news|community|market|calendar)(?:_[a-z0-9-]+)*\Z")
+# Native host 가 기록하는 상태(`native.STATES`) + 연결이 끊겼을 때 이 모듈이 붙이는 `waiting_chrome`
 STATES = {
-    "running",
+    "connecting",
     "collecting",
-    "stopped",
     "paused",
-    "blocked",
-    "backoff",
     "error",
-    "failed",
     "waiting_chrome",
     "waiting_verification",
     "auth_required",
-    "logging_in",
-    "reauthenticating",
 }
-ERRORS = {*automation.AUTH_ERRORS, "TimeoutError", "RuntimeError", "ConnectionError"}
-REASONS = {*automation._REASON_TEXT, "extension_disconnected", "login_required", "access_denied"}
+AUTH_ERRORS = {"AccessDenied", "LoginRequired", "VerificationRequired"}
+ERRORS = {*AUTH_ERRORS, "TimeoutError", "RuntimeError", "ConnectionError"}
+REASONS = {*automation.REASON_TEXT, "extension_disconnected"}
 
 
 def _read(path: Path) -> tuple[dict, bool]:
@@ -70,79 +66,53 @@ def _known(value, allowed):
 
 
 def _runtime(root: Path, now: datetime) -> tuple[dict, bool]:
-    """기존 상태 응답 키를 유지하되 고정된 필드와 사유만 노출한다."""
+    """Native host 기록에서 고정된 필드와 사유만 노출한다. 2분 안에 기록이 없거나 호스트 잠금이
+    다른 프로세스면 `waiting_chrome`."""
     runtime = root / "runtime"
     files = {}
     invalid = False
-    for name in (
-        "bridge-config",
-        "service",
-        "bridge",
-        "alert-monitor",
-        "lane-blocked",
-        *(f"runner-{lane}" for lane in automation.LANES),
-    ):
+    for name in ("bridge", *(f"runner-{lane}" for lane in automation.LANES)):
         files[name], bad = _read(runtime / f"{name}.json")
         invalid |= bad
-    backend = "extension" if files["bridge-config"].get("backend") == "extension" else "playwright"
-    service = files["service"]
-    health = _known(files["alert-monitor"].get("health"), {"healthy", "fault", "ok", "unknown"})
-    alive = False
-    if backend == "extension":
-        bridge = files["bridge"]
-        at = _stamp(bridge.get("updated_at"), now)
-        lock, bad = _read(runtime / "bridge-host.lock")
-        invalid |= bad
-        pid = bridge.get("pid")
-        holder = lock.get("pid")
-        start = lock.get("proc_start")
-        alive = bool(
-            at
-            and (now - datetime.fromisoformat(at)).total_seconds() <= 120
-            and type(pid) is int
-            and pid > 0
-            and pid_alive(pid)
-            and type(holder) is int
-            and holder > 0
-            and (start is None or isinstance(start, str))
-            and same_process(holder, start)
-        )
-        service = (
-            bridge
-            if alive
-            else {
-                "state": "waiting_chrome",
-                "reason": "extension_disconnected",
-                "at": at,
-            }
-        )
-        health = "healthy" if alive else "waiting_chrome"
+    bridge = files["bridge"]
+    at = _stamp(bridge.get("updated_at"), now)
+    lock, bad = _read(runtime / "bridge-host.lock")
+    invalid |= bad
+    pid = bridge.get("pid")
+    holder = lock.get("pid")
+    start = lock.get("proc_start")
+    alive = bool(
+        at
+        and (now - datetime.fromisoformat(at)).total_seconds() <= 120
+        and type(pid) is int
+        and pid > 0
+        and pid_alive(pid)
+        and type(holder) is int
+        and holder > 0
+        and (start is None or isinstance(start, str))
+        and same_process(holder, start)
+    )
+    service = (
+        bridge
+        if alive
+        else {"state": "waiting_chrome", "reason": "extension_disconnected", "at": at}
+    )
     state = _known(service.get("state"), STATES)
     reason = _known(service.get("reason"), REASONS)
-    blocked = state in {"blocked", "waiting_verification", "auth_required"}
+    blocked = state in set(automation.BLOCKED_STATES)
     lanes = {}
-    blocks = {}
     for lane in automation.LANES:
         row = files[f"runner-{lane}"]
-        if backend == "extension" and row.get("backend") != "extension":
+        if row.get("backend") != "extension":
             row = {}
         lanes[lane] = {
-            "state": "paused"
-            if backend == "extension" and not alive
-            else _known(row.get("state"), STATES),
+            "state": "paused" if not alive else _known(row.get("state"), STATES),
             "error_type": _known(row.get("error_type"), ERRORS),
             "stage": _known(row.get("stage"), {"starting", "login", "collecting", "navigation"}),
             "updated_at": _stamp(row.get("updated_at"), now),
         }
-        block = files["lane-blocked"].get(lane)
-        if backend != "extension" and isinstance(block, dict):
-            blocks[lane] = {
-                "reason": _known(block.get("reason"), ERRORS),
-                "at": _stamp(block.get("at"), now),
-            }
     exit_code = service.get("exit_code")
     return {
-        "backend": backend,
         "service": {
             "state": state,
             "reason": reason,
@@ -150,13 +120,12 @@ def _runtime(root: Path, now: datetime) -> tuple[dict, bool]:
             "exit_code": exit_code if type(exit_code) is int else None,
         },
         "blocked": blocked,
-        "reason_text": automation._REASON_TEXT.get(reason, "수집이 중단되었습니다")
+        "reason_text": automation.REASON_TEXT.get(reason, "수집이 중단되었습니다")
         if blocked
         else None,
         "lanes": lanes,
-        "lane_blocks": blocks,
         "last_success_at": None,
-        "health": "blocked" if backend == "extension" and blocked else health,
+        "health": "blocked" if blocked else "healthy" if alive else "waiting_chrome",
     }, invalid
 
 
@@ -238,43 +207,13 @@ def _lane(name: str) -> str:
     )
 
 
-def _recovery(state: dict, now: datetime, successes: dict[str, str]) -> dict:
-    lanes = []
-    for lane, block in state["lane_blocks"].items():
-        at = block["at"]
-        retry = (
-            datetime.fromisoformat(at) + timedelta(seconds=automation.LANE_RETRY_S) if at else None
-        )
-        if retry and retry > now:
-            status, text = "waiting", "접근 제한으로 대기 중"
-        elif at and successes.get(lane, "") > at:
-            status, text = "recovered", "차단 이후 유효 자료 수집 확인"
-        else:
-            status, text = "unknown", "재시도 결과 미확인"
-        lanes.append(
-            {
-                "lane": lane,
-                "state": status,
-                "retry_after_at": retry.isoformat() if retry else None,
-                "text": text,
-            }
-        )
+def _recovery(state: dict) -> dict:
     service = state["service"]["state"]
     if state["blocked"]:
-        status, text = "manual", state["reason_text"]
-    elif service == "backoff":
-        status, text = "waiting", "오류 후 자동 재시도 대기 중"
-    elif service == "waiting_chrome":
-        status, text = "waiting", "Chrome에서 로그인과 확장 연결을 확인하세요"
-    elif any(lane["state"] == "waiting" for lane in lanes):
-        status, text = "partial", "접근이 제한된 작업은 재시도 대기 중입니다"
-    elif any(lane["state"] == "unknown" for lane in lanes):
-        status, text = "unknown", "일부 작업의 재시도 결과가 미확인입니다"
-    elif lanes:
-        status, text = "recovered", "차단 이후 유효 자료 수집을 확인했습니다"
-    else:
-        status, text = "none", "복구 대기 없음"
-    return {"state": status, "text": text, "lanes": lanes}
+        return {"state": "manual", "text": state["reason_text"]}
+    if service == "waiting_chrome":
+        return {"state": "waiting", "text": "Chrome에서 로그인과 확장 연결을 확인하세요"}
+    return {"state": "none", "text": "복구 대기 없음"}
 
 
 def _scope(name: str, now: datetime) -> str:
@@ -292,21 +231,17 @@ def _runtime_state(state: dict, now: datetime, *, normal_count: int) -> str | No
     """최근 저장 자료가 현재 중단·작업 오류를 가리지 않도록 한다."""
     service = state["service"]
     if state["blocked"]:
-        return (
-            "stopped"
-            if service["reason"] in {"restart_limit", "chromium_install_failed"}
-            else "login_required"
-        )
-    if service["state"] in {"stopped", "paused"}:
+        return "login_required"
+    if service["state"] == "paused":
         return "stopped"
-    if service["state"] in {"waiting_chrome", "backoff", "logging_in", "reauthenticating"}:
+    if service["state"] in {"waiting_chrome", "connecting"}:
         return "waiting"
-    if service["state"] in {"error", "failed"} or state["health"] == "fault":
+    if service["state"] == "error":
         return "error"
     for lane in state["lanes"].values():
         at = lane["updated_at"]
         if at and (now - datetime.fromisoformat(at)).total_seconds() <= 120:
-            if lane["state"] in {"error", "failed", "auth_required", "waiting_verification"}:
+            if lane["state"] in {"error", "auth_required", "waiting_verification"}:
                 return "partial" if normal_count else "error"
     return None
 
@@ -325,21 +260,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
         for name in names
     }
     changes, responses, history_bad = _history(root, cutoffs, now)
-    successes: dict[str, str] = {}
-    for name in names:
-        row = raw[name] if isinstance(raw[name], dict) else {}
-        success = _stamp(row.get("last_success_at"), now)
-        count = row.get("count")
-        if (
-            success
-            and success == cutoffs[name]
-            and _known(row.get("status"), {"ok", "partial"})
-            and type(count) is int
-            and 0 < count <= 1_000_000
-        ):
-            lane = _lane(name)
-            successes[lane] = max(successes.get(lane, ""), success)
-    recovery = _recovery(state, now, successes)
+    recovery = _recovery(state)
     streams = []
     for name in names:
         row = raw[name] if isinstance(raw[name], dict) else {}
@@ -351,7 +272,6 @@ def read_status(root: Path, *, now: datetime) -> dict:
         interval = row.get("target_interval_s")
         interval = interval if type(interval) in (int, float) and 2 <= interval <= 86400 else 30
         lane = _lane(name)
-        block = next((b for b in recovery["lanes"] if b["lane"] == lane), None)
         lane_row = state["lanes"].get(lane, {})
         lane_at = lane_row.get("updated_at")
         lane_current = bool(lane_at and attempt and lane_at >= attempt)
@@ -368,12 +288,10 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result, error = "login_required", "로그인 또는 사이트 확인이 필요합니다"
         elif status == "error":
             result, error = "error", "최근 수집 요청에 오류가 있습니다"
-        elif lane_current and lane_row.get("error_type") in automation.AUTH_ERRORS:
+        elif lane_current and lane_row.get("error_type") in AUTH_ERRORS:
             result, error = "login_required", "로그인 또는 사이트 확인이 필요합니다"
-        elif lane_current and lane_row.get("state") in {"error", "failed"}:
+        elif lane_current and lane_row.get("state") == "error":
             result, error = "error", "최근 수집 작업에 오류가 있습니다"
-        elif block and block["state"] == "waiting":
-            result = "stopped"
         elif (now - datetime.fromisoformat(attempt)).total_seconds() > max(120, interval * 3):
             result = "delayed"
         elif count == 0:
@@ -403,7 +321,6 @@ def read_status(root: Path, *, now: datetime) -> dict:
                 "change_state": change_state,
                 "count": count,
                 "error": error,
-                "recovery": block["text"] if block else None,
             }
         )
     active = [s for s in streams if s["scope"] == "active"]

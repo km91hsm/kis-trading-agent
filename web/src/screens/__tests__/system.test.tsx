@@ -435,7 +435,7 @@ describe("시스템 화면", () => {
   test.each([
     ["waiting_chrome", "waiting_chrome", false, "대기"],
     ["auth_required", "blocked", true, "로그인 필요"],
-    ["stopped", "fault", false, "중단"],
+    ["paused", "waiting_chrome", false, "중단"],
     ["error", "fault", false, "오류"],
   ])("수집 서비스 %s는 사람이 이해할 상태로 표시한다", async (state, health, blocked, label) => {
     await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({ health, blocked, service: { state, at: null, reason: null } }) }));
@@ -445,10 +445,10 @@ describe("시스템 화면", () => {
   test("수집 응답·유효 자료·값 변화·0건을 분리하고 기록된 항목만 집계한다", async () => {
     await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({
       summary: { state: "partial", recorded: 2, normal: 1, partial: 0, empty: 1, delayed: 0, error: 0, waiting: 0, stopped: 0, login_required: 0, unknown: 0, note: null },
-      recovery: { state: "none", text: "복구 대기 없음", lanes: [] },
+      recovery: { state: "none", text: "복구 대기 없음" },
       streams: [
-        { id: "news_all", label: "뉴스 · 전체", state: "normal", status: "ok", count: 12, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:59:30Z", last_change_at: "2026-11-05T00:58:00Z", change_state: "unchanged", error: null, recovery: null },
-        { id: "market_turnover_live", label: "증시 · 거래대금", state: "empty", status: "partial", count: 0, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:57:00Z", last_change_at: null, change_state: "empty", error: null, recovery: null },
+        { id: "news_all", label: "뉴스 · 전체", state: "normal", status: "ok", count: 12, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:59:30Z", last_change_at: "2026-11-05T00:58:00Z", change_state: "unchanged", error: null },
+        { id: "market_turnover_live", label: "증시 · 거래대금", state: "empty", status: "partial", count: 0, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:57:00Z", last_change_at: null, change_state: "empty", error: null },
       ],
     }) }));
     const st = section("saveticker");

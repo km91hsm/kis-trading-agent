@@ -342,11 +342,10 @@ export type SavetickerStream = {
   change_state: "changed" | "unchanged" | "empty" | "unknown";
   count: number | null;
   error: string | null;
-  recovery: string | null;
 };
 export type SavetickerResp = {
+  /** Chrome 확장(Native host) 등록 여부 */
   configured: boolean;
-  backend: string;
   service: { state: string; reason: string | null; at: string | null } | null;
   blocked: boolean;
   reason_text: string | null;
@@ -354,7 +353,7 @@ export type SavetickerResp = {
   health: string | null;
   streams?: SavetickerStream[];
   summary?: { state: CollectionState; recorded: number; active_recorded?: number; historical?: number; unconfirmed?: number; note: string | null } & Record<CollectionState, number>;
-  recovery?: { state: string; text: string; lanes: { lane: string; state: string; retry_after_at?: string | null; text?: string }[] };
+  recovery?: { state: string; text: string };
 };
 export type ScalpResp = { enabled: boolean; judge: boolean; max_weight_pct: number; max_positions: number; markets: Record<string, { open: unknown[]; closed: unknown[]; halted: boolean }> };
 export type FoAccount = { id: string; env: string; mode: string; paused: boolean; state: string | null; enabled: boolean; triggers: unknown[] };
