@@ -1,107 +1,163 @@
-# 번들(실행파일) 사용법 — macOS · Windows
+# 설치 안내 — macOS · Windows
 
-Python·uv 를 설치하지 않고 쓰는 배포본입니다. GitHub Releases 의 `trader-<버전>-macos-<arm64|x86_64>.zip`(macOS) 또는
-`trader-<버전>-windows-x86_64.zip`(Windows) 을 받아 압축을 풉니다. 압축 안 최상위 `README.md` 가 이 문서입니다.
+Python·uv 없이 쓰는 설치판입니다. [GitHub Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서
+운영체제에 맞는 파일 하나를 받습니다.
 
-## 1. 폴더 구조
+| 운영체제 | 파일 |
+|---|---|
+| macOS (Apple 실리콘) | `trader-<버전>-macos-arm64.dmg` |
+| macOS (Intel) | `trader-<버전>-macos-x86_64.dmg` |
+| Windows (64비트) | `trader-<버전>-windows-x86_64-setup.exe` |
 
-> **데이터 폴더가 바뀌었습니다.** 이번 버전부터 `config/ secrets/ state/ docs/` 는 앱 옆이 아니라 OS 표준
-> 사용자 데이터 폴더에 생깁니다 — macOS `~/Library/Application Support/Trader`, Windows `%LOCALAPPDATA%\Trader`.
-> 트레이 메뉴 「데이터 폴더 열기」로 열 수 있고, 옛 폴더의 데이터는 `trader migrate-home --from <옛 trader 폴더>` 로
-> 옮깁니다(원본은 지우지 않음). 아래 구조도는 다음 버전에서 갱신합니다.
+앱과 데이터는 따로 있습니다. 앱을 지우거나 새 버전으로 바꿔도 **데이터 폴더**는 그대로 남습니다.
 
-```
-trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 복사해도 된다
-  Trader.app           ← macOS: 더블클릭 = 메뉴바 아이콘 + 데몬 + 웹 UI + 브라우저 (Dock 에는 안 뜬다)
-  trader               ← macOS: 터미널용 CLI (Trader.app 안의 실행파일로 가는 링크)
-  TraderApp.exe        ← Windows: 더블클릭 = 작업표시줄 아이콘 + 데몬 + 웹 UI + 브라우저 (콘솔 창 없음)
-  trader.exe           ← Windows: 터미널용 CLI
-  _internal/           ← Windows 전용. 런타임·라이브러리·에이전트 프롬프트·웹·템플릿 (macOS 는 .app 안에 있다)
-  README.md            ← 이 문서
-  config/              ← settings·accounts·universe·schedule·sources·ml 등 .yaml (첫 실행 때 생성)
-  secrets/.env         ← API 키 (첫 실행 때 WEB_TOKEN 만 든 채로 생김 → 키를 덧붙여 채운다)
-  state/               ← 원장 DB·runs·logs·features·models (실행하며 생김, 백업 대상)
-  docs/                ← 이 문서 (첫 실행 때 복사)
-```
+| | macOS | Windows |
+|---|---|---|
+| 앱 | `/Applications/Trader.app` | `%LOCALAPPDATA%\Programs\Trader\` |
+| 데이터 폴더 | `~/Library/Application Support/Trader` | `%LOCALAPPDATA%\Trader` |
+| 터미널 CLI | `/Applications/Trader.app/Contents/MacOS/trader` | `%LOCALAPPDATA%\Programs\Trader\trader.exe` |
 
-## 2. 준비물
+데이터 폴더 안: `config/`(설정 yaml) · `secrets/.env`(API 키) · `state/`(원장 DB·로그·모델·수집 파일) ·
+`docs/`(이 문서) · `saveticker-extension/`(Chrome 확장 복사본).
 
-1. **Claude Code CLI** — 번들에 들어 있지 않습니다. https://claude.ai/code 안내대로 `claude` 를 설치하고
-   한 번 로그인(구독 인증)해 둡니다. 터미널에서 `claude --version` 이 나오면 됩니다.
-2. **KIS Open API 앱키** (모의·실전), **DART**·**FRED** 키, **네이버 API HUB** 앱의 Client ID/Secret,
-   **텔레그램** 봇 토큰·chat_id. 키 이름은 `secrets/.env.example` 을 따릅니다.
-3. (선택) **세이브티커 수집** — 일반 Chrome 확장과 로컬 Native host 로 수집합니다. 아래 4절의 설치 절차를 보세요.
-4. (선택) 번들은 scikit-learn 백엔드로 돕니다. LightGBM·PPO 백엔드는 소스 설치(`uv sync --extra lightgbm --extra rl`,
-   macOS 는 `brew install libomp`)에서만 쓸 수 있고, 없으면 sklearn 으로 폴백합니다.
-   소스 설치에서 LightGBM 으로 학습·승격한 모델(`trader ml models` 의 backend)은 번들이 로드하지 못합니다 —
-   번들과 `state/` 를 공유하려면 소스 쪽도 sklearn 백엔드로 학습하세요.
+## 1. 준비물
 
-## 3. 첫 실행
+1. **Claude Code CLI** — 설치판에 들어 있지 않습니다. https://claude.ai/code 안내대로 `claude` 를 설치하고 한 번
+   로그인(구독 인증)해 둡니다. 터미널에서 `claude --version` 이 나오면 됩니다.
+2. **KIS Open API 앱키**(모의·실전), **DART**·**FRED** 키, **네이버 API HUB** 앱의 Client ID/Secret,
+   **텔레그램** 봇 토큰·chat_id. 키 이름은 데이터 폴더의 `secrets/.env.example` 을 따릅니다.
+3. (선택) 세이브티커 수집용 **Chrome**(6절).
+4. 설치판은 scikit-learn 백엔드로 돕니다. LightGBM·PPO 백엔드는 소스 설치(`uv sync --extra lightgbm --extra rl`)에서만
+   쓸 수 있고 없으면 sklearn 으로 폴백합니다. 소스 설치에서 LightGBM 으로 학습·승격한 모델은 설치판이 로드하지 못합니다.
 
-1. **압축 풀기** 뒤 운영체제별로 한 번만:
-   - macOS: **먼저** 터미널에서 `xattr -dr com.apple.quarantine trader/` 를 실행합니다(압축 파일의 격리
-     표시 제거). 그래도 "확인되지 않은 개발자" 경고가 뜨면 `Trader.app` 을 **우클릭 → 열기** 로 한 번 엽니다.
-     격리 표시를 지우지 않고 '우클릭 → 열기' 만 하면 macOS 가 앱을 읽기 전용 임시 경로(App Translocation)에서
-     돌려 설정·원장을 만들 수 없습니다 — 그때는 앱이 안내 알림을 띄우고 `state/logs/startup-error.log`
-     (없으면 홈 폴더)에 남긴 뒤 종료합니다.
-   - Windows: SmartScreen 경고("Windows의 PC 보호")에서 **추가 정보 → 실행** 을 한 번 누릅니다.
-2. **더블클릭**: `Trader.app`(macOS) 또는 `TraderApp.exe`(Windows). 메뉴바(작업표시줄)에 ▲ 아이콘이 뜨고,
-   처음에는 `config/`·`secrets/.env.example`·`docs/` 가 만들어지고 `secrets/.env` 에 웹 쓰기 토큰 `WEB_TOKEN` 이
-   자동으로 들어간 뒤 **웹 UI**(http://127.0.0.1:8787)가 열립니다.
-   키가 없으면 수집·세션은 실패하지만 UI 는 뜹니다. 터미널에서 같은 초기화만 하려면 `./trader init`
-   (Windows: `trader.exe init`) — 이미 있는 파일은 건드리지 않습니다.
-3. **키 넣기**: 첫 실행이 만든 `secrets/.env` 에 `secrets/.env.example` 의 키 이름대로 줄을 덧붙여 값을 채웁니다
-   (`WEB_TOKEN` 줄은 자동 생성이니 그대로 둡니다 — `.env.example` 을 복사해 덮어쓰면 토큰이 사라집니다). 다른 프로젝트의 `.env` 가 있으면
-   `./trader accounts secrets import --from <그 파일>` 로 이름 매핑 복사(값은 출력되지 않음).
-4. **계좌**: `config/accounts.yaml` 의 `cano` 자리표시자(`00000000`)를 본인 계좌번호로 바꿉니다(모의는 `auto`,
+## 2. 설치
+
+### macOS
+
+1. `.dmg` 를 더블클릭해 엽니다.
+2. 창 안의 **Trader** 를 옆의 **Applications(응용 프로그램)** 폴더로 끌어다 놓습니다. 그다음 디스크 이미지는
+   꺼내도 됩니다(Finder 사이드바의 ⏏). 디스크 이미지 안에서 바로 실행하지 마세요 — 세이브티커 확장 설치가 거부됩니다.
+3. 첫 실행 때 "확인되지 않은 개발자" 경고가 뜹니다(코드 서명이 없는 앱). **응용 프로그램 폴더에서 Trader 를
+   우클릭 → 열기 → 열기** 를 한 번 누릅니다. macOS 15 이상에서 '열기' 버튼이 없으면 **시스템 설정 → 개인정보 보호 및
+   보안** 맨 아래의 「그래도 열기」를 누릅니다. 이후에는 평소처럼 더블클릭으로 열립니다.
+
+### Windows
+
+1. `…-setup.exe` 를 실행합니다. SmartScreen 경고("Windows의 PC 보호")가 뜨면 **추가 정보 → 실행** 을 누릅니다.
+2. 관리자 권한은 필요 없습니다(현재 사용자에게만 설치). 마지막 화면의 「Trader 실행」을 체크한 채 마치면 바로 켜집니다.
+   시작 메뉴에 **Trader** 가 생깁니다.
+
+## 3. 첫 실행 · 키 넣기
+
+1. **Trader 실행** — 메뉴바(macOS) 또는 작업표시줄 알림 영역(Windows)에 ▲ 아이콘이 뜹니다(Dock 에는 안 뜹니다).
+   처음 실행하면 데이터 폴더에 `config/`·`secrets/.env.example`·`docs/` 가 생기고, `secrets/.env` 에 웹 쓰기 토큰
+   `WEB_TOKEN` 이 자동으로 들어간 뒤 **웹 UI**(http://127.0.0.1:8787)가 열립니다. 키가 없으면 수집·세션은 실패하지만
+   UI 는 뜹니다.
+2. **데이터 폴더 열기** — ▲ 아이콘 메뉴의 「데이터 폴더 열기」를 누릅니다.
+3. **키 넣기** — `secrets/.env` 를 텍스트 편집기로 열고 `secrets/.env.example` 의 키 이름대로 줄을 덧붙여 값을
+   채웁니다. `WEB_TOKEN` 줄은 그대로 둡니다(`.env.example` 을 복사해 덮어쓰면 토큰이 사라집니다). 다른 프로젝트의
+   `.env` 가 있으면 `trader accounts secrets import --from <그 파일>` 로 이름 매핑 복사(값은 출력되지 않음).
+4. **계좌** — `config/accounts.yaml` 의 `cano` 자리표시자(`00000000`)를 본인 계좌번호로 바꿉니다(모의는 `auto`,
    실전은 `off` 로 시작). `config/sources.yaml` 의 `edgar.user_agent`(또는 `.env` 의 `EDGAR_USER_AGENT`)에
    `<이름> <이메일>` 을 넣습니다(SEC 요구).
-5. **점검**: `./trader accounts ping`(KIS 시세·계좌 연결), `./trader status`(`state/STATUS.md` 생성),
-   `./trader selfcheck`(설치 점검 JSON 1줄).
-6. **리허설**(구독 호출 없음) — macOS: `FAKE_CLAUDE=1 ./trader spot analyze --ticker 005930 --dry-run`,
-   Windows PowerShell: `$env:FAKE_CLAUDE="1"; .\trader.exe spot analyze --ticker 005930 --dry-run`.
-7. **자동 시작**(선택): `./trader install` 로 로그온 시 데몬 + 웹 UI(브라우저는 열지 않음 —
-   `trader app --no-browser`) 자동 시작을 등록합니다(해제 `--uninstall`, 데몬 밖 5분 감시는 `--watchdog`).
-   이미 떠 있는 상태에서 다시 실행하면(더블클릭 포함) 「이미 실행 중입니다」 안내 뒤 브라우저만 엽니다.
+5. 설정을 바꿨으면 ▲ 메뉴 「종료」 후 다시 실행합니다.
 
-## 4. 평소 운용
+## 4. 터미널 CLI
 
-- 더블클릭(= `trader app --tray`) 하나로 스케줄 데몬 + 웹 UI 가 돕니다. 메뉴바(작업표시줄)의 ▲ 아이콘 메뉴:
-  **웹 UI 열기 / 일시정지·재개 / 로그 폴더 열기 / 종료**. 종료는 실행 중인 분석 세션이 끝나길 기다린 뒤
-  내려갑니다(최대 `llm.timeout_s`).
-- 터미널에서 창과 함께 보고 싶으면 `./trader app`(트레이 없음, Ctrl+C 로 종료).
-- 데몬 로그는 `state/logs/`. 외부 감시 1회는 `./trader watchdog`.
+설치판에도 터미널용 `trader` 가 들어 있습니다. 경로가 길어서 별칭을 두면 편합니다.
+
+- macOS (`~/.zshrc` 에 한 줄):
+  ```
+  alias trader="/Applications/Trader.app/Contents/MacOS/trader"
+  ```
+- Windows PowerShell (`$PROFILE` 에 한 줄):
+  ```
+  Set-Alias trader "$env:LOCALAPPDATA\Programs\Trader\trader.exe"
+  ```
+
+설치판의 `trader` 는 언제나 위 데이터 폴더를 씁니다(환경변수 `TRADER_HOME` 이 있으면 그쪽).
+자주 쓰는 명령: `trader status`(`state/STATUS.md` 생성), `trader selfcheck`(설치 점검 JSON 1줄),
+`trader accounts ping`(KIS 연결 점검), `trader --version`.
+리허설(구독 호출 없음) — macOS: `FAKE_CLAUDE=1 trader spot analyze --ticker 005930 --dry-run`,
+Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 --dry-run`.
+
+## 5. 평소 운용 · 자동 시작
+
+- 앱 하나(▲ 아이콘)가 스케줄 데몬 + 웹 UI 를 함께 돌립니다. 메뉴: **웹 UI 열기 / 일시정지·재개 / 로그 폴더 열기 /
+  데이터 폴더 열기 / 로그인 시 자동 시작 / 종료**. 종료는 실행 중인 분석 세션이 끝나길 기다린 뒤 내려갑니다
+  (최대 `llm.timeout_s`).
+- **자동 시작**: 메뉴의 「로그인 시 자동 시작」을 체크하면 로그인할 때 데몬 + 웹 UI 가 브라우저 없이 뜹니다
+  (터미널에서는 `trader install`, 해제 `trader install --uninstall`, 데몬 밖 5분 감시는 `--watchdog`).
+  이미 떠 있는 상태에서 다시 실행하면 「이미 실행 중입니다」 안내 뒤 브라우저만 엽니다.
+- 웹 UI 제어(일시정지·승인·모드·작업 실행)는 쓰기 토큰(`secrets/.env` 의 `WEB_TOKEN`)이 필요합니다. 이 PC 에서 연
+  브라우저는 시스템 화면의 「이 PC 에서 받기」로 토큰을 받고, 폰·tailnet 에서는 그 값을 직접 붙여 넣습니다.
 - 텔레그램: 알림 수신, `/approve <id>`·`/reject <id>`·`/status`·`/mode <계좌> <auto|approve|off>` 등.
-- 웹 UI 제어(일시정지·승인·모드·작업 실행)는 쓰기 토큰(`secrets/.env` 의 `WEB_TOKEN`, 첫 실행 때 자동 생성)이 필요합니다.
-  이 PC 에서 연 브라우저는 시스템 화면의 「이 PC 에서 받기」로 토큰을 받고, 폰·tailnet 에서는 그 값을 직접 붙여 넣습니다.
-  토큰을 넣기 전의 브라우저는 조회만 됩니다. `trader app`·`trader web` 모두 기동 전에 `WEB_TOKEN` 이 없으면 만들어 넣습니다
-  (환경변수 `WEB_TOKEN` 이 있으면 그것이 우선).
-- 작업은 터미널 없이 웹 대시보드에서, 또는 `./trader jobs run <작업>` 으로 데몬 큐에 넣을 수 있습니다
-  (데몬이 켜져 있어야 함 — `./trader jobs kinds` 로 종류 확인).
-- **세이브티커 Chrome 수집기 설치**: `trader saveticker extension install` 한 번이면 됩니다(경로 인자 없음, 다시
-  실행해도 됨). 확장을 데이터 폴더의 `saveticker-extension/extension` 으로 복사하고 설치된 앱의 `trader` 를 Chrome
-  Native host 로 등록합니다. 앱이 Gatekeeper 임시 경로나 마운트한 디스크 이미지에서 실행 중이면 거부하니 먼저
-  `/Applications` 로 옮기세요. 그다음 `chrome://extensions` → 개발자 모드 → (옛 확장이 다른 경로로 로드돼 있으면 먼저
-  삭제) → 「압축해제된 확장 프로그램 로드」 → `<데이터 폴더>/saveticker-extension/extension` → 확장 팝업에서 시작.
-  상태는 `trader saveticker extension status`, 제거는 팝업에서 중지한 뒤 `trader saveticker extension uninstall`.
-  앱을 업데이트하면 데몬이 처음 돌 때 확장 복사본을 새 버전으로 바꾸고 "확장을 새로고침하세요" 알림을 한 번 보냅니다.
-  Chrome 에서 직접 로그인해야 하고 컴퓨터가 깨어 있어야 수집합니다(세이브티커 수집 방식은 이 Chrome 확장 하나뿐 — 계정 파일·자동 브라우저 수집은 없습니다).
-  저장 폴더는 `state/external/saveticker/`.
-- 자주 쓰는 터미널 명령(`uv run trader …` 대신 `./trader …`):
-  `status`, `scan run`, `spot analyze --ticker <코드>`, `spot monitor --once --dry-run`, `spot fills sync`, `spot approvals list`,
-  `accounts show|pause|resume`, `ml features backfill --years 3`, `ml train`, `ml models`, `evaluation rl models`,
-  `evaluation readiness`, `evaluation backtest --since YYYY-MM-DD`.
+- 작업은 웹 대시보드에서, 또는 `trader jobs run <작업>` 으로 데몬 큐에 넣습니다(`trader jobs kinds` 로 종류 확인).
 
-## 5. 업데이트·백업
+## 6. 세이브티커 수집(선택)
 
-- 새 zip 을 풀어 **`Trader.app`·`trader`(macOS) 또는 `_internal/`·실행파일 둘(Windows)만** 교체합니다.
-  `config/ secrets/ state/` 는 그대로 둡니다. 버전은 `./trader --version`.
-- 백업은 `config/ secrets/ state/` 세 폴더면 충분합니다. 배포 zip 에는 이 폴더들이 들어가지 않습니다.
+세이브티커는 Chrome 확장 + 로컬 Native host 로만 수집합니다(계정 파일·자동 브라우저 수집은 없음).
 
-## 6. 문제가 날 때
+1. 앱을 응용 프로그램 폴더(macOS) 또는 설치 경로(Windows)에 둔 상태로 터미널에서
+   `trader saveticker extension install` 을 한 번 실행합니다(다시 실행해도 됨). 확장을 데이터 폴더의
+   `saveticker-extension/extension` 으로 복사하고 설치된 `trader` 를 Chrome Native host 로 등록합니다.
+2. Chrome 주소창에 `chrome://extensions` → 오른쪽 위 **개발자 모드** 켜기 → (다른 경로로 로드된 옛 Trader 수집
+   확장이 있으면 먼저 삭제) → **압축해제된 확장 프로그램 로드** → `<데이터 폴더>/saveticker-extension/extension` 선택.
+3. Chrome 에서 세이브티커에 직접 로그인한 뒤 확장 팝업에서 **시작** 을 누릅니다.
+4. Chrome 의 다운로드 위치는 기본값(사용자 `Downloads` 폴더)이어야 합니다 — 「다운로드 전 저장 위치 확인」도 끕니다.
+   첫 PDF 를 저장할 때 macOS 가 `trader` 의 다운로드 폴더 접근 허용을 물으면 **허용** 합니다.
+5. 상태는 `trader saveticker extension status`, 수집 결과는 `trader saveticker status`. 저장 폴더는
+   데이터 폴더의 `state/external/saveticker/`. 컴퓨터가 깨어 있고 Chrome 이 켜져 있어야 수집합니다.
+6. 제거: 팝업에서 중지 → `trader saveticker extension uninstall` → `chrome://extensions` 에서 확장 삭제.
 
-- "claude 실행파일을 찾을 수 없습니다": PATH 에 `claude` 가 없습니다. `config/settings.yaml` 의
-  `claude_bin` 에 전체 경로를 적습니다.
-- 웹이 안 열림: 터미널에서 `./trader web` 로 띄우고 오류 메시지를 봅니다. 포트는 `settings.yaml` `web.port`.
-- 더블클릭해도 아무 반응이 없음: `state/logs/startup-error.log` 를 봅니다.
-- 원장 오류: `state/trader.db` 가 깨진 경우 `state/` 를 백업 뒤 비우면 새로 만듭니다(기록 유실 주의).
+## 7. 업데이트
+
+1. 세이브티커를 쓰면 확장 팝업에서 **수집 중지**.
+2. ▲ 메뉴 「종료」.
+3. 새 버전 설치:
+   - macOS: 새 `.dmg` 를 열고 Trader 를 응용 프로그램으로 다시 끌어다 놓아 **대치** 합니다.
+   - Windows: 새 `…-setup.exe` 를 실행합니다(같은 위치에 덮어씁니다. 앱이 켜져 있으면 닫기를 묻습니다).
+4. 앱을 실행합니다. 확장 복사본이 새 버전으로 바뀌면 "확장을 새로고침하세요" 알림이 한 번 옵니다 — 그때
+   `chrome://extensions` 에서 Trader 수집 확장의 새로고침(↻)을 누르고 팝업에서 다시 시작합니다.
+
+데이터 폴더(설정·키·원장)는 그대로 쓰입니다. 버전은 `trader --version`.
+
+## 8. 옛 휴대용 폴더에서 넘어오기
+
+0.2.x 까지의 zip 판(압축을 푼 `trader/` 폴더 옆에 `config/ secrets/ state/` 가 있던 방식) 또는 소스 폴더에서
+옮겨 올 때 한 번만 합니다. 원본은 지우지 않습니다.
+
+1. 옛 데몬 내리기: 옛 트레이 앱 「종료」, 자동 시작을 등록했었다면 옛 `trader install --uninstall`
+   (macOS 에서 직접 등록한 경우 `launchctl bootout gui/$(id -u)/com.trader.daemon`). 세이브티커 팝업에서 수집 중지.
+2. 새 앱을 설치합니다(2절). 아직 실행하지 않아도 됩니다.
+3. 미리 보기:
+   ```
+   trader migrate-home --from <옛 폴더> [--saveticker-from <옛 세이브티커 수집 폴더>] --dry-run
+   ```
+4. 결과가 맞으면 `--dry-run` 을 빼고 다시 실행합니다(원장은 SQLite backup 으로 복사, 잠금 파일 제외).
+   새 데이터 폴더에 이미 원장이 있거나 데몬이 실행 중이면 거부합니다.
+5. 새 앱을 실행하고 ▲ 메뉴 「로그인 시 자동 시작」을 다시 켭니다(옛 등록을 새 경로로 덮어씀).
+6. 세이브티커를 쓰면 `trader saveticker extension install` 을 다시 하고 6절 2~3 단계대로 새 경로의 확장을 로드합니다.
+7. 며칠 써 보고 문제가 없으면 옛 폴더를 정리합니다.
+
+## 9. 백업 · 제거
+
+- **백업**: 데이터 폴더 하나면 충분합니다(특히 `config/ secrets/ state/`). 앱은 언제든 다시 설치할 수 있습니다.
+- **제거**:
+  - macOS: 세이브티커를 썼으면 팝업에서 중지 후 `trader saveticker extension uninstall` → ▲ 메뉴에서
+    「로그인 시 자동 시작」 해제 → 「종료」 → 응용 프로그램의 Trader 를 휴지통으로.
+  - Windows: 세이브티커 팝업에서 수집 중지 → ▲ 메뉴 「종료」 → 설정 → 앱 → 설치된 앱(또는 제어판 → 프로그램 제거) → Trader.
+    제거 프로그램이 로그온 자동 시작과 세이브티커 Native host 등록도 해제합니다(확장이 연결 중이면 등록 해제는
+    건너뛰니, 남았으면 `chrome://extensions` 에서 확장을 지우면 됩니다).
+  - 어느 쪽이든 **데이터 폴더는 남습니다.** 완전히 지우려면 데이터 폴더를 직접 삭제합니다(되돌릴 수 없음).
+
+## 10. 문제가 날 때
+
+- **실행해도 아이콘이 안 뜸**: 데이터 폴더의 `state/logs/startup-error.log` 를 봅니다(데이터 폴더를 만들 수 없을 때는
+  홈 폴더의 `startup-error.log`). macOS 에서 "앱이 임시 위치(App Translocation)에서 실행 중" 안내가 뜨면 Trader 를
+  응용 프로그램 폴더로 옮긴 뒤 다시 실행합니다.
+- **"claude 실행파일을 찾을 수 없습니다"**: PATH 에 `claude` 가 없습니다. `config/settings.yaml` 의 `claude_bin` 에
+  전체 경로를 적습니다.
+- **웹이 안 열림**: 터미널에서 `trader web` 으로 띄우고 오류 메시지를 봅니다. 포트는 `settings.yaml` 의 `web.port`.
+- 데몬 로그는 데이터 폴더의 `state/logs/`(▲ 메뉴 「로그 폴더 열기」). 외부 감시 1회는 `trader watchdog`.
+- **원장 오류**: `state/trader.db` 가 깨지면 `state/` 를 백업한 뒤 비우면 새로 만듭니다(기록 유실 주의).

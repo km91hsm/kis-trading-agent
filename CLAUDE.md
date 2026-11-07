@@ -97,6 +97,6 @@
 - 구현 플랜: `docs/superpowers/plans/` (마일스톤별 1개)
 - 커널 모듈 규약: `docs/architecture.md`
 - 진행 체크리스트: `docs/TODO.md`
-- 전환 리허설·되돌리기: `docs/runbook-transition.md` · 번들 사용법: `docs/bundle-usage.md`
+- 전환 리허설·되돌리기: `docs/runbook-transition.md` · 설치판(dmg·setup.exe) 설치 안내: `docs/bundle-usage.md` · 설치 파일 빌드: `packaging/build.py`(macOS `hdiutil`, Windows Inno Setup `packaging/trader.iss`, 배포는 `v*` 태그 CI)
 - Claude Code 권한·세션 훅: `.claude/settings.json`(deny = 이 금지사항) · `tools/session_start.py`(STATUS 두 절 + 열린 TODO)
 - SDD 작업 기록(로컬 전용, gitignore): `.superpowers/sdd/<날짜>-<마일스톤>/progress.md`
