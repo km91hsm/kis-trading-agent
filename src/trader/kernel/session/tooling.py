@@ -160,6 +160,7 @@ _QUALITY_KEYS = frozenset(
         "source_coverage",
         "streams_status",
         "data_gaps",
+        "fallback_reason",
         "errors",
         "error",
         "truncation",
@@ -170,10 +171,15 @@ _QUALITY_KEYS = frozenset(
 
 _IDENTITY_FIELDS = {
     "source",
+    "requested_source",
     "source_asof",
     "asof",
     "received_at",
     "observed_at",
+    "observed_date",
+    "unit",
+    "timestamp_precision",
+    "session",
     "generated_at",
     "market",
     "currency",
@@ -202,7 +208,11 @@ def _compact(
     mapping_limit: int | None = None,
 ) -> Any:
     if isinstance(v, str):
-        if chars is not None and path[-1:] in (("data_gaps",), ("error",)):
+        if chars is not None and path[-1:] in (
+            ("data_gaps",),
+            ("error",),
+            ("fallback_reason",),
+        ):
             return _cut(v, max(chars, 300))
         return (
             _cut(v, chars)

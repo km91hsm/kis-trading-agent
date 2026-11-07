@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import httpx
+import pytest
 
 from tests.features.ingest.helpers import T0, load
 from trader.features.ingest.macro import Ecos, Fred, collect_macro
@@ -157,4 +158,122 @@ def test_collect_macro_passes_asof_to_sources(respx_mock):
         asof=datetime(2026, 10, 6, 12, 0, tzinfo=UTC),
     )
     assert out["us10y"]["data"]["date"] == "2026-10-06"
-    assert fred.calls[0].request.url.params["observation_end"] == "2026-10-06"
+    yield_request = next(
+        c.request for c in fred.calls if c.request.url.params["series_id"] == "DGS10"
+    )
+    assert yield_request.url.params["observation_end"] == "2026-10-06"
+
+
+class DailyIndexMarket(FakeIndexMarket):
+    def __init__(self, outcome="ok"):
+        super().__init__()
+        self.outcome = outcome
+        self.requests = []
+
+    def get_index_us_daily(self, symbol, *, asof):
+        self.requests.append((symbol, asof))
+        if self.outcome == "failure":
+            raise RuntimeError("합성 지수 조회 실패")
+        if self.outcome == "missing":
+            return None
+        return {"value": Decimal("4200.50"), "date": "2026-10-08", "symbol": symbol}
+
+
+def test_kis_indices_selected_without_duplicate_fred_requests(respx_mock):
+    fred = respx_mock.get(url__startswith=FRED).respond(200, json=load("macro_fred.json"))
+    market = DailyIndexMarket()
+    out = collect_macro(
+        MacroCfg(ecos=False),
+        Secrets(FRED_API_KEY="synthetic"),
+        market_client=market,
+        asof=T0,
+        http=httpx.Client(),
+        now=lambda: T0,
+    )
+    assert market.requests == [("SPX", T0), ("COMP", T0)]
+    assert {c.request.url.params["series_id"] for c in fred.calls} == {
+        "DEXKOUS",
+        "DGS10",
+        "VIXCLS",
+        "DFF",
+        "DTWEXBGS",
+        "DCOILWTICO",
+    }
+    for key, symbol, name in [("sp500", "SPX", "S&P 500"), ("nasdaq", "COMP", "NASDAQ Composite")]:
+        section = out[key]
+        assert section["data"]["value"] == Decimal("4200.50")
+        assert section["source"] == "KIS" and section["series_id"] == symbol
+        assert section["instrument"] == name and section["unit"] == "index points"
+        assert section["observed_date"] == "2026-10-08" and section["observed_at"] is None
+        assert section["basis"] == "daily_observation"
+        assert section["timestamp_precision"] == "day" and section["live_verified"] is False
+        assert section["received_at"] == T0.isoformat() and section["fallback_reason"] is None
+
+
+@pytest.mark.parametrize(
+    "outcome,reason",
+    [
+        ("failure", "합성 지수 조회 실패"),
+        ("missing", "no valid daily observation"),
+        ("no_method", "method unavailable"),
+        ("no_client", "no market client"),
+        ("disabled", "disabled"),
+    ],
+)
+def test_kis_index_fallback_preserves_actual_fred_identity(respx_mock, outcome, reason):
+    from datetime import UTC, datetime
+
+    # UTC 11/7이지만 미국은 11/6이므로 fallback도 11/5까지만 허용한다.
+    asof = datetime(2026, 11, 7, 1, tzinfo=UTC)
+    fred = respx_mock.get(url__startswith=FRED).respond(
+        200,
+        json={
+            "observations": [
+                {"date": "2026-11-06", "value": "9000"},
+                {"date": "2026-11-05", "value": "4300"},
+            ]
+        },
+    )
+    market = (
+        None
+        if outcome == "no_client"
+        else (FakeIndexMarket() if outcome == "no_method" else DailyIndexMarket(outcome))
+    )
+    cfg = MacroCfg(kis_indices=outcome != "disabled", ecos=False)
+    out = collect_macro(
+        cfg,
+        Secrets(FRED_API_KEY="synthetic"),
+        market_client=market,
+        asof=asof,
+        http=httpx.Client(),
+        now=lambda: T0,
+    )
+    for key, series in [("sp500", "SP500"), ("nasdaq", "NASDAQCOM")]:
+        section = out[key]
+        assert section["source"] == "FRED" and section["series_id"] == series
+        assert section["data"] == {"value": 4300.0, "date": "2026-11-05"}
+        assert reason in section["fallback_reason"]
+    index_requests = [
+        c.request for c in fred.calls if c.request.url.params["series_id"] in {"SP500", "NASDAQCOM"}
+    ]
+    assert len(index_requests) == 2
+    assert all(r.url.params["observation_end"] == "2026-11-05" for r in index_requests)
+    if outcome == "disabled":
+        assert not market.requests
+
+
+def test_kis_indices_work_without_fred_key_and_missing_retains_fallback_gap():
+    for outcome in ("ok", "missing"):
+        out = collect_macro(
+            MacroCfg(ecos=False),
+            Secrets(),
+            market_client=DailyIndexMarket(outcome),
+            asof=T0,
+            http=httpx.Client(),
+            now=lambda: T0,
+        )
+        if outcome == "ok":
+            assert out["sp500"]["source"] == "KIS" and out["sp500"]["data"]
+        else:
+            assert out["sp500"]["data"] is None and out["sp500"]["error"] == "no api key"
+            assert "no valid daily observation" in out["sp500"]["fallback_reason"]

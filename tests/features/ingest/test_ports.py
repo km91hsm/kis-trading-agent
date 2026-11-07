@@ -353,3 +353,83 @@ def test_public_research_context_preserves_asof_gaps_and_blog_failure(
     assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "missing"
     assert out["blog_posts"] == []
     assert any("ranto28" in gap for gap in out["data_gaps"])
+
+
+def test_kis_index_from_real_input_port_reaches_compact_context(project):
+    from datetime import timedelta
+
+    from trader.features.ingest import inputs
+    from trader.kernel.session.tooling import compact_context
+
+    inputs._MACRO_MEMO.clear()
+
+    asof = datetime.now(UTC)
+    observed_date = (asof - timedelta(days=2)).date().isoformat()
+
+    class IndexMarket(FakeMarket):
+        def get_index_us_daily(self, symbol, *, asof):
+            return {"value": 4200, "date": observed_date, "symbol": symbol}
+
+    cfg = SourcesConfig.model_validate(
+        {
+            "dart": {"enabled": False},
+            "edgar": {"enabled": False},
+            "news": {"enabled": False},
+            "community": {"enabled": False},
+            "macro": {"fred": False, "ecos": False},
+        }
+    )
+    out = InputsPortImpl(Secrets(), cfg).collect(
+        ticker="005930",
+        market="KR",
+        exchange=None,
+        asof=asof,
+        force=True,
+        conn_factory=None,
+        market_client=IndexMarket(now=lambda: asof),
+    )
+    compact = compact_context(out)
+    assert compact["macro"]["sp500"]["source"] == "KIS"
+    assert compact["macro"]["sp500"]["data"]["value"] == 4200
+    assert compact["source_coverage"]["macro"]["sp500"]["source"] == "KIS"
+    assert compact["source_coverage"]["macro"]["sp500"]["series_id"] == "SPX"
+    assert compact["source_coverage"]["macro"]["nasdaq"]["series_id"] == "COMP"
+    assert compact["source_coverage"]["macro"]["sp500"]["status"] == "present"
+    inputs._MACRO_MEMO.clear()
+
+
+def test_public_research_context_keeps_per_index_fallback_through_compaction(conn, respx_mock):
+    from trader.kernel.session.tooling import compact_context
+
+    asof = datetime(2026, 11, 7, 1, tzinfo=UTC)
+
+    class IndexMarket(FakeMarket):
+        def get_index_us_daily(self, symbol, *, asof):
+            if symbol == "SPX":
+                raise RuntimeError("합성 SPX 원천 실패")
+            return {"value": 20000, "date": "2026-11-05", "symbol": symbol}
+
+    fred = respx_mock.get("https://api.stlouisfed.org/fred/series/observations").respond(
+        200, json={"observations": [{"value": "4300", "date": "2026-11-05"}]}
+    )
+    cfg = SourcesConfig.model_validate({"macro": {"ecos": False}})
+    out = InputsPortImpl(Secrets(FRED_API_KEY="synthetic"), cfg).research_context(
+        conn,
+        "US",
+        asof=asof,
+        market_client=IndexMarket(),
+        now=lambda: asof,
+    )
+    compact = compact_context(out)
+    coverage = compact["source_coverage"]["macro"]
+    assert coverage["sp500"]["source"] == "FRED"
+    assert coverage["sp500"]["series_id"] == "SP500"
+    assert "합성 SPX 원천 실패" in coverage["sp500"]["fallback_reason"]
+    assert coverage["sp500"]["basis"] == "daily_close"
+    assert coverage["sp500"]["requested_source"] == "S&P 500"
+    assert coverage["sp500"]["observed_date"] == "2026-11-05"
+    assert coverage["sp500"]["unit"] == "index points"
+    assert compact["macro"]["sp500"]["data"]["value"] == 4300
+    assert coverage["nasdaq"]["source"] == "KIS" and coverage["nasdaq"]["series_id"] == "COMP"
+    assert coverage["nasdaq"]["basis"] == "daily_observation"
+    assert "NASDAQCOM" not in {c.request.url.params["series_id"] for c in fred.calls}

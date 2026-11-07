@@ -52,6 +52,7 @@ class MacroCfg(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
+    kis_indices: bool = True
     fred: bool = True
     ecos: bool = True
 

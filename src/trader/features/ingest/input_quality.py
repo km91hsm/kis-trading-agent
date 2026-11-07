@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from trader.features.ingest.macro import MACRO_INSTRUMENTS
+
 
 def macro_context(macro: dict, *, asof: datetime) -> dict:
     """관측일과 조회시각·발표시각을 구분하고 asof 뒤 관측값을 차단한다."""
@@ -14,8 +16,14 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
             out[key] = section
             continue
         data = section.get("data")
-        observation = (data.get("asof") or data.get("date")) if isinstance(data, dict) else None
-        source = "ECOS" if key == "base_rate_kr" else "KIS" if key == "kospi" else "FRED"
+        observation = (
+            ((data.get("asof") or data.get("date")) if isinstance(data, dict) else None)
+            or section.get("observed_at")
+            or section.get("observed_date")
+        )
+        source = section.get("source") or (
+            "ECOS" if key == "base_rate_kr" else "KIS" if key == "kospi" else "FRED"
+        )
         future = False
         timestamp_error = None
         if observation:
@@ -32,13 +40,15 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
                 # Date/month observations have no release timestamp. Preserve their
                 # precision and unknown release freshness instead of inventing a time.
                 future = raw[:10] > asof.astimezone(UTC).date().isoformat()
-        gaps = []
+        gaps = list(section.get("data_gaps") or [])
         if timestamp_error:
             gaps.append(timestamp_error)
         if section.get("error"):
             gaps.append(str(section["error"]))
         if future:
             gaps.append("observation is after asof")
+        if section.get("fallback_reason"):
+            gaps.append(str(section["fallback_reason"]))
         if data is not None:
             gaps.append(
                 "release time/frequency freshness unavailable; observation date is not fetch time"
@@ -49,8 +59,8 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
             "source": source,
             "source_asof": observation,
             "status": "unavailable" if future or timestamp_error or data is None else "available",
-            "stale": None,
-            "data_gaps": gaps,
+            "stale": section.get("stale"),
+            "data_gaps": list(dict.fromkeys(gaps)),
         }
     return out
 
@@ -132,9 +142,9 @@ def activity_context(
 _REQUESTED_MACRO = {
     "sp500": ("SP500", "S&P 500", True),
     "nasdaq": ("NASDAQCOM", "NASDAQ Composite", True),
-    "wti": ("DCOILWTICO", "WTI crude oil spot price", False),
-    "dxy": ("DTWEXBGS", "Federal Reserve broad US dollar index", False),
-    "us10y": ("DGS10", "US Treasury 10-year constant maturity yield", True),
+    "wti": ("DCOILWTICO", "WTI crude oil futures", False),
+    "dxy": ("DTWEXBGS", "ICE US Dollar Index (DXY)", False),
+    "us10y": ("DGS10", "US 10-year Treasury yield", False),
 }
 
 
@@ -145,22 +155,34 @@ def source_coverage(
     blog_posts: list[dict] | None = None,
     blog_config: list[str] | None = None,
 ) -> dict:
-    """요청 원천과 실제 관측을 구분한다. FRED proxy를 Investing.com 자료로 표시하지 않는다."""
+    """요청 지표와 실제 선택 원천을 구분하고 일별 대체 관측의 한계를 표시한다."""
     coverage = {}
-    for key, (series, instrument, exact) in _REQUESTED_MACRO.items():
+    for key, (series, requested, exact) in _REQUESTED_MACRO.items():
         section = macro.get(key) or {}
         available = isinstance(section, dict) and section.get("data") is not None
+        instrument, unit, basis = MACRO_INSTRUMENTS[key]
+        gaps = list(section.get("data_gaps") or [])
+        if section.get("fallback_reason"):
+            gaps.append(str(section["fallback_reason"]))
         coverage[key] = {
             "status": "present" if available else "missing",
-            "source": "FRED",
-            "requested_source": "Investing.com",
-            "series_id": series,
-            "instrument": instrument,
+            "source": section.get("source", "FRED"),
+            "requested_source": requested,
+            "series_id": section.get("series_id", series),
+            "instrument": section.get("instrument", instrument),
+            "basis": section.get("basis", basis),
+            "unit": section.get("unit", unit),
+            "observed_date": section.get("observed_date"),
+            "observed_at": section.get("observed_at"),
+            "timestamp_precision": section.get("timestamp_precision", "day"),
+            "session": section.get("session", "daily_observation"),
+            "live_verified": section.get("live_verified", False),
+            "fallback_reason": section.get("fallback_reason"),
             "exact_requested_instrument": exact,
             "received_at": section.get("received_at"),
             "source_asof": section.get("source_asof"),
             "stale": section.get("stale"),
-            "data_gaps": ["Investing.com source not collected; FRED series used"]
+            "data_gaps": list(dict.fromkeys(gaps))
             + ([] if exact else ["proxy differs from requested instrument; do not equate values"])
             + ([] if available else ["no observation supplied to this input"]),
         }

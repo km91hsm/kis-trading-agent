@@ -311,3 +311,37 @@ def test_compact_context_does_not_count_ellipsis_as_delivered_blog_evidence():
     )
     assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "dropped"
     assert out["source_coverage"]["naver_blog/ranto28"]["items"] == 0
+
+
+@pytest.mark.parametrize("limit", [8000, 24000])
+def test_shrink_keeps_bounded_fallback_reason_and_daily_source_metadata(limit):
+    reason = "KIS upstream unavailable: " + "합성 진단 " * 10000
+    obj = {
+        "macro": {"sp500": {"data": {"value": 4300, "date": "2026-11-05"}}},
+        "source_coverage": {
+            "macro": {
+                "sp500": {
+                    "status": "present",
+                    "source": "FRED",
+                    "series_id": "SP500",
+                    "instrument": "S&P 500",
+                    "fallback_reason": reason,
+                    "unit": "index points",
+                    "observed_date": "2026-11-05",
+                    "timestamp_precision": "day",
+                    "session": "daily_observation",
+                }
+            }
+        },
+        "news": [{"title": "합성 뉴스", "summary": "가" * 2000} for _ in range(20)],
+    }
+    out = shrink(obj, limit)
+    assert _size(out) <= limit
+    coverage = out["source_coverage"]["macro"]["sp500"]
+    assert coverage["status"] == "present"
+    assert coverage["fallback_reason"].startswith("KIS upstream unavailable: ")
+    assert len(coverage["fallback_reason"]) <= 301
+    assert coverage["unit"] == "index points"
+    assert coverage["observed_date"] == "2026-11-05"
+    assert coverage["timestamp_precision"] == "day"
+    assert coverage["session"] == "daily_observation"

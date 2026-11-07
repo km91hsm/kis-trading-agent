@@ -113,3 +113,74 @@ def test_intraday_macro_rejects_same_day_future_timestamp_after_timezone_convers
         asof=asof,
     )
     assert current["kospi"]["data"]["value"] == 2990
+
+
+def test_selected_index_metadata_survives_repeated_macro_validation_and_coverage():
+    raw = {
+        "sp500": {
+            "data": {"value": 4200, "date": "2026-11-05"},
+            "error": None,
+            "source": "KIS",
+            "series_id": "SPX",
+            "instrument": "S&P 500",
+            "basis": "daily_observation",
+            "unit": "index points",
+            "observed_date": "2026-11-05",
+            "observed_at": None,
+            "timestamp_precision": "day",
+            "session": "daily_observation",
+            "live_verified": False,
+            "fallback_reason": None,
+            "received_at": "2026-11-07T00:00:00+00:00",
+            "data_gaps": ["source timing unavailable"],
+        }
+    }
+    asof = datetime(2026, 11, 7, tzinfo=UTC)
+    checked = input_quality.macro_context(raw, asof=asof)
+    checked = input_quality.macro_context(checked, asof=asof)
+    coverage = input_quality.source_coverage(checked)["macro"]["sp500"]
+    assert checked["sp500"]["source"] == "KIS"
+    assert "source timing unavailable" in checked["sp500"]["data_gaps"]
+    assert len(checked["sp500"]["data_gaps"]) == len(set(checked["sp500"]["data_gaps"]))
+    for key in (
+        "source",
+        "series_id",
+        "instrument",
+        "basis",
+        "unit",
+        "observed_date",
+        "observed_at",
+        "timestamp_precision",
+        "session",
+        "live_verified",
+        "fallback_reason",
+    ):
+        assert coverage[key] == raw["sp500"][key]
+    assert coverage["requested_source"] == "S&P 500"
+    assert coverage["source_asof"] == "2026-11-05"
+    assert coverage["exact_requested_instrument"] is True
+
+
+def test_selected_fred_fallback_reason_reaches_proxy_coverage():
+    macro = input_quality.macro_context(
+        {
+            "nasdaq": {
+                "data": {"value": 20000, "date": "2026-11-05"},
+                "error": None,
+                "source": "FRED",
+                "series_id": "NASDAQCOM",
+                "instrument": "NASDAQ Composite",
+                "basis": "daily_close",
+                "fallback_reason": "KIS method unavailable",
+                "received_at": "2026-11-07T00:00:00+00:00",
+            }
+        },
+        asof=datetime(2026, 11, 7, tzinfo=UTC),
+    )
+    coverage = input_quality.source_coverage(macro)["macro"]
+    assert coverage["nasdaq"]["source"] == "FRED"
+    assert coverage["nasdaq"]["fallback_reason"] == "KIS method unavailable"
+    assert "KIS method unavailable" in coverage["nasdaq"]["data_gaps"]
+    assert coverage["dxy"]["exact_requested_instrument"] is False
+    assert coverage["wti"]["exact_requested_instrument"] is False
+    assert coverage["us10y"]["exact_requested_instrument"] is False
