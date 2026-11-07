@@ -191,9 +191,12 @@ def test_install_defaults_program_to_bundle_service_argv(tmp_path, monkeypatch):
     monkeypatch.setattr(bundle, "cli_executable", lambda: PurePosixPath("/dist/trader/trader"))
     r = installer.install(dry_run=True, platform="darwin", home=tmp_path, project_root=tmp_path)
     assert "<string>/dist/trader/trader</string>" in r["content"]
-    assert "<string>app</string>\n    <string>--no-browser</string>" in r["content"]
+    assert (
+        "<string>app</string>\n    <string>--tray</string>\n    <string>--no-browser</string>"
+        in r["content"]
+    )
     w = installer.install(dry_run=True, platform="win32", home=tmp_path, project_root=tmp_path)
-    assert "<Arguments>app --no-browser</Arguments>" in w["content"]
+    assert "<Arguments>app --tray --no-browser</Arguments>" in w["content"]
 
 
 def test_render_watchdog_variants_use_interval_not_keepalive(tmp_path):

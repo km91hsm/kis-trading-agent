@@ -16,7 +16,7 @@
 | `uv run trader daemon [--dry-run]` | 스케줄러 데몬. 이미 실행 중이면(다른 데이터 루트의 데몬 포함 — 사용자 단위 전역 잠금) 안내 후 exit 0 (사용자 전용 — 금지사항 참고) |
 | `uv run trader web [--host] [--port]` | 웹 UI·API 서버(`WEB_TOKEN` 이 없으면 먼저 만든다) |
 | `uv run trader app [--tray --no-browser --browser-delay 1.5 --dry-run]` | 번들 진입점: 첫 실행 초기화·`WEB_TOKEN` 생성 → 데몬 + 웹 UI 한 프로세스 → 브라우저 또는 트레이. 이미 실행 중이면 브라우저만 열고 exit 0 (사용자 전용) |
-| `uv run trader install [--uninstall --watchdog --dry-run]` | 로그온 시 데몬 + 웹 UI(`app --no-browser`, 브라우저는 열지 않음; `--watchdog` 이면 5분 감시) 자동 시작 등록·해제 (사용자 전용) |
+| `uv run trader install [--uninstall --watchdog --dry-run]` | 로그온 시 데몬 + 웹 UI + 트레이(`app --tray --no-browser`, 브라우저는 열지 않음; `--watchdog` 이면 5분 감시) 자동 시작 등록·해제 (사용자 전용) |
 | `uv run trader migrate-home --from <옛 폴더> [--saveticker-from <수집 폴더> --dry-run]` | 옛 휴대용 폴더(또는 소스 폴더)의 `config/ secrets/ state/ docs/` 를 현재 데이터 루트(번들은 OS 사용자 데이터 폴더)로 복사(원본 유지·SQLite backup·잠금 파일 제외). 대상 원장이 있거나 데몬 실행 중이면 거부. JSON 1줄 |
 | `uv run trader accounts show\|mode\|pause\|resume\|ping\|order-test --account …\|add\|remove\|secrets import` | 계좌 목록·모드·일시정지·점검·모의 주문 연결 점검(1주 접수→즉시 취소)·추가삭제·키 가져오기 (모드 변경·`ping`·`order-test` 는 사용자 전용, `order-test` 는 paused 무관·dry-run 거부) |
 | `uv run trader ingest collect --ticker … [--market KR\|US --exchange … --asof … --force]` | 종목 수집 1회(공시·뉴스·거시 등, 절별 오류 격리) |

@@ -1,5 +1,5 @@
-"""로그온 시 데몬 + 웹 UI(`app --no-browser`) 자동 시작 등록 (스펙 §10.1). 파이썬 템플릿 +
-subprocess, 셸 스크립트 없음.
+"""로그온 시 데몬 + 웹 UI + 트레이(`app --tray --no-browser`) 자동 시작 등록 (스펙 §10.1).
+파이썬 템플릿 + subprocess, 셸 스크립트 없음.
 
 - macOS: ~/Library/LaunchAgents/com.trader.daemon.plist + `launchctl load -w`
 - Windows: %USERPROFILE%/trader-daemon.xml + `schtasks /Create /TN trader-daemon /XML … /F`
@@ -146,8 +146,8 @@ def render(
     exit_timeout_s: int = DEFAULT_EXIT_TIMEOUT_S,
     interval_s: int | None = None,
 ) -> str:
-    """program 은 등록 argv (`[python, "-m", "trader", "app", "--no-browser"]` 또는 번들
-    `[exe, "app", "--no-browser"]`, 기본은 `bundle.service_argv()`). extra_paths(claude
+    """program 은 등록 argv (`[python, "-m", "trader", "app", "--tray", "--no-browser"]` 또는 번들
+    `[exe, "app", "--tray", "--no-browser"]`, 기본은 `bundle.service_argv()`). extra_paths(claude
     디렉터리 등)를 launchd PATH 앞에 둔다 (launchd 는 셸 PATH 가 없다).
 
     exit_timeout_s: SIGTERM 뒤 launchd 가 SIGKILL 하기까지의 시간. 데몬은 실행 중인 analyze

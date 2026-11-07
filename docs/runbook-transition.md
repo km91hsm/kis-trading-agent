@@ -76,13 +76,13 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 3. 로그온 등록:
    ```
    cd <새 저장소>
-   uv run trader install                 # 데몬 + 웹 UI(`app --no-browser`) (먼저 --dry-run 으로 plist/XML 확인)
+   uv run trader install                 # 데몬 + 웹 UI(`app --tray --no-browser`) (먼저 --dry-run 으로 plist/XML 확인)
    uv run trader install --watchdog      # 데몬 밖 5분 감시
    ```
 4. 확인:
    - `uv run trader notify-test` — 텔레그램 시험 메시지 1건.
    - 텔레그램 `/status` — 「운영 점검」·「데몬」 절과 계좌 절이 나온다.
-   - 웹 `http://127.0.0.1:8787/system` — 로그온 등록이 데몬과 웹 UI 를 함께 띄우므로(`app --no-browser`)
+   - 웹 `http://127.0.0.1:8787/system` — 로그온 등록이 데몬과 웹 UI 를 함께 띄우므로(`app --tray --no-browser`)
      로그온 뒤 바로 열린다. 데몬 살아 있음·운영 점검 정상·잡 표 다음 예정 시각.
    - 같은 PC 에서 `trader app`(또는 번들 더블클릭)을 다시 실행하면 「이미 실행 중입니다」 안내 뒤 브라우저만
      열고 exit 0 — 두 번째 데몬은 뜨지 않는다.
@@ -93,7 +93,7 @@ uv run trader selfcheck                              # 설치 점검 JSON 1줄, 
 git tag v0.2.1 && git push origin v0.2.1
 ```
 → GitHub Actions `build.yml`(macOS arm64·x86_64, Windows x86_64)이 테스트·웹 빌드·PyInstaller 번들·zip 을 만들고
-Release 에 올린다. 번들의 `./trader install` 도 소스와 같이 `app --no-browser` 를 등록한다(로그온 뒤 웹 UI 포함).
+Release 에 올린다. 번들의 `./trader install` 도 소스와 같이 `app --tray --no-browser` 를 등록한다(로그온 뒤 웹 UI 포함).
 zip 을 풀어 더블클릭(`Trader.app` / `TraderApp.exe`)으로 메뉴바·트레이 아이콘·웹 UI 가 뜨는지는
 사용자 실기 확인 항목이다(`docs/TODO.md` 「사용자 확인 대기」, 사용법 `docs/bundle-usage.md`).
 
@@ -108,7 +108,7 @@ uv run trader install                   # 옛 데몬 로그온 등록 복구 (�
 ```
 
 - 새 저장소 `install --uninstall` 은 멱등이다 — 등록돼 있지 않으면(Windows 작업 없음 포함) 오류 없이 끝난다.
-- 새 등록은 데몬과 웹 UI 를 한 프로세스(`app --no-browser`)로 띄우므로, 해제·종료하면 8787 웹도 함께 내려간다.
+- 새 등록은 데몬과 웹 UI 를 한 프로세스(`app --tray --no-browser`)로 띄우므로, 해제·종료하면 8787 웹도 함께 내려간다.
 
 - 새 데몬이 떠 있으면 먼저 내린다(트레이 「종료」 또는 Ctrl+C — 실행 중 세션을 기다린 뒤 잠금 해제).
 - 두 저장소의 원장(`state/trader.db`)은 별개다. 되돌린 뒤 새 저장소에서 난 주문·체결은 KIS 앱과 대조한다.

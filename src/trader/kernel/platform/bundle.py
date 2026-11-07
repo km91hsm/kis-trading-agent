@@ -115,8 +115,9 @@ def cli_argv() -> list[str]:
 
 def service_argv() -> list[str]:
     """로그온 등록(launchd·작업 스케줄러)에 쓰는 argv: 데몬 + 웹 UI 한 프로세스
-    (`app --no-browser` — 로그온 직후 브라우저는 열지 않는다, FR-2)."""
-    return [*cli_argv(), "app", "--no-browser"]
+    (`app --tray --no-browser` — 로그온 직후 브라우저는 열지 않고 메뉴바/작업표시줄 아이콘으로
+    제어한다, FR-2. 트레이를 못 띄우는 환경이면 `app` 이 아이콘 없이 계속 돈다)."""
+    return [*cli_argv(), "app", "--tray", "--no-browser"]
 
 
 def watchdog_argv() -> list[str]:
