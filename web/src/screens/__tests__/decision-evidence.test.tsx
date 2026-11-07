@@ -47,7 +47,7 @@ test("당시 수집, 현재 규칙 재구성, 전달 미기록, 모델 인용을
   expect(section.textContent).toContain("인용 미기록");
   expect(section.textContent).toContain("합성 입력 A");
   expect(section.textContent).toContain("합성 출처");
-  const links = [...section.querySelectorAll("a")];
+  const links = Array.from(section.querySelectorAll("a"));
   expect(links.some(a => a.href === "https://example.test/17")).toBe(true);
   expect(links.some(a => a.getAttribute("href")?.startsWith("javascript:"))).toBe(false);
   const external = links.find(a => a.href === "https://example.test/17")!;
@@ -75,7 +75,7 @@ test("같은 쟁점의 주장·반론·재답변을 연결하고 공급자·합�
   expect(issue.textContent).toContain("Codex");
   expect(comparison.textContent).toContain("공급자 미기록");
   expect(comparison.textContent).toContain("80% → 70%");
-  const ref = [...issue.querySelectorAll("a")].find(a => a.textContent?.includes("news:17"))!;
+  const ref = Array.from(issue.querySelectorAll("a")).find(a => a.textContent?.includes("news:17"))!;
   expect(ref.getAttribute("href")).toBe("#input-news.stock%3A0");
   expect(document.getElementById("input-news.stock%3A0")).not.toBeNull();
 });

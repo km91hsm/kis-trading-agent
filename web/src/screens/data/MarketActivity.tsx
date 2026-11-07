@@ -45,7 +45,7 @@ function chartHref(r: ActivityRow, params: URLSearchParams) {
   return `/data?${next}#stock-chart`;
 }
 const columns = (params: URLSearchParams): Column<ActivityRow>[] => [
-  { key: "ticker", label: "종목 · 차트", width: "20%", render: (r) => <Link data-activity-ticker to={chartHref(r, params)}>{r.ticker}{r.name && r.name !== r.ticker ? ` ${r.name}` : ""}</Link> },
+  { key: "ticker", label: "종목 · 차트", width: "20%", long: true, render: (r) => <Link data-activity-ticker to={chartHref(r, params)}>{r.ticker}{r.name && r.name !== r.ticker ? ` ${r.name}` : ""}</Link> },
   { key: "exchange", label: "거래소 / 원천 순위", width: "16%", render: (r) => `${r.exchange} / ${r.source_rank ?? "—"}` },
   { key: "price", label: "가격", width: "15%", align: "num", render: (r) => `${fmtMoney(r.price, r.currency)} ${r.currency}` },
   { key: "change_pct", label: "가격 등락률", width: "12%", align: "num", render: (r) => fmtPct(r.change_pct) },
@@ -117,7 +117,7 @@ export function MarketActivity() {
             <p className="perf-note">수집된 상위 종목 안에서 비교합니다. 전체 시장 순위는 아닙니다.</p>
             <ActivityTable params={params} rows={rows} empty={waiting ? `${status} — 정규장 관측 시간에 자동 수집합니다` : filter || growthOnly ? "조건에 맞는 관측 종목이 없습니다" : empty ? "조회한 범위에 종목이 없습니다" : "수집 자료 없음 — 데이터 수집 상태를 확인하세요"} />
             <p className="data-muted">유효 이력 {fmtInt(s.coverage.successful.length)}개 / 최근 실패 {fmtInt(failures)}개 / 미수집 {fmtInt(s.coverage.pending?.length ?? 0)}개</p>
-            <details className="activity-notes"><summary>비교 기준과 수집 범위</summary><p>5분 증감률은 최근 5분 거래대금을 직전 5분과 비교합니다. 최소 10분의 같은 거래 세션 관측이 필요합니다. 정규장 시간 기준이며 임시 휴장 여부와 원천 거래 세션은 별도 확인이 필요합니다.</p>{failures ? <p>조회 오류 범위: {s.coverage.failed.join(", ")}</p> : null}<Link to="/system/features#saveticker">데이터 수집 상태 보기</Link></details>
+            <details className="activity-notes"><summary>비교 기준과 수집 범위</summary><p>5분 증감률은 최근 5분 거래대금을 직전 5분과 비교합니다. 최소 10분의 같은 거래 세션 관측이 필요합니다. 정규장 시간 기준이며 임시 휴장 여부와 원천 거래 세션은 별도 확인이 필요합니다.</p>{failures ? <p>조회 오류 범위: {s.coverage.failed.join(", ")}</p> : null}<Link to="/system/jobs#runs">거래대금 수집 실행 기록 보기</Link></details>
           </>
         );
       })}
