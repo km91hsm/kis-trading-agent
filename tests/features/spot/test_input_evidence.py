@@ -165,7 +165,7 @@ def test_receipt_view_exposes_only_safe_metadata_and_keeps_unreadable_count(case
         rd, public_context(snapshot()), stage="researcher:r0:bull", provider=None, recorded_at=ASOF
     )
     path = next((rd / "input_receipts").glob("*.json"))
-    receipt = json.loads(path.read_text())
+    receipt = json.loads(path.read_text(encoding="utf-8"))
     receipt["private_payload"] = "DO_NOT_EXPOSE"
     receipt["groups"][0]["refs"].append("javascript:private_secret")
     path.write_text(json.dumps(receipt))
@@ -373,7 +373,7 @@ def test_inner_source_outcomes_are_sanitized_and_preserved_through_receipt_api(c
     run_store.write_checkpoint(rd, "00_inputs", data)
     input_receipts.record(rd, data, stage="checkpoint:00_inputs", provider=None, recorded_at=ASOF)
     path = next((rd / "input_receipts").glob("*.json"))
-    receipt = json.loads(path.read_text())
+    receipt = json.loads(path.read_text(encoding="utf-8"))
     receipt["groups"][0]["sections"][0]["source_outcomes"] = [
         {"source": "google_rss", "status": "error", "count": None, "error": "SECRET_PATH"},
         {"source": "naver", "status": "skipped", "count": None},

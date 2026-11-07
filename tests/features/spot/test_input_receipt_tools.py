@@ -45,7 +45,7 @@ def test_receipt_matches_final_tool_response_and_failure_preserves_result(
     ).hexdigest()
     files = list((rd / "input_receipts").glob("*.json"))
     assert len(files) == 1
-    receipt = json.loads(files[0].read_text())
+    receipt = json.loads(files[0].read_text(encoding="utf-8"))
     assert receipt["context_hash"] == digest
     assert receipt["provider"] is None  # 도구 호출자의 모델은 역할만으로 추정하지 않는다.
     assert (rd / "00_inputs.json").read_bytes() == before

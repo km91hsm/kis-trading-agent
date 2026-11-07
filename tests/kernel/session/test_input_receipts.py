@@ -36,14 +36,14 @@ def test_receipt_describes_exact_context_without_copying_text(tmp_path):
     )
     files = list((tmp_path / "input_receipts").glob("*.json"))
     assert len(files) == 1
-    body = json.loads(files[0].read_text())
+    body = json.loads(files[0].read_text(encoding="utf-8"))
     assert body["context_hash"] == expected
     assert body["provider"] is None
     assert body["groups"][0]["count"] == 1
     assert body["groups"][0]["refs"] == ["news:8", "https://example.test/8"]
     assert body["truncated"] is True
-    assert "합성 제목" not in files[0].read_text()
-    assert "원문을 복제" not in files[0].read_text()
+    assert "합성 제목" not in files[0].read_text(encoding="utf-8")
+    assert "원문을 복제" not in files[0].read_text(encoding="utf-8")
     before = files[0].read_bytes()
     assert input_receipts.record(
         tmp_path / "other", {}, stage="trader", provider=None, recorded_at="2026-11-05T01:00:00Z"
@@ -81,7 +81,9 @@ def test_receipt_keeps_per_source_counts_without_source_text(tmp_path):
     input_receipts.record(
         tmp_path, context, stage="trader", provider=None, recorded_at="2026-11-04T01:00:00Z"
     )
-    receipt = json.loads(next((tmp_path / "input_receipts").glob("*.json")).read_text())
+    receipt = json.loads(
+        next((tmp_path / "input_receipts").glob("*.json")).read_text(encoding="utf-8")
+    )
     assert receipt["groups"][0]["source_counts"] == {"fixture-a": 2, "fixture-b": 1}
 
 
@@ -169,7 +171,7 @@ def test_partial_community_retains_error_metadata_without_changing_source_counts
     assert input_receipts.record(
         tmp_path, context, stage="trader", provider=None, recorded_at=stamp
     )
-    raw = next((tmp_path / "input_receipts").glob("*.json")).read_text()
+    raw = next((tmp_path / "input_receipts").glob("*.json")).read_text(encoding="utf-8")
     groups = {group["id"]: group for group in json.loads(raw)["groups"]}
     assert groups["blog_posts"]["count"] == groups["community"]["count"] == 1
     assert groups["blog_posts"]["source_counts"] == {"naver_blog/fixture": 1}
@@ -305,7 +307,9 @@ def test_all_skipped_sections_remain_skipped_in_receipt(tmp_path):
     input_receipts.record(
         tmp_path, context, stage="trader", provider=None, recorded_at="2026-11-04T01:00:00Z"
     )
-    receipt = json.loads(next((tmp_path / "input_receipts").glob("*.json")).read_text())
+    receipt = json.loads(
+        next((tmp_path / "input_receipts").glob("*.json")).read_text(encoding="utf-8")
+    )
     assert all(group["source_counts"] == {} and group["count"] == 0 for group in receipt["groups"])
     assert all(
         section["status"] == "skipped"
@@ -349,7 +353,7 @@ def test_collector_inner_failure_is_not_hidden_by_successful_outer_section(
     input_receipts.record(
         tmp_path, context, stage="trader", provider=None, recorded_at="2026-11-04T01:00:00Z"
     )
-    raw = next((tmp_path / "input_receipts").glob("*.json")).read_text()
+    raw = next((tmp_path / "input_receipts").glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(raw)
     assert receipt["context_hash"] == digest
     assert receipt["groups"][0]["source_counts"] == ({"합성 매체": 1} if items else {})
