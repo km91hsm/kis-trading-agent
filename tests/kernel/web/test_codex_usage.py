@@ -1,7 +1,9 @@
 """구독 관측과 이 프로그램의 Codex 호출량은 토론 설정과 독립이다."""
 
 import json
+import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -9,11 +11,28 @@ import pytest
 from tests.kernel.web.conftest import ledger_deps, make_client
 
 
+@pytest.fixture(autouse=True)
+def python_codex_shim(monkeypatch):
+    """실제 Python을 명시 실행한다. shebang 실행 여부와 무관하게 Windows에서도 같은 RPC다."""
+    actual_popen = subprocess.Popen
+    children = []
+
+    def start(argv, **kwargs):
+        if len(argv) >= 3 and argv[1:3] == ["app-server", "--stdio"]:
+            argv = [sys.executable, "-u", argv[0], *argv[1:]]
+            process = actual_popen(argv, **kwargs)
+            children.append(process)
+            return process
+        return actual_popen(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    return children
+
+
 def _fake_codex(project, response):
-    binary = project / "fake-codex"
+    binary = project / "fake-codex.py"
     log = project / "requests.jsonl"
     binary.write_text(
-        f"#!{sys.executable}\n"
         "import json, os, sys\n"
         f"log = {str(log)!r}\n"
         "for line in sys.stdin:\n"
@@ -155,42 +174,81 @@ def test_cached_success_becomes_stale_when_refresh_fails(project, monkeypatch):
     assert stale["age_s"] == 120 and stale["seven_day"]["used_pct"] == 34
 
 
-def test_timeout_terminates_child_and_output_overflow_is_bounded(project, monkeypatch):
-    import os
-
+def test_timeout_terminates_child_and_output_overflow_is_bounded(
+    project, monkeypatch, python_codex_shim
+):
     from tests.kernel.web.conftest import NOW
     from trader.kernel.session import codex_usage
 
-    binary = project / "hanging-codex"
-    binary.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(10)\n")
+    binary = project / "hanging-codex.py"
+    binary.write_text("import time\ntime.sleep(10)\n")
     binary.chmod(0o700)
-    children = []
-    real_popen = codex_usage.subprocess.Popen
-
-    def start(*args, **kwargs):
-        process = real_popen(*args, **kwargs)
-        children.append(process)
-        return process
-
-    monkeypatch.setattr(codex_usage.subprocess, "Popen", start)
     monkeypatch.setattr(codex_usage, "RPC_TIMEOUT_S", 0.3)
     out = codex_usage.read_limits(str(binary), now=NOW)
     assert out["reason"] == "timeout"
-    try:
-        os.kill(children[0].pid, 0)
-    except ProcessLookupError:
-        pass
-    else:
-        raise AssertionError("timed-out child survived")
-    binary = project / "noisy-codex"
+    assert python_codex_shim[-1].poll() is not None
+    binary = project / "noisy-codex.py"
     monkeypatch.setattr(codex_usage, "RPC_TIMEOUT_S", 8)
     binary.write_text(
-        f"#!{sys.executable}\nimport sys, time\n"
-        "sys.stdout.write('x' * 300000); sys.stdout.flush()\ntime.sleep(10)\n"
+        "import sys, time\nsys.stdout.write('x' * 300000); sys.stdout.flush()\ntime.sleep(10)\n"
     )
     binary.chmod(0o700)
     out = codex_usage.read_limits(str(binary), now=NOW)
     assert out["reason"] == "invalid_response"
+    assert python_codex_shim[-1].poll() is not None
+
+
+@pytest.mark.parametrize("outcome", ["success", "timeout", "overflow", "parent_exits"])
+def test_rpc_reaps_signal_ignoring_descendant_even_after_parent_exits(
+    project, monkeypatch, python_codex_shim, outcome
+):
+    from tests.kernel.web.conftest import NOW
+    from trader.kernel.session import codex_usage
+
+    heartbeat = project / "child-heartbeat"
+    child = project / "child.py"
+    child.write_text(
+        "import pathlib, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"heartbeat = pathlib.Path({str(heartbeat)!r})\n"
+        "for counter in range(120):\n"
+        "    heartbeat.write_text(str(counter))\n"
+        "    time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    binary, _ = _fake_codex(
+        project,
+        {
+            "result": {
+                "rateLimits": {
+                    "primary": {"usedPercent": 12, "windowDurationMins": 300},
+                }
+            }
+        },
+    )
+    protocol = binary.read_text(encoding="utf-8")
+    action = {
+        "success": protocol,
+        "timeout": "time.sleep(6)\n",
+        "overflow": "sys.stdout.write('x' * 300000); sys.stdout.flush(); time.sleep(6)\n",
+        "parent_exits": "os._exit(0)\n",
+    }[outcome]
+    binary.write_text(
+        "import os, pathlib, signal, subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-u', {str(child)!r}], stdin=subprocess.DEVNULL)\n"
+        f"while not pathlib.Path({str(heartbeat)!r}).exists(): time.sleep(0.01)\n" + action,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(codex_usage, "RPC_TIMEOUT_S", 1)
+    started = time.monotonic()
+    result = codex_usage.read_limits(str(binary), now=NOW)
+    elapsed = time.monotonic() - started
+    assert elapsed < 3, f"descendant stdout kept RPC open for {elapsed:.2f}s"
+    assert python_codex_shim[-1].poll() is not None
+    assert result["status"] == ("ready" if outcome == "success" else "unavailable")
+    before = heartbeat.read_text()
+    time.sleep(0.15)
+    assert heartbeat.read_text() == before, "descendant still running after RPC cleanup"
 
 
 @pytest.mark.parametrize(

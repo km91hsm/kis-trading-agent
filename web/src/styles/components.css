@@ -77,6 +77,7 @@
 
 /* 표 */
 .table-block { min-width: 0; scroll-margin-top: calc(var(--bar) + var(--space-4)); }
+.table-scroll > table { scroll-margin-top: calc(var(--bar) + var(--space-4)); }
 .table-bar {
   display: flex;
   align-items: center;

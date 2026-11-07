@@ -22,7 +22,7 @@ export function Pager({ page, pages, total, from, to, setPage }: Omit<Paged<unkn
     pending.current = false;
     // 같은 화면의 다른 표를 건드리지 않고 이 번호 줄 앞의 목록으로 돌아간다.
     let previous = nav.current.previousElementSibling;
-    while (previous && !previous.matches(".table-block, [data-pagination-target], ul, ol")) previous = previous.previousElementSibling;
+    while (previous && !previous.matches(".table-block, [data-pagination-target], table, ul, ol")) previous = previous.previousElementSibling;
     const target = previous instanceof HTMLElement ? previous : nav.current.closest<HTMLElement>("[data-pagination-region], section, main");
     if (!target) return;
     if (!target.hasAttribute("tabindex")) target.tabIndex = -1;

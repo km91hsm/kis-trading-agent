@@ -41,6 +41,14 @@ function List({ rows }: { rows: string[] }) {
   );
 }
 
+function NativeTableList() {
+  const paged = usePaged(ROWS, 30);
+  return <section><h2>지표</h2><div className="table-scroll">
+    <table><tbody>{paged.rows.map((value) => <tr key={value}><td>{value}</td></tr>)}</tbody></table>
+    <Pager {...paged} />
+  </div></section>;
+}
+
 function mount(rows: string[], url = "/x") {
   return render(
     <MemoryRouter initialEntries={[url]}>
@@ -50,6 +58,14 @@ function mount(rows: string[], url = "/x") {
 }
 
 describe("Pager + usePaged", () => {
+  test("일반 table을 쓰는 지표 목록도 필터가 아닌 새 표 시작으로 이동한다", () => {
+    const { container } = render(<MemoryRouter><NativeTableList /></MemoryRouter>);
+    act(() => (container.querySelector('[data-page="2"]') as HTMLButtonElement).click());
+    const table = container.querySelector("table") as HTMLElement;
+    expect(table.textContent).toContain("r31");
+    expect(scrolled).toEqual([table]);
+    expect(document.activeElement).toBe(table);
+  });
   test("다른 목록은 그대로 두고 변경한 목록의 새 첫 행으로 스크롤과 포커스를 옮긴다", () => {
     const { container } = render(<MemoryRouter><TableList name="first" /><TableList name="second" /></MemoryRouter>);
     const second = container.querySelector('[data-list="second"]') as HTMLElement;

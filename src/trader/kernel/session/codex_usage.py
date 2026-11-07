@@ -17,6 +17,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from trader.kernel.platform import codex_usage_process
 from trader.kernel.platform.codex_bin import CodexNotFound, child_env, find_codex
 
 CACHE_TTL_S = 60.0
@@ -32,75 +33,85 @@ class UsageReadError(Exception):
 
 def _rpc(bin_path: Path) -> dict:
     """stdin을 응답까지 열어 두는 stdio 핸드셰이크. stdout·시간·자식 수명을 제한한다."""
-    with tempfile.TemporaryDirectory(prefix="codex-usage-") as cwd:
-        with subprocess.Popen(
-            [str(bin_path), "app-server", "--stdio"],
-            cwd=cwd,
-            env=child_env(bin_path),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        ) as proc:
-            inbox: queue.Queue = queue.Queue(maxsize=32)
-            overflow = threading.Event()
+    reader = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="codex-usage-") as cwd:
+            with codex_usage_process.spawn(
+                [str(bin_path), "app-server", "--stdio"],
+                cwd=cwd,
+                env=child_env(bin_path),
+            ) as proc:
+                inbox: queue.Queue = queue.Queue(maxsize=32)
+                overflow = threading.Event()
 
-            def read():
-                total = 0
-                assert proc.stdout is not None
-                while line := proc.stdout.readline(MAX_OUTPUT_BYTES + 1):
-                    total += len(line)
-                    if total > MAX_OUTPUT_BYTES:
-                        overflow.set()
-                        return
+                def read():
+                    total = 0
+                    assert proc.stdout is not None
+                    pending = b""
+                    while True:
+                        try:
+                            chunk = proc.stdout.read(65536)
+                        except (OSError, ValueError):
+                            break
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > MAX_OUTPUT_BYTES:
+                            overflow.set()
+                            return
+                        pending += chunk
+                        while b"\n" in pending:
+                            line, pending = pending.split(b"\n", 1)
+                            try:
+                                inbox.put_nowait(json.loads(line.decode("utf-8", errors="replace")))
+                            except (ValueError, UnicodeError):
+                                continue
+                            except queue.Full:
+                                overflow.set()
+                                return
                     try:
-                        inbox.put_nowait(json.loads(line))
-                    except (ValueError, UnicodeError):
-                        continue
+                        inbox.put_nowait(None)
                     except queue.Full:
                         overflow.set()
-                        return
-                try:
-                    inbox.put_nowait(None)
-                except queue.Full:
-                    overflow.set()
 
-            reader = threading.Thread(target=read, daemon=True)
-            reader.start()
-            deadline = time.monotonic() + RPC_TIMEOUT_S
+                reader = threading.Thread(target=read, daemon=True)
+                reader.start()
+                deadline = time.monotonic() + RPC_TIMEOUT_S
 
-            def send(message):
-                assert proc.stdin is not None
-                proc.stdin.write(json.dumps(message).encode() + b"\n")
-                proc.stdin.flush()
+                def send(message):
+                    assert proc.stdin is not None
+                    proc.stdin.write(json.dumps(message).encode() + b"\n")
+                    proc.stdin.flush()
 
-            def receive(request_id):
-                while (remaining := deadline - time.monotonic()) > 0:
-                    if overflow.is_set():
-                        raise UsageReadError("invalid_response")
-                    try:
-                        message = inbox.get(timeout=min(remaining, 0.1))
-                    except queue.Empty:
-                        continue
-                    if message is None:
-                        raise UsageReadError("cli_error")
-                    if not isinstance(message, dict) or message.get("id") != request_id:
-                        continue
-                    if "error" in message:
-                        error = message["error"]
-                        reason = (
-                            str(error.get("message", "")).lower() if isinstance(error, dict) else ""
-                        )
-                        auth = any(
-                            word in reason
-                            for word in ("auth", "login", "logged", "sign in", "api key")
-                        )
-                        raise UsageReadError("authentication_required" if auth else "rpc_error")
-                    if not isinstance(message.get("result"), dict):
-                        raise UsageReadError("invalid_response")
-                    return message["result"]
-                raise UsageReadError("timeout")
+                def receive(request_id):
+                    while (remaining := deadline - time.monotonic()) > 0:
+                        if overflow.is_set():
+                            raise UsageReadError("invalid_response")
+                        try:
+                            message = inbox.get(timeout=min(remaining, 0.1))
+                        except queue.Empty:
+                            continue
+                        if message is None:
+                            raise UsageReadError("cli_error")
+                        if not isinstance(message, dict) or message.get("id") != request_id:
+                            continue
+                        if "error" in message:
+                            error = message["error"]
+                            reason = (
+                                str(error.get("message", "")).lower()
+                                if isinstance(error, dict)
+                                else ""
+                            )
+                            auth = any(
+                                word in reason
+                                for word in ("auth", "login", "logged", "sign in", "api key")
+                            )
+                            raise UsageReadError("authentication_required" if auth else "rpc_error")
+                        if not isinstance(message.get("result"), dict):
+                            raise UsageReadError("invalid_response")
+                        return message["result"]
+                    raise UsageReadError("timeout")
 
-            try:
                 send(
                     {
                         "id": 1,
@@ -129,15 +140,9 @@ def _rpc(bin_path: Path) -> dict:
                     }
                 )
                 return receive(2)
-            finally:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=1)
-                reader.join(timeout=1)
+    finally:
+        if reader is not None:
+            reader.join(timeout=1)
 
 
 def _windows(result: dict) -> dict:
