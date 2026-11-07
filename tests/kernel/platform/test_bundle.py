@@ -154,12 +154,15 @@ def test_app_bundle_dir_is_public():
 
 
 def test_service_and_watchdog_argv(tmp_path, monkeypatch):
-    """로그온 등록 대상은 데몬 + 웹 UI 한 프로세스(`app --no-browser`, FR-2)."""
-    assert bundle.service_argv() == [sys.executable, "-m", "trader", "app", "--no-browser"]
+    """로그온 등록 대상은 데몬 + 웹 UI 한 프로세스(`app --tray --no-browser` — 메뉴바/작업표시줄
+    아이콘 포함, FR-2)."""
+    assert bundle.service_argv() == [
+        sys.executable, "-m", "trader", "app", "--tray", "--no-browser"
+    ]
     assert bundle.watchdog_argv() == [sys.executable, "-m", "trader", "watchdog"]
     exe_dir = tmp_path / "dist" / "trader"
     _freeze(monkeypatch, exe_dir)
-    assert bundle.service_argv() == [str(exe_dir / "trader"), "app", "--no-browser"]
+    assert bundle.service_argv() == [str(exe_dir / "trader"), "app", "--tray", "--no-browser"]
     assert bundle.watchdog_argv() == [str(exe_dir / "trader"), "watchdog"]
 
 

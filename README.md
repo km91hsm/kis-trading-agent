@@ -13,7 +13,7 @@
 [Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서 macOS 는 `trader-<버전>-macos-<arm64|x86_64>.dmg`
 (Trader 를 응용 프로그램으로 끌어다 놓기), Windows 는 `trader-<버전>-windows-x86_64-setup.exe`(관리자 권한 불필요)를
 받아 설치합니다. 데이터는 앱과 분리된 `~/Library/Application Support/Trader` · `%LOCALAPPDATA%\Trader` 에 생깁니다.
-첫 실행·키 넣기·업데이트·옛 폴더에서 넘어오기는 [설치 안내](docs/bundle-usage.md) 를 보세요.
+제품 개요·처음 설정·사용법(웹 UI·트레이·텔레그램·명령)은 [사용자 설명서](docs/user-guide.md), 첫 실행·키 넣기·업데이트·옛 폴더에서 넘어오기는 [설치 안내](docs/bundle-usage.md) 를 보세요.
 
 ### 소스
 

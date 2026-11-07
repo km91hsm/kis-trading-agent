@@ -1,6 +1,6 @@
 # 설치 안내 — macOS · Windows
 
-Python·uv 없이 쓰는 설치판입니다. [GitHub Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서
+Python·uv 없이 쓰는 설치판입니다. 제품 개요와 사용법은 [사용자 설명서](user-guide.md)에 있습니다. [GitHub Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서
 운영체제에 맞는 파일 하나를 받습니다.
 
 | 운영체제 | 파일 |
@@ -86,7 +86,7 @@ Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 -
 - 앱 하나(▲ 아이콘)가 스케줄 데몬 + 웹 UI 를 함께 돌립니다. 메뉴: **웹 UI 열기 / 일시정지·재개 / 로그 폴더 열기 /
   데이터 폴더 열기 / 로그인 시 자동 시작 / 종료**. 종료는 실행 중인 분석 세션이 끝나길 기다린 뒤 내려갑니다
   (최대 `llm.timeout_s`).
-- **자동 시작**: 메뉴의 「로그인 시 자동 시작」을 체크하면 로그인할 때 데몬 + 웹 UI 가 브라우저 없이 뜹니다
+- **자동 시작**: 메뉴의 「로그인 시 자동 시작」을 체크하면 로그인할 때 데몬 + 웹 UI 가 브라우저 없이, 메뉴바(작업표시줄) ▲ 아이콘과 함께 뜹니다
   (터미널에서는 `trader install`, 해제 `trader install --uninstall`, 데몬 밖 5분 감시는 `--watchdog`).
   이미 떠 있는 상태에서 다시 실행하면 「이미 실행 중입니다」 안내 뒤 브라우저만 엽니다.
 - 웹 UI 제어(일시정지·승인·모드·작업 실행)는 쓰기 토큰(`secrets/.env` 의 `WEB_TOKEN`)이 필요합니다. 이 PC 에서 연
@@ -122,6 +122,10 @@ Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 -
 
 데이터 폴더(설정·키·원장)는 그대로 쓰입니다. 버전은 `trader --version`.
 
+**0.3.0 에서 올릴 때 한 번만**: 0.3.0 의 자동 시작은 ▲ 아이콘 없이 떠서 2번의 「종료」를 쓸 수 없습니다. 3번까지 마친 뒤
+터미널에서 `/Applications/Trader.app/Contents/MacOS/trader install`(감시도 쓰면 `… install --watchdog`)을 실행하세요.
+등록이 `app --tray --no-browser` 로 바뀌면서 옛 프로세스를 내리고 새 버전을 ▲ 아이콘과 함께 띄웁니다.
+
 ## 8. 옛 휴대용 폴더에서 넘어오기
 
 0.2.x 까지의 zip 판(압축을 푼 `trader/` 폴더 옆에 `config/ secrets/ state/` 가 있던 방식) 또는 소스 폴더에서
@@ -136,7 +140,8 @@ Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 -
    ```
 4. 결과가 맞으면 `--dry-run` 을 빼고 다시 실행합니다(원장은 SQLite backup 으로 복사, 잠금 파일 제외).
    새 데이터 폴더에 이미 원장이 있거나 데몬이 실행 중이면 거부합니다.
-5. 새 앱을 실행하고 ▲ 메뉴 「로그인 시 자동 시작」을 다시 켭니다(옛 등록을 새 경로로 덮어씀).
+5. 터미널에서 새 앱의 `trader install`(감시도 쓰면 `trader install --watchdog`)을 실행해 옛 등록을 새 경로로 덮어씁니다.
+   옛 등록 파일이 남아 있으면 ▲ 메뉴의 「로그인 시 자동 시작」이 이미 켜진 것으로 보여, 메뉴로 하면 오히려 해제됩니다.
 6. 세이브티커를 쓰면 `trader saveticker extension install` 을 다시 하고 6절 2~3 단계대로 새 경로의 확장을 로드합니다.
 7. 며칠 써 보고 문제가 없으면 옛 폴더를 정리합니다.
 
