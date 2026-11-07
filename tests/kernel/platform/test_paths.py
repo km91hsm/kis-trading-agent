@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 import pytest
@@ -44,7 +43,7 @@ def test_root_not_found(tmp_path, monkeypatch):
 
 def test_relative_trader_home_is_resolved(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
     monkeypatch.setenv("TRADER_HOME", ".")
     root = paths.project_root()
     assert root.is_absolute() and root == tmp_path.resolve()
@@ -56,24 +55,3 @@ def test_missing_root_raises_korean_message(tmp_path, monkeypatch):
     with pytest.raises(paths.ProjectRootNotFound, match="pyproject.toml") as exc:
         paths.project_root()
     assert "TRADER_HOME" in str(exc.value)
-
-
-@pytest.mark.parametrize(
-    ("platform", "expected"),
-    [
-        ("darwin", Path("Library") / "Caches" / "ms-playwright"),
-        ("win32", Path("AppData") / "Local" / "ms-playwright"),
-        ("linux", Path(".cache") / "ms-playwright"),
-    ],
-)
-def test_playwright_browsers_dir_by_platform(monkeypatch, tmp_path, platform, expected):
-    monkeypatch.setattr(sys, "platform", platform)
-    monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    assert paths.playwright_browsers_dir() == tmp_path / expected
-
-
-def test_playwright_browsers_dir_win32_uses_localappdata(monkeypatch, tmp_path):
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LA"))
-    assert paths.playwright_browsers_dir() == tmp_path / "LA" / "ms-playwright"

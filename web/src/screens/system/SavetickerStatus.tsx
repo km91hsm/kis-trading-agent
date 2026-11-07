@@ -20,24 +20,21 @@ const STATUS: Record<CollectionState, StatusLabel> = {
   delayed: { text: "지연", tone: "warn" },
   unknown: { text: "미확인", tone: "muted" },
 };
-const BACKEND: Record<string, string> = { extension: "Chrome 확장", playwright: "자동 브라우저(Playwright)" };
 const SERVICE: Record<string, string> = {
-  running: "실행 중", collecting: "수집 중", stopped: "중단", paused: "일시정지", blocked: "중단",
-  backoff: "재시도 대기", error: "오류", failed: "오류", waiting_chrome: "Chrome 연결 대기",
-  auth_required: "로그인 필요", waiting_verification: "사이트 확인 필요", logging_in: "로그인 중", reauthenticating: "로그인 복구 중",
+  connecting: "연결 중", collecting: "수집 중", paused: "일시정지", error: "오류",
+  waiting_chrome: "Chrome 연결 대기", auth_required: "로그인 필요", waiting_verification: "사이트 확인 필요",
 };
 
 export function savetickerState(s: SavetickerResp): StatusLabel {
   if (!s.configured) return { text: "설정 안 됨", tone: "muted" };
   const service = s.service?.state;
-  if (service === "auth_required" || service === "waiting_verification"
-    || (s.blocked && !["restart_limit", "chromium_install_failed"].includes(s.service?.reason ?? ""))) return STATUS.login_required;
-  if (s.blocked || service === "stopped" || service === "paused") return STATUS.stopped;
-  if (service === "failed" || service === "error") return STATUS.error;
-  if (service === "waiting_chrome" || service === "backoff" || service === "logging_in" || service === "reauthenticating") return STATUS.waiting;
+  if (s.blocked || service === "auth_required" || service === "waiting_verification") return STATUS.login_required;
+  if (service === "paused") return STATUS.stopped;
+  if (service === "error") return STATUS.error;
+  if (service === "waiting_chrome" || service === "connecting") return STATUS.waiting;
   if (s.summary && s.summary.state !== "normal") return STATUS[s.summary.state] ?? STATUS.unknown;
   if (s.health === "fault") return STATUS.error;
-  if ((service === "collecting" || service === "running") && (s.health === "healthy" || s.health === "ok")) return { text: "정상 · 수집 중", tone: "ok" };
+  if (service === "collecting" && s.health === "healthy") return { text: "정상 · 수집 중", tone: "ok" };
   return STATUS.unknown;
 }
 
@@ -87,7 +84,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
     <Stats cols={4} items={[
       { label: "상태", value: <Chip tone={status.tone}>{status.text}</Chip>, num: false },
       { label: "서비스", value: s.service?.state ? (SERVICE[s.service.state] ?? "미확인") : "—", sub: s.service?.at ? fmtWhen(s.service.at) : undefined, num: false },
-      { label: "수집 방식", value: BACKEND[s.backend] ?? "미확인", num: false },
+      { label: "수집 방식", value: "Chrome 확장", sub: s.configured ? "등록됨" : "미등록", num: false },
       { label: "마지막 성공", value: fmtWhen(s.last_success_at) },
     ]} />
     {summary ? <p className="collection-summary">
@@ -101,7 +98,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
     <Table columns={COLUMNS} rows={s.streams ?? []} rowKey={(r) => r.id} empty="수집 기록 없음 · 첫 수집을 기다립니다" expand={(r) => <div className="collection-detail">
       {r.scope && r.scope !== "active" ? <p>{r.scope === "historical" ? "과거 월의 저장 기록입니다." : "현재 수집 대상으로 지정되었는지 저장 기록으로 확인할 수 없습니다."} 현재 전체 수집 상태에는 반영하지 않습니다.</p> : null}
       <p>{r.error ?? (r.state === "empty" ? "최근 응답은 0건입니다. 이전 유효 자료가 남아 있을 수 있습니다." : r.state === "delayed" ? "목표 주기보다 수집 시도가 늦습니다. 값 변화 여부와는 별개입니다." : r.state === "partial" ? "일부 자료만 수집되었습니다." : "최근 수집 요청의 오류 기록은 없습니다.")}</p>
-      <p>{r.recovery ?? s.recovery?.text ?? "복구 상태 미기록"}</p>
+      <p>{s.recovery?.text ?? "복구 상태 미기록"}</p>
       <span className="data-muted">항목 ID: {r.id}</span>
     </div>} />
     <details className="collection-guide">
@@ -115,7 +112,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
     <div><button type="button" className="btn" disabled={busy || !s.configured} onClick={() => setConfirming(true)}>다시 시작</button></div>
     {note ? <p className="perf-note" role="status">{note}</p> : null}
     {error ? <p className="data-error" role="alert">{error}</p> : null}
-    <Confirm open={confirming} title="데이터 수집 다시 시작" body={<p>수집 서비스를 다시 시작하도록 데몬에 요청합니다. 쌓인 데이터는 그대로입니다.</p>}
+    <Confirm open={confirming} title="데이터 수집 다시 시작" body={<p>다시 시작을 요청합니다. 수집 재개는 Chrome 확장 아이콘(팝업)에서 합니다. 쌓인 데이터는 그대로입니다.</p>}
       onConfirm={() => void restart()} onClose={() => setConfirming(false)} />
   </div>;
 }

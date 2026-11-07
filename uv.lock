@@ -2168,7 +2168,6 @@ dependencies = [
     { name = "joblib" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "playwright" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pypdf" },
@@ -2201,6 +2200,7 @@ build = [
     { name = "pyinstaller" },
 ]
 dev = [
+    { name = "playwright" },
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },
@@ -2218,7 +2218,6 @@ requires-dist = [
     { name = "lightgbm", marker = "extra == 'lightgbm'", specifier = ">=4" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2" },
-    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pyarrow", specifier = ">=17" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pypdf", specifier = ">=6,<7" },
@@ -2243,6 +2242,7 @@ build = [
     { name = "pyinstaller", specifier = ">=6.11" },
 ]
 dev = [
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },

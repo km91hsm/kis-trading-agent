@@ -6,11 +6,11 @@ import { render } from "../../test/render";
 
 function fixture(state: CollectionState = "normal"): SavetickerResp {
   return {
-    configured: true, backend: "extension", service: { state: "collecting", reason: null, at: null },
+    configured: true, service: { state: "collecting", reason: null, at: null },
     blocked: false, health: "healthy", reason_text: null, last_success_at: "2026-11-04T00:00:00Z",
     summary: { state, recorded: 1, normal: state === "normal" ? 1 : 0, waiting: 0, login_required: 0, stopped: 0, error: state === "error" ? 1 : 0, partial: state === "partial" ? 1 : 0, empty: 0, delayed: state === "delayed" ? 1 : 0, unknown: 0, note: null },
-    recovery: { state: "partial", text: "접근이 제한된 작업은 재시도 대기 중입니다", lanes: [] },
-    streams: [{ id: "news_all", label: "뉴스 · 전체", state, status: "ok", count: 2, last_attempt_at: "2026-11-04T00:01:00Z", last_response_at: "2026-11-04T00:01:00Z", last_success_at: "2026-11-04T00:01:00Z", last_change_at: "2026-11-04T00:00:00Z", change_state: "unchanged", error: "최근 수집 요청에 오류가 있습니다", recovery: "접근 제한으로 대기 중" }],
+    recovery: { state: "waiting", text: "Chrome에서 로그인과 확장 연결을 확인하세요" },
+    streams: [{ id: "news_all", label: "뉴스 · 전체", state, status: "ok", count: 2, last_attempt_at: "2026-11-04T00:01:00Z", last_response_at: "2026-11-04T00:01:00Z", last_success_at: "2026-11-04T00:01:00Z", last_change_at: "2026-11-04T00:00:00Z", change_state: "unchanged", error: "최근 수집 요청에 오류가 있습니다" }],
   };
 }
 
@@ -47,7 +47,7 @@ describe("수집 상세 상태", () => {
       expect(expand).toBeTruthy();
       act(() => expand.click());
       expect(card?.textContent).toContain("최근 수집 요청에 오류가 있습니다");
-      expect(card?.textContent).toContain("접근 제한으로 대기 중");
+      expect(card?.textContent).toContain("Chrome에서 로그인과 확장 연결을 확인하세요");
       expect(expand.getAttribute("aria-expanded")).toBe("true");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: width });

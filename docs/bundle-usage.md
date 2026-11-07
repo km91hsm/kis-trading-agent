@@ -74,11 +74,12 @@ trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 �
 - 작업은 터미널 없이 웹 대시보드에서, 또는 `./trader jobs run <작업>` 으로 데몬 큐에 넣을 수 있습니다
   (데몬이 켜져 있어야 함 — `./trader jobs kinds` 로 종류 확인).
 - **세이브티커 Chrome 수집기 설치**: `./trader saveticker extension prepare --destination <새 패키지 경로>` 로
-  검토용 패키지를 만들고(Chrome·backend 는 바꾸지 않음), `REVIEW.md`·`extension/manifest.json` 을 확인한 뒤
+  검토용 패키지를 만들고(Chrome 은 바꾸지 않음), `REVIEW.md`·`extension/manifest.json` 을 확인한 뒤
   `./trader saveticker extension install-host <패키지 경로>` 로 로컬 host 를 등록하고 `chrome://extensions`
   개발자 모드에서 패키지의 `extension/` 을 압축해제된 확장으로 로드합니다. 상태는
   `./trader saveticker extension status`, 제거는 확장을 지운 뒤 `./trader saveticker extension uninstall-host <패키지 경로>`.
-  Chrome 에서 직접 로그인해야 하고 컴퓨터가 깨어 있어야 수집합니다. 저장 폴더는 `state/external/saveticker/`.
+  Chrome 에서 직접 로그인해야 하고 컴퓨터가 깨어 있어야 수집합니다(세이브티커 수집 방식은 이 Chrome 확장 하나뿐 — 계정 파일·자동 브라우저 수집은 없습니다).
+  저장 폴더는 `state/external/saveticker/`.
 - 자주 쓰는 터미널 명령(`uv run trader …` 대신 `./trader …`):
   `status`, `scan run`, `spot analyze --ticker <코드>`, `spot monitor --once --dry-run`, `spot fills sync`, `spot approvals list`,
   `accounts show|pause|resume`, `ml features backfill --years 3`, `ml train`, `ml models`, `evaluation rl models`,

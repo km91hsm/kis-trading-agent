@@ -154,14 +154,12 @@ export function fixtureRegime() {
 export function fixtureSaveticker(over: Over = {}) {
   return {
     configured: true,
-    backend: "extension",
-    service: { state: "running", reason: null, at: "2026-11-05T09:00:00+09:00", exit_code: null },
+    service: { state: "collecting", reason: null, at: "2026-11-05T09:00:00+09:00", exit_code: null },
     blocked: false,
     reason_text: null,
     lanes: {},
-    lane_blocks: {},
     last_success_at: "2026-11-05T09:58:00+09:00",
-    health: "ok",
+    health: "healthy",
     ...over,
   };
 }

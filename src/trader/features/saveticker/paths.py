@@ -1,4 +1,4 @@
-"""saveticker 수집 폴더·계정 파일 위치."""
+"""saveticker 수집 폴더 위치."""
 
 from __future__ import annotations
 
@@ -25,7 +25,3 @@ def home(cfg: SaveTickerCfg | None = None) -> Path:
     cfg = cfg or load_cfg()
     return resolve_dir(cfg.dir) or state_dir() / "external" / "saveticker"
 
-
-def credentials_path() -> Path:
-    """계정 파일(`SAVETICKER_EMAIL`·`SAVETICKER_PASSWORD`). 값은 수집 프로세스만 읽는다."""
-    return project_root() / "secrets" / "saveticker.env"
