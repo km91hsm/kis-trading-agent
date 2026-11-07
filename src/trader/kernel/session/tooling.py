@@ -77,9 +77,7 @@ def load_turns(d: Path, pattern: re.Pattern[str] = DEBATE_RE) -> dict[int, dict[
         if not m:
             continue
         data = read_checkpoint(d, stage) or {}
-        turns.setdefault(int(m.group(1)), {})[m.group(2)] = DebateTurn.model_validate(
-            data["data"]
-        )
+        turns.setdefault(int(m.group(1)), {})[m.group(2)] = DebateTurn.model_validate(data["data"])
     return turns
 
 
@@ -140,19 +138,55 @@ def _cut(v: Any, n: int) -> Any:
     return v
 
 
-def _trim_lists(v: Any, keep: int) -> Any:
-    """`keep` 보다 긴 dict 목록은 마지막 `keep` 건만(시계열은 오름차순이라 꼬리가 최신)."""
+# Only these documented ascending series retain their tail. News/rankings/unknown lists
+# retain their head; arbitrary list ordering is never inferred from dict-valued rows.
+_ASCENDING_SERIES = frozenset({"daily", "minute", "candles", "bars", "closes"})
+_QUALITY_KEYS = frozenset(
+    {
+        "meta",
+        "source",
+        "source_asof",
+        "asof",
+        "received_at",
+        "observed_at",
+        "generated_at",
+        "market",
+        "currency",
+        "scope",
+        "basis",
+        "status",
+        "stale",
+        "coverage",
+        "source_coverage",
+        "streams_status",
+        "data_gaps",
+        "errors",
+        "error",
+        "truncation",
+        "note",
+    }
+)
+
+
+def _compact(v: Any, keep: int, chars: int | None, path: tuple[str, ...] = ()) -> Any:
+    if isinstance(v, str):
+        return _cut(v, chars) if chars is not None else v
     if isinstance(v, list):
-        if len(v) > keep and all(isinstance(x, dict) for x in v):
-            v = v[-keep:]
-        return [_trim_lists(x, keep) for x in v]
+        tail = any(k in _ASCENDING_SERIES for k in path[-2:])
+        selected = v[-keep:] if tail else v[:keep]
+        return [_compact(x, keep, chars, path) for x in selected]
     if isinstance(v, dict):
-        return {k: _trim_lists(x, keep) for k, x in v.items()}
+        priority = [k for k in v if k in _QUALITY_KEYS]
+        ordinary = [k for k in v if k not in _QUALITY_KEYS][:keep]
+        selected = set(priority + ordinary)
+        return {k: _compact(x, keep, chars, (*path, k)) for k, x in v.items() if k in selected}
     return v
 
 
 def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
-    """UTF-8 바이트 한도를 넘으면 리포트의 evidence → 긴 문자열 순으로 줄인다."""
+    """Bound the complete serialized UTF-8 bundle, including truncation metadata."""
+    if limit < 2:
+        raise ValueError("JSON dict requires at least 2 bytes")
     if drop_evidence and "reports" in obj:
         obj = {
             **obj,
@@ -161,22 +195,77 @@ def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
     if _size(obj) <= limit:
         return obj
     if "reports" in obj and any("evidence" in r for r in obj["reports"]):
-        return shrink(obj, limit, drop_evidence=True)
-    # 긴 목록(일봉·분봉 같은 시계열, 오름차순)은 꼬리(최신)만 남긴다 — 문자열을 자르기 전에
-    for keep in (120, 60, 30):
-        trimmed = _trim_lists(obj, keep)
-        if _size(trimmed) <= limit:
-            note = f"묶음이 {limit}바이트를 넘어 긴 목록을 최근 {keep}건으로 줄였습니다"
-            return {**trimmed, "note": note}
-    obj = trimmed
-    for n in (300, 200, 140, 100):
-        cut = {
-            **_cut(obj, n),
-            "note": f"묶음이 {limit}바이트를 넘어 긴 문자열을 {n}자에서 잘랐습니다",
+        reduced = shrink(obj, limit, drop_evidence=True)
+        reduced["truncation"] = {
+            **(reduced.get("truncation") or {}),
+            "truncated": True,
+            "evidence_dropped": True,
+            "original_bytes": _size(obj),
+            "limit_bytes": limit,
         }
-        if _size(cut) <= limit:
-            return cut
-    return cut
+        return shrink(reduced, limit)
+    original_bytes = _size(obj)
+    metadata = {
+        "note": "입력 일부 축약; 뉴스·순위·순서미상 목록은 앞, 오름차순 봉은 뒤 보존",
+        "truncation": {
+            "truncated": True,
+            "original_bytes": original_bytes,
+            "limit_bytes": limit,
+            "list_policy": "head; ascending candles tail",
+        },
+    }
+    for chars in (None, 300, 140, 64, 16, 1):
+        for keep in (120, 60, 30, 10, 3, 1):
+            compact = {**_compact(obj, keep, chars), **metadata}
+            if _size(compact) <= limit:
+                return compact
+    # Pathological objects can contain arbitrarily many quality keys at every level.
+    # Preserve a small top-level quality summary before the final tiny-budget fallback.
+    quality = {k: v for k, v in obj.items() if k in _QUALITY_KEYS}
+    for chars in (64, 16, 1):
+        compact = {**_compact(quality, 1, chars), **metadata}
+        if _size(compact) <= limit:
+            return compact
+    for compact in ({"truncation": {"truncated": True}}, {}):
+        if _size(compact) <= limit:
+            return compact
+    return {}
+
+
+def compact_context(inputs: dict) -> dict:
+    """Bound public research evidence independently of accounts/portfolio/order context."""
+    nm = inputs.get("news_macro") or {}
+    sentiment = inputs.get("sentiment") or {}
+    data = {
+        k: inputs[k]
+        for k in (
+            "meta",
+            "market",
+            "asof",
+            "scope",
+            "market_activity",
+            "data_gaps",
+            "source_coverage",
+        )
+        if k in inputs
+    }
+    for key, value in (
+        ("news", nm.get("news") or inputs.get("macro_news") or inputs.get("news")),
+        ("macro", nm.get("macro") or inputs.get("macro")),
+        ("events", nm.get("events")),
+        ("saveticker", inputs.get("saveticker") or sentiment.get("saveticker")),
+    ):
+        if value is not None:
+            data[key] = value
+    community = (sentiment.get("community") or {}).get("data") or {}
+    blogs = inputs.get("blog_posts") or [
+        p
+        for p in community.get("posts") or []
+        if str(p.get("source") or "").startswith("naver_blog/")
+    ]
+    if blogs:
+        data["blog_posts"] = blogs
+    return shrink(data, 8000)
 
 
 def evidence_stats(reports: list[dict]) -> dict:
@@ -221,9 +310,7 @@ def trader_summary(summ: dict) -> dict:
     out = dict(summ)
     other = "final" if summ.get("preferred") == "round0" else "round0"
     if isinstance(summ.get(other), dict):
-        out[other] = {
-            side: brief_turn(t) for side, t in summ[other].items() if isinstance(t, dict)
-        }
+        out[other] = {side: brief_turn(t) for side, t in summ[other].items() if isinstance(t, dict)}
     # issues 는 final 양측 rebuttals 의 복제라 트레이더 묶음에선 뺀다
     out.pop("issues", None)
     out["note"] = f"{other} 턴은 핵심만, issues 는 final.rebuttals 와 같아 생략"

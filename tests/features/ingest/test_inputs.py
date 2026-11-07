@@ -49,7 +49,17 @@ def test_build_inputs_sections(project):
         secrets=Secrets(),
         deps=deps(),
     )
-    assert set(d) == {"meta", "technical", "fundamental", "news_macro", "sentiment", "errors"}
+    assert set(d) == {
+        "meta",
+        "technical",
+        "fundamental",
+        "news_macro",
+        "sentiment",
+        "errors",
+        "market_activity",
+        "data_gaps",
+        "source_coverage",
+    }
     assert d["meta"]["ticker"] == "005930" and d["meta"]["name"] == "삼성전자"
     assert d["meta"]["schema_version"] == inputs.SCHEMA_VERSION
     assert set(d["technical"]) == {"quote", "daily", "minute", "orderbook", "indicators"}
@@ -75,7 +85,7 @@ def test_inputs_fundamental_history_section(project):
         secrets=Secrets(),
         deps=deps(),
     )
-    assert inputs.SCHEMA_VERSION == 3 and d["meta"]["schema_version"] == 3
+    assert inputs.SCHEMA_VERSION == 4 and d["meta"]["schema_version"] == 4
     h = d["fundamental"]["history"]["data"]
     assert set(h["years"]) == {"2023", "2024", "2025"}  # JSON 키는 문자열
     assert h["years"]["2025"]["매출액"] == "330"  # Decimal → str

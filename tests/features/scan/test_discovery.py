@@ -354,6 +354,8 @@ def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, setti
                     "title": "반도체 사이클",
                     "excerpt": "메모리 업황",
                     "posted_at": "2026-10-08T01:00:00+00:00",
+                    "received_at": T0.isoformat(),
+                    "url": "https://blog.naver.com/x/1",
                 }
             ]
             us = discovery.build_inputs(
@@ -502,3 +504,39 @@ def test_fake_screen_with_discovery_merges_and_summarizes(project, conn, setting
     assert r["discovery"]["candidates"][0]["ticker"] == "000000" and r["discovery"]["universe"] == 1
     assert r["picks"][0] == {"ticker": "000000", "reason": "FAKE: 뉴스 발굴"}
     assert len(r["picks"]) == 5
+
+
+def test_scout_input_preserves_saveticker_quality_and_kr_scope(
+    project, conn, settings, monkeypatch
+):
+    snap = {
+        "source": "saveticker",
+        "market": "KR",
+        "observed_at": T0.isoformat(),
+        "movers": {"gain": [], "loss": [], "turnover": []},
+        "community_top5": [],
+        "stale": ["market_turnover_regular"],
+        "streams_status": {"news_all": "partial"},
+        "data_gaps": ["KR coverage unavailable"],
+        "report": None,
+    }
+    monkeypatch.setattr(
+        discovery.saveticker_api,
+        "snapshot",
+        lambda *a, **kw: snap if kw.get("market") == "KR" else None,
+    )
+    out = discovery.build_inputs(
+        conn,
+        settings,
+        UNI_KR,
+        market="KR",
+        today=D,
+        asof=T0,
+        quant_candidates=[],
+        state=project / "state",
+    )
+    assert out["saveticker"]["stale"] == ["market_turnover_regular"]
+    assert out["saveticker"]["streams_status"]["news_all"] == "partial"
+    assert out["saveticker"]["movers"]["gain"] == []
+    assert out["market_activity"]["market"] == "KR"
+    assert "KR coverage unavailable" in out["data_gaps"]

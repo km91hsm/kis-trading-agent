@@ -133,3 +133,195 @@ def test_recent_filters_by_tickers_and_since(project, conn):
     untagged = port.recent(conn, "KR", tickers=None, since=since, asof=now, untagged_only=True)
     assert [r["title"] for r in untagged] == ["macro"]  # 종목 태그 없는 시장·거시 뉴스만
     assert port.recent(conn, "US", tickers=None, since=since, asof=now) == []
+
+
+def test_build_port_reads_custom_saveticker_news_and_calendar(project, monkeypatch, conn):
+    from types import SimpleNamespace
+
+    from trader.features.ingest import ports as ingest_ports
+    from trader.features.ingest.saveticker_ingest import ingest_news
+    from trader.features.saveticker.settings import SaveTickerCfg
+    from trader.kernel.config.time import KST
+
+    asof = datetime.now(UTC)
+    root = project / "custom-feed"
+    latest = root / "data" / "latest"
+    latest.mkdir(parents=True)
+    stamp = asof.isoformat()
+    (latest / "community_top5.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "stream": "community_top5",
+                "observed_at": stamp,
+                "items": [{"tickers": ["AAPL"], "title": "Apple", "rank": 1}],
+            }
+        )
+    )
+    (latest / f"calendar_{asof:%Y-%m}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "stream": f"calendar_{asof:%Y-%m}",
+                "observed_at": stamp,
+                "items": [{"title": "경제 일정", "scheduled_at": stamp}],
+            }
+        )
+    )
+    day = root / "data" / asof.astimezone(KST).date().isoformat()
+    day.mkdir()
+    (day / "news.jsonl").write_text(
+        json.dumps(
+            {
+                "stream": "news_all",
+                "received_at": stamp,
+                "revision": 1,
+                "item": {
+                    "id": "custom-news",
+                    "title": "사용자 폴더 뉴스",
+                    "body": "Apple 소식",
+                    "tickers": ["AAPL"],
+                    "published_at": stamp,
+                },
+            }
+        )
+    )
+    conn = db.connect()
+    try:
+        assert ingest_news(conn, root, now=lambda: asof)["inserted"] == 1
+    finally:
+        conn.close()
+    cfg = SourcesConfig.model_validate(
+        {
+            "dart": {"enabled": False},
+            "edgar": {"enabled": False},
+            "news": {"google_rss": False, "naver": False},
+            "macro": {"enabled": False},
+            "community": {"enabled": False},
+        }
+    )
+    monkeypatch.setattr(ingest_ports, "load_sources", lambda **kw: cfg)
+    # 실제 build_port가 SaveTicker 설정을 읽어 collect까지 전달하는 경로다.
+    monkeypatch.setattr(
+        "trader.features.saveticker.api.load_cfg", lambda **kw: SaveTickerCfg(dir=str(root))
+    )
+    port = ingest_ports.build_port(SimpleNamespace(secrets=Secrets(), registry=None, ports={}))
+    out = port.collect(
+        ticker="AAPL", market="US", exchange="NAS", asof=asof, force=True, conn_factory=db.connect
+    )
+    assert out["news_macro"]["news"]["data"]["stock"][0]["title"] == "사용자 폴더 뉴스"
+    data = out["sentiment"]["saveticker"]["data"]
+    assert data["mentions"]["community_top5"][0]["name"] == "Apple"
+    assert out["news_macro"]["events"]["data"]["upcoming"][0]["title"] == "경제 일정"
+
+
+def test_inputs_port_delivers_activity_with_own_connection(project):
+    from types import SimpleNamespace
+
+    cfg = SourcesConfig.model_validate(
+        {
+            "dart": {"enabled": False},
+            "edgar": {"enabled": False},
+            "news": {"enabled": False},
+            "macro": {"enabled": False},
+            "community": {"enabled": False},
+        }
+    )
+    asof = datetime.now(UTC)
+
+    def snapshot(conn, market, *, asof):
+        # Reading on the producer's connection would fail sqlite's thread check.
+        conn.execute("SELECT 1")
+        return {
+            "source": "kis",
+            "market": market,
+            "currency": "KRW",
+            "received_at": asof.isoformat(),
+            "source_asof": None,
+            "basis": "unknown",
+            "status": "partial",
+            "stale": False,
+            "coverage": {"complete": False},
+            "rankings": {
+                "turnover": [
+                    {"ticker": "005930", "turnover": "123456", "growth": {"status": "unavailable"}}
+                ],
+                "gain": [],
+                "loss": [],
+            },
+            "errors": {},
+        }
+
+    port = InputsPortImpl(Secrets(), cfg, {"market_activity": SimpleNamespace(snapshot=snapshot)})
+    out = port.collect(
+        ticker="005930", market="KR", exchange=None, asof=asof, force=True, conn_factory=db.connect
+    )
+    assert out["market_activity"]["source"] == "kis"
+    assert out["market_activity"]["rankings"]["turnover"][0]["turnover"] == "123456"
+    assert out["market_activity"]["source_asof"] is None
+    assert any("partial" in gap for gap in out["data_gaps"])
+
+
+def test_activity_connection_failure_remains_a_data_gap(project):
+    cfg = SourcesConfig.model_validate(
+        {
+            "dart": {"enabled": False},
+            "edgar": {"enabled": False},
+            "news": {"enabled": False},
+            "macro": {"enabled": False},
+            "community": {"enabled": False},
+        }
+    )
+
+    def unavailable():
+        raise RuntimeError("store unavailable")
+
+    port = InputsPortImpl(Secrets(), cfg)
+    out = port.collect(
+        ticker="005930",
+        market="KR",
+        exchange=None,
+        asof=datetime.now(UTC),
+        force=True,
+        conn_factory=unavailable,
+    )
+    assert out["market_activity"]["status"] == "unavailable"
+    assert any("store unavailable" in gap for gap in out["data_gaps"])
+
+
+def test_ranto_blog_reaches_input_and_research_context(project, respx_mock):
+    from trader.kernel.session.tooling import compact_context
+
+    respx_mock.get("https://rss.blog.naver.com/ranto28.xml").respond(
+        200,
+        text=(
+            "<rss><channel><item><title>시장 의견</title><description>공개 RSS 발췌</description>"
+            "<pubDate>Fri, 06 Nov 2026 10:00:00 +0900</pubDate>"
+            "<link>https://blog.naver.com/ranto28/1</link></item></channel></rss>"
+        ),
+    )
+    cfg = SourcesConfig.model_validate(
+        {
+            "dart": {"enabled": False},
+            "edgar": {"enabled": False},
+            "news": {"enabled": False},
+            "macro": {"enabled": False},
+            "community": {"reddit": False, "clien": False},
+            "channels": {"naver_blog": ["ranto28"]},
+        }
+    )
+    out = InputsPortImpl(Secrets(), cfg).collect(
+        ticker="005930",
+        market="KR",
+        exchange=None,
+        asof=datetime.now(UTC),
+        force=True,
+        conn_factory=None,
+    )
+    coverage = out["source_coverage"]["naver_blog/ranto28"]
+    assert coverage["status"] == "present" and coverage["configured"] is True
+    assert coverage["source_asof"] == "2026-11-06T01:00:00+00:00"
+    assert coverage["received_at"]
+    compact = compact_context(out)
+    assert compact["blog_posts"][0]["title"] == "시장 의견"
+    assert compact["blog_posts"][0]["received_at"]

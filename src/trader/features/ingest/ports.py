@@ -15,6 +15,7 @@ from trader.features.ingest.api import (
     collect_and_save,
     load_sources,
 )
+from trader.features.saveticker import api as saveticker
 from trader.kernel.config.secrets import Secrets
 from trader.kernel.registry.types import Port
 
@@ -23,10 +24,16 @@ class InputsPortImpl:
     """종목 하나의 `00_inputs` 체크포인트를 만들거나(없을 때·force) 읽어 돌려준다."""
 
     def __init__(
-        self, secrets: Secrets, cfg: SourcesConfig, ports: Mapping[str, Any] | None = None
+        self,
+        secrets: Secrets,
+        cfg: SourcesConfig,
+        ports: Mapping[str, Any] | None = None,
+        *,
+        saveticker_cfg: Any | None = None,
     ) -> None:
         self._secrets = secrets
         self._cfg = cfg
+        self._saveticker_cfg = saveticker_cfg
         # `Boot.ports` 자체 — 포트는 구현이 만들어진 뒤에 채워지므로 collect 때 풀어 쓴다
         self._ports = ports if ports is not None else {}
 
@@ -47,6 +54,7 @@ class InputsPortImpl:
         deps = build_input_deps(
             self._secrets, self._cfg, market=market_client, conn_factory=conn_factory
         )
+        deps.market_activity = self._ports.get("market_activity")
         ml = self._ports.get("ml")  # 덕 타이핑 — features.ml 을 import 하지 않는다
         if ml is not None:
             deps.peer_fn = ml.peer_medians
@@ -60,6 +68,7 @@ class InputsPortImpl:
             deps=deps,
             state=state,
             force=force,
+            saveticker_cfg=self._saveticker_cfg,
         )
         return json.loads(path.read_text(encoding="utf-8"))
 
@@ -89,7 +98,12 @@ class InputsPortImpl:
 
 
 def build_port(boot: Any) -> InputsPortImpl:
-    return InputsPortImpl(boot.secrets, load_sources(registry=boot.registry), boot.ports)
+    return InputsPortImpl(
+        boot.secrets,
+        load_sources(registry=boot.registry),
+        boot.ports,
+        saveticker_cfg=saveticker.load_cfg(registry=boot.registry),
+    )
 
 
 PORT = Port("inputs", build_port)

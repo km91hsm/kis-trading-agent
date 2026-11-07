@@ -186,9 +186,7 @@ def test_clamp_weight():
 
 def test_build_inputs_without_regime_or_client_is_empty_but_ok(project, conn, settings):
     asof = datetime(2026, 10, 24, 12, tzinfo=UTC)
-    inp = market_view.build_inputs(
-        _lctx(project, conn, settings), market="US", today=D, asof=asof
-    )
+    inp = market_view.build_inputs(_lctx(project, conn, settings), market="US", today=D, asof=asof)
     assert inp["regime"]["state"] is None and inp["index"]["closes"] == []
     assert inp["proxy"] == "SPX"
 
@@ -297,3 +295,34 @@ def test_run_market_view_passes_cancel_to_session(lctx, conn):
         lctx, market="KR", date=D, inputs={}, cap_hit=False, session_runner=runner, cancel=ev
     )
     assert seen["cancel"] is ev
+
+
+def test_market_inputs_include_bounded_activity_and_quality(lctx, monkeypatch):
+    from types import SimpleNamespace
+
+    def snapshot(conn, market, *, asof):
+        return {
+            "source": "kis",
+            "market": market,
+            "currency": "KRW",
+            "status": "partial",
+            "received_at": asof.isoformat(),
+            "stale": True,
+            "source_asof": None,
+            "coverage": {"complete": False},
+            "basis": "unknown",
+            "errors": {},
+            "rankings": {
+                "turnover": [{"ticker": "005930", "turnover": "100"}],
+                "gain": [],
+                "loss": [],
+            },
+        }
+
+    lctx.ports["market_activity"] = SimpleNamespace(snapshot=snapshot)
+    monkeypatch.setattr(market_view.ingest, "collect_macro", lambda *a, **k: {})
+    monkeypatch.setattr(market_view.ingest, "recent", lambda *a, **k: [{"title": "시장 뉴스"}])
+    out = market_view.build_inputs(lctx, market="KR", today=D, asof=T0)
+    assert out["market_activity"]["rankings"]["turnover"][0]["turnover"] == "100"
+    assert out["macro_news"][0]["title"] == "시장 뉴스"
+    assert any("stale" in gap for gap in out["data_gaps"])

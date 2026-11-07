@@ -88,7 +88,6 @@ def _sector_weights(
     return out
 
 
-
 def build_inputs(
     ctx: Any,
     *,
@@ -185,9 +184,17 @@ def build_inputs(
             st_dir = saveticker.load_cfg().dir
         except Exception:  # noqa: BLE001 - sources.yaml 이 없거나 잘못되면 기본 경로
             st_dir = saveticker.DEFAULT_DIR
-        saveticker_snap = saveticker.snapshot(saveticker.resolve_dir(st_dir), asof=asof)
+        saveticker_snap = saveticker.snapshot(
+            saveticker.resolve_dir(st_dir), asof=asof, market=market
+        )
     except Exception as e:  # noqa: BLE001 - 선택 입력
         errors["saveticker"] = f"{type(e).__name__}: {e}"
+    macro = ingest.macro_context(macro, asof=asof)
+    activity = ingest.activity_context(
+        conn, market, asof=asof, port=(getattr(ctx, "ports", None) or {}).get("market_activity")
+    )
+    gaps = list(activity.get("data_gaps") or [])
+    gaps.extend((saveticker_snap or {}).get("data_gaps") or [])
     held: list[str] = []
     sectors: list[dict] = []
     hedge_tickers = cfg.tickers(market)
@@ -230,6 +237,9 @@ def build_inputs(
         "asof": asof.isoformat(),
         "proxy": tools.MARKET_PROXY_LABEL.get(market, market),
         "saveticker": saveticker_snap,
+        "market_activity": activity,
+        "source_coverage": ingest.source_coverage(macro),
+        "data_gaps": gaps,
         "regime": {
             "state": regime.get("state"),
             "count": regime.get("count"),

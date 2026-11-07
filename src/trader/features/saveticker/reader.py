@@ -286,7 +286,7 @@ def _quote_rows(items: list[dict], *, with_turnover: bool = False) -> list[dict]
     return out
 
 
-def snapshot(root: Path | None, *, asof: datetime) -> dict | None:
+def snapshot(root: Path | None, *, asof: datetime, market: str | None = None) -> dict | None:
     """세션 입력용 요약(토큰 절약: 항목 수 그대로, 필드만 고른다). 폴더가 없으면 None."""
     if root is None or not available(root):
         return None
@@ -327,7 +327,7 @@ def snapshot(root: Path | None, *, asof: datetime) -> dict | None:
         if s
     ]
     observed = [o for o in observed if o is not None and o <= cutoff]
-    return {
+    result = {
         "source": "saveticker (로컬 수집기, saveticker.dir)",
         "observed_at": max(observed).isoformat() if observed else None,
         "index": index,
@@ -345,11 +345,47 @@ def snapshot(root: Path | None, *, asof: datetime) -> dict | None:
         or None,
     }
 
+    gaps = [f"stale:{stream}" for stream in sorted(stale)]
+    gaps.extend(
+        f"stream:{k}:{v}"
+        for k, v in (result["streams_status"] or {}).items()
+        if v not in ("ok", "success")
+    )
+    if market is not None:
+        result["market"] = market
+        # These ranking streams cover US stocks. Unknown market must not imply KR.
+        if market != "US":
+            result["global_context"] = {
+                "market": "US",
+                "scope": "global_reference",
+                "index": result["index"],
+            }
+            result["index"] = []
+            result["movers"] = {key: [] for key in movers}
+            result["community"] = {key: [] for key in community}
+            result["community_top5"] = []
+            gaps.append("saveticker rankings cover US; KR coverage unavailable")
+    result["data_gaps"] = gaps
+    return result
 
-def for_ticker(snap: dict | None, ticker: str) -> dict | None:
+
+def for_ticker(snap: dict | None, ticker: str, *, market: str | None = None) -> dict | None:
     """종목 세션 분위기 절: 이 종목이 등장하는 TOP5·상승/하락·거래대금 행 + 시장 지수."""
     if not snap:
         return None
+    if market is not None and snap.get("market") != market:
+        snap = {**snap, "market": market}
+        if market != "US":
+            snap["global_context"] = {
+                "market": "US",
+                "scope": "global_reference",
+                "index": snap.get("index") or [],
+            }
+            snap["index"] = []
+            snap["movers"] = {}
+            snap["community"] = {}
+            snap["community_top5"] = []
+            snap["data_gaps"] = [*(snap.get("data_gaps") or []), "KR rankings unavailable"]
     t = ticker.upper()
 
     def hits(rows: list[dict]) -> list[dict]:
@@ -364,11 +400,15 @@ def for_ticker(snap: dict | None, ticker: str) -> dict | None:
         "market_turnover": hits((snap.get("movers") or {}).get("turnover") or []),
     }
     return {
+        **{
+            k: snap.get(k)
+            for k in ("source", "market", "stale", "streams_status", "data_gaps", "global_context")
+        },
         "observed_at": snap.get("observed_at"),
         "mentions": {k: v for k, v in mentions.items() if v},
         "index": snap.get("index") or [],
         "note": (
-            "종목 언급(mentions)이 비어 있으면 세이브티커 커뮤니티·시세 상위에 없다는 뜻. "
-            "index 는 시장 전체 분위기 맥락이다"
+            "mentions가 비어 있어도 미수집·지연·부분수집일 수 있어 순위 미진입을 뜻하지 않는다. "
+            "stale·streams_status·data_gaps와 시장 범위를 확인한다"
         ),
     }

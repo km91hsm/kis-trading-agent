@@ -19,6 +19,7 @@ from trader.features.ingest.dart import (
     basic_ratios,
 )
 from trader.features.ingest.edgar import EdgarClient, ratios_by_year_us
+from trader.features.ingest.input_quality import activity_context, macro_context, source_coverage
 from trader.features.ingest.inputs import (
     SCHEMA_VERSION,
     InputDeps,
@@ -70,6 +71,9 @@ __all__ = [
     "SourcesConfig",
     "Universe",
     "UsSymbol",
+    "activity_context",
+    "macro_context",
+    "source_coverage",
     "basic_ratios",
     "build_dart",
     "build_edgar",

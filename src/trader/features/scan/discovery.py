@@ -136,6 +136,7 @@ def build_inputs(
             "summary": (n.get("summary") or "")[:200],
             "source": n.get("source"),
             "published_at": n.get("published_at"),
+            "received_at": n.get("received_at"),
             "tickers": n.get("tickers") or [],
         }
         for n in news
@@ -151,13 +152,28 @@ def build_inputs(
         root = saveticker_api.resolve_dir(
             getattr(cfg, "saveticker_dir", None) or saveticker_api.load_cfg().dir
         )
-        snap = saveticker_api.snapshot(root, asof=asof)
+        snap = saveticker_api.snapshot(root, asof=asof, market=market)
         if snap:
             saveticker_snap = {
-                k: snap.get(k) for k in ("observed_at", "movers", "community_top5", "report")
+                k: snap.get(k)
+                for k in (
+                    "source",
+                    "market",
+                    "observed_at",
+                    "movers",
+                    "community_top5",
+                    "report",
+                    "stale",
+                    "streams_status",
+                    "data_gaps",
+                    "global_context",
+                )
             }
     except Exception as e:  # noqa: BLE001 - 선택 입력
         logger.debug("세이브티커 발굴 입력 실패 %s: %s", market, e)
+    activity = ingest_api.activity_context(conn, market, asof=asof)
+    gaps = list(activity.get("data_gaps") or [])
+    gaps.extend((saveticker_snap or {}).get("data_gaps") or [])
     blog_posts = _blog_posts(sources_cfg, http, market=market, asof=asof, now=now)
     d = market_dir(today, market, state, create=True)
     recent = _recent_picks(market, today, state)
@@ -185,6 +201,15 @@ def build_inputs(
         "recent_picks": recent,
         "intraday_round": rnd,
         "saveticker": saveticker_snap,
+        "market_activity": activity,
+        "source_coverage": ingest_api.source_coverage(
+            {},
+            blog_posts=blog_posts,
+            blog_config=list(
+                getattr(getattr(sources_cfg, "channels", None), "naver_blog", []) or []
+            ),
+        ),
+        "data_gaps": gaps,
         "theme_heat": _theme_heat(conn, settings, market, today),
         "blog_posts": blog_posts,
         "quant_candidates": [
@@ -247,6 +272,8 @@ def _blog_posts(
                     "title": it.get("title"),
                     "excerpt": (it.get("body") or "")[:400],
                     "posted_at": it.get("posted_at"),
+                    "received_at": it.get("received_at"),
+                    "url": it.get("url"),
                 }
             )
     return out
