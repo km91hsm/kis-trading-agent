@@ -193,3 +193,41 @@ def test_screen_context_has_regime_and_todays_market_view(conn):
         "rationale": "r",
         "invalidation_conditions": ["x"],
     }
+
+
+def test_regular_screen_wires_inputs_research_port_to_scout_payload(
+    project, conn, settings, monkeypatch
+):
+    from trader.features.ingest import macro as macro_sources
+    from trader.features.ingest.api import Universe
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.run_store import market_dir, read_checkpoint
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    ctx = lane(conn, settings, accounts=[_acct()])
+    ctx.ports["inputs"] = InputsPortImpl(Secrets(), SourcesConfig())
+    monkeypatch.setattr(
+        macro_sources,
+        "collect_macro",
+        lambda *a, **kw: {
+            "dxy": {
+                "data": {"value": 124, "date": D.isoformat()},
+                "received_at": ctx.now().isoformat(),
+                "error": None,
+            }
+        },
+    )
+    screener.run_screen(
+        ctx,
+        market="KR",
+        date=D,
+        candidates=CANDS,
+        cap_hit=False,
+        discovery=True,
+        universe=Universe(kr=["000000"]),
+    )
+    generated = read_checkpoint(market_dir(D, "KR", ctx.state), "_discovery_inputs")["data"]
+    assert generated["macro"]["dxy"]["data"]["value"] == 124
+    assert generated["source_coverage"]["macro"]["dxy"]["status"] == "present"

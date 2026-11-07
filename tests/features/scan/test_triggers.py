@@ -341,3 +341,40 @@ def test_post_ingest_runs_events_then_triggers_and_isolates_errors(conn, project
 def test_post_ingest_without_deps_only_events(conn):
     out = triggers.post_ingest(conn=conn, markets=["KR"], now=NOW)
     assert set(out) == {"events:KR"}
+
+
+def test_discover_request_wires_inputs_research_port_to_generated_payload(
+    conn, project, monkeypatch
+):
+    from trader.features.ingest import macro as macro_sources
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.run_store import market_dir, read_checkpoint
+
+    deps = trigger_deps(project, conn, notifier=Sent())
+    deps.ports["inputs"] = InputsPortImpl(Secrets(), SourcesConfig())
+    monkeypatch.setattr(
+        macro_sources,
+        "collect_macro",
+        lambda *a, **kw: {
+            "dxy": {
+                "data": {"value": 123, "date": NOW.date().isoformat()},
+                "received_at": NOW.isoformat(),
+                "error": None,
+            }
+        },
+    )
+    monkeypatch.setattr(ingest_api, "load_universe", lambda: UNI)
+    monkeypatch.setattr(
+        triggers, "run_session", lambda *a, **kw: SimpleNamespace(ok=True, error=None)
+    )
+    _news(conn, [("시장 발굴 뉴스", [])])
+    ingest_api.novel_items(conn, "KR", since=NOW - timedelta(hours=6))
+    result = triggers.discover_request(deps, {"market": "KR"}, progress=None)
+    assert result["novel"] == 1
+    generated = read_checkpoint(market_dir(NOW.date(), "KR", deps.state), "_discovery_inputs")[
+        "data"
+    ]
+    assert generated["macro"]["dxy"]["data"]["value"] == 123
+    assert generated["source_coverage"]["macro"]["dxy"]["status"] == "present"

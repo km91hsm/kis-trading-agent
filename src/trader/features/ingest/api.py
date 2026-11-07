@@ -39,6 +39,7 @@ from trader.features.ingest.news_store import (
     row_to_dict,
     universe_names,
 )
+from trader.features.ingest.research_context import collect_research_context
 from trader.features.ingest.settings import MacroCfg, NewsCfg, SourcesConfig, load_sources
 from trader.features.ingest.universe import (
     SectorMap,
@@ -81,6 +82,7 @@ __all__ = [
     "build_inputs",
     "collect_and_save",
     "collect_macro",
+    "collect_research_context",
     "count",
     "disclosures",
     "indicators",

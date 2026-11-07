@@ -117,6 +117,7 @@ def run_screen(
                 cache_names=names.load_cache_names(cache_dir),
                 sources_cfg=sources_cfg,
                 http=http,
+                research_port=(ctx.ports or {}).get("inputs"),
             )
         except Exception as e:  # noqa: BLE001 - 발굴 입력 실패는 스크리닝을 막지 않는다
             logger.warning("발굴 입력 조립 실패 %s: %s", market, e)

@@ -226,7 +226,7 @@ def _compact(
 
 
 def _delivery_coverage(value: Any) -> Any:
-    """Coverage describes evidence in this delivered object, including nested contexts."""
+    """중첩 context를 포함해 실제 전달된 근거에 맞춰 coverage를 계산한다."""
     if isinstance(value, list):
         return [_delivery_coverage(v) for v in value]
     if not isinstance(value, dict):
@@ -270,7 +270,7 @@ def _delivery_coverage(value: Any) -> Any:
 
 
 def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
-    """Bound the complete serialized UTF-8 bundle, including truncation metadata."""
+    """축약 기록을 포함한 전체 UTF-8 직렬화 결과가 바이트 상한을 지키게 한다."""
     if limit < 2:
         raise ValueError("JSON dict requires at least 2 bytes")
     if drop_evidence and "reports" in obj:
@@ -326,7 +326,7 @@ def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
 
 
 def compact_context(inputs: dict) -> dict:
-    """Bound public research evidence independently of accounts/portfolio/order context."""
+    """계좌·포트폴리오·주문과 분리된 공개 연구 근거를 제한된 크기로 조립한다."""
     nm = inputs.get("news_macro") or {}
     sentiment = inputs.get("sentiment") or {}
     data = {
@@ -350,6 +350,14 @@ def compact_context(inputs: dict) -> dict:
     ):
         if value is not None:
             data[key] = value
+    # FO stores news_macro itself as a Section; spot uses per-item Sections.
+    if {"data", "received_at", "error"} <= set(nm):
+        section_data = nm.get("data") or {}
+        data["news"] = {**nm, "data": section_data.get("news")}
+        if section_data.get("macro"):
+            data["macro"] = section_data["macro"]
+    if {"data", "received_at", "error"} <= set(sentiment):
+        sentiment = sentiment.get("data") or {}
     community = (sentiment.get("community") or {}).get("data") or {}
     blogs = inputs.get("blog_posts") or [
         p

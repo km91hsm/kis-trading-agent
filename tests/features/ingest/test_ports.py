@@ -325,3 +325,31 @@ def test_ranto_blog_reaches_input_and_research_context(project, respx_mock):
     compact = compact_context(out)
     assert compact["blog_posts"][0]["title"] == "시장 의견"
     assert compact["blog_posts"][0]["received_at"]
+
+
+def test_public_research_context_preserves_asof_gaps_and_blog_failure(
+    conn, monkeypatch, respx_mock
+):
+    from trader.features.ingest import macro as macro_sources
+
+    asof = datetime(2026, 11, 7, 1, tzinfo=UTC)
+    cfg = SourcesConfig.model_validate({"channels": {"naver_blog": ["ranto28"]}})
+    monkeypatch.setattr(
+        macro_sources,
+        "collect_macro",
+        lambda *a, **kw: {
+            "kospi": {
+                "data": {"value": 3000, "asof": "2026-11-07T05:00:00Z"},
+                "received_at": "2026-11-07T01:00:00Z",
+                "error": None,
+            }
+        },
+    )
+    respx_mock.get("https://rss.blog.naver.com/ranto28.xml").respond(500)
+    out = InputsPortImpl(Secrets(), cfg).research_context(conn, "US", asof=asof, now=lambda: asof)
+    assert out["macro"]["kospi"]["data"] is None
+    assert out["macro"]["kospi"]["status"] == "unavailable"
+    assert out["source_coverage"]["naver_blog/ranto28"]["configured"] is True
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "missing"
+    assert out["blog_posts"] == []
+    assert any("ranto28" in gap for gap in out["data_gaps"])

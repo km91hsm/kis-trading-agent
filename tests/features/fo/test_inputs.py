@@ -183,3 +183,80 @@ def test_spot_hedge_held_empty_without_ports(conn):
     ctx.ports = ports_for(ctx.settings, ctx.accounts)  # brokers() → [] (현물 브로커 없음)
     inp = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
     assert inp["context"]["data"]["spot_exposure"]["hedge_held"] == []
+
+
+def test_real_fo_generated_news_section_reaches_compact_context(conn):
+    from trader.kernel.session.tooling import compact_context
+
+    class News:
+        def recent(self, *args, **kwargs):
+            return [
+                {
+                    "title": "FO 실제 형태 뉴스",
+                    "source": "test-news",
+                    "tickers": [],
+                    "published_at": NOW.isoformat(),
+                    "received_at": NOW.isoformat(),
+                }
+            ]
+
+    ctx = _ctx(conn)
+    ctx.ports = {**ctx.ports, "inputs": News()}
+    generated = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
+    out = compact_context(generated)
+    assert out["news"]["data"][0]["title"] == "FO 실제 형태 뉴스"
+    assert out["news"]["received_at"] == NOW.isoformat()
+    assert "context" not in out and "accounts" not in out
+
+
+def test_fo_collects_public_research_context_through_real_inputs_port(conn, monkeypatch):
+    import respx
+
+    from trader.features.ingest import macro as macro_sources
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.tooling import compact_context
+
+    macro = {
+        key: {
+            "data": {"value": i + 1, "date": D.isoformat()},
+            "received_at": NOW.isoformat(),
+            "error": None,
+        }
+        for i, key in enumerate(("sp500", "nasdaq", "wti", "dxy", "us10y"))
+    }
+    monkeypatch.setattr(macro_sources, "collect_macro", lambda *a, **k: macro)
+    cfg = SourcesConfig.model_validate({"channels": {"naver_blog": ["ranto28"]}})
+    activity = SimpleNamespace(
+        snapshot=lambda c, m, **kw: {
+            "source": "kis",
+            "market": m,
+            "currency": "KRW",
+            "status": "partial",
+            "received_at": NOW.isoformat(),
+            "source_asof": None,
+            "stale": False,
+            "rankings": {"turnover": [{"ticker": "005930", "turnover": "100"}]},
+        }
+    )
+    ctx = _ctx(conn)
+    ctx.ports = {
+        **ctx.ports,
+        "inputs": InputsPortImpl(Secrets(), cfg, {"market_activity": activity}),
+    }
+    rss = (
+        "<rss><channel><item><title>미국 시장 거시 의견</title><description>공개 발췌</description>"
+        "<pubDate>Mon, 26 Oct 2026 10:00:00 +0900</pubDate>"
+        "<link>https://blog.naver.com/ranto28/1</link></item></channel></rss>"
+    )
+    with respx.mock(assert_all_called=False) as routes:
+        routes.get("https://rss.blog.naver.com/ranto28.xml").respond(200, text=rss)
+        generated = inputs.build_inputs(ctx, today=D, asof=NOW, accounts=ctx.accounts)
+    out = compact_context(generated)
+    assert out["market_activity"]["source"] == "kis"
+    assert set(out["macro"]) == {"sp500", "nasdaq", "wti", "dxy", "us10y"}
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
+    assert out["blog_posts"][0]["body"] == "공개 발췌"
+    assert out["blog_posts"][0]["posted_at"] == "2026-10-26T01:00:00+00:00"
+    assert "accounts" not in out and "context" not in out

@@ -13,6 +13,7 @@ from trader.features.ingest.api import (
     SourcesConfig,
     build_input_deps,
     collect_and_save,
+    collect_research_context,
     load_sources,
 )
 from trader.features.saveticker import api as saveticker
@@ -71,6 +72,29 @@ class InputsPortImpl:
             saveticker_cfg=self._saveticker_cfg,
         )
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def research_context(
+        self,
+        conn: Any,
+        market: str,
+        *,
+        asof: datetime,
+        market_client: Any = None,
+        http: Any = None,
+        now: Callable[[], datetime] | None = None,
+    ) -> dict:
+        """거시·공개 블로그·KIS 활동 입력. 계좌·포지션·주문은 포함하지 않는다."""
+        return collect_research_context(
+            self._cfg,
+            self._secrets,
+            conn=conn,
+            market=market,
+            asof=asof,
+            market_client=market_client,
+            http=http,
+            now=now,
+            activity_port=self._ports.get("market_activity"),
+        )
 
     def recent(
         self,

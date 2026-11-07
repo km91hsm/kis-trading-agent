@@ -1,4 +1,4 @@
-"""Small source-quality contexts shared by stock, market and scout inputs."""
+"""종목·시장·발굴 입력이 공유하는 원천·관측시각·품질 요약."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 
 def macro_context(macro: dict, *, asof: datetime) -> dict:
-    """Observation date is not retrieval freshness or publication/release time."""
+    """관측일과 조회시각·발표시각을 구분하고 asof 뒤 관측값을 차단한다."""
     out = {}
     for key, section in macro.items():
         if not isinstance(section, dict) or "data" not in section:
@@ -58,7 +58,7 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
 def activity_context(
     conn: Any, market: str, *, asof: datetime, port: Any = None, ticker: str | None = None
 ) -> dict:
-    """Read bounded KIS rankings; failures remain explicit model-facing data gaps."""
+    """수집 범위가 제한된 KIS 순위를 읽고 실패를 모델이 확인할 data_gaps에 남긴다."""
     try:
         if conn is None:
             raise ValueError("no activity store connection")
@@ -145,7 +145,7 @@ def source_coverage(
     blog_posts: list[dict] | None = None,
     blog_config: list[str] | None = None,
 ) -> dict:
-    """Requested sources are explicit: FRED proxies never become Investing.com data."""
+    """요청 원천과 실제 관측을 구분한다. FRED proxy를 Investing.com 자료로 표시하지 않는다."""
     coverage = {}
     for key, (series, instrument, exact) in _REQUESTED_MACRO.items():
         section = macro.get(key) or {}

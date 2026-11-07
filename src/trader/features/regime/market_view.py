@@ -126,12 +126,14 @@ def build_inputs(
         except Exception as e:  # noqa: BLE001 - 지수 봉은 보조 입력
             errors["index"] = f"{type(e).__name__}: {e}"
     macro: dict[str, Any] = {}
+    sources_cfg = None
+    secrets = (getattr(ctx, "ext", None) or {}).get("secrets") or Secrets()
     try:
-        secrets = (getattr(ctx, "ext", None) or {}).get("secrets") or Secrets()
+        sources_cfg = ingest.load_sources()
         macro = {
             k: v.model_dump() if hasattr(v, "model_dump") else v
             for k, v in ingest.collect_macro(
-                ingest.load_sources().macro,
+                sources_cfg.macro,
                 secrets,
                 market_client=market_client,
                 asof=asof,
@@ -189,11 +191,20 @@ def build_inputs(
         )
     except Exception as e:  # noqa: BLE001 - 선택 입력
         errors["saveticker"] = f"{type(e).__name__}: {e}"
-    macro = ingest.macro_context(macro, asof=asof)
-    activity = ingest.activity_context(
-        conn, market, asof=asof, port=(getattr(ctx, "ports", None) or {}).get("market_activity")
+    research = ingest.collect_research_context(
+        sources_cfg or ingest.SourcesConfig(),
+        secrets,
+        conn=conn,
+        market=market,
+        asof=asof,
+        market_client=market_client,
+        http=http,
+        now=now,
+        macro=macro,
+        activity_port=(getattr(ctx, "ports", None) or {}).get("market_activity"),
     )
-    gaps = list(activity.get("data_gaps") or [])
+    macro, activity = research["macro"], research["market_activity"]
+    gaps = list(research["data_gaps"])
     gaps.extend((saveticker_snap or {}).get("data_gaps") or [])
     held: list[str] = []
     sectors: list[dict] = []
@@ -238,7 +249,8 @@ def build_inputs(
         "proxy": tools.MARKET_PROXY_LABEL.get(market, market),
         "saveticker": saveticker_snap,
         "market_activity": activity,
-        "source_coverage": ingest.source_coverage(macro),
+        "source_coverage": research["source_coverage"],
+        "blog_posts": research["blog_posts"],
         "data_gaps": gaps,
         "regime": {
             "state": regime.get("state"),
