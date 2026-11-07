@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from trader.features.spot import costs, executor, rules, schemas, tradability
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot import summary as summary_mod
+from trader.features.spot.research import RESEARCH
 from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
@@ -580,7 +581,7 @@ def checkpoint_write(
     d = _dir(ctx, ticker, market, date)
     if match := _DEBATE_RE.match(stage):
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, "spot", round_no=int(match[1]), side=match[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(match[1]), side=match[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
@@ -604,7 +605,7 @@ def checkpoint_write(
         stage,
         ticker,
         validated,
-        rounds=research_policy.rounds(ctx.conn, ctx.settings, d, "spot"),
+        rounds=research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH),
     )
     if mismatch:
         return {"ok": False, "error": mismatch}
@@ -614,9 +615,11 @@ def checkpoint_write(
         return {"ok": False, "error": f"전제조건 미충족({stage}): {'; '.join(missing)}"}
     if isinstance(validated, schemas.DebateTurn):
         if err := research_policy.turn_error(
-            ctx.conn, ctx.settings, d, "spot", validated.model_dump()
+            ctx.conn, ctx.settings, d, RESEARCH, validated.model_dump()
         ):
             return {"ok": False, "error": err}
+    if isinstance(validated, schemas.DebateTurn):
+        research_policy.invalidate_summary(d, RESEARCH)
     path = write_checkpoint(d, stage, _wrap(validated.model_dump(), _call(agent, call_meta)))
     return {"ok": True, "path": str(path)}
 
@@ -655,7 +658,7 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
     `skipped_debate: true` 요약을, 아니면 `debate_required: true` 오류를 돌려준다.
     토론 턴이 있으면 합의 여부와 무관하게 정상 요약이다."""
     d = _dir(ctx, ticker, market, date)
-    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "spot"):
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err, "debate_required": True}
     turns = _load_turns(d)
     if not turns:
@@ -746,7 +749,7 @@ def checkpoint_bundle(
         data = {
             "ticker": ticker,
             "scope": "spot",
-            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, "spot"),
+            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH),
             "market": market,
             "asof": ((read_checkpoint(d, "00_inputs") or {}).get("meta") or {}).get("asof"),
             "currency": "KRW" if market == "KR" else "USD",
@@ -760,7 +763,7 @@ def checkpoint_bundle(
         return {"ok": True, "data": _shrink(data, BUNDLE_LIMIT_BYTES)}
     if kind == "trader":
         if _latest_decision_stage(d) is None:
-            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "spot"):
+            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
                 return {"ok": False, "error": err}
         summ = read_checkpoint(d, "25_research_summary")
         if summ is None:
@@ -1082,7 +1085,7 @@ def submit_decision(
     if resume_stage is None and "30_decision" in stages:
         return _resume_saved(ctx, d, stages, date, market, ticker)
     if resume_stage is None:
-        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "spot"):
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
             return {"ok": False, "error": err}
     missing = check_rule(SUBMIT_RULE, "30_decision", stages)
     if missing:
@@ -1193,4 +1196,4 @@ def codex_turn(ctx: ToolContext, *, ticker: str, market: str, date: date, round:
     d = _dir(ctx, ticker, market, date)
     if len(_reports(d)) < MIN_REPORTS:
         return {"ok": False, "error": "Codex 토론 전 애널리스트 2개 이상 필요"}
-    return research_policy.generate_turn(ctx, d, "spot", round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)

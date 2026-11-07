@@ -11,6 +11,7 @@ from pathlib import Path
 from trader.kernel.config import KST, CodexDebateSettings
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger.control import get_flag
+from trader.kernel.registry.types import ResearchSpec
 from trader.kernel.session import codex, tooling
 from trader.kernel.session.run_store import (
     checkpoint_payload,
@@ -21,11 +22,6 @@ from trader.kernel.session.run_store import (
 from trader.kernel.session.schemas import DebateTurn
 
 FLAG = "codex_debate_enabled"
-SCOPES = {
-    "spot": ("00_inputs", "10_analyst_", "20_debate_r", "30_decision"),
-    "market": ("_market_inputs", "_market_analyst", "_market_debate_r", "_market_view"),
-    "fo": ("_fo_inputs", "_fo_analyst_", "_fo_debate_r", "_fo_decision"),
-}
 
 
 class ResearchPolicyError(RuntimeError):
@@ -54,8 +50,8 @@ def current(conn, settings) -> dict:
     }
 
 
-def key(d: Path, scope: str) -> str:
-    return scope + ":" + str(d.resolve())
+def key(d: Path, scope: ResearchSpec) -> str:
+    return scope.scope + ":" + str(d.resolve())
 
 
 def _stored(conn, d, scope):
@@ -75,10 +71,28 @@ def _stored(conn, d, scope):
     return {**json.loads(row[0]), "policy_hash": row[1], "context_hash": row[2]} if row else None
 
 
-def start(conn, settings, d: Path, scope: str, *, now: datetime) -> dict:
+def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dict:
     wanted = current(conn, settings)
+    wanted["research"] = {
+        name: getattr(scope, name)
+        for name in (
+            "scope",
+            "input_stage",
+            "report_prefix",
+            "turn_prefix",
+            "completed_stage",
+            "summary_stage",
+            "cli_template",
+            "bull_agent",
+            "bear_agent",
+        )
+    }
     old = _stored(conn, d, scope)
-    _, analyst_prefix, debate_prefix, completed = SCOPES[scope]
+    analyst_prefix, debate_prefix, completed = (
+        scope.report_prefix,
+        scope.turn_prefix,
+        scope.completed_stage,
+    )
     stages = list_checkpoints(d)
     if completed in stages:
         return {
@@ -130,7 +144,7 @@ def get(conn, settings, d, scope) -> dict:
         return old
     policy = current(conn, settings)
     # Legacy completed decisions remain legacy even after toggling ON.
-    if read_checkpoint(d, SCOPES[scope][3]) is not None:
+    if read_checkpoint(d, scope.completed_stage) is not None:
         return {**policy, "enabled": False, "legacy_completed": True}
     if policy["enabled"]:
         raise ResearchPolicyError(
@@ -140,7 +154,7 @@ def get(conn, settings, d, scope) -> dict:
 
 
 def reports(d, scope):
-    prefix = SCOPES[scope][1]
+    prefix = scope.report_prefix
     return [
         (read_checkpoint(d, s) or {}).get("data", {})
         for s in list_checkpoints(d)
@@ -150,7 +164,7 @@ def reports(d, scope):
 
 def _context_hash(d, scope):
     return codex.digest(
-        {"inputs": read_checkpoint(d, SCOPES[scope][0]), "reports": reports(d, scope)}
+        {"inputs": read_checkpoint(d, scope.input_stage), "reports": reports(d, scope)}
     )
 
 
@@ -182,13 +196,13 @@ def write_error(conn, settings, d, scope, *, round_no, side) -> str | None:
         if not policy["enabled"]:
             return None
         if side == "bear":
-            return "Codex bear는 전용 codex-turn 도구로만 기록할 수 있습니다"
+            return f"Codex bear는 전용 도구로만 기록할 수 있습니다: {scope.cli_template}"
         if round_no > policy["rounds"]:
             return f"라운드 {round_no}는 고정 정책 라운드({policy['rounds']})를 넘습니다"
         _bind(conn, d, scope, policy)
         if round_no > 0:
             for prev_side in ("bull", "bear"):
-                if read_checkpoint(d, f"{SCOPES[scope][2]}{round_no - 1}_{prev_side}") is None:
+                if read_checkpoint(d, f"{scope.turn_prefix}{round_no - 1}_{prev_side}") is None:
                     return "반박 이전 라운드의 양측 턴이 필요합니다"
         return None
     except ResearchPolicyError as exc:
@@ -201,11 +215,10 @@ def rounds(conn, settings, d, scope) -> int:
 
 def payload(conn, settings, d, scope, round_no):
     policy = get(conn, settings, d, scope)
-    inputs = read_checkpoint(d, SCOPES[scope][0]) or {}
+    inputs = read_checkpoint(d, scope.input_stage) or {}
     inputs = inputs.get("data", inputs)
-    meta = inputs.get("meta") or inputs
     # Only the previous round is included, so round0 remains independent.
-    prefix = SCOPES[scope][2]
+    prefix = scope.turn_prefix
     previous = {}
     if round_no:
         for side in ("bull", "bear"):
@@ -213,16 +226,15 @@ def payload(conn, settings, d, scope, round_no):
             if saved is None:
                 raise ResearchPolicyError("반박 이전 라운드의 양측 턴이 필요합니다")
             previous[side] = saved.get("data", {})
+    metadata = scope.metadata(d, inputs)
+    required = {"market", "ticker", "currency", "asof"}
+    if not required <= metadata.keys() or any(not metadata[k] for k in required):
+        raise ResearchPolicyError(
+            "연구 metadata adapter에 market/ticker/currency/asof가 필요합니다"
+        )
     data = {
-        "scope": scope,
-        "market": meta.get("market")
-        or inputs.get("market")
-        or ("KR" if scope == "fo" else d.name if scope == "market" else d.parent.name),
-        "ticker": meta.get("ticker")
-        or meta.get("proxy")
-        or inputs.get("proxy")
-        or (d.name if scope == "spot" else None),
-        "asof": meta.get("asof") or inputs.get("asof") or inputs.get("date") or "unknown",
+        "scope": scope.scope,
+        **metadata,
         "round": round_no,
         "side": "bear",
         "reports": reports(d, scope),
@@ -230,8 +242,6 @@ def payload(conn, settings, d, scope, round_no):
         "opponent_previous": previous.get("bull"),
         "input_context": tooling.compact_context(inputs),
     }
-    data["currency"] = "KRW" if data["market"] == "KR" else "USD"
-    data["ticker"] = data["ticker"] or ("KOSPI200" if data["market"] == "KR" else "SPX")
     return codex.sanitize(data), policy
 
 
@@ -255,7 +265,9 @@ def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel
             cancel=cancel,
             validate=lambda turn: turn_error(ctx.conn, ctx.settings, d, scope, turn),
         )
-        stage = f"{SCOPES[scope][2]}{round_no}_bear"
+        stage = f"{scope.turn_prefix}{round_no}_bear"
+        result["call"]["agent"] = scope.bear_agent
+        invalidate_summary(d, scope)
         path = write_checkpoint(d, stage, checkpoint_payload(result["data"], result["call"]))
         return {"ok": True, "path": str(path), "provider": "codex", "round": round_no}
     except (ResearchPolicyError, codex.CodexError) as exc:
@@ -267,7 +279,7 @@ def completion_error(conn, settings, d, scope) -> str | None:
         policy = get(conn, settings, d, scope)
         if not policy["enabled"]:
             return None
-        prefix = SCOPES[scope][2]
+        prefix = scope.turn_prefix
         # Check presence before fingerprint, yielding the useful missing-turn error first.
         for rnd in range(policy["rounds"] + 1):
             for side in ("bull", "bear"):
@@ -395,7 +407,7 @@ def turn_error(conn, settings, d, scope, value):
             return None
         if not turn.rebuttals:
             return "상호 반박 라운드 rebuttals를 비울 수 없습니다"
-        prefix = SCOPES[scope][2]
+        prefix = scope.turn_prefix
         own = (read_checkpoint(d, f"{prefix}{turn.round - 1}_{turn.side}") or {}).get("data") or {}
         opponent = (
             read_checkpoint(
@@ -423,3 +435,11 @@ def turn_error(conn, settings, d, scope, value):
 def public_policy(conn, settings, d, scope):
     policy = get(conn, settings, d, scope)
     return {k: policy[k] for k in ("enabled", "rounds", "bull", "bear")}
+
+
+def invalidate_summary(d: Path, research: ResearchSpec) -> bool:
+    """턴 변경 전에 그 턴들의 파생 요약만 무효화한다. 결정/주문에는 손대지 않는다."""
+    path = d / f"{research.summary_stage}.json"
+    existed = path.exists()
+    path.unlink(missing_ok=True)
+    return existed

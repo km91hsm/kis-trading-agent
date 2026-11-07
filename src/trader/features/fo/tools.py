@@ -37,6 +37,7 @@ from trader.features.fo import inputs as fo_inputs
 from trader.features.fo import rules as fo_rules
 from trader.features.fo import sizing as fo_sizing
 from trader.features.fo import store as fo_store
+from trader.features.fo.research import RESEARCH
 from trader.features.fo.schemas import FoDecisionEnvelope
 from trader.features.fo.types import FoExecContext
 from trader.kernel.broker import fo_master
@@ -311,11 +312,11 @@ def fo_bundle(
             previous=(own.model_dump() if own else None, opp.model_dump() if opp else None),
         )  # fmt: skip
         data["input_context"] = tooling.compact_context(inputs)
-        data["research_policy"] = research_policy.public_policy(ctx.conn, ctx.settings, d, "fo")
+        data["research_policy"] = research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH)
         return {"ok": True, "data": tooling.shrink(data, BUNDLE_LIMIT_BYTES)}
     if kind == "trader":
         if not _fo_decision_stages(d):
-            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "fo"):
+            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
                 return {"ok": False, "error": err}
         summ = read_checkpoint(d, FO_SUMMARY)
         if summ is None:
@@ -374,11 +375,11 @@ def fo_write(
     md = _FO_DEBATE_RE.match(stage)
     if md:
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, "fo", round_no=int(md[1]), side=md[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(md[1]), side=md[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
-    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, "fo")
+    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     ma = _FO_ANALYST_RE.match(stage)
     md = _FO_DEBATE_RE.match(stage)
     if ma:
@@ -425,20 +426,17 @@ def fo_write(
         }
     d = _fo_dir(ctx, date, create=True)
     if isinstance(v, DebateTurn):
-        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, "fo", v.model_dump()):
+        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
             return {"ok": False, "error": err}
+    invalidated = research_policy.invalidate_summary(d, RESEARCH) if md else False
     path = write_checkpoint(d, stage, _wrap(v.model_dump(), tooling.call_meta(agent, call_meta)))
-    invalidated = False
-    if md and FO_SUMMARY in list_checkpoints(d):
-        (d / f"{FO_SUMMARY}.json").unlink(missing_ok=True)
-        invalidated = True
     return {"ok": True, "path": str(path), "stage": stage, "summary_invalidated": invalidated}
 
 
 def fo_summarize(ctx: FoToolContext, *, date: date) -> dict:
     """`_fo_debate_*` 를 모아 `_fo_summary`(수렴 감시 포함)를 만든다."""
     d = _fo_dir(ctx, date)
-    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "fo"):
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err}
     return tooling.summarize_turns(d, FO_SUMMARY, _FO_DEBATE_RE)
 
@@ -598,7 +596,7 @@ def submit_fo_decision(
                 return out | res | {"resumed_execution": True}
         return out
     if round_n == 0:
-        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "fo"):
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
             return {"ok": False, "error": err}
     roles = {m.group(1) for s in stages if (m := _FO_ANALYST_RE.match(s))}
     missing: list[str] = []
@@ -931,7 +929,7 @@ def codex_turn(ctx: FoToolContext, *, date: date, round: int) -> dict:
     d = _fo_dir(ctx, date)
     if len(_fo_reports(d)) < FO_MIN_ROLES:
         return {"ok": False, "error": "Codex 토론 전 서로 다른 애널리스트 2개 이상 필요"}
-    return research_policy.generate_turn(ctx, d, "fo", round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)
 
 
 @fo_tool_app.command("codex-turn")

@@ -86,6 +86,22 @@ class OriginSpec:
 
 
 @dataclass(frozen=True)
+class ResearchSpec:
+    """기능이 선언하는 연구 단계·CLI·입력 어댑터. 커널은 기능 이름을 해석하지 않는다."""
+
+    scope: str
+    input_stage: str
+    report_prefix: str
+    turn_prefix: str
+    completed_stage: str
+    summary_stage: str
+    cli_template: str
+    bull_agent: str
+    bear_agent: str
+    metadata: Callable[[Path, dict], dict[str, str]]
+
+
+@dataclass(frozen=True)
 class SessionKind:
     """LLM 세션 종류."""
 
@@ -103,8 +119,8 @@ class SessionKind:
     # True 면 같은 운영일 같은 종목이 세션 타임아웃으로 `llm.timeout_retry_max` 번 실패한 뒤
     # 다시 띄우지 않는다(단일 종목 세션만). 커널은 세션 이름이 아니라 이 선언만 본다
     retry_guard: bool = False
-    # (ctx, spec) -> [(checkpoint directory, research scope)]. Resume는 선언하지 않는다.
-    research_targets: Callable[..., list[tuple[Path, str]]] | None = None
+    # (ctx, spec) -> [(checkpoint directory, feature research contract)].
+    research_targets: Callable[..., list[tuple[Path, ResearchSpec]]] | None = None
 
 
 @dataclass(frozen=True)

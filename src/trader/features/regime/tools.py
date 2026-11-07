@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from trader.features.regime.research import RESEARCH
 from trader.features.regime.schemas import AnalystReport, DebateTurn, HedgeProposal
 from trader.kernel.ledger import control
 from trader.kernel.platform import paths
@@ -122,7 +123,7 @@ def market_bundle(
         data = {
             **base,
             "proxy": inputs.get("proxy"),
-            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, "market"),
+            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH),
             "round": round,
             "side": side,
             "reports": [report],
@@ -132,7 +133,7 @@ def market_bundle(
         }
         return {"ok": True, "data": tooling.shrink(data, BUNDLE_LIMIT_BYTES)}
     if kind == "strategist":
-        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "market"):
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
             return {"ok": False, "error": err}
         summ = read_checkpoint(d, "_market_summary")
         if summ is None:
@@ -168,11 +169,11 @@ def market_write(
     d = market_dir(date, market, ctx.state, create=True)
     if m:
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, "market", round_no=int(m[1]), side=m[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(m[1]), side=m[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
-    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, "market")
+    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     if stage == "_market_analyst":
         model: type = AnalystReport
     elif m:
@@ -202,8 +203,10 @@ def market_write(
     if read_checkpoint(d, "_market_inputs") is None:
         return {"ok": False, "error": "_market_inputs 없음 (시장 세션 밖에서는 쓸 수 없다)"}
     if isinstance(v, DebateTurn):
-        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, "market", v.model_dump()):
+        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
             return {"ok": False, "error": err}
+    if isinstance(v, DebateTurn):
+        research_policy.invalidate_summary(d, RESEARCH)
     path = write_checkpoint(d, stage, _wrap(v.model_dump(), tooling.call_meta(agent, call_meta)))
     return {"ok": True, "path": str(path), "stage": stage}
 
@@ -213,7 +216,7 @@ def market_summarize(ctx: MarketToolContext, *, market: str, date: date) -> dict
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
-    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "market"):
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err}
     return tooling.summarize_turns(d, "_market_summary", _MARKET_DEBATE_RE)
 
@@ -232,7 +235,7 @@ def submit_market_view(
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
-    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, "market"):
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err}
     if _market_report(d) is None or read_checkpoint(d, "_market_summary") is None:
         return {
@@ -278,4 +281,4 @@ def codex_turn(ctx: MarketToolContext, *, market: str, date: date, round: int) -
     d = market_dir(date, market, ctx.state)
     if _market_report(d) is None:
         return {"ok": False, "error": "Codex 토론 전 _market_analyst 필요"}
-    return research_policy.generate_turn(ctx, d, "market", round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)

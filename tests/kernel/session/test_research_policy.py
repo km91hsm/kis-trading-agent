@@ -6,8 +6,13 @@ from types import SimpleNamespace
 import pytest
 
 from tests.features.spot.helpers import ok_report, ok_turn
+from trader.features.fo.research import RESEARCH as FO_RESEARCH
+from trader.features.regime.research import RESEARCH as MARKET_RESEARCH
+from trader.features.spot.research import RESEARCH as SPOT_RESEARCH
 from trader.kernel.config import LlmSettings
 from trader.kernel.session.run_store import checkpoint_payload, read_checkpoint, write_checkpoint
+
+RESEARCHES = {"spot": SPOT_RESEARCH, "market": MARKET_RESEARCH, "fo": FO_RESEARCH}
 
 NOW = datetime(2026, 11, 7, tzinfo=UTC)
 
@@ -29,15 +34,15 @@ def test_policy_frozen_and_mandatory_rounds(conn, tmp_path):
     from trader.kernel.session import research_policy as p
 
     s = settings()
-    policy = p.start(conn, s, tmp_path, "spot", now=NOW)
+    policy = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
     assert policy["enabled"] and policy["rounds"] == 1
     seed(tmp_path)
     s.llm.codex_debate.enabled = False
-    assert p.get(conn, s, tmp_path, "spot")["enabled"]
-    err = p.completion_error(conn, s, tmp_path, "spot")
+    assert p.get(conn, s, tmp_path, SPOT_RESEARCH)["enabled"]
+    err = p.completion_error(conn, s, tmp_path, SPOT_RESEARCH)
     assert "Codex" in err and "0" in err
     with pytest.raises(p.ResearchPolicyError, match="재분석"):
-        p.start(conn, s, tmp_path, "spot", now=NOW)
+        p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
     assert read_checkpoint(tmp_path, "00_inputs") is not None
 
 
@@ -46,9 +51,9 @@ def test_new_enabled_policy_rejects_legacy_unfinished_but_preserves_decision(con
 
     seed(tmp_path)
     with pytest.raises(p.ResearchPolicyError, match="재분석"):
-        p.start(conn, settings(), tmp_path, "spot", now=NOW)
+        p.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
     write_checkpoint(tmp_path, "30_decision", checkpoint_payload({"action": "HOLD"}))
-    policy = p.start(conn, settings(), tmp_path, "spot", now=NOW)
+    policy = p.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
     assert not policy["enabled"] and policy["legacy_completed"]
     assert read_checkpoint(tmp_path, "30_decision")["data"]["action"] == "HOLD"
 
@@ -60,7 +65,7 @@ def test_general_checkpoint_cannot_forge_codex_bear(conn, tmp_path):
     s = settings()
     d = tmp_path / "runs" / "2026-11-07" / "KR" / "005930"
     d.mkdir(parents=True)
-    p.start(conn, s, d, "spot", now=NOW)
+    p.start(conn, s, d, SPOT_RESEARCH, now=NOW)
     seed(d)
     ctx = tools.ToolContext(settings=s, accounts=[], conn=conn, state=tmp_path, now=lambda: NOW)
     out = tools.checkpoint_write(
@@ -82,7 +87,7 @@ def test_general_checkpoint_cannot_forge_codex_bear(conn, tmp_path):
                 f"20_debate_r{rnd}_{side}",
                 checkpoint_payload(ok_turn(side, rnd), {"provider": "codex"}),
             )
-    assert "증명" in p.completion_error(conn, s, d, "spot")
+    assert "증명" in p.completion_error(conn, s, d, SPOT_RESEARCH)
     assert not tools.checkpoint_summarize(
         ctx, ticker="005930", market="KR", date=date(2026, 11, 7)
     )["ok"]
@@ -101,8 +106,9 @@ def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
     monkeypatch.delenv("FAKE_CLAUDE", raising=False)
     s = settings()
     d = tmp_path
-    p.start(conn, s, d, scope, now=NOW)
-    input_stage, analyst_prefix, prefix, _ = p.SCOPES[scope]
+    p.start(conn, s, d, RESEARCHES[scope], now=NOW)
+    r = RESEARCHES[scope]
+    input_stage, analyst_prefix, prefix = r.input_stage, r.report_prefix, r.turn_prefix
     write_checkpoint(
         d,
         input_stage,
@@ -148,29 +154,31 @@ def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     for rnd in (0, 1):
-        assert p.write_error(conn, s, d, scope, round_no=rnd, side="bull") is None
+        assert p.write_error(conn, s, d, RESEARCHES[scope], round_no=rnd, side="bull") is None
         write_checkpoint(
             d, f"{prefix}{rnd}_bull", checkpoint_payload(turn("bull", rnd), {"provider": "claude"})
         )
-        out = p.generate_turn(ctx, d, scope, rnd, runner=fake, bin_path=Path("/fake/codex"))
+        out = p.generate_turn(
+            ctx, d, RESEARCHES[scope], rnd, runner=fake, bin_path=Path("/fake/codex")
+        )
         assert out["ok"], out
-    assert p.completion_error(conn, s, d, scope) is None
+    assert p.completion_error(conn, s, d, RESEARCHES[scope]) is None
     write_checkpoint(
         d,
         f"{prefix}0_bull",
         checkpoint_payload({**turn("bull", 0), "arguments": ["changed"]}, {"provider": "claude"}),
     )
-    assert "증명" in p.completion_error(conn, s, d, scope)
+    assert "증명" in p.completion_error(conn, s, d, RESEARCHES[scope])
 
 
 def test_on_debate_requires_symmetric_issue_coverage(conn, tmp_path):
     from trader.kernel.session import research_policy as p
 
     s = settings()
-    p.start(conn, s, tmp_path, "spot", now=NOW)
+    p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
     seed(tmp_path)
     # Invalid independent turn: no independently proposed issues.
-    assert "쟁점" in p.turn_error(conn, s, tmp_path, "spot", ok_turn("bull", 0))
+    assert "쟁점" in p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, ok_turn("bull", 0))
     issue = {
         "issue_id": "bull:valuation",
         "topic": "밸류에이션",
@@ -178,7 +186,7 @@ def test_on_debate_requires_symmetric_issue_coverage(conn, tmp_path):
         "evidence": ["technical.indicators"],
     }
     bull = ok_turn("bull", 0, issues=[issue], responses=[])
-    assert p.turn_error(conn, s, tmp_path, "spot", bull) is None
+    assert p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, bull) is None
     write_checkpoint(
         tmp_path, "20_debate_r0_bull", checkpoint_payload(bull, {"provider": "claude"})
     )
@@ -186,7 +194,7 @@ def test_on_debate_requires_symmetric_issue_coverage(conn, tmp_path):
     bear = ok_turn("bear", 0, issues=[bear_issue], responses=[])
     write_checkpoint(tmp_path, "20_debate_r0_bear", checkpoint_payload(bear, {"provider": "codex"}))
     r1 = ok_turn("bull", 1, issues=[issue], rebuttals=["반박"], responses=[])
-    assert "coverage" in p.turn_error(conn, s, tmp_path, "spot", r1)
+    assert "coverage" in p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, r1)
     r1["responses"] = [
         {
             "issue_id": "bear:cycle",
@@ -194,4 +202,4 @@ def test_on_debate_requires_symmetric_issue_coverage(conn, tmp_path):
             "evidence": ["technical.indicators"],
         }
     ]
-    assert p.turn_error(conn, s, tmp_path, "spot", r1) is None
+    assert p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, r1) is None

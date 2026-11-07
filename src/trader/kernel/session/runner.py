@@ -371,7 +371,14 @@ def run_session(
             research.append((directory, scope, policy))
     codex_required = any(p["enabled"] for _, _, p in research)
     effective_kind = (
-        replace(kind, agents=tuple(a for a in kind.agents if not a.endswith("researcher-bear")))
+        replace(
+            kind,
+            agents=tuple(
+                a
+                for a in kind.agents
+                if a not in {r.bear_agent for _, r, p in research if p["enabled"]}
+            ),
+        )
         if codex_required
         else kind
     )
@@ -432,20 +439,11 @@ def run_session(
             checkpoint_names=checkpoint_names,
         )
         if codex_required:
-            scopes = {scope for _, scope, policy in research if policy["enabled"]}
-            commands = {
-                "spot": (
-                    "checkpoint codex-turn --ticker <ticker> "
-                    "--market <market> --date <date> --round "
-                    "<n>"
-                ),
-                "market": "market codex-turn --market <market> --date <date> --round <n>",
-                "fo": "fo codex-turn --market KR --date <date> --round <n>",
-            }
+            descriptors = {scope.scope: scope for _, scope, policy in research if policy["enabled"]}
             prompt += "\n# 고정된 Codex 토론 정책 (기존 흐름보다 우선)\n"
             prompt += (
-                "bull은 Claude researcher-bull, bear는 Code"
-                "x 전용 도구다. Claude bear를 생성하거나 저장하지 않는다. "
+                "bull은 선언된 Claude 에이전트, bear는 Codex 전용 도구다. "
+                "Claude bear를 쓰지 않는다. "
             )
             prompt += (
                 "r0은 양측 독립 의견. r1부터 고정 debate_rounds까지 양측"
@@ -474,8 +472,9 @@ def run_session(
                 "면 중단하고 오류를 보고한다. 재개 세션의 기존 결정은 원래 정책을 유지"
                 "한다.\n"
             )
-            for scope in scopes:
-                prompt += f"- {scope} bear: {bundle.tool_command()} {commands[scope]}\n"
+            for descriptor in descriptors.values():
+                prompt += f"- {descriptor.scope} bull: {descriptor.bull_agent}; "
+                prompt += f"bear: {bundle.tool_command()} {descriptor.cli_template}\n"
             prompt += (
                 "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한"
                 "다. 각 라운드의 bull과 bear 완료 후 다음 라운드, 마지막에 s"
