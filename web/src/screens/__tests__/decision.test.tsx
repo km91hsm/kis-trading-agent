@@ -79,6 +79,21 @@ describe("결정 상세 화면", () => {
   const heads = (t: Element) => Array.from(t.querySelectorAll("thead th")).map((e) => e.textContent);
   const bodyRows = (t: Element) => t.querySelector("tbody")!.querySelectorAll("tr");
 
+  test("실제 공급자와 독립 쟁점·상대 쟁점 반론을 읽을 수 있고 옛 기록에 공급자를 추정하지 않는다", async () => {
+    const trace = fixtureSpotTrace({ debate: [
+      { round: 1, side: "bear", stance: "BEARISH", conviction: 0.6, provider: "codex", model: "fixture-model", issues: [{ issue_id: "bear:1", topic: "금리 부담", claim: "자금조달 비용 상승", evidence: ["macro:us10y"] }], responses: [{ issue_id: "bull:1", response: "매출 증가와 이익 증가는 구분해야 함", evidence: ["news:3"] }] },
+      { round: 0, side: "bull", stance: "BULLISH", conviction: 0.7 },
+    ] });
+    await mount({ ...spotRoutes, "GET /api/decisions/spot/7/trace": trace }, "/decisions/spot/7");
+    const debate = section("debate")!;
+    expect(debate.textContent).toContain("Codex / fixture-model");
+    expect(debate.textContent).toContain("미기록");
+    act(() => (debate.querySelector('button[aria-label="펼치기"]') as HTMLButtonElement).click());
+    expect(debate.textContent).toContain("금리 부담");
+    expect(debate.textContent).toContain("매출 증가와 이익 증가는 구분해야 함");
+    expect(debate.textContent).toContain("bull:1");
+  });
+
   test("spot 상세는 라운드·토론 턴·게이트·주문을 표로 그리고, 근거는 산문 그대로", async () => {
     await mount(spotRoutes, "/decisions/spot/7");
     expect(document.body.textContent).toContain("005930 삼성전자 매수");
@@ -91,7 +106,7 @@ describe("결정 상세 화면", () => {
     expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
     // 토론 턴 — details 안 표
     const debate = section("debate")!.querySelector("details table")!;
-    expect(heads(debate)).toEqual(["라운드", "측", "판단", "확신", "타이밍", "조건"]);
+    expect(heads(debate)).toEqual(["라운드", "측", "참여 모델", "판단", "확신", "타이밍", "조건"]);
     expect(bodyRows(debate)).toHaveLength(3);
     expect(bodyRows(debate)[1].textContent).toContain("강세 측");
     expect(bodyRows(debate)[1].textContent).toContain("80%");

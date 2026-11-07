@@ -110,6 +110,23 @@ def _data(rd: Path, stage: str) -> dict:
     return cp.get("data") if isinstance(cp.get("data"), dict) else {}
 
 
+def _debate_row(rd: Path, row: sqlite3.Row) -> dict:
+    data = _loads(row["data_json"], {})
+    cp = run_store.read_checkpoint(rd, f"20_debate_r{row['round']}_{row['side']}") or {}
+    call = cp.get("call") if cp.get("data") == data else None
+    call = call if isinstance(call, dict) else {}
+    provider = call.get("provider")
+    if provider not in {"claude", "codex"}:
+        provider = None
+    return {
+        "round": row["round"], "side": row["side"], "stance": row["stance"],
+        "conviction": row["conviction"], "timing": data.get("timing"),
+        "provider": provider, "model": call.get("model") if provider else None,
+        "issues": data.get("issues", []), "responses": data.get("responses", []),
+        "replies": data.get("replies", []),
+    }
+
+
 # --- merge 조각: /decisions ----------------------------------------------------------------
 
 
@@ -367,8 +384,7 @@ def trace(conn: sqlite3.Connection, decision_id: int, state: Path | None) -> dic
             "news_refs": news_ids_of(a),
         })  # fmt: skip
     debate = [
-        {"round": r["round"], "side": r["side"], "stance": r["stance"],
-         "conviction": r["conviction"], "timing": _loads(r["data_json"], {}).get("timing")}
+        _debate_row(rd, r)
         for r in conn.execute(
             "SELECT * FROM debate_turns WHERE decision_date=? AND market=? AND ticker=? "
             "ORDER BY round, side",

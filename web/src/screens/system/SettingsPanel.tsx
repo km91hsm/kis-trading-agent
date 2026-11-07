@@ -5,6 +5,7 @@ import { Table, type Column } from "../../components/Table";
 import { GLOSSARY } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
+import { CodexDebate } from "./CodexDebate";
 
 type SettingsResp = {
   markets: string[];
@@ -27,6 +28,7 @@ export function SettingsPanel() {
     const models = Object.entries(s.models).map(([role, model]) => ({ role, model }));
     return (
       <>
+        <CodexDebate />
         <h3 className="perf-sub">AI 사용 한도</h3>
         <Stats
           cols={4}

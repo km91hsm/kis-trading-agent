@@ -198,6 +198,30 @@ def test_decision_detail_rounds_summary_and_outcomes(client, ledger):
     assert client.get("/api/decisions/spot/999/outcomes").status_code == 404
 
 
+def test_trace_provider_only_from_matching_saved_turn(client, ledger, project):
+    did = _decide(ledger)
+    rd = run_store.run_dir(D, "KR", "005930", project / "state")
+    for side in ("bull", "bear"):
+        stage = f"20_debate_r0_{side}"
+        data = ok_turn(side)
+        ingest_checkpoint(ledger, D, "KR", "005930", stage, {"data": data})
+        run_store.write_checkpoint(rd, stage, {"data": data, "call": {
+            "provider": "codex" if side == "bear" else "claude", "model": "fixture-model",
+        }})
+    turns = client.get(f"/api/decisions/spot/{did}/trace").json()["debate"]
+    assert [(t["side"], t["provider"], t["model"]) for t in turns] == [
+        ("bear", "codex", "fixture-model"), ("bull", "claude", "fixture-model"),
+    ]
+    # A stale checkpoint cannot re-label the ledger's historical debate.
+    run_store.write_checkpoint(rd, "20_debate_r0_bear", {
+        "data": {**ok_turn("bear"), "conviction": 0.123},
+        "call": {"provider": "codex", "model": "wrong"},
+    })
+    run_store.write_checkpoint(rd, "20_debate_r0_bull", {"data": ok_turn("bull"), "call": None})
+    turns = client.get(f"/api/decisions/spot/{did}/trace").json()["debate"]
+    assert all(t["provider"] is None and t["model"] is None for t in turns)
+
+
 def test_news_refs_from_analyst_evidence(client, ledger):
     """evidence `source_id` 가 `news:<id>` 인 것만 센다(`market_notes` 등은 무시)."""
     did = _decide(ledger)

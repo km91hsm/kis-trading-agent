@@ -10,6 +10,7 @@ import { screenPages } from "../../lib/nav";
 import { ChartView } from "./ChartView";
 import { Features } from "./Features";
 import { News } from "./News";
+import { MarketActivity } from "./MarketActivity";
 import { Themes } from "./Themes";
 import { Watchlist } from "./Watchlist";
 
@@ -56,7 +57,7 @@ export type DataPage = (typeof NAV.data.pages)[number]["id"];
 type SectionId = (typeof NAV.data.items)[number]["id"];
 
 const SECTIONS: Record<SectionId, { title: string; body: ReactNode }> = {
-  quotes: { title: "시세·차트", body: <ChartView /> },
+  quotes: { title: "시세·차트", body: <><MarketActivity /><ChartView /></> },
   news: { title: "뉴스·공시", body: <News /> },
   themes: { title: "테마", body: <Themes /> },
   watchlist: { title: "감시목록", body: <Watchlist /> },

@@ -432,7 +432,7 @@ describe("데이터 화면", () => {
     await mount(routes(), "quotes", "/data?ticker=005930");
     expect(callsTo("/names/search")[0].searchParams.get("q")).toBe("005930");
     expect(callsTo("/charts")[0].searchParams.get("ticker")).toBe("005930");
-    expect(section("quotes").querySelector("h3")!.textContent).toContain("삼성전자");
+    expect(Array.from(section("quotes").querySelectorAll("h3")).some((h) => h.textContent?.includes("삼성전자"))).toBe(true);
   });
 
   test("호가는 next_poll_ms 마다 다시 부르고, 언마운트하면 멈춘다", async () => {
