@@ -19,6 +19,7 @@ from trader.features.ingest.dart import (
     basic_ratios,
 )
 from trader.features.ingest.edgar import EdgarClient, ratios_by_year_us
+from trader.features.ingest.input_quality import activity_context, macro_context, source_coverage
 from trader.features.ingest.inputs import (
     SCHEMA_VERSION,
     InputDeps,
@@ -38,6 +39,7 @@ from trader.features.ingest.news_store import (
     row_to_dict,
     universe_names,
 )
+from trader.features.ingest.research_context import collect_research_context
 from trader.features.ingest.settings import MacroCfg, NewsCfg, SourcesConfig, load_sources
 from trader.features.ingest.universe import (
     SectorMap,
@@ -70,6 +72,9 @@ __all__ = [
     "SourcesConfig",
     "Universe",
     "UsSymbol",
+    "activity_context",
+    "macro_context",
+    "source_coverage",
     "basic_ratios",
     "build_dart",
     "build_edgar",
@@ -77,6 +82,7 @@ __all__ = [
     "build_inputs",
     "collect_and_save",
     "collect_macro",
+    "collect_research_context",
     "count",
     "disclosures",
     "indicators",

@@ -99,6 +99,9 @@ _TR: dict[str, tuple[str, str, str | None]] = {
         "TTTC0013U",
         "VTTC0013U",
     ),
+    # 공식 examples_llm/overseas_stock/{trade_pbmn,updown_rate}, 2026-11-07 확인
+    "OVS_TURNOVER_RANK": ("/uapi/overseas-stock/v1/ranking/trade-pbmn", "HHDFS76320010", None),
+    "OVS_CHANGE_RANK": ("/uapi/overseas-stock/v1/ranking/updown-rate", "HHDFS76290000", None),
     # 해외 시세
     "OVS_PRICE": ("/uapi/overseas-price/v1/quotations/price", "HHDFS00000300", "HHDFS00000300"),
     # 종목 기본정보(이름) — 데몬 names_fill 만 쓴다(화면 표시 경로는 네트워크 없음).

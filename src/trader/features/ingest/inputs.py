@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from trader.features.ingest import indicators, manual_inputs, news_store
+from trader.features.ingest import indicators, input_quality, manual_inputs, news_store
 from trader.features.ingest.base import MAX_PAST as _MAX_PAST
 from trader.features.ingest.base import SKIP_REASONS, Section, run_section, skipped_section
 from trader.features.ingest.community import collect_channels, collect_community  # noqa: F401
@@ -67,7 +67,7 @@ def _stuck_done(key: str) -> Callable[[Any], None]:
 logger = logging.getLogger("trader.sources")
 
 # v2: fundamental.history (3개년 + 최근 분기), v3: fundamental.peer (동종업 중앙값)
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_PAST = _MAX_PAST  # 정본은 ingest/base
 MAX_FUTURE = timedelta(hours=24)  # 과거와 대칭. 연도 오타 같은 먼 미래만 거부
 
@@ -86,6 +86,7 @@ class InputDeps:
     # 동종업 중앙값 계산 함수 `peer_fn(market=, ticker=, asof_date=, sectors=) -> dict | None`.
     # 피처 스토어(M7)가 주입한다. None 이면 peer 절은 건너뜀
     peer_fn: Callable[..., dict | None] | None = None
+    market_activity: Any | None = None
 
 
 def jsonable(obj: Any) -> Any:
@@ -106,7 +107,7 @@ _jsonable = jsonable  # 옛 이름 별칭
 
 
 def _is_section(v: Any) -> bool:
-    return isinstance(v, dict) and set(v) == {"data", "received_at", "error"}
+    return isinstance(v, dict) and {"data", "received_at", "error"} <= set(v)
 
 
 _SUB_SOURCE_OK = frozenset({"ok", "not available for KR", "not available for US"})
@@ -313,7 +314,10 @@ def _news_macro(ticker, market, name, asof, cfg, secrets, deps) -> dict[str, Any
         macro = _macro_memoized(cfg, secrets, market, asof, deps, now)
     else:
         macro = skipped_section("disabled", now=now)
-    return {"news": news, "macro": macro}
+    return {
+        "news": news,
+        "macro": input_quality.macro_context(macro, asof=asof) if cfg.macro.enabled else macro,
+    }
 
 
 def _with_store_news(news: dict, ticker: str, market: str, asof, cfg, deps) -> dict:
@@ -361,14 +365,19 @@ def _with_store_news(news: dict, ticker: str, market: str, asof, cfg, deps) -> d
 
 
 MACRO_MEMO_TTL = timedelta(minutes=15)
-_MACRO_MEMO: dict[tuple[str, str], tuple[datetime, dict[str, Any]]] = {}
+_MACRO_MEMO: dict[tuple[str, ...], tuple[datetime, dict[str, Any]]] = {}
 _MACRO_MEMO_LOCK = threading.Lock()
 
 
 def _macro_memoized(cfg, secrets, market: str, asof: datetime, deps, now) -> dict[str, Any]:
     """거시 지표(FRED·ECOS·지수)는 종목과 무관하다 — 같은 시장·운영일의 수집은 15분 동안 재사용해
     종목마다 8회씩 외부 API 를 다시 부르지 않는다. 전부 실패한 결과는 메모하지 않는다."""
-    key = (market, asof.astimezone(UTC).date().isoformat())
+    key = (
+        market,
+        asof.astimezone(UTC).date().isoformat(),
+        (asof.astimezone(MARKET_TZ["US"]).date() - timedelta(days=1)).isoformat(),
+        cfg.macro.model_dump_json(),
+    )
     t = now()
     with _MACRO_MEMO_LOCK:
         hit = _MACRO_MEMO.get(key)
@@ -465,7 +474,7 @@ def _sentiment(
         ),
         "trends": skipped_section("phase8", now=now),
         "manual_inputs": _manual(ticker, market, asof, now),
-        "saveticker": _saveticker_section(ticker, asof, saveticker_cfg, now),
+        "saveticker": _saveticker_section(ticker, asof, saveticker_cfg, now, market=market),
     }
 
 
@@ -485,13 +494,18 @@ def _upcoming(asof: datetime, saveticker_cfg: Any | None) -> list[dict]:
         return []
 
 
-def _saveticker_section(ticker: str, asof: datetime, saveticker_cfg: Any | None, now) -> Section:
+def _saveticker_section(
+    ticker: str, asof: datetime, saveticker_cfg: Any | None, now, *, market: str | None = None
+) -> Section:
     """세이브티커 로컬 폴더(사용자 수집기)의 커뮤니티·시세 상위에서 이 종목 언급 + 시장 트렌드."""
     root = _saveticker_root(saveticker_cfg)
     if root is None or not saveticker.available(root):
         return skipped_section("no saveticker dir", now=now)
     return run_section(
-        lambda: saveticker.for_ticker(saveticker.snapshot(root, asof=asof), ticker), now=now
+        lambda: saveticker.for_ticker(
+            saveticker.snapshot(root, asof=asof, market=market), ticker, market=market
+        ),
+        now=now,
     )
 
 
@@ -620,6 +634,30 @@ def build_inputs(
         pool.shutdown(wait=False, cancel_futures=True)
     result["news_macro"]["events"] = _events(
         result["fundamental"], asof, deps.now, upcoming=_upcoming(asof, saveticker_cfg)
+    )
+    conn = None
+    try:
+        connection_error = None
+        if deps.conn_factory is not None:
+            try:
+                conn = deps.conn_factory()
+            except Exception as exc:  # noqa: BLE001 - optional persisted activity
+                connection_error = f"market_activity: {type(exc).__name__}: {exc}"
+        result["market_activity"] = input_quality.activity_context(
+            conn, market, asof=asof, port=deps.market_activity, ticker=ticker
+        )
+        if connection_error:
+            result["market_activity"]["data_gaps"].append(connection_error)
+    finally:
+        if conn is not None:
+            conn.close()
+    result["data_gaps"] = list(result["market_activity"].get("data_gaps") or [])
+    st_data = result["sentiment"].get("saveticker", {}).get("data") or {}
+    result["data_gaps"].extend(st_data.get("data_gaps") or [])
+    result["source_coverage"] = input_quality.source_coverage(
+        result["news_macro"].get("macro") or {},
+        community=result["sentiment"].get("community", {}).get("data"),
+        blog_config=list(cfg.channels.naver_blog),
     )
     result = jsonable(result)
     result["errors"] = _collect_errors(result)

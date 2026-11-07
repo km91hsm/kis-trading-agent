@@ -376,6 +376,7 @@ def discover_request(deps: Any, params: dict, progress: Any) -> dict:
                 cache_names=names.load_cache_names(_cache_dir(deps)),
                 sources_cfg=sources_cfg,
                 http=http,
+                research_port=deps.ports.get("inputs"),
                 intraday_news=novel,
                 analyzed_today=analyzed,
             )

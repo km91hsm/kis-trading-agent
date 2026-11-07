@@ -33,7 +33,7 @@
 1. 설정 `news.saveticker_*` → `saveticker` 섹션(saveticker 기능 소유).
 2. `disabled_sites` 를 삭제했다.
 3. `edgar.user_agent` 는 선택(기본 `""`, 시크릿 `EDGAR_USER_AGENT` 우선).
-4. `channels.naver_blog` 기본 `[]`(옛 `["ranto28"]`). 사용자 확인 TODO.
+4. `channels.naver_blog` 기본 `[]`. 개인 설정에 공개 RSS 블로그 ID를 추가하면 최근 발췌를 수집한다. `ranto28`의 실제 포함 여부는 `source_coverage`로 확인한다.
 5. CLI `trader collect` → `trader ingest collect`. 시세 클라이언트 없이 돈다(계좌 조립은 accounts, M4 레인이 주입).
 6. `fundamental.peer` 는 `InputDeps.peer_fn` 이 없으면 `no sector peers` 로 건너뛴다(M7).
 7. `news_collect` 는 수집·적재·prune·`news.post_ingest` 훅만 한다. `_news_trigger`·`_disclosure_trigger`·`_events_check`·`discover` 큐·`ticker_names` 캐시는 M7, `_vix` 는 M6, 웹 `/api/news`·수동 입력 라우트는 M11(`routes.py`), health `disclosure` 는 M12.

@@ -461,7 +461,8 @@ def build_inputs(
         "verified": _verified(ctx, fo_accounts),
     }
     return {
-        "schema_version": 1,
+        **_research_context(ctx, asof=asof),
+        "schema_version": 2,
         "meta": {
             "market": MARKET,
             "date": today.isoformat(),
@@ -481,6 +482,36 @@ def build_inputs(
     }
 
 
+def _research_context(ctx: FoExecContext, *, asof: datetime) -> dict:
+    """공개 서비스 포트로 연구자료만 받는다. 다른 레인의 구현이나 계좌 자료는 읽지 않는다."""
+    collect = getattr(ctx.ports.get("inputs"), "research_context", None)
+    gap = "InputsPort.research_context unavailable"
+    if collect is not None:
+        try:
+            result = collect(
+                ctx.conn, MARKET, asof=asof, market_client=ctx.market_client, now=ctx.now
+            )
+            return {
+                k: result[k]
+                for k in ("macro", "market_activity", "blog_posts", "source_coverage", "data_gaps")
+                if k in result
+            }
+        except Exception as exc:  # noqa: BLE001 - supplemental research must fail soft
+            gap = f"InputsPort.research_context: {type(exc).__name__}: {exc}"
+    return {
+        "macro": {},
+        "blog_posts": [],
+        "market_activity": {
+            "source": "kis",
+            "market": MARKET,
+            "status": "unavailable",
+            "data_gaps": [gap],
+        },
+        "source_coverage": {"status": "unavailable", "data_gaps": [gap]},
+        "data_gaps": [gap],
+    }
+
+
 def _news_macro(ctx: FoExecContext, *, asof: datetime) -> tuple[dict | None, str | None]:
     """종목 태그 없는 시장·거시 뉴스(`ports["inputs"].recent`, asof 이전 최근 `NEWS_LOOKBACK`).
     (data, 오류)."""
@@ -492,7 +523,7 @@ def _news_macro(ctx: FoExecContext, *, asof: datetime) -> tuple[dict | None, str
                            limit=NEWS_LIMIT, asof=asof, untagged_only=True)  # fmt: skip
     except Exception as e:  # noqa: BLE001 - 절 단위 격리
         return None, f"{type(e).__name__}: {e}"
-    keys = ("title", "source", "published_at", "tickers")
+    keys = ("title", "summary", "source", "published_at", "received_at", "url", "tickers")
     return {"news": [{k: r.get(k) for k in keys} for r in rows]}, None
 
 

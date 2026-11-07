@@ -70,6 +70,15 @@ def write_cmd(
     _run(go, market=market, date=date, stage=stage, agent=agent)
 
 
+@market_app.command("codex-turn")
+def codex_turn_cmd(
+    market: str = typer.Option(..., "--market"),
+    date: str = typer.Option(..., "--date"),
+    round: int = typer.Option(..., "--round"),
+) -> None:
+    _run(tools.codex_turn, market=market, date=date, round=round)
+
+
 @market_app.command("summarize")
 def summarize_cmd(
     market: str = typer.Option(..., "--market"), date: str = typer.Option(..., "--date")

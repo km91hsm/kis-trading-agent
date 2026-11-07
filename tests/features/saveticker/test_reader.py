@@ -153,3 +153,34 @@ def test_report_excerpt_refuses_path_outside_data(tmp_path):
     item = {"attachment": {"text_path": "attachments/../../x.txt"}}
     assert saveticker.report_excerpt(root, item) is None
     assert saveticker.report_excerpt(root, {}) is None
+
+
+def test_ticker_context_preserves_quality_without_claiming_absence(tmp_path):
+    from datetime import timedelta
+
+    snap = saveticker.snapshot(_root(tmp_path), asof=T_AFTER + timedelta(hours=2))
+    data = saveticker.for_ticker(snap, "QQQ")
+    assert data["stale"] == snap["stale"]
+    assert data["streams_status"] == snap["streams_status"]
+    assert data["data_gaps"]
+    assert "없다는 뜻" not in data["note"]
+
+
+def test_snapshot_market_prevents_us_movers_becoming_kr_candidates(tmp_path):
+    kr = saveticker.snapshot(_root(tmp_path), asof=T_AFTER, market="KR")
+    assert kr["market"] == "KR"
+    assert kr["movers"] == {"gain": [], "loss": [], "turnover": []}
+    assert kr["global_context"]["market"] == "US"
+    assert kr["global_context"]["index"]
+    assert kr["data_gaps"]
+    us = saveticker.snapshot(SAMPLE, asof=T_AFTER, market="US")
+    assert us["movers"]["gain"]
+
+
+def test_for_ticker_market_keyword_filters_legacy_snapshot(tmp_path):
+    snap = saveticker.snapshot(_root(tmp_path), asof=T_AFTER)
+    out = saveticker.for_ticker(snap, "QQQ", market="KR")
+    assert out["mentions"] == {}
+    assert out["market"] == "KR"
+    assert out["index"] == []
+    assert out["global_context"]["market"] == "US"

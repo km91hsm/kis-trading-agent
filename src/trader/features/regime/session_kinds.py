@@ -9,9 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from trader.features.regime.fake import run_fake_market
+from trader.features.regime.research import RESEARCH
 from trader.features.regime.schemas import AnalystReport, DebateTurn, HedgeProposal
 from trader.kernel.registry.types import AgentDef, SessionKind
 from trader.kernel.session.agents import ORCHESTRATOR, by_name
+from trader.kernel.session.run_store import market_dir
 
 MARKET_AGENTS = (
     "analyst-market",
@@ -39,6 +41,7 @@ AGENTS = (
 
 MARKET = SessionKind(
     kind="market",
+    research_targets=lambda ctx, spec: [(market_dir(spec.date, spec.market, ctx.state), RESEARCH)],
     agents=MARKET_AGENTS,
     prompt_section="market",
     schemas=(AnalystReport, DebateTurn, HedgeProposal),

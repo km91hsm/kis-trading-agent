@@ -37,6 +37,7 @@ from trader.features.fo import inputs as fo_inputs
 from trader.features.fo import rules as fo_rules
 from trader.features.fo import sizing as fo_sizing
 from trader.features.fo import store as fo_store
+from trader.features.fo.research import RESEARCH
 from trader.features.fo.schemas import FoDecisionEnvelope
 from trader.features.fo.types import FoExecContext
 from trader.kernel.broker import fo_master
@@ -48,7 +49,7 @@ from trader.kernel.notify.boot import boot_notifier
 from trader.kernel.notify.telegram import Notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import tooling
+from trader.kernel.session import research_policy, tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -280,8 +281,16 @@ def fo_bundle(
     if kind == "analyst":
         if role not in ("technical", "sentiment", "news_macro"):
             return {"ok": False, "error": "analyst 묶음은 --role technical|sentiment|news_macro"}
-        return {"ok": True, "data": tooling.shrink(
-            fo_inputs.bundle(inputs, kind="analyst", role=role), BUNDLE_LIMIT_BYTES)}  # fmt: skip
+        return {
+            "ok": True,
+            "data": tooling.shrink(
+                {
+                    **fo_inputs.bundle(inputs, kind="analyst", role=role),
+                    "input_context": tooling.compact_context(inputs),
+                },
+                BUNDLE_LIMIT_BYTES,
+            ),
+        }
     reports = _fo_reports(d)
     if not reports:
         return {"ok": False, "error": "_fo_analyst_* 없음 (애널리스트 먼저)"}
@@ -302,8 +311,13 @@ def fo_bundle(
             inputs, kind="researcher", round=round, side=side, reports=reports,
             previous=(own.model_dump() if own else None, opp.model_dump() if opp else None),
         )  # fmt: skip
-        return {"ok": True, "data": tooling.shrink(data, BUNDLE_LIMIT_BYTES)}
+        data["input_context"] = tooling.compact_context(inputs)
+        data["research_policy"] = research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH)
+        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "trader":
+        if not _fo_decision_stages(d):
+            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+                return {"ok": False, "error": err}
         summ = read_checkpoint(d, FO_SUMMARY)
         if summ is None:
             return {"ok": False, "error": f"{FO_SUMMARY} 없음 (fo summarize 먼저)"}
@@ -336,6 +350,7 @@ def fo_bundle(
             summary=tooling.trader_summary(summ.get("data", summ)), position=position,
             trigger=trigger,
         )  # fmt: skip
+        data["input_context"] = tooling.compact_context(inputs)
         data["request_id"] = request_id
         data["previous_decision"] = prev
         data["previous_decision_stage"] = prev_stage
@@ -356,13 +371,22 @@ def fo_write(
     """LLM 쓰기 가능 파생 단계: `_fo_analyst_<role>`(AnalystReport, role 일치),
     `_fo_debate_r<n>_<side>`(DebateTurn, round·side 일치, n ≤ debate_rounds). 토론 턴을 새로 쓰면
     `_fo_summary` 를 지운다(요약은 턴의 함수)."""
+    d = _fo_dir(ctx, date)
+    md = _FO_DEBATE_RE.match(stage)
+    if md:
+        if err := research_policy.write_error(
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(md[1]), side=md[2]
+        ):
+            return {"ok": False, "error": err}
+        call_meta = {**(call_meta or {}), "provider": "claude"}
+    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     ma = _FO_ANALYST_RE.match(stage)
     md = _FO_DEBATE_RE.match(stage)
     if ma:
         model: type = AnalystReport
     elif md:
         model = DebateTurn
-        if int(md.group(1)) > ctx.settings.debate_rounds:
+        if int(md.group(1)) > rounds:
             return {
                 "ok": False,
                 "error": (
@@ -401,17 +425,20 @@ def fo_write(
             ),
         }
     d = _fo_dir(ctx, date, create=True)
+    if isinstance(v, DebateTurn):
+        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
+            return {"ok": False, "error": err}
+    invalidated = research_policy.invalidate_summary(d, RESEARCH) if md else False
     path = write_checkpoint(d, stage, _wrap(v.model_dump(), tooling.call_meta(agent, call_meta)))
-    invalidated = False
-    if md and FO_SUMMARY in list_checkpoints(d):
-        (d / f"{FO_SUMMARY}.json").unlink(missing_ok=True)
-        invalidated = True
     return {"ok": True, "path": str(path), "stage": stage, "summary_invalidated": invalidated}
 
 
 def fo_summarize(ctx: FoToolContext, *, date: date) -> dict:
     """`_fo_debate_*` 를 모아 `_fo_summary`(수렴 감시 포함)를 만든다."""
-    return tooling.summarize_turns(_fo_dir(ctx, date), FO_SUMMARY, _FO_DEBATE_RE)
+    d = _fo_dir(ctx, date)
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
+    return tooling.summarize_turns(d, FO_SUMMARY, _FO_DEBATE_RE)
 
 
 def fo_reeval_request(
@@ -483,9 +510,7 @@ def _fo_resolved(ctx: FoToolContext, inputs: dict, env: Any, pos: Any, *, today:
         if isinstance(tech.get("data"), dict) and tech["data"].get("code") == code:
             quote = tech["data"]
         else:
-            quote = next(
-                (q for q in cctx.get("option_chain") or [] if q.get("code") == code), None
-            )
+            quote = next((q for q in cctx.get("option_chain") or [] if q.get("code") == code), None)
     days_left = quote.get("days_left") if quote else None
     if days_left is None:
         days_left = fo_exec.days_left_of(None, contract, today)
@@ -570,6 +595,9 @@ def submit_fo_decision(
                 )  # fmt: skip
                 return out | res | {"resumed_execution": True}
         return out
+    if round_n == 0:
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+            return {"ok": False, "error": err}
     roles = {m.group(1) for s in stages if (m := _FO_ANALYST_RE.match(s))}
     missing: list[str] = []
     if len(roles) < FO_MIN_ROLES:
@@ -895,6 +923,22 @@ def write_cmd(
     _fo_tool_run(
         fo_write, market=market, date=date, stage=stage, payload_text=json_text, agent=agent
     )
+
+
+def codex_turn(ctx: FoToolContext, *, date: date, round: int) -> dict:
+    d = _fo_dir(ctx, date)
+    if len(_fo_reports(d)) < FO_MIN_ROLES:
+        return {"ok": False, "error": "Codex 토론 전 서로 다른 애널리스트 2개 이상 필요"}
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)
+
+
+@fo_tool_app.command("codex-turn")
+def codex_turn_cmd(
+    market: str = typer.Option("KR", "--market"),
+    date: str = typer.Option(..., "--date"),
+    round: int = typer.Option(..., "--round"),
+) -> None:
+    _fo_tool_run(codex_turn, market=market, date=date, round=round)
 
 
 @fo_tool_app.command("summarize")

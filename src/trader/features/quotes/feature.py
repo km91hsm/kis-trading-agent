@@ -3,16 +3,20 @@
 
 from trader.features.quotes import charts, names
 from trader.features.quotes.health import AREA as HEALTH
-from trader.features.quotes.jobs import MISS_FLAG, NAMES_FILL
+from trader.features.quotes.jobs import MARKET_ACTIVITY, MISS_FLAG, NAMES_FILL
+from trader.features.quotes.migrations import MIGRATIONS
+from trader.features.quotes.ports import PORT
 from trader.features.quotes.routes import ROUTERS
-from trader.features.quotes.settings import SCHEDULE_SECTION, SECTION
+from trader.features.quotes.settings import ACTIVITY_SCHEDULE_SECTION, SCHEDULE_SECTION, SECTION
 from trader.kernel.registry.types import Feature, NavItem
 
 FEATURE = Feature(
     id="quotes",
     tier="service",
-    sections=(SECTION, SCHEDULE_SECTION),
-    jobs=(NAMES_FILL,),
+    migrations=MIGRATIONS,
+    sections=(SECTION, SCHEDULE_SECTION, ACTIVITY_SCHEDULE_SECTION),
+    ports=(PORT,),
+    jobs=(NAMES_FILL, MARKET_ACTIVITY),
     routes=(*ROUTERS, names.router, charts.router),
     nav=(NavItem("data", "quotes", "시세·차트", 0),),
     control_namespaces=("fx_cache", MISS_FLAG),

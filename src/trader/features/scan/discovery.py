@@ -94,10 +94,11 @@ def build_inputs(
     http: Any | None = None,
     intraday_news: list[dict] | None = None,
     analyzed_today: list[str] | None = None,
+    research_port: Any | None = None,
 ) -> dict:
     """scout 입력을 조립해 `_discovery_inputs` 로 저장하고 돌려준다. 뉴스가 비어도 파일은 만든다
     (scout 이 '발굴 없음' 을 낼 수 있게). `sources_cfg.channels.naver_blog` + `http` 가 있으면
-    블로그 최근 글(`blog_posts`)도 싣는다(KR 만, 실패는 빈 목록).
+    블로그 최근 글(`blog_posts`)도 시장과 무관하게 싣는다(실패는 빈 목록).
 
     `intraday_news` 가 있으면 장중 발굴(Phase 23): 저장소 48h 대신 **새 내용으로 판정된 뉴스만**
     싣고 `intraday_round`(오늘 n번째) 를 붙이며 `recent_picks` 맨 앞에 오늘 이미 분석·발굴한
@@ -136,6 +137,7 @@ def build_inputs(
             "summary": (n.get("summary") or "")[:200],
             "source": n.get("source"),
             "published_at": n.get("published_at"),
+            "received_at": n.get("received_at"),
             "tickers": n.get("tickers") or [],
         }
         for n in news
@@ -151,14 +153,40 @@ def build_inputs(
         root = saveticker_api.resolve_dir(
             getattr(cfg, "saveticker_dir", None) or saveticker_api.load_cfg().dir
         )
-        snap = saveticker_api.snapshot(root, asof=asof)
+        snap = saveticker_api.snapshot(root, asof=asof, market=market)
         if snap:
             saveticker_snap = {
-                k: snap.get(k) for k in ("observed_at", "movers", "community_top5", "report")
+                k: snap.get(k)
+                for k in (
+                    "source",
+                    "market",
+                    "observed_at",
+                    "movers",
+                    "community_top5",
+                    "report",
+                    "stale",
+                    "streams_status",
+                    "data_gaps",
+                    "global_context",
+                )
             }
     except Exception as e:  # noqa: BLE001 - 선택 입력
         logger.debug("세이브티커 발굴 입력 실패 %s: %s", market, e)
-    blog_posts = _blog_posts(sources_cfg, http, market=market, asof=asof, now=now)
+    activity = ingest_api.activity_context(conn, market, asof=asof)
+    gaps = list(activity.get("data_gaps") or [])
+    gaps.extend((saveticker_snap or {}).get("data_gaps") or [])
+    research = {}
+    if research_port is not None:
+        try:
+            research = research_port.research_context(conn, market, asof=asof, http=http, now=now)
+        except Exception as exc:  # noqa: BLE001 - supplemental sources remain explicit gaps
+            gaps.append(f"research_context: {type(exc).__name__}: {exc}")
+    blog_posts = research.get("blog_posts") if research else None
+    if blog_posts is None:
+        blog_posts = _blog_posts(sources_cfg, http, market=market, asof=asof, now=now)
+    if research:
+        activity = research.get("market_activity") or activity
+        gaps.extend(research.get("data_gaps") or [])
     d = market_dir(today, market, state, create=True)
     recent = _recent_picks(market, today, state)
     rnd = None
@@ -185,6 +213,17 @@ def build_inputs(
         "recent_picks": recent,
         "intraday_round": rnd,
         "saveticker": saveticker_snap,
+        "market_activity": activity,
+        "macro": research.get("macro") or {},
+        "source_coverage": research.get("source_coverage")
+        or ingest_api.source_coverage(
+            {},
+            blog_posts=blog_posts,
+            blog_config=list(
+                getattr(getattr(sources_cfg, "channels", None), "naver_blog", []) or []
+            ),
+        ),
+        "data_gaps": gaps,
         "theme_heat": _theme_heat(conn, settings, market, today),
         "blog_posts": blog_posts,
         "quant_candidates": [
@@ -226,15 +265,16 @@ def news_burst(
 def _blog_posts(
     sources_cfg: Any, http: Any, *, market: str, asof: datetime, now: Callable[[], datetime]
 ) -> list[dict]:
-    """네이버 블로그 최근 글(제목·발췌 400자·게시 시각). 한국어 블로그라 KR 발굴에만 싣는다."""
+    """설정된 공개 블로그의 발췌와 발행·조회시각을 시장 언어와 무관하게 전달한다."""
     channels = getattr(sources_cfg, "channels", None)
     blogs = list(getattr(channels, "naver_blog", None) or [])
-    if market != "KR" or http is None or not blogs:
+    if http is None or not blogs:
         return []
     try:
-        r = ingest_api.NaverBlogSource(
-            blogs, http=http, max_posts=getattr(channels, "naver_blog_posts", 5), now=now
-        ).fetch(asof=asof)
+        with ingest_api.owned_client(http, timeout=10) as client:
+            r = ingest_api.NaverBlogSource(
+                blogs, http=client, max_posts=getattr(channels, "naver_blog_posts", 5), now=now
+            ).fetch(asof=asof)
     except Exception as e:  # noqa: BLE001 - 선택 입력
         logger.debug("블로그 발굴 입력 실패: %s", e)
         return []
@@ -247,6 +287,8 @@ def _blog_posts(
                     "title": it.get("title"),
                     "excerpt": (it.get("body") or "")[:400],
                     "posted_at": it.get("posted_at"),
+                    "received_at": it.get("received_at"),
+                    "url": it.get("url"),
                 }
             )
     return out

@@ -193,3 +193,44 @@ def test_screen_context_has_regime_and_todays_market_view(conn):
         "rationale": "r",
         "invalidation_conditions": ["x"],
     }
+
+
+def test_regular_screen_wires_inputs_research_port_to_scout_payload(
+    project, conn, settings, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from trader.features.ingest.api import Universe
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.run_store import market_dir, read_checkpoint
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    ctx = lane(conn, settings, accounts=[_acct()])
+    calls = []
+
+    def index(symbol, *, asof):
+        calls.append(symbol)
+        return {"value": Decimal("4200.50"), "date": "2026-10-07"}
+
+    market = SimpleNamespace(get_index_us_daily=index)
+    monkeypatch.setattr(ctx.ports["accounts"], "market_client", lambda: market)
+    cfg = SourcesConfig.model_validate({"macro": {"fred": False, "ecos": False}})
+    ctx.ports["inputs"] = InputsPortImpl(Secrets(), cfg, ctx.ports)
+    screener.run_screen(
+        ctx,
+        market="KR",
+        date=D,
+        candidates=CANDS,
+        cap_hit=False,
+        discovery=True,
+        universe=Universe(kr=["000000"]),
+    )
+    generated = read_checkpoint(market_dir(D, "KR", ctx.state), "_discovery_inputs")["data"]
+    for key, symbol in (("sp500", "SPX"), ("nasdaq", "COMP")):
+        assert generated["macro"][key]["data"]["value"] == "4200.50"
+        coverage = generated["source_coverage"]["macro"][key]
+        assert coverage["status"] == "present" and coverage["source"] == "KIS"
+        assert coverage["series_id"] == symbol
+    assert calls == ["SPX", "COMP"]

@@ -88,7 +88,6 @@ def _sector_weights(
     return out
 
 
-
 def build_inputs(
     ctx: Any,
     *,
@@ -127,12 +126,14 @@ def build_inputs(
         except Exception as e:  # noqa: BLE001 - 지수 봉은 보조 입력
             errors["index"] = f"{type(e).__name__}: {e}"
     macro: dict[str, Any] = {}
+    sources_cfg = None
+    secrets = (getattr(ctx, "ext", None) or {}).get("secrets") or Secrets()
     try:
-        secrets = (getattr(ctx, "ext", None) or {}).get("secrets") or Secrets()
+        sources_cfg = ingest.load_sources()
         macro = {
             k: v.model_dump() if hasattr(v, "model_dump") else v
             for k, v in ingest.collect_macro(
-                ingest.load_sources().macro,
+                sources_cfg.macro,
                 secrets,
                 market_client=market_client,
                 asof=asof,
@@ -185,9 +186,26 @@ def build_inputs(
             st_dir = saveticker.load_cfg().dir
         except Exception:  # noqa: BLE001 - sources.yaml 이 없거나 잘못되면 기본 경로
             st_dir = saveticker.DEFAULT_DIR
-        saveticker_snap = saveticker.snapshot(saveticker.resolve_dir(st_dir), asof=asof)
+        saveticker_snap = saveticker.snapshot(
+            saveticker.resolve_dir(st_dir), asof=asof, market=market
+        )
     except Exception as e:  # noqa: BLE001 - 선택 입력
         errors["saveticker"] = f"{type(e).__name__}: {e}"
+    research = ingest.collect_research_context(
+        sources_cfg or ingest.SourcesConfig(),
+        secrets,
+        conn=conn,
+        market=market,
+        asof=asof,
+        market_client=market_client,
+        http=http,
+        now=now,
+        macro=macro,
+        activity_port=(getattr(ctx, "ports", None) or {}).get("market_activity"),
+    )
+    macro, activity = research["macro"], research["market_activity"]
+    gaps = list(research["data_gaps"])
+    gaps.extend((saveticker_snap or {}).get("data_gaps") or [])
     held: list[str] = []
     sectors: list[dict] = []
     hedge_tickers = cfg.tickers(market)
@@ -230,6 +248,10 @@ def build_inputs(
         "asof": asof.isoformat(),
         "proxy": tools.MARKET_PROXY_LABEL.get(market, market),
         "saveticker": saveticker_snap,
+        "market_activity": activity,
+        "source_coverage": research["source_coverage"],
+        "blog_posts": research["blog_posts"],
+        "data_gaps": gaps,
         "regime": {
             "state": regime.get("state"),
             "count": regime.get("count"),

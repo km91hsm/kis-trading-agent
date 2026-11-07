@@ -98,6 +98,13 @@ claude_bin: null      # null 이면 PATH 에서 claude 탐색
 
 # 오케스트레이터 세션 예산·동시성 (스펙 §4.1)
 llm:
+  # 다음 새 연구부터 Claude 강세 / Codex 약세 토론. 기존 ChatGPT CLI 로그인 사용.
+  codex_debate:
+    enabled: false
+    model: null
+    timeout_s: 180
+    daily_call_cap: 80
+    bin: null
   budget_usd: 5.0        # 세션당 --max-budget-usd (전문 전달 세션은 $2~3, 실기 확인)
   timeout_s: 900         # 세션 타임아웃(종류별은 timeout_by_kind 기본값: 스크리너·발굴 300, 재평가 600). 600 에서 분석 35% 가 시간 초과(2026-10-29)
   timeout_by_kind:       # 종류별 타임아웃(초). 키를 두면 기본 dict 를 통째로 바꾸므로 기본값도 함께 적는다
@@ -248,6 +255,9 @@ fo:
 
 # 화면 시세(quotes): 국내 정규장 실시간 허브(KIS 웹소켓, 체결통보가 세션을 쓰면 REST 로 양보)와 REST 폴링 주기
 quotes:
+  activity_enabled: true  # KIS 키 준비 시 데몬이 관측 창(정규장 시계)에서 수집. 원천 세션은 미확인
+  activity_max_pages: 2   # 거래소·순위당 최대 페이지(1~5)
+  activity_limit: 100     # 거래소·순위당 최대 후보(1~200)
   realtime_ws: true
   us_poll_ms: 5000         # 미국 정규장 화면 폴링(ms)
   fo_poll_ms: 2000         # 파생 정규장 화면 폴링(ms)

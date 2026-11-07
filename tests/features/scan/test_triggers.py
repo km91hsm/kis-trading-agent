@@ -341,3 +341,43 @@ def test_post_ingest_runs_events_then_triggers_and_isolates_errors(conn, project
 def test_post_ingest_without_deps_only_events(conn):
     out = triggers.post_ingest(conn=conn, markets=["KR"], now=NOW)
     assert set(out) == {"events:KR"}
+
+
+def test_discover_request_wires_inputs_research_port_to_generated_payload(
+    conn, project, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.run_store import market_dir, read_checkpoint
+
+    deps = trigger_deps(project, conn, notifier=Sent())
+    calls = []
+
+    def index(symbol, *, asof):
+        calls.append(symbol)
+        return {"value": Decimal("4200.50"), "date": "2026-10-07"}
+
+    market = SimpleNamespace(get_index_us_daily=index)
+    monkeypatch.setattr(deps.ports["accounts"], "market_client", lambda: market)
+    cfg = SourcesConfig.model_validate({"macro": {"fred": False, "ecos": False}})
+    deps.ports["inputs"] = InputsPortImpl(Secrets(), cfg, deps.ports)
+    monkeypatch.setattr(ingest_api, "load_universe", lambda: UNI)
+    monkeypatch.setattr(
+        triggers, "run_session", lambda *a, **kw: SimpleNamespace(ok=True, error=None)
+    )
+    _news(conn, [("시장 발굴 뉴스", [])])
+    ingest_api.novel_items(conn, "KR", since=NOW - timedelta(hours=6))
+    result = triggers.discover_request(deps, {"market": "KR"}, progress=None)
+    assert result["novel"] == 1
+    generated = read_checkpoint(market_dir(NOW.date(), "KR", deps.state), "_discovery_inputs")[
+        "data"
+    ]
+    for key, symbol in (("sp500", "SPX"), ("nasdaq", "COMP")):
+        assert generated["macro"][key]["data"]["value"] == "4200.50"
+        coverage = generated["source_coverage"]["macro"][key]
+        assert coverage["status"] == "present" and coverage["source"] == "KIS"
+        assert coverage["series_id"] == symbol
+    assert calls == ["SPX", "COMP"]

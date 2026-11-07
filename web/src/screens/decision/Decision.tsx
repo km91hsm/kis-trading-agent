@@ -59,14 +59,30 @@ const roundColumns = (market: string | null | undefined): Column<RoundRow>[] => 
 ];
 type DebateRow = TraceDebate & { key: number };
 const DEBATE_COLUMNS: Column<DebateRow>[] = [
-  { key: "round", label: "라운드", width: "14%", render: (r) => `r${r.round ?? 0}` },
-  { key: "side", label: "측", width: "18%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{r.side === "bull" ? "강세 측" : "약세 측"}</Chip> },
-  { key: "stance", label: "판단", width: "20%", align: "chip", render: (r) => signalChip(r.stance) },
-  { key: "conviction", label: "확신", width: "12%", align: "num", render: (r) => pct(r.conviction) },
-  { key: "timing", label: "타이밍", width: "12%", render: (r) => timingLabel(r.timing) },
+  { key: "round", label: "라운드", width: "9%", render: (r) => `r${r.round ?? 0}` },
+  { key: "side", label: "측", width: "13%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{r.side === "bull" ? "강세 측" : "약세 측"}</Chip> },
+  { key: "provider", label: "참여 모델", width: "21%", render: (r) => r.provider ? `${r.provider === "codex" ? "Codex" : r.provider === "claude" ? "Claude" : r.provider}${r.model ? ` / ${r.model}` : " / 모델 미기록"}` : "미기록" },
+  { key: "stance", label: "판단", width: "12%", align: "chip", render: (r) => signalChip(r.stance) },
+  { key: "conviction", label: "확신", width: "10%", align: "num", render: (r) => pct(r.conviction) },
+  { key: "timing", label: "타이밍", width: "10%", render: (r) => timingLabel(r.timing) },
   { key: "timing_note", label: "조건", width: "auto", long: true, render: (r) => r.timing_note ?? "—" },
 ];
 type GateRow = TraceGate & { key: number };
+
+function DebateDetail({ turn }: { turn: TraceDebate }) {
+  const issues = turn.issues ?? [];
+  const responses = turn.responses ?? [];
+  const replies = turn.replies ?? [];
+  if (!issues.length && !responses.length) return <p className="data-muted">구조화된 쟁점·반론 기록이 없습니다.</p>;
+  return <>
+    <h3 className="perf-sub">제시한 쟁점</h3>
+    <ul className="decision-lines">{issues.map((x) => <li key={x.issue_id}><strong>{x.topic}</strong> <span className="data-muted">{x.issue_id}</span><p>{x.claim}</p><span className="data-muted">근거: {x.evidence.join(", ") || "미기록"}</span></li>)}</ul>
+    <h3 className="perf-sub">상대 쟁점에 대한 반론</h3>
+    {responses.length ? <ul className="decision-lines">{responses.map((x) => <li key={x.issue_id}><strong>{x.issue_id}</strong><p>{x.response}</p><span className="data-muted">근거: {x.evidence.join(", ") || "미기록"}</span></li>)}</ul> : <p className="data-muted">독립 의견 단계에는 상대 의견을 제공하지 않습니다.</p>}
+    {replies.length ? <><h3 className="perf-sub">받은 반론에 대한 재답변</h3><ul className="decision-lines">{replies.map((x) => <li key={x.issue_id}><strong>{x.issue_id}</strong><p>{x.response}</p><span className="data-muted">근거: {x.evidence.join(", ") || "미기록"}</span></li>)}</ul></> : null}
+  </>;
+}
+
 const GATE_COLUMNS: Column<GateRow>[] = [
   { key: "account_id", label: "계좌", width: "18%" },
   { key: "approved", label: "결과", width: "12%", align: "chip", render: (r) => gateChip(r.approved) },
@@ -230,7 +246,7 @@ export function Decision() {
           {t ? (
             <details className="debate">
               <summary>토론 턴 {t.debate.length}개</summary>
-              <Table columns={DEBATE_COLUMNS} rows={t.debate.map((x, i) => ({ ...x, key: i }))} rowKey={(r) => r.key} />
+              <Table columns={DEBATE_COLUMNS} rows={t.debate.map((x, i) => ({ ...x, key: i }))} rowKey={(r) => r.key} expand={(r) => <DebateDetail turn={r} />} />
             </details>
           ) : (
             <Pending res={rawTrace} what="추적" />

@@ -15,6 +15,7 @@ import httpx
 from trader.features.ingest.base import Section, owned_client, run_section, skipped_section, utc_now
 from trader.features.ingest.settings import MacroCfg
 from trader.kernel.config.secrets import Secrets
+from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.platform.logging_setup import quiet_httpx
 
 logger = logging.getLogger("trader.sources")
@@ -37,6 +38,14 @@ FRED_SERIES: dict[str, str] = {
 }
 ECOS_SERIES: dict[str, tuple[str, str]] = {
     "base_rate_kr": ("722Y001", "0101000"),  # 한국은행 기준금리 (일별)
+}
+KIS_INDICES = {"sp500": "SPX", "nasdaq": "COMP"}
+MACRO_INSTRUMENTS = {
+    "sp500": ("S&P 500", "index points", "daily_close"),
+    "nasdaq": ("NASDAQ Composite", "index points", "daily_close"),
+    "wti": ("WTI crude oil spot price", "USD/barrel", "daily_spot"),
+    "dxy": ("Federal Reserve broad US dollar index", "index 2006-01=100", "daily_index"),
+    "us10y": ("US Treasury 10-year constant maturity yield", "percent", "daily_cmt"),
 }
 
 
@@ -119,6 +128,7 @@ def collect_macro(
 
     asof 이후 관측값은 제외한다 (룩어헤드, 스펙 §3.3)."""
     asof_day = asof.astimezone(UTC).date()
+    index_day = asof.astimezone(MARKET_TZ["US"]).date() - timedelta(days=1)
     with owned_client(http, timeout=10) as http:
         out: dict[str, Section] = {}
 
@@ -129,12 +139,32 @@ def collect_macro(
 
         fred = Fred(secrets.FRED_API_KEY, http) if secrets.FRED_API_KEY else None
         for key, series in FRED_SERIES.items():
+            fallback_reason = None
+            if key in KIS_INDICES:
+                if not cfg.kis_indices:
+                    fallback_reason = "KIS indices disabled"
+                elif market_client is None:
+                    fallback_reason = "KIS no market client"
+                elif not callable(getattr(market_client, "get_index_us_daily", None)):
+                    fallback_reason = "KIS daily index method unavailable"
+                else:
+                    section = run_section(
+                        lambda s=KIS_INDICES[key]: market_client.get_index_us_daily(s, asof=asof),
+                        now=now,
+                    )
+                    if section["data"] is not None and section["error"] is None:
+                        out[key] = _macro_metadata(section, key, "KIS", KIS_INDICES[key])
+                        continue
+                    fallback_reason = section["error"] or "KIS no valid daily observation"
             if not cfg.fred:
                 out[key] = skipped_section("disabled", now=now)
             elif fred is None:
                 out[key] = skipped_section("no api key", now=now)
             else:
-                out[key] = run_section(lambda s=series: fred.latest(s, asof=asof_day), now=now)
+                day = index_day if key in KIS_INDICES else asof_day
+                out[key] = run_section(lambda s=series, d=day: fred.latest(s, asof=d), now=now)
+            if key in MACRO_INSTRUMENTS:
+                out[key] = _macro_metadata(out[key], key, "FRED", series, fallback_reason)
 
         ecos = Ecos(secrets.ECOS_API_KEY, http, now=now) if secrets.ECOS_API_KEY else None
         for key, (stat, item) in ECOS_SERIES.items():
@@ -147,6 +177,26 @@ def collect_macro(
                     lambda s=stat, i=item: ecos.latest(s, i, asof=asof_day), now=now
                 )
         return out
+
+
+def _macro_metadata(section, key, source, series, fallback_reason=None) -> dict[str, Any]:
+    """선택한 원천의 상품·일별 시점 한계와 대체 원인을 관측값에 함께 보존한다."""
+    instrument, unit, basis = MACRO_INSTRUMENTS[key]
+    data = section.get("data") or {}
+    return {
+        **section,
+        "source": source,
+        "series_id": series,
+        "instrument": instrument,
+        "unit": unit,
+        "basis": "daily_observation" if source == "KIS" else basis,
+        "observed_date": data.get("date"),
+        "observed_at": None,
+        "timestamp_precision": "day",
+        "session": "daily_observation",
+        "live_verified": False,
+        "fallback_reason": fallback_reason,
+    }
 
 
 def _index_payload(market_client: Any) -> dict[str, Any]:

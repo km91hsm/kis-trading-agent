@@ -17,10 +17,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from trader.features.regime.research import RESEARCH
 from trader.features.regime.schemas import AnalystReport, DebateTurn, HedgeProposal
 from trader.kernel.ledger import control
 from trader.kernel.platform import paths
-from trader.kernel.session import tooling
+from trader.kernel.session import research_policy, tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import market_dir, read_checkpoint, write_checkpoint
 
@@ -92,7 +93,14 @@ def market_bundle(
     inputs = (read_checkpoint(d, "_market_inputs") or {}).get("data") or {}
     if not inputs:
         return {"ok": False, "error": "_market_inputs 없음 (파이썬이 세션 앞에서 만든다)"}
-    base = {"scope": "market", "market": market, "date": date.isoformat()}
+    base = {
+        "scope": "market",
+        "market": market,
+        "date": date.isoformat(),
+        "asof": inputs.get("asof"),
+        "currency": "KRW" if market == "KR" else "USD",
+        "input_context": tooling.compact_context(inputs),
+    }
     if kind == "analyst":
         return {"ok": True, "data": tooling.shrink({**base, **inputs}, BUNDLE_LIMIT_BYTES)}
     report = _market_report(d)
@@ -115,6 +123,7 @@ def market_bundle(
         data = {
             **base,
             "proxy": inputs.get("proxy"),
+            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH),
             "round": round,
             "side": side,
             "reports": [report],
@@ -122,8 +131,10 @@ def market_bundle(
             "own_previous": own.model_dump() if own else None,
             "opponent_previous": opp.model_dump() if opp else None,
         }
-        return {"ok": True, "data": tooling.shrink(data, BUNDLE_LIMIT_BYTES)}
+        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "strategist":
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+            return {"ok": False, "error": err}
         summ = read_checkpoint(d, "_market_summary")
         if summ is None:
             return {"ok": False, "error": "_market_summary 없음 (market summarize 먼저)"}
@@ -155,7 +166,14 @@ def market_write(
     if err := _bad_market(market):
         return err
     m = _MARKET_DEBATE_RE.match(stage)
-    rounds = int(getattr(ctx.settings, "debate_rounds", 0))
+    d = market_dir(date, market, ctx.state, create=True)
+    if m:
+        if err := research_policy.write_error(
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(m[1]), side=m[2]
+        ):
+            return {"ok": False, "error": err}
+        call_meta = {**(call_meta or {}), "provider": "claude"}
+    rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     if stage == "_market_analyst":
         model: type = AnalystReport
     elif m:
@@ -184,6 +202,11 @@ def market_write(
     d = market_dir(date, market, ctx.state, create=True)
     if read_checkpoint(d, "_market_inputs") is None:
         return {"ok": False, "error": "_market_inputs 없음 (시장 세션 밖에서는 쓸 수 없다)"}
+    if isinstance(v, DebateTurn):
+        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
+            return {"ok": False, "error": err}
+    if isinstance(v, DebateTurn):
+        research_policy.invalidate_summary(d, RESEARCH)
     path = write_checkpoint(d, stage, _wrap(v.model_dump(), tooling.call_meta(agent, call_meta)))
     return {"ok": True, "path": str(path), "stage": stage}
 
@@ -193,6 +216,8 @@ def market_summarize(ctx: MarketToolContext, *, market: str, date: date) -> dict
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
     return tooling.summarize_turns(d, "_market_summary", _MARKET_DEBATE_RE)
 
 
@@ -210,6 +235,8 @@ def submit_market_view(
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
     if _market_report(d) is None or read_checkpoint(d, "_market_summary") is None:
         return {
             "ok": False,
@@ -246,3 +273,12 @@ def market_view_today(conn: sqlite3.Connection | None, market: str, today: date)
     if not v or v.get("date") != today.isoformat():
         return None
     return v
+
+
+def codex_turn(ctx: MarketToolContext, *, market: str, date: date, round: int) -> dict:
+    if err := _bad_market(market):
+        return err
+    d = market_dir(date, market, ctx.state)
+    if _market_report(d) is None:
+        return {"ok": False, "error": "Codex 토론 전 _market_analyst 필요"}
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)

@@ -130,3 +130,96 @@ NAMES_FILL = JobSpec(
     schedule_key="names_fill.interval_s", interval_s=3600, enabled=None, gate="none",
     heavy=False, misfire="default", catch_up="none", start_soon_s=120, body=names_fill_body,
 )  # fmt: skip
+
+
+def market_activity_body(deps: Any, job: Any = None) -> dict:
+    """관측 창에 시장별 제한 순위를 append-only로 저장한다. GET/LLM은 저장 자료만 읽는다."""
+    from trader.features.quotes import activity_store, market_activity, routes
+    from trader.kernel.config import market_hours
+    from trader.kernel.config.time import MARKET_TZ
+
+    cfg = deps.settings.quotes
+    if not cfg.activity_enabled:
+        return {"skipped": "disabled"}
+    out = {}
+    for market in deps.markets:
+        if market not in {"KR", "US"}:
+            continue
+        now = deps.now()
+        if not market_hours.is_open(market, now):
+            out[market] = {"skipped": "outside_poll_window"}
+            continue
+        client = routes.runtime_for(deps).market
+        venues = ["KRX"] if market == "KR" else ["NAS", "NYS", "AMS"]
+        partitions = {}
+        for venue in venues:
+            for kind in market_activity.KINDS:
+                part = dict(
+                    rows=[],
+                    ok=False,
+                    pages=0,
+                    truncated=False,
+                    error=None,
+                    max_pages=cfg.activity_max_pages,
+                    limit=cfg.activity_limit,
+                )
+                partitions[f"{venue}:{kind}"] = part
+                if client is None:
+                    part["error"] = "client_unavailable"
+                    continue
+                stop = getattr(deps, "stop_event", None)
+                if stop is not None and stop.is_set():
+                    part["error"] = "collection_cancelled"
+                    continue
+                try:
+                    page = client.activity_rank(
+                        market,
+                        kind,
+                        exchange=venue,
+                        max_pages=cfg.activity_max_pages,
+                        limit=cfg.activity_limit,
+                    )
+                    observed_at = deps.now()
+                    day = observed_at.astimezone(MARKET_TZ[market]).date().isoformat()
+                    part.update(
+                        ok=True,
+                        pages=page.pages,
+                        truncated=page.truncated,
+                        error=page.error,
+                        received_at=activity_store.utc(observed_at).isoformat(),
+                    )
+                    part["rows"] = [
+                        dict(
+                            row.model_dump(mode="json"),
+                            observed_day=day,
+                            observation_session="regular_poll_window",
+                        )
+                        for row in page.rows
+                    ]
+                except Exception as e:  # noqa: BLE001 — 거래소·순위 실패를 격리하고 오류 유형만 보존
+                    part["error"] = type(e).__name__
+        received_at = deps.now()
+        conn = deps.conn_factory()
+        try:
+            activity_store.append(conn, market, received_at=received_at, partitions=partitions)
+            out[market] = market_activity.snapshot(conn, market, asof=received_at)
+        finally:
+            conn.close()
+    return out
+
+
+MARKET_ACTIVITY = JobSpec(
+    id="market_activity",
+    kind="market_activity",
+    trigger="interval",
+    per_market=False,
+    schedule_key="market_activity.interval_s",
+    interval_s=30,
+    enabled=lambda settings: settings.quotes.activity_enabled,
+    gate="none",
+    heavy=False,
+    misfire="default",
+    catch_up="none",
+    start_soon_s=5,
+    body=market_activity_body,
+)

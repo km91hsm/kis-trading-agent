@@ -16,11 +16,14 @@ const view={stream:'news_reports',kind:'news',source:'SAVE 리포트',
  url:'https://www.saveticker.com/news',interval_s:900};
 globalThis.nativeCalls=[];
 globalThis.commandResults=[];
-globalThis.filenameEvents=[];globalThis.filenameRegistrations=0;
+globalThis.filenameEvents=[];
 const add=chrome.downloads.onDeterminingFilename.addListener.bind(
  chrome.downloads.onDeterminingFilename);
 chrome.downloads.onDeterminingFilename.addListener=fn=>{
- filenameRegistrations++;return add(fn);
+ return add((item,suggest)=>fn(item,(...args)=>{
+  filenameEvents.push({id:item.id,url:item.url,suggestion:args[0]??null});
+  return suggest(...args);
+ }));
 };
 const send=chrome.tabs.sendMessage.bind(chrome.tabs);
 chrome.tabs.sendMessage=async(...args)=>{
@@ -152,7 +155,7 @@ def test_production_worker_blob_download_uses_issued_filename(tmp_path):
             deadline = time.monotonic() + 35
             while True:
                 result = worker.evaluate("""async()=>({calls:nativeCalls,
-                    commands:commandResults,filenameEvents,filenameRegistrations,
+                    commands:commandResults,filenameEvents,
                     state:await chrome.storage.local.get(null),
                     downloads:await chrome.downloads.search({})})""")
                 if any(call["type"] == "pdf" for call in result["calls"]):
@@ -160,16 +163,24 @@ def test_production_worker_blob_download_uses_issued_filename(tmp_path):
                 assert time.monotonic() < deadline, json.dumps(result, ensure_ascii=False)
                 time.sleep(0.1)
             pdf_calls = [call for call in result["calls"] if call["type"] == "pdf"]
-            assert result["filenameRegistrations"] == 0
-            assert result["filenameEvents"] == []
             assert len(pdf_calls) == 1
             assert pdf_calls[0]["ticket"] == "synthetic-ticket"
             assert pdf_calls[0]["item_id"] == "synthetic-report"
             assert pdf_calls[0]["download_name"] == _NAME
             assert len(result["downloads"]) == 1
             item = result["downloads"][0]
+            assert result["filenameEvents"] == [
+                {
+                    "id": item["id"],
+                    "url": item["url"],
+                    "suggestion": {"filename": "SaveTicker/" + _NAME, "conflictAction": "uniquify"},
+                }
+            ]
+            assert item["url"].startswith("blob:https://www.saveticker.com/")
             assert item["state"] == "complete"
             assert item["filename"].replace("\\", "/").endswith("/SaveTicker/" + _NAME)
-            assert (tmp_path / "downloads" / "SaveTicker" / _NAME).read_bytes().startswith(b"%PDF-")
+            assert (tmp_path / "downloads" / "SaveTicker" / _NAME).read_bytes() == (
+                b"%PDF-1.4\nSYNTHETIC WORKER PROBE"
+            )
         finally:
             context.close()

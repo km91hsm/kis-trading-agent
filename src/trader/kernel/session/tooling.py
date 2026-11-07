@@ -77,9 +77,7 @@ def load_turns(d: Path, pattern: re.Pattern[str] = DEBATE_RE) -> dict[int, dict[
         if not m:
             continue
         data = read_checkpoint(d, stage) or {}
-        turns.setdefault(int(m.group(1)), {})[m.group(2)] = DebateTurn.model_validate(
-            data["data"]
-        )
+        turns.setdefault(int(m.group(1)), {})[m.group(2)] = DebateTurn.model_validate(data["data"])
     return turns
 
 
@@ -140,19 +138,154 @@ def _cut(v: Any, n: int) -> Any:
     return v
 
 
-def _trim_lists(v: Any, keep: int) -> Any:
-    """`keep` 보다 긴 dict 목록은 마지막 `keep` 건만(시계열은 오름차순이라 꼬리가 최신)."""
+# Only these documented ascending series retain their tail. News/rankings/unknown lists
+# retain their head; arbitrary list ordering is never inferred from dict-valued rows.
+_ASCENDING_SERIES = frozenset({"daily", "minute", "candles", "bars", "closes"})
+_QUALITY_KEYS = frozenset(
+    {
+        "meta",
+        "source",
+        "source_asof",
+        "asof",
+        "received_at",
+        "observed_at",
+        "generated_at",
+        "market",
+        "currency",
+        "scope",
+        "basis",
+        "status",
+        "stale",
+        "coverage",
+        "source_coverage",
+        "streams_status",
+        "data_gaps",
+        "fallback_reason",
+        "errors",
+        "error",
+        "truncation",
+        "note",
+    }
+)
+
+
+_IDENTITY_FIELDS = {
+    "source",
+    "requested_source",
+    "source_asof",
+    "asof",
+    "received_at",
+    "observed_at",
+    "observed_date",
+    "unit",
+    "timestamp_precision",
+    "session",
+    "generated_at",
+    "market",
+    "currency",
+    "scope",
+    "basis",
+    "status",
+    "series_id",
+    "instrument",
+    "ticker",
+    "date",
+    "posted_at",
+    "value",
+    "price",
+    "turnover",
+    "turnover_unit",
+    "turnover_basis",
+    "turnover_source_field",
+    "recent_5m",
+    "previous_5m",
+}
+
+
+def _compact(
+    v: Any,
+    keep: int,
+    chars: int | None,
+    path: tuple[str, ...] = (),
+    *,
+    mapping_limit: int | None = None,
+) -> Any:
+    if isinstance(v, str):
+        if chars is not None and path[-1:] in (
+            ("data_gaps",),
+            ("error",),
+            ("fallback_reason",),
+        ):
+            return _cut(v, max(chars, 300))
+        return (
+            _cut(v, chars)
+            if chars is not None and (not path or path[-1] not in _IDENTITY_FIELDS)
+            else v
+        )
     if isinstance(v, list):
-        if len(v) > keep and all(isinstance(x, dict) for x in v):
-            v = v[-keep:]
-        return [_trim_lists(x, keep) for x in v]
+        tail = any(k in _ASCENDING_SERIES for k in path[-2:])
+        selected = v[-keep:] if tail else v[:keep]
+        return [_compact(x, keep, chars, path, mapping_limit=mapping_limit) for x in selected]
     if isinstance(v, dict):
-        return {k: _trim_lists(x, keep) for k, x in v.items()}
+        keys = list(v)
+        if mapping_limit is not None and "source_coverage" not in path:
+            priority = [k for k in v if k in _QUALITY_KEYS]
+            ordinary = [k for k in v if k not in _QUALITY_KEYS][:mapping_limit]
+            keys = priority + ordinary
+        return {
+            k: _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit) for k in keys
+        }
     return v
 
 
+def _delivery_coverage(value: Any) -> Any:
+    """중첩 context를 포함해 실제 전달된 근거에 맞춰 coverage를 계산한다."""
+    if isinstance(value, list):
+        return [_delivery_coverage(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    result = {k: _delivery_coverage(v) for k, v in value.items()}
+    coverage = result.get("source_coverage")
+    if not isinstance(coverage, dict):
+        return result
+    macro = result.get("macro") or (result.get("news_macro") or {}).get("macro") or {}
+    for key, details in (coverage.get("macro") or {}).items():
+        if isinstance(details, dict) and details.get("status") in ("present", "partial"):
+            observation = (macro.get(key) or {}).get("data")
+            if not isinstance(observation, dict) or observation.get("value") is None:
+                details["status"] = "dropped"
+                details["data_gaps"] = [
+                    *(details.get("data_gaps") or []),
+                    "observation not included in delivered context",
+                ]
+    for source, details in coverage.items():
+        if not source.startswith("naver_blog/") or not isinstance(details, dict):
+            continue
+        if details.get("status") not in ("present", "partial"):
+            continue
+        community = ((result.get("sentiment") or {}).get("community") or {}).get("data") or {}
+        posts = result.get("blog_posts") or community.get("posts") or []
+        actual = sum(
+            1
+            for p in posts
+            if isinstance(p, dict)
+            and p.get("source") == source
+            and any(str(p.get(k) or "").strip(" …") for k in ("body", "excerpt"))
+        )
+        original = details.get("original_items", details.get("items", actual))
+        if isinstance(original, int) and actual < original:
+            details.update(
+                status="partial" if actual else "dropped", items=actual, original_items=original
+            )
+            gap = "some blog evidence omitted from delivered context"
+            details["data_gaps"] = list(dict.fromkeys([*(details.get("data_gaps") or []), gap]))
+    return result
+
+
 def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
-    """UTF-8 바이트 한도를 넘으면 리포트의 evidence → 긴 문자열 순으로 줄인다."""
+    """축약 기록을 포함한 전체 UTF-8 직렬화 결과가 바이트 상한을 지키게 한다."""
+    if limit < 2:
+        raise ValueError("JSON dict requires at least 2 bytes")
     if drop_evidence and "reports" in obj:
         obj = {
             **obj,
@@ -161,22 +294,161 @@ def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
     if _size(obj) <= limit:
         return obj
     if "reports" in obj and any("evidence" in r for r in obj["reports"]):
-        return shrink(obj, limit, drop_evidence=True)
-    # 긴 목록(일봉·분봉 같은 시계열, 오름차순)은 꼬리(최신)만 남긴다 — 문자열을 자르기 전에
-    for keep in (120, 60, 30):
-        trimmed = _trim_lists(obj, keep)
-        if _size(trimmed) <= limit:
-            note = f"묶음이 {limit}바이트를 넘어 긴 목록을 최근 {keep}건으로 줄였습니다"
-            return {**trimmed, "note": note}
-    obj = trimmed
-    for n in (300, 200, 140, 100):
-        cut = {
-            **_cut(obj, n),
-            "note": f"묶음이 {limit}바이트를 넘어 긴 문자열을 {n}자에서 잘랐습니다",
+        reduced = shrink(obj, limit, drop_evidence=True)
+        reduced["truncation"] = {
+            **(reduced.get("truncation") or {}),
+            "truncated": True,
+            "evidence_dropped": True,
+            "original_bytes": _size(obj),
+            "limit_bytes": limit,
         }
-        if _size(cut) <= limit:
-            return cut
-    return cut
+        return shrink(reduced, limit)
+    original_bytes = _size(obj)
+    metadata = {
+        "note": "입력 일부 축약; 뉴스·순위·순서미상 목록은 앞, 오름차순 봉은 뒤 보존",
+        "truncation": {
+            "truncated": True,
+            "original_bytes": original_bytes,
+            "limit_bytes": limit,
+            "list_policy": "head; ascending candles tail",
+        },
+    }
+    for chars in (None, 300, 140, 64, 16, 1):
+        for keep in (120, 60, 30, 10, 3, 1):
+            compact = _delivery_coverage({**_compact(obj, keep, chars), **metadata})
+            if _size(compact) <= limit:
+                return compact
+    # Only after text and list reduction may pathological mappings lose keys.
+    for mapping_limit in (120, 30, 3, 1):
+        compact = _delivery_coverage(
+            {**_compact(obj, 1, 1, mapping_limit=mapping_limit), **metadata}
+        )
+        if _size(compact) <= limit:
+            return compact
+    # Pathological objects can contain arbitrarily many quality keys at every level.
+    # Preserve a small top-level quality summary before the final tiny-budget fallback.
+    quality = {k: v for k, v in obj.items() if k in _QUALITY_KEYS}
+    for chars in (64, 16, 1):
+        compact = _delivery_coverage({**_compact(quality, 1, chars), **metadata})
+        if _size(compact) <= limit:
+            return compact
+    for compact in ({"truncation": {"truncated": True}}, {}):
+        if _size(compact) <= limit:
+            return compact
+    return {}
+
+
+_DEBATE_PROSE = frozenset(
+    {
+        "summary",
+        "bullets",
+        "key_risks",
+        "counter_evidence",
+        "data_gaps",
+        "claim",
+        "topic",
+        "response",
+        "arguments",
+        "rebuttals",
+        "what_would_change_my_mind",
+        "reason",
+        "condition",
+        "price_zone",
+        "excerpt",
+        "body",
+    }
+)
+
+
+def _debate_prose(value: Any, chars: int, field: str = "") -> Any:
+    """근거·쟁점·응답 목록과 식별자를 그대로 두고 설명문만 줄인다."""
+    if isinstance(value, dict):
+        return {key: _debate_prose(item, chars, key) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_debate_prose(item, chars, field) for item in value]
+    if isinstance(value, str) and field in _DEBATE_PROSE:
+        return _cut(value, chars)
+    return value
+
+
+def compact_debate(obj: dict, limit: int = 24_000) -> dict:
+    """양 모델의 토론 입력을 같은 규칙으로 제한한다. 필수 식별자는 생략하지 않는다."""
+    original = _size(obj)
+    if original <= limit:
+        return obj
+    protected = {"reports", "own_previous", "opponent_previous", "research_policy"}
+    metadata = {
+        "truncated": True,
+        "original_bytes": original,
+        "limit_bytes": limit,
+        "evidence_dropped": False,
+        "note": "설명문·보조 context 일부 축약; 모든 근거·쟁점·응답 식별자와 항목 보존",
+    }
+    for chars in (300, 140, 64):
+        reduced = {
+            key: _debate_prose(value, chars) if key in protected else value
+            for key, value in obj.items()
+        }
+        for context_limit in (8000, 4000, 2000, 500):
+            compact = {**reduced, "truncation": metadata}
+            for key in ("input_context", "regime", "market_view", "index"):
+                if isinstance(compact.get(key), dict):
+                    compact[key] = shrink(compact[key], context_limit)
+            if _size(compact) <= limit:
+                return compact
+    raise ValueError(f"토론 필수 근거·쟁점 구조가 {limit:,} UTF-8 bytes 상한을 넘습니다")
+
+
+def debate_bundle(obj: dict, limit: int = 24_000) -> dict:
+    """Claude 도구 경계에서도 필수 구조 초과를 자료 없는 성공으로 숨기지 않는다."""
+    try:
+        return {"ok": True, "data": compact_debate(obj, limit)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def compact_context(inputs: dict) -> dict:
+    """계좌·포트폴리오·주문과 분리된 공개 연구 근거를 제한된 크기로 조립한다."""
+    nm = inputs.get("news_macro") or {}
+    sentiment = inputs.get("sentiment") or {}
+    data = {
+        k: inputs[k]
+        for k in (
+            "meta",
+            "market",
+            "asof",
+            "scope",
+            "market_activity",
+            "data_gaps",
+            "source_coverage",
+        )
+        if k in inputs
+    }
+    for key, value in (
+        ("news", nm.get("news") or inputs.get("macro_news") or inputs.get("news")),
+        ("macro", nm.get("macro") or inputs.get("macro")),
+        ("events", nm.get("events")),
+        ("saveticker", inputs.get("saveticker") or sentiment.get("saveticker")),
+    ):
+        if value is not None:
+            data[key] = value
+    # FO stores news_macro itself as a Section; spot uses per-item Sections.
+    if {"data", "received_at", "error"} <= set(nm):
+        section_data = nm.get("data") or {}
+        data["news"] = {**nm, "data": section_data.get("news")}
+        if section_data.get("macro"):
+            data["macro"] = section_data["macro"]
+    if {"data", "received_at", "error"} <= set(sentiment):
+        sentiment = sentiment.get("data") or {}
+    community = (sentiment.get("community") or {}).get("data") or {}
+    blogs = inputs.get("blog_posts") or [
+        p
+        for p in community.get("posts") or []
+        if str(p.get("source") or "").startswith("naver_blog/")
+    ]
+    if blogs:
+        data["blog_posts"] = blogs
+    return shrink(_delivery_coverage(data), 8000)
 
 
 def evidence_stats(reports: list[dict]) -> dict:
@@ -221,9 +493,7 @@ def trader_summary(summ: dict) -> dict:
     out = dict(summ)
     other = "final" if summ.get("preferred") == "round0" else "round0"
     if isinstance(summ.get(other), dict):
-        out[other] = {
-            side: brief_turn(t) for side, t in summ[other].items() if isinstance(t, dict)
-        }
+        out[other] = {side: brief_turn(t) for side, t in summ[other].items() if isinstance(t, dict)}
     # issues 는 final 양측 rebuttals 의 복제라 트레이더 묶음에선 뺀다
     out.pop("issues", None)
     out["note"] = f"{other} 턴은 핵심만, issues 는 final.rebuttals 와 같아 생략"

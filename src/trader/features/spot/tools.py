@@ -26,11 +26,12 @@ from pydantic import ValidationError
 from trader.features.spot import costs, executor, rules, schemas, tradability
 from trader.features.spot import ledger as spot_ledger
 from trader.features.spot import summary as summary_mod
+from trader.features.spot.research import RESEARCH
 from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import calls, runner, tooling
+from trader.kernel.session import calls, research_policy, runner, tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -546,10 +547,15 @@ def checkpoint_read(
     if isinstance(out, dict):
         out = _compact_section(section, out)
         errors = [e for e in data.get("errors", []) if e.startswith(section + ".")]
-        out = {**out, "input_errors": errors, "meta": data.get("meta")}
+        out = {
+            **out,
+            "input_errors": errors,
+            "meta": data.get("meta"),
+            "input_context": _shrink(tooling.compact_context(data), 2_000),
+        }
         if section in ("fundamental", "sentiment"):  # 에이전트 md: "함께 오는 quote 는 현재가다"
             out["quote"] = (body.get("technical") or {}).get("quote")
-    return {"ok": True, "data": out}
+    return {"ok": True, "data": _shrink(out, BUNDLE_LIMIT_BYTES)}
 
 
 # --- checkpoint write ---------------------------------------------------------------
@@ -572,6 +578,13 @@ def checkpoint_write(
 ) -> dict:
     """LLM 이 쓸 수 있는 단계(`WRITE_RULES`)만 받는다: 스키마·파일명↔페이로드 일치·라운드 상한
     검증 뒤 전제조건(선행 단계)을 본다."""
+    d = _dir(ctx, ticker, market, date)
+    if match := _DEBATE_RE.match(stage):
+        if err := research_policy.write_error(
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(match[1]), side=match[2]
+        ):
+            return {"ok": False, "error": err}
+        call_meta = {**(call_meta or {}), "provider": "claude"}
     if model:
         call_meta = {**(call_meta or {}), "model": model}
     if stage.startswith("30_decision"):
@@ -587,18 +600,33 @@ def checkpoint_write(
             f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
         )
         return {"ok": False, "error": f"스키마 검증 실패({stage}): {msgs}"}
-    mismatch = _name_payload_mismatch(ctx, stage, ticker, validated)
+    mismatch = _name_payload_mismatch(
+        ctx,
+        stage,
+        ticker,
+        validated,
+        rounds=research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH),
+    )
     if mismatch:
         return {"ok": False, "error": mismatch}
     d = _dir(ctx, ticker, market, date)
     missing = check_rule(rule, stage, list_checkpoints(d))
     if missing:
         return {"ok": False, "error": f"전제조건 미충족({stage}): {'; '.join(missing)}"}
+    if isinstance(validated, schemas.DebateTurn):
+        if err := research_policy.turn_error(
+            ctx.conn, ctx.settings, d, RESEARCH, validated.model_dump()
+        ):
+            return {"ok": False, "error": err}
+    if isinstance(validated, schemas.DebateTurn):
+        research_policy.invalidate_summary(d, RESEARCH)
     path = write_checkpoint(d, stage, _wrap(validated.model_dump(), _call(agent, call_meta)))
     return {"ok": True, "path": str(path)}
 
 
-def _name_payload_mismatch(ctx: ToolContext, stage: str, ticker: str, v: Any) -> str | None:
+def _name_payload_mismatch(
+    ctx: ToolContext, stage: str, ticker: str, v: Any, *, rounds: int | None = None
+) -> str | None:
     m = _ANALYST_RE.match(stage)
     if m:
         role = m.group(1)
@@ -614,7 +642,7 @@ def _name_payload_mismatch(ctx: ToolContext, stage: str, ticker: str, v: Any) ->
         rnd, side = int(m.group(1)), m.group(2)
         if v.side != side or v.round != rnd:
             return f"파일명 r{rnd}_{side} 와 페이로드 round={v.round} side={v.side} 불일치"
-        if rnd > ctx.settings.debate_rounds:
+        if rnd > (ctx.settings.debate_rounds if rounds is None else rounds):
             return f"라운드 {rnd} 는 설정(debate_rounds={ctx.settings.debate_rounds})을 넘습니다"
     return None
 
@@ -630,6 +658,8 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
     `skipped_debate: true` 요약을, 아니면 `debate_required: true` 오류를 돌려준다.
     토론 턴이 있으면 합의 여부와 무관하게 정상 요약이다."""
     d = _dir(ctx, ticker, market, date)
+    if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err, "debate_required": True}
     turns = _load_turns(d)
     if not turns:
         return _summarize_without_debate(ctx, d)
@@ -676,6 +706,7 @@ def _summarize_without_debate(ctx: ToolContext, d: Path) -> dict:
 
 # --- bundle: 서브에이전트 입력 묶음 (파이썬이 조립 → 오케스트레이터는 전문 전달만) ---------
 
+
 def _latest_decision_stage(d: Path) -> str | None:
     """오늘의 최신 결정 단계 (31_decision_r<n> 중 n 최대, 없으면 30_decision, 둘 다 없으면 None)."""
     stages = list_checkpoints(d)
@@ -717,14 +748,23 @@ def checkpoint_bundle(
                 return {"ok": False, "error": f"라운드 {round - 1} 의 양측 턴이 모두 필요합니다"}
         data = {
             "ticker": ticker,
+            "scope": "spot",
+            "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH),
+            "market": market,
+            "asof": ((read_checkpoint(d, "00_inputs") or {}).get("meta") or {}).get("asof"),
+            "currency": "KRW" if market == "KR" else "USD",
+            "input_context": tooling.compact_context(read_checkpoint(d, "00_inputs") or {}),
             "round": round,
             "side": side,
             "reports": reports,
             "own_previous": own.model_dump() if own else None,
             "opponent_previous": opp.model_dump() if opp else None,
         }
-        return {"ok": True, "data": _shrink(data, BUNDLE_LIMIT_BYTES)}
+        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "trader":
+        if _latest_decision_stage(d) is None:
+            if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+                return {"ok": False, "error": err}
         summ = read_checkpoint(d, "25_research_summary")
         if summ is None:
             return {"ok": False, "error": "25_research_summary 없음 (summarize 먼저)"}
@@ -734,6 +774,7 @@ def checkpoint_bundle(
         data = {
             "ticker": ticker,
             "reports": reports,
+            "input_context": tooling.compact_context(inputs),
             "previous_decision": prev,  # 재평가(resume) 때 트레이더가 전제로 삼는 원래·최신 결정
             "previous_decision_stage": prev_stage,
             "research_summary": _trader_summary(summ.get("data", summ)),
@@ -903,8 +944,8 @@ def _execute(
     change_pct: float | None = None,
 ) -> list[dict]:
     """리스크 게이트·계좌별 실행(주문은 executor → 커널 코어 안에서만). 결정은 1회, 판정·주문은
-    계좌마다. 재평가 라운드는 41_/51_ 체크포인트 이름에 들어간다. 메모리 기록은 호출자가
-`_record_memory` 로 한다."""
+        계좌마다. 재평가 라운드는 41_/51_ 체크포인트 이름에 들어간다. 메모리 기록은 호출자가
+    `_record_memory` 로 한다."""
     return executor.execute(
         _exec_ctx_of(ctx),
         decision,
@@ -1043,6 +1084,9 @@ def submit_decision(
         return {"ok": False, "error": "원장 연결이 없어 계좌별 실행을 할 수 없음"}
     if resume_stage is None and "30_decision" in stages:
         return _resume_saved(ctx, d, stages, date, market, ticker)
+    if resume_stage is None:
+        if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+            return {"ok": False, "error": err}
     missing = check_rule(SUBMIT_RULE, "30_decision", stages)
     if missing:
         return {"ok": False, "error": "전제조건 미충족: " + ", ".join(missing)}
@@ -1145,3 +1189,11 @@ def status(ctx: ToolContext, *, market: str, date: date) -> dict:
         "sessions_today": calls.sessions_today(ctx.conn, ctx.now()) if ctx.conn else 0,
         "cap": ctx.settings.llm.daily_session_cap,
     }
+
+
+@_guarded
+def codex_turn(ctx: ToolContext, *, ticker: str, market: str, date: date, round: int) -> dict:
+    d = _dir(ctx, ticker, market, date)
+    if len(_reports(d)) < MIN_REPORTS:
+        return {"ok": False, "error": "Codex 토론 전 애널리스트 2개 이상 필요"}
+    return research_policy.generate_turn(ctx, d, RESEARCH, round)

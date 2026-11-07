@@ -40,3 +40,38 @@ SESSION = Migration(
     ),
     owner="kernel/session",
 )
+
+
+RESEARCH = Migration(
+    17,
+    "research-providers",
+    statements=(
+        "ALTER TABLE agent_calls ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'",
+        """CREATE TABLE research_policies (
+            research_key TEXT PRIMARY KEY,
+            policy_json TEXT NOT NULL,
+            policy_hash TEXT NOT NULL,
+            context_hash TEXT,
+            created_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE research_calls (
+            id INTEGER PRIMARY KEY,
+            provider TEXT NOT NULL,
+            model TEXT,
+            policy_hash TEXT NOT NULL,
+            input_hash TEXT NOT NULL,
+            prompt_hash TEXT NOT NULL,
+            schema_hash TEXT NOT NULL,
+            turn_hash TEXT,
+            status TEXT NOT NULL CHECK(status IN ('running','ok','error')),
+            error TEXT,
+            duration_ms INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            counts_toward_cap INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX ix_research_calls_created ON research_calls(provider, created_at)",
+    ),
+    owner="kernel/session",
+)

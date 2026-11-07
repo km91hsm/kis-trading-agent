@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from trader.features.spot.fake import run_fake_analyze, run_fake_resume
+from trader.features.spot.research import RESEARCH
 from trader.features.spot.schemas import AnalystReport, DebateTurn, Decision
 from trader.kernel.registry.types import AgentDef, SessionKind
+from trader.kernel.session.run_store import run_dir
 
 AGENT_NAMES = (
     "analyst-technical",
@@ -45,6 +47,9 @@ ANALYZE = SessionKind(
     throttle="hard",
     fake=run_fake_analyze,
     stdin_extra=None,
+    research_targets=lambda ctx, spec: [
+        (run_dir(spec.date, spec.market, t["ticker"], ctx.state), RESEARCH) for t in spec.tickers
+    ],
     retry_guard=True,  # 같은 종목 반복 타임아웃 차단(옛 analyze 동작)
 )
 

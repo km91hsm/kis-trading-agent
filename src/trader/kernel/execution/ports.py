@@ -61,6 +61,19 @@ class InputsPort(Protocol):
         """`00_inputs` 를 저장하고 그 payload 를 돌려준다."""
         ...
 
+    def research_context(
+        self,
+        conn: Any,
+        market: str,
+        *,
+        asof: datetime,
+        market_client: Any = None,
+        http: Any = None,
+        now: Callable[[], datetime] | None = None,
+    ) -> dict:
+        """계좌·주문 없이 거시·공개 블로그·KIS 활동의 원천/시각/품질 입력을 수집한다."""
+        ...
+
     def recent(
         self,
         conn: Any,

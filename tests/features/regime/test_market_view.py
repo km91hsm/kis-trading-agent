@@ -186,9 +186,7 @@ def test_clamp_weight():
 
 def test_build_inputs_without_regime_or_client_is_empty_but_ok(project, conn, settings):
     asof = datetime(2026, 10, 24, 12, tzinfo=UTC)
-    inp = market_view.build_inputs(
-        _lctx(project, conn, settings), market="US", today=D, asof=asof
-    )
+    inp = market_view.build_inputs(_lctx(project, conn, settings), market="US", today=D, asof=asof)
     assert inp["regime"]["state"] is None and inp["index"]["closes"] == []
     assert inp["proxy"] == "SPX"
 
@@ -297,3 +295,70 @@ def test_run_market_view_passes_cancel_to_session(lctx, conn):
         lctx, market="KR", date=D, inputs={}, cap_hit=False, session_runner=runner, cancel=ev
     )
     assert seen["cancel"] is ev
+
+
+def test_market_inputs_include_bounded_activity_and_quality(lctx, monkeypatch):
+    from types import SimpleNamespace
+
+    def snapshot(conn, market, *, asof):
+        return {
+            "source": "kis",
+            "market": market,
+            "currency": "KRW",
+            "status": "partial",
+            "received_at": asof.isoformat(),
+            "stale": True,
+            "source_asof": None,
+            "coverage": {"complete": False},
+            "basis": "unknown",
+            "errors": {},
+            "rankings": {
+                "turnover": [{"ticker": "005930", "turnover": "100"}],
+                "gain": [],
+                "loss": [],
+            },
+        }
+
+    lctx.ports["market_activity"] = SimpleNamespace(snapshot=snapshot)
+    monkeypatch.setattr(market_view.ingest, "collect_macro", lambda *a, **k: {})
+    monkeypatch.setattr(market_view.ingest, "recent", lambda *a, **k: [{"title": "시장 뉴스"}])
+    out = market_view.build_inputs(lctx, market="KR", today=D, asof=T0)
+    assert out["market_activity"]["rankings"]["turnover"][0]["turnover"] == "100"
+    assert out["macro_news"][0]["title"] == "시장 뉴스"
+    assert any("stale" in gap for gap in out["data_gaps"])
+
+
+def test_generated_market_context_collects_configured_blog_for_us(lctx, monkeypatch, respx_mock):
+    import httpx
+
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.session.tooling import compact_context
+
+    cfg = SourcesConfig.model_validate({"channels": {"naver_blog": ["ranto28"]}})
+    monkeypatch.setattr(market_view.ingest, "load_sources", lambda: cfg)
+    monkeypatch.setattr(
+        market_view.ingest,
+        "collect_macro",
+        lambda *a, **kw: {
+            "nasdaq": {
+                "data": {"value": Decimal("20000.50"), "date": D.isoformat()},
+                "received_at": T0.isoformat(),
+                "error": None,
+            }
+        },
+    )
+    monkeypatch.setattr(market_view.ingest, "recent", lambda *a, **k: [{"title": "시장 뉴스"}])
+    respx_mock.get("https://rss.blog.naver.com/ranto28.xml").respond(
+        200,
+        text=(
+            "<rss><channel><item><title>미국 시장 의견</title>"
+            "<description>달러와 미국 주식</description>"
+            "<pubDate>Thu, 08 Oct 2026 10:00:00 +0900</pubDate></item></channel></rss>"
+        ),
+    )
+    with httpx.Client() as http:
+        generated = market_view.build_inputs(lctx, market="US", today=D, asof=T0, http=http)
+    out = compact_context(generated)
+    assert out["blog_posts"][0]["body"] == "달러와 미국 주식"
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
+    assert out["macro"]["nasdaq"]["data"]["value"] == "20000.50"

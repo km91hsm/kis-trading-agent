@@ -21,6 +21,7 @@ news:
 
 macro:
   enabled: true
+  kis_indices: true    # 미국 SPX·COMP 일별 관측 우선, 실패하면 FRED
   fred: true           # FRED_API_KEY
   ecos: true           # ECOS_API_KEY
 

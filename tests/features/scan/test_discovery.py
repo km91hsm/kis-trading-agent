@@ -319,9 +319,9 @@ def test_tool_discovery_inputs_and_submit_discovery_round_trip(
     assert saved["call"]["agent"] == "scout" and saved["data"]["notes"] == ["악재: 없음"]
 
 
-def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, settings):
+def test_build_inputs_includes_naver_blog_posts_for_both_markets(project, conn, settings):
     """Phase 21: `sources_cfg.channels.naver_blog` + http 가 있으면 블로그 최근 글을 발굴 입력에
-    싣는다(KR 만, 실패는 빈 목록)."""
+    싣는다(두 시장 모두, 실패는 빈 목록)."""
     import httpx
     import respx
 
@@ -354,6 +354,8 @@ def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, setti
                     "title": "반도체 사이클",
                     "excerpt": "메모리 업황",
                     "posted_at": "2026-10-08T01:00:00+00:00",
+                    "received_at": T0.isoformat(),
+                    "url": "https://blog.naver.com/x/1",
                 }
             ]
             us = discovery.build_inputs(
@@ -369,7 +371,7 @@ def test_build_inputs_includes_naver_blog_posts_for_kr_only(project, conn, setti
                 sources_cfg=cfg,
                 http=http,
             )
-            assert us["blog_posts"] == []
+            assert us["blog_posts"][0]["source"] == "naver_blog/blog-test"
     # http 없음 → 빈 목록, 파일은 그대로 만들어진다
     data = discovery.build_inputs(
         conn,
@@ -502,3 +504,95 @@ def test_fake_screen_with_discovery_merges_and_summarizes(project, conn, setting
     assert r["discovery"]["candidates"][0]["ticker"] == "000000" and r["discovery"]["universe"] == 1
     assert r["picks"][0] == {"ticker": "000000", "reason": "FAKE: 뉴스 발굴"}
     assert len(r["picks"]) == 5
+
+
+def test_scout_input_preserves_saveticker_quality_and_kr_scope(
+    project, conn, settings, monkeypatch
+):
+    snap = {
+        "source": "saveticker",
+        "market": "KR",
+        "observed_at": T0.isoformat(),
+        "movers": {"gain": [], "loss": [], "turnover": []},
+        "community_top5": [],
+        "stale": ["market_turnover_regular"],
+        "streams_status": {"news_all": "partial"},
+        "data_gaps": ["KR coverage unavailable"],
+        "report": None,
+    }
+    monkeypatch.setattr(
+        discovery.saveticker_api,
+        "snapshot",
+        lambda *a, **kw: snap if kw.get("market") == "KR" else None,
+    )
+    out = discovery.build_inputs(
+        conn,
+        settings,
+        UNI_KR,
+        market="KR",
+        today=D,
+        asof=T0,
+        quant_candidates=[],
+        state=project / "state",
+    )
+    assert out["saveticker"]["stale"] == ["market_turnover_regular"]
+    assert out["saveticker"]["streams_status"]["news_all"] == "partial"
+    assert out["saveticker"]["movers"]["gain"] == []
+    assert out["market_activity"]["market"] == "KR"
+    assert "KR coverage unavailable" in out["data_gaps"]
+
+
+def test_generated_us_scout_uses_public_research_port_and_compact_context(
+    project, conn, settings, monkeypatch
+):
+    import httpx
+    import respx
+
+    from trader.features.ingest import macro as macro_sources
+    from trader.features.ingest.ports import InputsPortImpl
+    from trader.features.ingest.settings import SourcesConfig
+    from trader.kernel.config import Secrets
+    from trader.kernel.session.tooling import compact_context
+
+    cfg = SourcesConfig.model_validate({"channels": {"naver_blog": ["ranto28"]}})
+    monkeypatch.setattr(
+        macro_sources,
+        "collect_macro",
+        lambda *a, **kw: {
+            "dxy": {
+                "data": {"value": 120, "date": D.isoformat()},
+                "received_at": T0.isoformat(),
+                "error": None,
+            }
+        },
+    )
+    port = InputsPortImpl(Secrets(), cfg)
+    with respx.mock(assert_all_called=False) as routes:
+        routes.get("https://rss.blog.naver.com/ranto28.xml").respond(
+            200,
+            text=(
+                "<rss><channel><item><title>미국 시장</title>"
+                "<description>공개 RSS 발췌</description>"
+                "<pubDate>Thu, 08 Oct 2026 10:00:00 +0900</pubDate></item></channel></rss>"
+            ),
+        )
+        with httpx.Client() as http:
+            generated = discovery.build_inputs(
+                conn,
+                settings,
+                UNI_US,
+                market="US",
+                today=D,
+                asof=T0,
+                quant_candidates=[],
+                state=project / "state",
+                now=lambda: T0,
+                sources_cfg=cfg,
+                http=http,
+                research_port=port,
+            )
+    out = compact_context(generated)
+    assert out["blog_posts"][0]["body"] == "공개 RSS 발췌"
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
+    assert out["macro"]["dxy"]["data"]["value"] == 120
+    assert out["market_activity"]["market"] == "US"

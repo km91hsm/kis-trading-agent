@@ -586,3 +586,82 @@ def test_timeout_guard_follows_kind_retry_guard_not_kind_name(project, conn):
     # 이름이 analyze 여도 retry_guard=False 면 차단하지 않고 세션을 띄운다
     res = _run(spec(), ctx, kind=_kind(retry_guard=False), runner=lambda cmd, **kw: _ok_result())
     assert res.ok
+
+
+def test_codex_policy_missing_turns_fail_even_when_claude_exits_success(project, conn, monkeypatch):
+    from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
+    from trader.features.spot.session_kinds import ANALYZE
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    ctx = make_ctx(project, conn, llm=LlmSettings(codex_debate={"enabled": True}))
+    captured = {}
+
+    def fake(cmd, **kw):
+        captured["prompt"] = cmd[cmd.index("--append-system-prompt") + 1]
+        captured["agents"] = json.loads(
+            Path(cmd[cmd.index("--agents") + 1]).read_text(encoding="utf-8")
+        )
+        return _ok_result()
+
+    result = run_session(
+        spec(),
+        ANALYZE,
+        ctx,
+        agents=ag.by_name(SPOT_AGENTS),
+        runner=fake,
+        claude_bin=Path("/fake/claude"),
+    )
+    assert not result.ok and "Codex" in result.error
+    assert "codex-turn" in captured["prompt"]
+    assert "researcher-bear" not in captured["agents"]
+    assert conn.execute("SELECT status FROM runs ORDER BY id DESC LIMIT 1").fetchone()[0] == "error"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 부모 SIGTERM 전파")
+def test_nested_codex_group_is_terminated_when_tool_parent_receives_sigterm(tmp_path):
+    import signal
+
+    marker = tmp_path / "codex.pid"
+    child = (
+        "import os,time,pathlib; pathlib.Path("
+        + repr(str(marker))
+        + ").write_text(str(os.getpid())); time.sleep(60)"
+    )
+    script = (
+        "from trader.kernel.session.runner import run_claude; "
+        "import sys; run_claude([sys.executable,'-c',"
+        + repr(child)
+        + "],input='',timeout=30,encoding='utf-8',terminate_on_parent_signal=True)"
+    )
+    parent = subprocess.Popen(
+        [sys.executable, "-c", script],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    child_pid = None
+    try:
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline and parent.poll() is None:
+            time.sleep(0.05)
+        assert marker.exists(), "nested Codex process must start"
+        child_pid = int(marker.read_text())
+        os.killpg(parent.pid, signal.SIGTERM)
+        parent.wait(timeout=5)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("nested Codex child survived tool cancellation")
+    finally:
+        if parent.poll() is None:
+            os.killpg(parent.pid, signal.SIGKILL)
+        if child_pid:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

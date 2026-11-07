@@ -18,7 +18,9 @@ from trader.kernel.broker._parse import rows as _rows
 from trader.kernel.broker._parse import to_int as _int
 from trader.kernel.broker.client import KisClient
 from trader.kernel.broker.errors import KisApiError
+from trader.kernel.broker.market_activity import ActivityMarketMixin
 from trader.kernel.broker.market_fo import FoMarketMixin, _ymd
+from trader.kernel.broker.market_indices import IndexMarketMixin
 from trader.kernel.broker.models import (
     Candle,
     InvestorFlow,
@@ -37,7 +39,7 @@ MAX_PAGES = 10  # 일봉 상한 약 1,000봉
 HOLIDAY_CACHE_DAYS = 7
 
 
-class KisMarket(FoMarketMixin):
+class KisMarket(FoMarketMixin, ActivityMarketMixin, IndexMarketMixin):
     def __init__(
         self,
         client: KisClient,

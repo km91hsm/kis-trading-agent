@@ -49,3 +49,6 @@ paper_review: {time: "09:00", days: sat}   # 모의 체결 점검(KST, 토)
 rl_train: {time: "10:30", days: sat}   # RL 사이저 주간 학습(KST, 토; ml_train 뒤)
 briefing: "07:20"   # 아침 브리핑(KST, 평일; KR 휴장일·일시정지 제외)
 fo: {kr: {session: "08:20", monitor: {start: "08:45", end: "15:45", interval_s: 60}}}  # 파생 레인(Phase 26): 아침 세션·KRX 파생 정규장 창
+
+market_activity:
+  interval_s: 30  # KIS 시장 활동 수집 주기. API 원천의 실시간성·지연을 보장하지 않음

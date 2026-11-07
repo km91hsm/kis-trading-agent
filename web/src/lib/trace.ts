@@ -5,7 +5,9 @@ import { GLOSSARY, sideLabel, termLabel } from "./glossary";
 
 export type TraceAnalyst = { role: string; label: string; signal: string | null; confidence: number | null; summary: string | null; evidence: string[] };
 /** timing 은 세션에 따라 문자열("NOW")이거나 객체({action, condition, price_zone}) — 정규화해 action 은 timing, 조건은 timing_note. */
-export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null; timing_note: string | null };
+export type DebateIssue = { issue_id: string; topic: string; claim: string; evidence: string[] };
+export type DebateResponse = { issue_id: string; response: string; evidence: string[] };
+export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null; timing_note: string | null; provider?: string | null; model?: string | null; issues?: DebateIssue[]; responses?: DebateResponse[]; replies?: DebateResponse[] };
 export type TraceGate = { stage: string; account_id: string; approved?: boolean; qty?: number | null; reasons?: string[]; note?: string | null; mode?: string | null; dry_run?: boolean | null };
 export type TraceOrder = { stage: string; account_id: string; status?: string | null; order_no?: string | null; message?: string | null; side?: string | null; qty?: number | null; price?: string | null; mode?: string | null };
 /** fo 게이트·주문 체크포인트 요약(`fo/routes._checks` 값). */
@@ -172,6 +174,11 @@ export function normalizeTrace(asset: "spot" | "fo", raw: unknown): TraceResp {
       return {
         round: typeof d.round === "number" ? d.round : null,
         side: strOrNull(d.side),
+        provider: strOrNull(d.provider),
+        model: strOrNull(d.model),
+        issues: arr(d.issues).map((x) => ({ issue_id: String(x.issue_id ?? ""), topic: String(x.topic ?? ""), claim: String(x.claim ?? ""), evidence: Array.isArray(x.evidence) ? x.evidence.map(String) : [] })),
+        responses: arr(d.responses).map((x) => ({ issue_id: String(x.issue_id ?? ""), response: String(x.response ?? ""), evidence: Array.isArray(x.evidence) ? x.evidence.map(String) : [] })),
+        replies: arr(d.replies).map((x) => ({ issue_id: String(x.issue_id ?? ""), response: String(x.response ?? ""), evidence: Array.isArray(x.evidence) ? x.evidence.map(String) : [] })),
         stance: strOrNull(d.stance),
         conviction: typeof d.conviction === "number" ? d.conviction : null,
         timing: obj ? strOrNull(obj.action) : strOrNull(t),
