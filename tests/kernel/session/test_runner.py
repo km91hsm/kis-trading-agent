@@ -598,7 +598,9 @@ def test_codex_policy_missing_turns_fail_even_when_claude_exits_success(project,
 
     def fake(cmd, **kw):
         captured["prompt"] = cmd[cmd.index("--append-system-prompt") + 1]
-        captured["agents"] = json.loads(Path(cmd[cmd.index("--agents") + 1]).read_text())
+        captured["agents"] = json.loads(
+            Path(cmd[cmd.index("--agents") + 1]).read_text(encoding="utf-8")
+        )
         return _ok_result()
 
     result = run_session(

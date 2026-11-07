@@ -77,7 +77,9 @@ def test_runner_uses_feature_cli_and_bear_agent(conn, project, monkeypatch):
 
     def fake(cmd, **kw):
         captured["prompt"] = cmd[cmd.index("--append-system-prompt") + 1]
-        captured["agents"] = json.loads(Path(cmd[cmd.index("--agents") + 1]).read_text())
+        captured["agents"] = json.loads(
+            Path(cmd[cmd.index("--agents") + 1]).read_text(encoding="utf-8")
+        )
         return _ok_result()
 
     result = run_session(
