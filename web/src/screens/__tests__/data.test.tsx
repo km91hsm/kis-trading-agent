@@ -101,6 +101,12 @@ async function mount(r: Routes, page: Page = "quotes", path = "/data") {
   await flush();
   return out;
 }
+test("US 거래대금 차트 링크는 종목명 검색에 없어도 거래소를 보존한다", async () => {
+  await mount(routes({ "GET /api/names/search": [] }), "quotes", "/data?market=US&ticker=XYZ&exchange=NYS");
+  await flush();
+  expect(callsTo("/charts").at(-1)?.searchParams.get("exchange")).toBe("NYS");
+});
+
 const section = (id: string) => document.getElementById(id) as HTMLElement;
 function LocationProbe() {
   const { search } = useLocation();
@@ -435,6 +441,20 @@ describe("데이터 화면", () => {
     expect(Array.from(section("quotes").querySelectorAll("h3")).some((h) => h.textContent?.includes("삼성전자"))).toBe(true);
   });
 
+  test("순위 종목 링크는 같은 페이지에서 차트를 바꾸고 선택한 정렬을 보존한다", async () => {
+    const { container } = await mount(routes({ "GET /api/quotes/activity": {
+      market: "KR", currency: "KRW", status: "partial", stale: false, received_at: new Date().toISOString(),
+      coverage: { successful: ["KRX:turnover"], failed: [], pending: [] },
+      rankings: { turnover: [{ ticker: "000660", name: "합성 종목", market: "KR", exchange: "KRX", currency: "KRW", price: "100", turnover: "1000", change_pct: 0.1, stale: false, received_at: new Date().toISOString(), growth: { status: "available", value: 0.5, reason: null } }], gain: [], loss: [] },
+    } }), "quotes", "/data?ticker=005930&sort=growth");
+    expect(callsTo("/charts").at(-1)?.searchParams.get("ticker")).toBe("005930");
+    const link = container.querySelector<HTMLAnchorElement>('a[data-activity-ticker]')!;
+    expect(link.getAttribute("href")).toContain("sort=growth");
+    await act(async () => link.click());
+    await flush();
+    expect(callsTo("/charts").at(-1)?.searchParams.get("ticker")).toBe("000660");
+  });
+
   test("호가는 next_poll_ms 마다 다시 부르고, 언마운트하면 멈춘다", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const { unmount } = await mount(routes());
@@ -596,4 +616,20 @@ describe("데이터 화면", () => {
     // 같은 절 안의 공시 표는 그대로
     expect(section("news").textContent).toContain("주요사항보고서(유상증자결정)");
   });
+});
+
+
+test("시장을 바꿔 새 순위를 기다릴 때 이전 시장 거래대금을 숨긴다", async () => {
+  let complete: (value: unknown) => void = () => {};
+  const pending = new Promise(resolve => { complete = resolve; });
+  const activity = { source: "kis", market: "US", currency: "USD", received_at: new Date().toISOString(), source_asof: null, basis: "unknown", status: "partial", stale: false,
+    coverage: { expected: ["NAS:turnover"], successful: ["NAS:turnover"], failed: [], complete: false, session: "unknown" },
+    rankings: { turnover: [{ ticker: "ONLY_US", name: "미국 전용", market: "US", exchange: "NAS", currency: "USD", source_rank: 1, price: "100", change_pct: 0, volume: 1, turnover: "100", received_at: new Date().toISOString(), stale: false, growth: { status: "unavailable", value: null, reason: "insufficient_history" } }], gain: [], loss: [] } };
+  await mount(routes({ "GET /api/quotes/activity": (url: URL) => url.searchParams.get("market") === "US" ? activity : pending }), "quotes", "/data?market=US");
+  expect(section("quotes").textContent).toContain("ONLY_US");
+  act(() => button(document.querySelector('[data-market-segment]')!, "KR").click());
+  await flush();
+  expect(section("quotes").textContent).not.toContain("ONLY_US");
+  await act(async () => complete({ ...activity, market: "KR", currency: "KRW", rankings: { turnover: [], gain: [], loss: [] } }));
+  await flush();
 });

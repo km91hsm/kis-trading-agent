@@ -51,6 +51,28 @@ def _deps(request: Request) -> Any:
     return request.app.state.deps
 
 
+@router.get("/market-clock")
+def market_clock(request: Request) -> dict:
+    """정규장 시간 기준 요약. 실제 개장 확인이나 신규 시세 요청은 하지 않는다."""
+    from trader.kernel.config import market_hours
+    from trader.kernel.config.time import MARKET_TZ
+
+    now = _deps(request).now()
+    return {
+        "checked_at": now.isoformat(),
+        "basis": "regular_calendar_rules",
+        "markets": {
+            market: {
+                "schedule_open": market_hours.is_open(market, now),
+                "local_date": now.astimezone(tz).date().isoformat(),
+                "timezone": str(tz),
+                "holiday_verified": False,
+            }
+            for market, tz in MARKET_TZ.items()
+        },
+    }
+
+
 @router.get("/health")
 def health_view(request: Request, live: int = Query(0, ge=0, le=1)) -> dict:
     """운영 점검 결과. 기본은 데몬 캐시(신선할 때), `?live=1` 이면 지금 직접 판정."""

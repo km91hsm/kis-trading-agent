@@ -1,5 +1,5 @@
 // 「시스템」 화면 — 페이지 4개(generated nav.ts 의 system.pages): 상태 `/system`(헬스·데몬·사용량) · 잡 `/system/jobs`(잡 큐·실행 기록)
-// · 기능 `/system/features`(국면·저장소·단타·파생) · 관리 `/system/admin`(설정·연결 키·쓰기 토큰·조작 이력).
+// · 기능 `/system/features`(국면·데이터 수집·단타·파생) · 관리 `/system/admin`(설정·연결 키·쓰기 토큰·조작 이력).
 // 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다. 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목),
 // 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
@@ -8,10 +8,8 @@ import { FoLegs } from "./FoLegs";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
 import { Chip } from "../../components/Chip";
-import { Confirm } from "../../components/Confirm";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
-import { errorText, postJson } from "../../lib/api";
 import { fmtPct, fmtWhen } from "../../lib/format";
 import { termLabel } from "../../lib/glossary";
 import { ControlLog } from "./ControlLog";
@@ -24,6 +22,7 @@ import { Secrets } from "./Secrets";
 import { SettingsPanel } from "./SettingsPanel";
 import { TokenPanel } from "./TokenPanel";
 import { Usage } from "./Usage";
+import { SavetickerStatus } from "./SavetickerStatus";
 import type { FoAccount, FoResp, RegimeMarket, RegimeResp, SavetickerResp, ScalpResp } from "./system.ts";
 
 const SECTIONS = [
@@ -33,7 +32,7 @@ const SECTIONS = [
   { id: "runs", label: "실행 기록" },
   { id: "usage", label: "사용량" },
   { id: "regime", label: "국면" },
-  { id: "saveticker", label: "저장소" },
+  { id: "saveticker", label: "데이터 수집" },
   { id: "scalp", label: "단타" },
   { id: "fo", label: "파생" },
   { id: "settings", label: "설정" },
@@ -76,73 +75,6 @@ const SCALP_COLUMNS: Column<ScalpMarketRow>[] = [
   { key: "halted", label: "상태", width: "25%", align: "chip", render: scalpChip },
 ];
 
-const BACKEND_LABEL: Record<string, string> = { extension: "Chrome 확장", playwright: "자동 브라우저(Playwright)" };
-const SERVICE_STATE: Record<string, { text: string; tone: "ok" | "warn" | "fail" | "muted" }> = {
-  running: { text: "실행 중", tone: "ok" },
-  stopped: { text: "멈춤", tone: "warn" },
-  failed: { text: "실패", tone: "fail" },
-};
-
-function savetickerState(s: SavetickerResp): { text: string; tone: "ok" | "warn" | "fail" | "muted" } {
-  if (s.blocked) return { text: "막힘", tone: "fail" };
-  if (!s.configured) return { text: "설정 안 됨", tone: "muted" };
-  const st = s.service?.state;
-  if (st && SERVICE_STATE[st]) return SERVICE_STATE[st];
-  if (st) return { text: st, tone: s.health === "ok" ? "ok" : "warn" };
-  return { text: "상태 없음", tone: "warn" };
-}
-
-function SavetickerStatus({ s }: { s: SavetickerResp }) {
-  const [note, setNote] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const restart = async () => {
-    setConfirming(false);
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await postJson<{ ok: boolean; note: string | null }>("/system/saveticker/restart", null);
-      setNote(r.note || "다시 시작을 요청했습니다 — 데몬이 1분 안에 처리합니다");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const state = savetickerState(s);
-  return (
-    <>
-      <Stats
-        cols={4}
-        items={[
-          { label: "상태", value: <Chip tone={state.tone}>{state.text}</Chip>, num: false },
-          { label: "서비스", value: s.service?.state ? (SERVICE_STATE[s.service.state]?.text ?? s.service.state) : "—", sub: s.service?.at ? fmtWhen(s.service.at) : undefined, num: false },
-          { label: "수집 방식", value: BACKEND_LABEL[s.backend] ?? s.backend, num: false },
-          { label: "마지막 성공", value: fmtWhen(s.last_success_at) },
-        ]}
-      />
-      {s.reason_text ? <p className="perf-note">{s.reason_text}</p> : null}
-      <button type="button" className="btn" disabled={busy || !s.configured} onClick={() => setConfirming(true)}>
-        다시 시작
-      </button>
-      {note ? <p className="perf-note">{note}</p> : null}
-      {error ? (
-        <p className="data-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <Confirm
-        open={confirming}
-        title="저장소 수집 다시 시작"
-        body={<p>수집 서비스를 다시 시작하도록 데몬에 요청합니다. 쌓인 데이터는 그대로입니다.</p>}
-        onConfirm={() => void restart()}
-        onClose={() => setConfirming(false)}
-      />
-    </>
-  );
-}
-
 export function System({ page }: { page: SystemPage }) {
   const pages = screenPages("system");
   const label = pages.find((p) => p.id === page)?.label ?? "";
@@ -174,7 +106,7 @@ export function System({ page }: { page: SystemPage }) {
       </FeatureStatus>
     ),
     saveticker: (
-      <FeatureStatus<SavetickerResp> path="/system/saveticker" keys={["daemon"]} what="저장소">
+      <FeatureStatus<SavetickerResp> path="/system/saveticker" keys={["daemon"]} what="데이터 수집">
         {(s) => <SavetickerStatus s={s} />}
       </FeatureStatus>
     ),

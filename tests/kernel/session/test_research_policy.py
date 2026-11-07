@@ -145,6 +145,15 @@ def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
 
     def fake(cmd, **kw):
         data = json.loads(kw["input"].split("\n", 1)[1])
+        import hashlib
+
+        digest = hashlib.sha256(
+            json.dumps(
+                data["input_context"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        receipts = [json.loads(path.read_text()) for path in (d / "input_receipts").glob("*.json")]
+        assert any(row["context_hash"] == digest and row["provider"] == "codex" for row in receipts)
         if data["round"] == 0:
             assert data["opponent_previous"] is None and data["own_previous"] is None
         else:
@@ -216,18 +225,34 @@ def test_second_rebuttal_round_rejects_missing_or_duplicate_replies(conn, tmp_pa
     seed(tmp_path)
     previous = {}
     for who, other in (("bull", "bear"), ("bear", "bull")):
-        previous[who] = ok_turn(who, 1, issues=[{
-            "issue_id": f"{who}:growth", "topic": "성장", "claim": "합성 근거의 불확실성",
-            "evidence": ["technical.indicators"],
-        }], rebuttals=["근거를 검토함"], responses=[{
-            "issue_id": f"{other}:growth", "response": "성장 전망은 실적 확인이 필요함",
-            "evidence": ["technical.indicators"],
-        }])
+        previous[who] = ok_turn(
+            who,
+            1,
+            issues=[
+                {
+                    "issue_id": f"{who}:growth",
+                    "topic": "성장",
+                    "claim": "합성 근거의 불확실성",
+                    "evidence": ["technical.indicators"],
+                }
+            ],
+            rebuttals=["근거를 검토함"],
+            responses=[
+                {
+                    "issue_id": f"{other}:growth",
+                    "response": "성장 전망은 실적 확인이 필요함",
+                    "evidence": ["technical.indicators"],
+                }
+            ],
+        )
         write_checkpoint(tmp_path, f"20_debate_r1_{who}", checkpoint_payload(previous[who]))
     turn = {**previous[side], "round": 2, "replies": []}
     assert "재답변 coverage" in p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, turn)
-    reply = {"issue_id": f"{side}:growth", "response": "전망과 실적을 구분하여 확신을 낮춤",
-             "evidence": ["technical.indicators"]}
+    reply = {
+        "issue_id": f"{side}:growth",
+        "response": "전망과 실적을 구분하여 확신을 낮춤",
+        "evidence": ["technical.indicators"],
+    }
     turn["replies"] = [reply, reply]
     assert "재답변 coverage" in p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, turn)
     turn["replies"] = [reply]

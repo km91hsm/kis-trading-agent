@@ -405,3 +405,6 @@
 }
 .empty-title { font-weight: 500; }
 .empty-body { font-size: var(--text-xs); }
+.skip-link { position: fixed; left: var(--space-4); top: var(--space-2); z-index: calc(var(--z-overlay) + 1); padding: var(--space-3) var(--space-4); border-radius: var(--radius); color: var(--accent-fg); background: var(--accent); transform: translateY(-200%); }
+.skip-link:focus-visible { transform: translateY(0); }
+#main-content { scroll-margin-top: calc(var(--bar) + var(--space-3)); }

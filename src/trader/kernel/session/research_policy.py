@@ -12,7 +12,7 @@ from trader.kernel.config import KST, CodexDebateSettings
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger.control import get_flag
 from trader.kernel.registry.types import ResearchSpec
-from trader.kernel.session import codex, tooling
+from trader.kernel.session import codex, input_receipts, tooling
 from trader.kernel.session.run_store import (
     checkpoint_payload,
     list_checkpoints,
@@ -256,6 +256,14 @@ def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel
         if not 0 <= round_no <= policy["rounds"]:
             return {"ok": False, "error": "고정 정책의 라운드 범위를 벗어났습니다"}
         _bind(ctx.conn, d, scope, policy)
+        if isinstance(data.get("input_context"), dict):
+            input_receipts.record(
+                d,
+                data["input_context"],
+                stage=f"{scope.scope}:researcher:r{round_no}:bear",
+                provider="codex",
+                recorded_at=ctx.now().isoformat(),
+            )
         result = codex.run_turn(
             ctx.conn,
             settings=ctx.settings,

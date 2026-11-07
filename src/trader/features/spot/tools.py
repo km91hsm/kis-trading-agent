@@ -31,7 +31,7 @@ from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import calls, research_policy, runner, tooling
+from trader.kernel.session import calls, input_receipts, research_policy, runner, tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -535,6 +535,14 @@ def checkpoint_read(
     if data is None:
         return {"ok": False, "error": f"체크포인트 없음: {stage}"}
     if section is None:
+        if stage == "00_inputs":
+            input_receipts.record(
+                _dir(ctx, ticker, market, date),
+                data,
+                stage="checkpoint:00_inputs",
+                provider=None,
+                recorded_at=ctx.now().isoformat(),
+            )
         return {"ok": True, "data": data}
     if stage == "00_inputs" and section == "trader_context":
         return {"ok": True, "data": trader_context(ctx, market, date, ticker, data)}
@@ -555,7 +563,16 @@ def checkpoint_read(
         }
         if section in ("fundamental", "sentiment"):  # 에이전트 md: "함께 오는 quote 는 현재가다"
             out["quote"] = (body.get("technical") or {}).get("quote")
-    return {"ok": True, "data": _shrink(out, BUNDLE_LIMIT_BYTES)}
+    final = _shrink(out, BUNDLE_LIMIT_BYTES)
+    if isinstance(final, dict) and isinstance(final.get("input_context"), dict):
+        input_receipts.record(
+            _dir(ctx, ticker, market, date),
+            final["input_context"],
+            stage=f"analyst:{section}",
+            provider=None,
+            recorded_at=ctx.now().isoformat(),
+        )
+    return {"ok": True, "data": final}
 
 
 # --- checkpoint write ---------------------------------------------------------------
@@ -760,7 +777,16 @@ def checkpoint_bundle(
             "own_previous": own.model_dump() if own else None,
             "opponent_previous": opp.model_dump() if opp else None,
         }
-        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
+        result = tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
+        if result["ok"] and isinstance(result["data"].get("input_context"), dict):
+            input_receipts.record(
+                d,
+                result["data"]["input_context"],
+                stage=f"researcher:r{round}:{side}",
+                provider=None,
+                recorded_at=ctx.now().isoformat(),
+            )
+        return result
     if kind == "trader":
         if _latest_decision_stage(d) is None:
             if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
@@ -781,7 +807,16 @@ def checkpoint_bundle(
             "context": trader_context(ctx, market, date, ticker, inputs),
         }
         data["context"]["evidence_stats"] = evidence_stats(reports)  # evidence 를 떼기 전에 센다
-        return {"ok": True, "data": _shrink(data, BUNDLE_LIMIT_BYTES, drop_evidence=True)}
+        final = _shrink(data, BUNDLE_LIMIT_BYTES, drop_evidence=True)
+        if isinstance(final.get("input_context"), dict):
+            input_receipts.record(
+                d,
+                final["input_context"],
+                stage="trader",
+                provider=None,
+                recorded_at=ctx.now().isoformat(),
+            )
+        return {"ok": True, "data": final}
     return {"ok": False, "error": f"알 수 없는 kind: {kind} (researcher|trader)"}
 
 

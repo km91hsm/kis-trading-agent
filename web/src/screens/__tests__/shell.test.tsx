@@ -27,6 +27,17 @@ function app(path = "/") {
 
 const ok = { "GET /api/system/health": fixtureHealth(), "GET /api/system/usage": fixtureUsage() };
 
+test("본문 바로가기는 키보드 초점을 주 콘텐츠로 이동한다", async () => {
+  fake = installFakeFetch(ok);
+  const { container } = app();
+  await flush();
+  const skip = container.querySelector<HTMLAnchorElement>('a.skip-link')!;
+  expect(skip?.textContent).toBe("본문으로 바로가기");
+  expect(skip?.getAttribute("href")).toBe("#main-content");
+  act(() => skip.click());
+  expect(document.activeElement).toBe(container.querySelector("main"));
+});
+
 beforeEach(() => {
   clearResourceCache();
   setEventsClient(stubClient);

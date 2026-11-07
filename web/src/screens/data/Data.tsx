@@ -11,6 +11,7 @@ import { ChartView } from "./ChartView";
 import { Features } from "./Features";
 import { News } from "./News";
 import { MarketActivity } from "./MarketActivity";
+import { MacroOverview } from "./MacroOverview";
 import { Themes } from "./Themes";
 import { Watchlist } from "./Watchlist";
 
@@ -31,6 +32,9 @@ export function useMarket(): [Market, (m: Market) => void] {
           next.delete("page"); // 시장을 바꾸면 1쪽부터, 종목 필터도 뜻이 없다
           next.delete("epage");
           next.delete("ticker");
+          next.delete("exchange");
+          next.delete("activity_q");
+          next.delete("apage");
           return next;
         },
         { replace: true },
@@ -56,8 +60,21 @@ export function MarketSegment() {
 export type DataPage = (typeof NAV.data.pages)[number]["id"];
 type SectionId = (typeof NAV.data.items)[number]["id"];
 
+function MarketData() {
+  const [market] = useMarket();
+  const [params] = useSearchParams();
+  return <>
+    <MacroOverview market={market} />
+    <MarketActivity key={market} />
+    <div id="stock-chart" className="stock-chart-section">
+      <h3>종목 차트</h3>
+      <ChartView key={`${market}:${params.get("ticker") ?? ""}:${params.get("exchange") ?? ""}`} />
+    </div>
+  </>;
+}
+
 const SECTIONS: Record<SectionId, { title: string; body: ReactNode }> = {
-  quotes: { title: "시세·차트", body: <><MarketActivity /><ChartView /></> },
+  quotes: { title: "시장 데이터", body: <MarketData /> },
   news: { title: "뉴스·공시", body: <News /> },
   themes: { title: "테마", body: <Themes /> },
   watchlist: { title: "감시목록", body: <Watchlist /> },

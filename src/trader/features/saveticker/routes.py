@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Request
 from trader.features.saveticker import automation
 from trader.features.saveticker.paths import credentials_path, home
 from trader.features.saveticker.restart import EXTENSION_NOTE, RESTART_FLAG
+from trader.features.saveticker.web_status import read_status
 from trader.kernel.ledger import control
 from trader.kernel.web.auth import actor_of, require_same_origin, require_token
 
@@ -29,10 +30,10 @@ system_saveticker_router = APIRouter(prefix="/system", tags=["system"])
 
 
 @system_saveticker_router.get("/saveticker")
-def saveticker_status() -> dict:
+def saveticker_status(request: Request) -> dict:
     """수집기 상태: 계정 파일 유무(확장 모드는 계정 불필요)·서비스 상태·멈춘 이유·작업별 상태·
     쉬는 작업·마지막 수집 시각."""
-    state = automation.status(home())
+    state = read_status(home(), now=request.app.state.deps.now())
     return {
         "configured": credentials_path().is_file() or state.get("backend") == "extension",
         **state,

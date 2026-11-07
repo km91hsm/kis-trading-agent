@@ -55,6 +55,8 @@ export function ChartView() {
   const [market] = useMarket();
   const [sp] = useSearchParams();
   const deep = (sp.get("ticker") ?? "").trim(); // 뉴스 「차트 보기」 딥링크
+  const requestedExchange = sp.get("exchange");
+  const deepExchange = market === "US" && ["NAS", "NYS", "AMS"].includes(requestedExchange ?? "") ? requestedExchange : null;
   const [text, setText] = useState(deep);
   const [q, setQ] = useState(deep);
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -72,8 +74,8 @@ export function ChartView() {
   useEffect(() => {
     if (!deep || q !== deep || !search.data || picked) return;
     const hit = search.data.find((h) => h.ticker === deep) ?? null;
-    setPicked(hit ? { ticker: hit.ticker, market: hit.market === "US" ? "US" : "KR", name: hit.name, exchange: hit.exchange } : { ticker: deep, market, name: null, exchange: null });
-  }, [deep, q, search.data, picked, market]);
+    setPicked(hit ? { ticker: hit.ticker, market: hit.market === "US" ? "US" : "KR", name: hit.name, exchange: hit.exchange ?? deepExchange } : { ticker: deep, market, name: null, exchange: deepExchange });
+  }, [deep, deepExchange, q, search.data, picked, market]);
 
   return (
     <>

@@ -104,3 +104,14 @@ def test_read_route_does_not_construct_or_call_broker(project, monkeypatch):
     assert response.status_code == 200
     assert response.json()["rankings"]["turnover"][0]["turnover"] == "123"
     assert c.get("/api/quotes/activity", params={"market": "ALL"}).status_code == 400
+
+
+def test_activity_view_explains_disabled_collector_without_starting_it(project):
+    from tests.features.conftest import web_client
+
+    c = web_client(project, [FEATURE], now=OPEN)
+    c.app.state.deps.settings.quotes.activity_enabled = False
+    got = c.get("/api/quotes/activity", params={"market": "US"}).json()
+    assert got["collection_state"] == "disabled"
+    assert got["enabled"] is False
+    assert got["coverage"]["failed"] == []

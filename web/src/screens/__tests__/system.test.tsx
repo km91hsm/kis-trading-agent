@@ -403,7 +403,7 @@ describe("시스템 화면", () => {
     expect(s.querySelector('[role="alert"]')?.textContent).toContain("이 PC 에서만");
   });
 
-  test("저장소 「다시 시작」 → Confirm 뒤 POST /system/saveticker/restart, 응답 note 표시; Stats 4칸", async () => {
+  test("데이터 수집 「다시 시작」 → Confirm 뒤 POST /system/saveticker/restart, 응답 note 표시; Stats 4칸", async () => {
     tokenStore.set("tok");
     await mount(routes());
     const st = section("saveticker");
@@ -414,6 +414,47 @@ describe("시스템 화면", () => {
     await flush();
     expect(callsTo("/system/saveticker/restart", "POST")).toHaveLength(1);
     expect(st.textContent).toContain("Chrome 확장 팝업에서 다시 시작하세요");
+  });
+
+  test("정상 healthy/collecting 수집은 한글과 정상색으로 표시한다", async () => {
+    await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({ health: "healthy", service: { state: "collecting", at: null, reason: null } }) }));
+    const st = section("saveticker");
+    expect(st.querySelector("h2")?.textContent).toBe("데이터 수집");
+    expect(st.querySelector(".chip")?.textContent).toBe("정상 · 수집 중");
+    expect(st.querySelector(".chip")?.getAttribute("data-tone")).toBe("ok");
+    expect(st.textContent).not.toContain("collecting");
+  });
+
+  test.each([
+    ["waiting_chrome", "waiting_chrome", false, "대기"],
+    ["auth_required", "blocked", true, "로그인 필요"],
+    ["stopped", "fault", false, "중단"],
+    ["error", "fault", false, "오류"],
+  ])("수집 서비스 %s는 사람이 이해할 상태로 표시한다", async (state, health, blocked, label) => {
+    await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({ health, blocked, service: { state, at: null, reason: null } }) }));
+    expect(section("saveticker").querySelector(".chip")?.textContent).toContain(label);
+  });
+
+  test("수집 응답·유효 자료·값 변화·0건을 분리하고 기록된 항목만 집계한다", async () => {
+    await mount(routes({ "GET /api/system/saveticker": fixtureSaveticker({
+      summary: { state: "partial", recorded: 2, normal: 1, partial: 0, empty: 1, delayed: 0, error: 0, waiting: 0, stopped: 0, login_required: 0, unknown: 0, note: null },
+      recovery: { state: "none", text: "복구 대기 없음", lanes: [] },
+      streams: [
+        { id: "news_all", label: "뉴스 · 전체", state: "normal", status: "ok", count: 12, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:59:30Z", last_change_at: "2026-11-05T00:58:00Z", change_state: "unchanged", error: null, recovery: null },
+        { id: "market_turnover_live", label: "증시 · 거래대금", state: "empty", status: "partial", count: 0, last_attempt_at: "2026-11-05T00:59:30Z", last_response_at: "2026-11-05T00:59:30Z", last_success_at: "2026-11-05T00:57:00Z", last_change_at: null, change_state: "empty", error: null, recovery: null },
+      ],
+    }) }));
+    const st = section("saveticker");
+    expect(st.textContent).toContain("기록된 항목 2개");
+    expect(st.textContent).not.toContain("19/20");
+    expect(st.textContent).toContain("응답 성공과 값 변화는 다릅니다");
+    const heads = Array.from(st.querySelectorAll("table thead th")).map((h) => h.textContent);
+    expect(heads).toEqual(["수집 항목", "상태", "최근 시도", "최근 응답", "유효 자료", "값 변화", "최근 건수"]);
+    const rows = st.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("변화 없음");
+    expect(rows[1].textContent).toContain("0건");
+    expect(rows[1].textContent).not.toContain("변화 없음");
   });
 
   test("기능 라우트가 404 면 「기능 없음」", async () => {
