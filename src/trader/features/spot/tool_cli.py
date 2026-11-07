@@ -142,9 +142,7 @@ def checkpoint_write_cmd(
     def go(ctx: tools.ToolContext, **kw) -> dict:
         return tools.checkpoint_write(ctx, payload=_payload(json_text), **kw)
 
-    _run(
-        go, ticker=ticker, market=market, date=date, stage=stage, agent=agent, model=model
-    )
+    _run(go, ticker=ticker, market=market, date=date, stage=stage, agent=agent, model=model)
 
 
 @checkpoint_app.command("bundle")
@@ -166,6 +164,17 @@ def checkpoint_bundle_cmd(
         round=round,
         side=side,
     )
+
+
+@checkpoint_app.command("codex-turn")
+def codex_turn_cmd(
+    ticker: str = typer.Option(..., "--ticker"),
+    market: str = typer.Option(..., "--market"),
+    date: str = typer.Option(..., "--date"),
+    round: int = typer.Option(..., "--round"),
+) -> None:
+    """고정 정책의 Codex bear 호출·검증·증명 기록."""
+    _run(tools.codex_turn, ticker=ticker, market=market, date=date, round=round)
 
 
 @checkpoint_app.command("summarize")

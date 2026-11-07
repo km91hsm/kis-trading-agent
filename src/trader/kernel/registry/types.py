@@ -103,6 +103,8 @@ class SessionKind:
     # True 면 같은 운영일 같은 종목이 세션 타임아웃으로 `llm.timeout_retry_max` 번 실패한 뒤
     # 다시 띄우지 않는다(단일 종목 세션만). 커널은 세션 이름이 아니라 이 선언만 본다
     retry_guard: bool = False
+    # (ctx, spec) -> [(checkpoint directory, research scope)]. Resume는 선언하지 않는다.
+    research_targets: Callable[..., list[tuple[Path, str]]] | None = None
 
 
 @dataclass(frozen=True)

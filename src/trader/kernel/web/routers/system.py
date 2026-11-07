@@ -241,3 +241,36 @@ def usage_throttle(request: Request, body: ThrottleBody) -> dict:
             )  # fmt: skip
         enabled, source = usage.throttle_enabled(conn, deps.settings)
     return {"enabled": enabled, "source": source}
+
+
+@settings_router.get("/settings/codex-debate")
+def codex_debate_status(request: Request) -> dict:
+    from trader.kernel.session import research_policy
+
+    deps = _deps(request)
+    with closing(deps.conn_factory()) as conn:
+        return research_policy.status(conn, deps.settings, now=deps.now())
+
+
+@settings_router.patch("/settings/codex-debate", dependencies=WRITE)
+def codex_debate_update(request: Request, body: ThrottleBody) -> dict:
+    from trader.kernel.session import research_policy
+
+    deps = _deps(request)
+    with closing(deps.conn_factory()) as conn:
+        old = get_flag(conn, research_policy.FLAG)
+        if body.enabled is None:
+            delete_flag(conn, research_policy.FLAG)
+        else:
+            set_flag(conn, research_policy.FLAG, body.enabled)
+        if old != body.enabled:
+            log_change(
+                conn,
+                channel="web",
+                actor=actor_of(request),
+                key=research_policy.FLAG,
+                old=old,
+                new=body.enabled,
+                at=deps.now().isoformat(),
+            )
+        return research_policy.status(conn, deps.settings, now=deps.now())

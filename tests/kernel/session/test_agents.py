@@ -1,5 +1,6 @@
 """kernel/session/agents: md 로더·agents_json·orchestrator_prompt."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -152,8 +153,18 @@ def test_common_rules_strips_trailing_period_before_or_after_parenthesis(tmp_pat
     b.write_text(f"# 공통 규칙\n{rule} (보충 B).\n{tail}\n", encoding="utf-8")
     c = tmp_path / "c.md"
     c.write_text(f"# 공통 규칙\n{rule}.\n{tail}\n", encoding="utf-8")
-    got = {
-        tuple(ag.common_rules(ag.load_agent(AgentDef(p.stem, p)).prompt)) for p in (a, b, c)
-    }
+    got = {tuple(ag.common_rules(ag.load_agent(AgentDef(p.stem, p)).prompt)) for p in (a, b, c)}
     assert len(got) == 1
     assert next(iter(got))[0] == rule
+
+
+def test_agents_use_current_schema_when_markdown_contains_obsolete_schema():
+    from trader.kernel.session.schemas import DebateTurn
+
+    original = (
+        '역할\n\n스키마: {"type":"object","properties":{"obsolete":{"type":"string"}},'
+        '"additionalProperties":false}\n'
+    )
+    out = ag.with_schema(original, DebateTurn)
+    schema = json.loads(out.split("스키마: ", 1)[1].splitlines()[0])
+    assert "issues" in schema["properties"] and "obsolete" not in schema["properties"]

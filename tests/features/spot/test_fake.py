@@ -226,3 +226,15 @@ def test_resume_kind_declaration():
     assert FEATURE.session_kinds == (ANALYZE, RESUME)
     p = load_agent(by_name(FEATURE.agents)["orchestrator"]).prompt
     assert "## resume 모드" in p and "31_decision_r<n>" in p
+
+
+def test_fake_session_with_codex_enabled_never_claims_or_launches_codex(lane_ctx, monkeypatch):
+    from trader.kernel.session import codex
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    lane_ctx.settings.llm.codex_debate.enabled = True
+    monkeypatch.setattr(codex, "run_turn", lambda *a, **kw: pytest.fail("FAKE launched Codex"))
+    _inputs()
+    res = _run(lane_ctx)
+    assert res.ok and res.fake
+    assert lane_ctx.conn.execute("SELECT COUNT(*) FROM research_calls").fetchone()[0] == 0

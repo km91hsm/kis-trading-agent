@@ -63,9 +63,22 @@ class UsageProbe(BaseModel):
     skip_if_recent_min: int = Field(5, ge=0, le=120)
 
 
+class CodexDebateSettings(BaseModel):
+    """다음 새 연구부터 적용되는 Codex bear 참여 설정."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    model: str | None = None
+    timeout_s: int = Field(180, ge=1, le=1800)
+    daily_call_cap: int = Field(80, ge=1, le=10000)
+    bin: str | None = None
+
+
 class LlmSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    codex_debate: CodexDebateSettings = Field(default_factory=CodexDebateSettings)
     budget_usd: float = 5.0
     # 세션 타임아웃(초). 2026-10-29 운영 점검: 600초에서 분석 세션 35% 가 시간 초과(성공 최장 588초)
     timeout_s: int = 900

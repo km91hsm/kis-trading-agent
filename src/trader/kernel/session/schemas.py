@@ -62,6 +62,23 @@ class StanceChange(BaseModel):
     evidence: list[str] = Field(max_length=5)
 
 
+class DebateIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_id: str = Field(pattern=r"^(bull|bear):[A-Za-z0-9_\-]{1,40}$")
+    topic: str = Field(min_length=1, max_length=150)
+    claim: str = Field(min_length=1, max_length=600)
+    evidence: list[str] = Field(min_length=1, max_length=5)
+
+
+class IssueResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_id: str
+    response: str = Field(min_length=1, max_length=600)
+    evidence: list[str] = Field(min_length=1, max_length=5)
+
+
 class DebateTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,6 +92,9 @@ class DebateTurn(BaseModel):
     conviction: float = Field(ge=0, le=1)
     what_would_change_my_mind: list[str]
     stance_change: StanceChange | None = None
+    issues: list[DebateIssue] = Field(default_factory=list, max_length=5)
+    responses: list[IssueResponse] = Field(default_factory=list, max_length=5)
+    replies: list[IssueResponse] = Field(default_factory=list, max_length=5)
 
 
 class CallMeta(BaseModel):
@@ -83,6 +103,12 @@ class CallMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent: str
+    provider: Literal["claude", "codex"] = "claude"
+    call_id: int | None = None
+    policy_hash: str | None = None
+    input_hash: str | None = None
+    prompt_hash: str | None = None
+    schema_hash: str | None = None
     model: str | None = None
     session_id: str | None = None
     cost_usd: float | None = None

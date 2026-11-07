@@ -18,6 +18,7 @@ from trader.features.fo.fake import run_fake_fo
 from trader.features.fo.schemas import FoDecisionEnvelope
 from trader.kernel.registry.types import AgentDef, SessionKind
 from trader.kernel.session.agents import ORCHESTRATOR
+from trader.kernel.session.run_store import market_dir
 from trader.kernel.session.schemas import AnalystReport, DebateTurn
 
 FO_AGENTS = (
@@ -38,6 +39,7 @@ AGENTS = (FO_TRADER, FO_ORCHESTRATOR)
 
 FO = SessionKind(
     kind="fo",
+    research_targets=lambda ctx, spec: [(market_dir(spec.date, spec.market, ctx.state), "fo")],
     agents=FO_AGENTS,
     prompt_section="fo",
     schemas=(AnalystReport, DebateTurn, FoDecisionEnvelope),

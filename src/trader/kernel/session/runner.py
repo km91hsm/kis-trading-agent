@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -33,7 +33,7 @@ from trader.kernel.platform import bundle, paths, procs
 from trader.kernel.platform import claude_bin as claude_bin_mod
 from trader.kernel.registry.types import AgentDef, SessionKind
 from trader.kernel.session import agents as agents_mod
-from trader.kernel.session import calls, usage
+from trader.kernel.session import calls, research_policy, usage
 
 logger = logging.getLogger("trader.session")
 
@@ -232,6 +232,7 @@ def run_claude(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
     timeout = kw.pop("timeout", None)
     stdin = kw.pop("input", None)
     cancel: threading.Event | None = kw.pop("cancel", None)
+    guard_parent_signal = kw.pop("terminate_on_parent_signal", False)
     kw.pop("capture_output", None)
     posix = os.name == "posix"
     proc = subprocess.Popen(
@@ -245,28 +246,43 @@ def run_claude(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
         **({} if posix else {"creationflags": WIN_NEW_GROUP_NO_WINDOW}),
         **kw,
     )
-    deadline = None if timeout is None else time.monotonic() + float(timeout)
-    pending_input = stdin
-    while True:
-        step = CANCEL_POLL_S if cancel is not None else None
-        if deadline is not None:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                terminate_group(proc)
-                raise subprocess.TimeoutExpired(cmd, timeout or 0)
-            step = left if step is None else min(step, left)
-        try:
-            out, err = proc.communicate(pending_input, timeout=step)
-            break
-        except subprocess.TimeoutExpired:
-            pending_input = None  # 첫 호출에서 stdin 은 이미 보냈다
-            if cancel is not None and cancel.is_set():
-                terminate_group(proc)
-                raise SessionCancelled(cmd, timeout or 0) from None
-            if deadline is not None and time.monotonic() >= deadline:
-                terminate_group(proc)
+    old_handler = None
+    if guard_parent_signal and threading.current_thread() is threading.main_thread():
+        old_handler = signal.getsignal(signal.SIGTERM)
+
+        def on_parent_termination(signum, frame):
+            terminate_group(proc)
+            raise SessionCancelled(cmd, timeout or 0)
+
+        signal.signal(signal.SIGTERM, on_parent_termination)
+    try:
+        deadline = None if timeout is None else time.monotonic() + float(timeout)
+        pending_input = stdin
+        while True:
+            step = CANCEL_POLL_S if cancel is not None else None
+            if deadline is not None:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    terminate_group(proc)
+                    raise subprocess.TimeoutExpired(cmd, timeout or 0)
+                step = left if step is None else min(step, left)
+            try:
+                out, err = proc.communicate(pending_input, timeout=step)
+                break
+            except SessionCancelled:
                 raise
-    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+            except subprocess.TimeoutExpired:
+                pending_input = None  # 첫 호출에서 stdin 은 이미 보냈다
+                if cancel is not None and cancel.is_set():
+                    terminate_group(proc)
+                    raise SessionCancelled(cmd, timeout or 0) from None
+                if deadline is not None and time.monotonic() >= deadline:
+                    terminate_group(proc)
+                    raise
+        return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+    finally:
+        if old_handler is not None:
+            signal.signal(signal.SIGTERM, old_handler)
 
 
 def _guard_repeated_timeouts(conn, spec: SessionSpec, kind: SessionKind, settings: Any) -> None:
@@ -348,6 +364,17 @@ def run_session(
         raise PipelineError(
             f"오늘 {extra_cap[0]} 세션 상한({extra_cap[1]})에 도달해 세션을 띄우지 않습니다"
         )
+    research = []
+    if not fake and kind.research_targets is not None:
+        for directory, scope in kind.research_targets(ctx, spec):
+            policy = research_policy.start(conn, settings, directory, scope, now=now())
+            research.append((directory, scope, policy))
+    codex_required = any(p["enabled"] for _, _, p in research)
+    effective_kind = (
+        replace(kind, agents=tuple(a for a in kind.agents if not a.endswith("researcher-bear")))
+        if codex_required
+        else kind
+    )
     run_id = runs.start(conn, kind.runs_kind, spec.market)
     started = now()
     tickers = ",".join(t["ticker"] for t in spec.tickers)
@@ -391,15 +418,69 @@ def run_session(
         cwd = Path(tempfile.mkdtemp(prefix="trader-claude-"))
         agents_file = cwd / "agents.json"
         agents_file.write_text(
-            json.dumps(agents_mod.agents_json(kind, agents, settings.models), ensure_ascii=False),
+            json.dumps(
+                agents_mod.agents_json(effective_kind, agents, settings.models), ensure_ascii=False
+            ),
             encoding="utf-8",
         )
         prompt = agents_mod.orchestrator_prompt(
             kind,
             agents,
-            debate_rounds=getattr(settings, "debate_rounds", 0),
+            debate_rounds=max(p["rounds"] for _, _, p in research)
+            if codex_required
+            else getattr(settings, "debate_rounds", 0),
             checkpoint_names=checkpoint_names,
         )
+        if codex_required:
+            scopes = {scope for _, scope, policy in research if policy["enabled"]}
+            commands = {
+                "spot": (
+                    "checkpoint codex-turn --ticker <ticker> "
+                    "--market <market> --date <date> --round "
+                    "<n>"
+                ),
+                "market": "market codex-turn --market <market> --date <date> --round <n>",
+                "fo": "fo codex-turn --market KR --date <date> --round <n>",
+            }
+            prompt += "\n# 고정된 Codex 토론 정책 (기존 흐름보다 우선)\n"
+            prompt += (
+                "bull은 Claude researcher-bull, bear는 Code"
+                "x 전용 도구다. Claude bear를 생성하거나 저장하지 않는다. "
+            )
+            prompt += (
+                "r0은 양측 독립 의견. r1부터 고정 debate_rounds까지 양측"
+                "이 상대의 이전 라운드를 반박해야 한다. 각 반박 턴 rebuttals는"
+                " 비우지 않는다. "
+            )
+            prompt += (
+                "각 공급자는 자기 issues 1~5개(issue_id는 bull:/be"
+                "ar: 고유ID, topic,claim,evidence=[리포트 sour"
+                "ce_id])를 제시한다. r0 responses/replies는 빈 목"
+                "록. "
+            )
+            prompt += (
+                "r1+는 자신의 쟁점ID를 유지하고 상대 직전 issues의 모든 ID에"
+                " responses(issue_id,response,evidence)로 "
+                "반론한다. r2+는 상대 직전 responses가 지적한 자신의 쟁점 전"
+                "부에 replies로 재답변한다. "
+            )
+            prompt += (
+                "WTI/DXY/미국10년금리 변화가 언제나 주가악재라는 고정규칙은 금지한"
+                "다. 성장/인플레/공급원인, 기대반영, 업종별 상반효과와 반례를 검토한다"
+                ". "
+            )
+            prompt += (
+                "애널리스트 합의라도 토론을 생략하지 않는다. Codex 오류/상한/미완료"
+                "면 중단하고 오류를 보고한다. 재개 세션의 기존 결정은 원래 정책을 유지"
+                "한다.\n"
+            )
+            for scope in scopes:
+                prompt += f"- {scope} bear: {bundle.tool_command()} {commands[scope]}\n"
+            prompt += (
+                "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한"
+                "다. 각 라운드의 bull과 bear 완료 후 다음 라운드, 마지막에 s"
+                "ummarize를 실행한다.\n"
+            )
         session_id = str(uuid.uuid4())
         cmd = build_command(
             spec, kind, settings, bin_path, agents_file, session_id=session_id, prompt=prompt
@@ -480,6 +561,11 @@ def run_session(
         except Exception:  # noqa: BLE001 - 사용률은 부가 정보 — 세션 결과를 막지 않는다
             logger.warning("사용률 기록 실패", exc_info=True)
     try:
+        if not data.get("is_error") and proc.returncode == 0:
+            for directory, scope, policy in research:
+                if policy["enabled"]:
+                    if err := research_policy.completion_error(conn, settings, directory, scope):
+                        return fail(err)
         return _finish_session(conn, call_id, run_id, spec, data, proc, session_id, elapsed_ms)
     except Exception as e:  # noqa: BLE001 - 결과 처리 중 예외에도 running 행을 남기지 않는다
         logger.exception("세션 결과 처리 실패 %s", spec.market)

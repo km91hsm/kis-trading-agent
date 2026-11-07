@@ -88,10 +88,13 @@ def json_schema(model: type) -> str:
 
 
 def with_schema(prompt: str, schema: type | None) -> str:
-    """md 에 스키마 전문이 없으면 정본 모델에서 만들어 덧붙인다 (md 사본은 설명용)."""
-    if schema is None or '"type":"object"' in prompt:
+    """md의 오래된 스키마 사본을 실행 시 정본 모델로 교체한다."""
+    if schema is None:
         return prompt
-    return prompt.rstrip("\n") + "\n\n스키마: " + json_schema(schema) + "\n"
+    canonical = "스키마: " + json_schema(schema)
+    if re.search(r"^스키마: \{.*\}$", prompt, re.MULTILINE):
+        return re.sub(r"^스키마: \{.*\}$", lambda _: canonical, prompt, flags=re.MULTILINE)
+    return prompt.rstrip("\n") + "\n\n" + canonical + "\n"
 
 
 def _def_of(agents: Mapping[str, AgentDef], name: str) -> AgentDef:
