@@ -58,7 +58,7 @@ KIS auth/client/market/broker/ws/fake·`tr_ids`·교차 프로세스 레이트�
 - [x] Task 1: 커널 전제(의존성·paths·bundle·run_store·hooks·DaemonDeps·teardown·디스플레이 skip)
 - [x] Task 2: saveticker 설정·경로·모델·스토어·보고서
 - [x] Task 3: saveticker 파서·플랜·API 계약·네이티브 호스트
-- [x] Task 4: saveticker Chromium·브라우저·감독·자동화
+- [x] Task 4: saveticker Chromium·브라우저·감독·자동화 (2026-11 Playwright 수집기 제거 — Chrome 확장만 남김)
 - [x] Task 5: saveticker 확장 설치·`extensions/saveticker/`·JS 테스트 CI
 - [x] Task 6: saveticker 리더·CLI·데몬 잡·feature·api·README
 - [x] Task 7: ingest 설정(sources·universe·sectors)·템플릿·원장 v3·base

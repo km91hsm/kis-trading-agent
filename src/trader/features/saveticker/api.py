@@ -1,6 +1,6 @@
 """saveticker 공개면. 다른 기능(ingest 등)은 이 모듈만 import 한다."""
 
-from trader.features.saveticker.paths import DEFAULT_DIR, credentials_path, home, resolve_dir
+from trader.features.saveticker.paths import DEFAULT_DIR, home, resolve_dir
 from trader.features.saveticker.reader import (
     JSONL_DAYS,
     NEWS_STREAMS,
@@ -25,7 +25,6 @@ __all__ = [
     "SUMMARY_CHARS",
     "SaveTickerCfg",
     "available",
-    "credentials_path",
     "for_ticker",
     "home",
     "load_cfg",

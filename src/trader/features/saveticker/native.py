@@ -19,8 +19,8 @@ from trader.features.saveticker import dom, jsonfeed
 from trader.features.saveticker.api_jobs import ApiError, BrowserApiSession
 from trader.features.saveticker.models import Capture, Item, ViewInfo
 from trader.features.saveticker.reports import save_pdf
-from trader.features.saveticker.service import View, build_views, lane_for
 from trader.features.saveticker.store import Store, atomic_json
+from trader.features.saveticker.views import View, build_views, lane_for
 from trader.kernel.config import KST
 from trader.kernel.daemon.lock import Lock
 

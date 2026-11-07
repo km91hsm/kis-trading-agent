@@ -1,7 +1,6 @@
-"""데몬 ↔ 세이브티커 수집 서비스: 앱이 켜져 있는 동안 서비스를 띄우고(계정 파일이 있을 때만),
-죽으면 다시, 종료 때 정리. 장애 감시는 텔레그램, 보관 기간 정리는 운영일 1회. 웹 '다시 시작'
-요청(control `saveticker_restart_requested`)은 이 잡이 소비한다(옛
-`test_saveticker_extension_restart_uses_popup_instead_of_legacy_reset` 단언은 여기로)."""
+"""데몬 ↔ 세이브티커 확장 수집 감시: 확장이 등록돼 있을 때만 장애·복구를 텔레그램으로, 보관 기간
+정리는 운영일 1회. 아무 프로세스도 띄우지 않는다. 웹 '다시 시작' 요청(control
+`saveticker_restart_requested`)은 이 잡이 소비해 Chrome 확장 팝업 재개 안내만 보낸다."""
 
 import threading
 from datetime import UTC, datetime
@@ -29,15 +28,6 @@ class Sent:
     def send(self, text, *, escape=True):
         self.msgs.append(text)
         return True
-
-
-class FakeProc:
-    def __init__(self):
-        self.pid = 4242
-        self.code = None
-
-    def poll(self):
-        return self.code
 
 
 @pytest.fixture(autouse=True)
@@ -69,21 +59,22 @@ def _deps(project, *, stop=None):
     )
 
 
+RUNTIME = ("state", "external", "saveticker", "runtime")
+FLAG = "saveticker_restart_requested"
+
+
 def _patch(monkeypatch):
-    spawned, monitored = [], []
-
-    def spawn(argv, *, log, env):
-        spawned.append((argv, log, env))
-        return FakeProc()
-
-    monkeypatch.setattr(job.procs, "spawn_detached", spawn)
-    monkeypatch.setattr(automation, "service_elsewhere", lambda: False)  # 이 PC 의 실제 수집기 무시
+    monitored = []
     monkeypatch.setattr(
         automation,
         "monitor",
         lambda home, *, send: monitored.append(send) or {"health": "healthy", "faults": []},
     )
-    return spawned, monitored
+    return monitored
+
+
+def _register(project):
+    atomic_json(project.joinpath(*RUNTIME) / "bridge-config.json", {"backend": "extension"})
 
 
 def test_job_registered(project):
@@ -94,40 +85,43 @@ def test_job_registered(project):
     (sj,) = jobs
     assert sj.id == "saveticker" and sj.spec.kind == "saveticker"
     assert sj.trigger_kwargs == {"seconds": 60}
+    assert sj.spec.teardown is None  # 띄운 프로세스가 없으니 정리할 것도 없다
 
 
-def test_no_credentials_no_service(project, monkeypatch):
-    spawned, monitored = _patch(monkeypatch)
+def test_unregistered_extension_is_not_monitored(project, monkeypatch):
+    monitored = _patch(monkeypatch)
     out = job.watch(_deps(project), None)
-    assert out["service"] == "계정 파일 없음" and not spawned and not monitored
+    assert out["service"] == "확장 미등록" and not monitored
 
 
-def test_starts_once_and_restarts_when_dead(project, monkeypatch):
-    spawned, monitored = _patch(monkeypatch)
-    (project / "secrets" / "saveticker.env").write_text("x", encoding="utf-8")
+def test_registered_extension_alerts_via_telegram(project, monkeypatch):
+    monitored = _patch(monkeypatch)
+    _register(project)
     deps = _deps(project)
     out = job.watch(deps, None)
-    argv, log, env = spawned[0]
-    assert argv[-2:] == ["saveticker", "service"] and env["TRADER_HOME"] == str(project)
-    assert log == project / "state" / "external" / "saveticker" / "runtime" / "daemon-service.log"
-    assert out["service"].startswith("시작") and monitored
-    assert job.watch(deps, None)["service"] == "실행 중" and len(spawned) == 1
-    job._STATE.proc.code = 1  # 죽었다
-    job.watch(deps, None)
-    assert len(spawned) == 2
+    assert out["service"] == "일반 Chrome 확장 수집 모드" and out["health"] == "healthy"
     # 텔레그램 알림은 messages 한 곳의 문구로
-    monitored[-1]("수집 장애: news_all")
+    monitored[-1]("수집 장애: process:runner")
     assert deps.notifier.msgs[-1].startswith("[세이브티커 수집]")
 
 
 def test_disabled_by_config(project, monkeypatch):
-    spawned, _ = _patch(monkeypatch)
-    (project / "secrets" / "saveticker.env").write_text("x", encoding="utf-8")
+    monitored = _patch(monkeypatch)
+    _register(project)
     (project / "config" / "sources.yaml").write_text(
         "saveticker: {collect: false}\n", encoding="utf-8"
     )
     assert job.watch(_deps(project), None) == {"skipped": "꺼짐"}
-    assert not spawned
+    assert not monitored
+
+
+def test_stop_event_skips_watch(project, monkeypatch):
+    monitored = _patch(monkeypatch)
+    _register(project)
+    stop = threading.Event()
+    stop.set()
+    assert job.watch(_deps(project, stop=stop), None) == {"skipped": "종료 중"}
+    assert not monitored
 
 
 def test_prune_once_per_day(project, monkeypatch):
@@ -142,38 +136,6 @@ def test_prune_once_per_day(project, monkeypatch):
     job.watch(deps, None)
     job.watch(deps, None)
     assert calls == [(NOW.date(), 30)]
-
-
-def test_shutdown_stops_service(project, monkeypatch):
-    stopped = []
-    monkeypatch.setattr(job.procs, "stop_tree", lambda proc, *, grace: stopped.append(grace))
-    deps = _deps(project)
-    job._STATE.proc = FakeProc()
-    job.stop(deps)
-    assert stopped == [automation.STOP_GRACE_S] and job._STATE.proc is None
-    job.stop(deps)  # 없으면 아무 일 없음
-    assert len(stopped) == 1
-
-
-def test_stop_event_skips_start_and_teardown_runs_once(project, monkeypatch):
-    spawned, monitored = _patch(monkeypatch)
-    stopped = []
-    monkeypatch.setattr(job.procs, "stop_tree", lambda proc, *, grace: stopped.append(grace))
-    (project / "secrets" / "saveticker.env").write_text("x", encoding="utf-8")
-    stop = threading.Event()
-    deps = _deps(project, stop=stop)
-    job.watch(deps, None)  # 서비스를 띄운다
-    assert len(spawned) == 1
-    job._STATE.proc.code = 1  # 죽었지만 종료 중이면 다시 띄우지 않는다
-    stop.set()
-    assert job.watch(deps, None) == {"skipped": "종료 중"} and len(spawned) == 1
-    job.stop(deps)
-    job.stop(deps)
-    assert stopped == [automation.STOP_GRACE_S]
-
-
-FLAG = "saveticker_restart_requested"
-RUNTIME = ("state", "external", "saveticker", "runtime")
 
 
 def _request_restart(deps):
@@ -192,57 +154,30 @@ def _flag(deps):
         conn.close()
 
 
-def test_restart_request_clears_blocks_and_flag(project, monkeypatch):
-    """웹 '다시 시작' 요청: 정지·작업 쉬기 기록을 지우고(옛 legacy reset) 플래그를 지운다 —
-    같은 틱에 서비스가 다시 뜬다."""
-    spawned, _ = _patch(monkeypatch)
-    (project / "secrets" / "saveticker.env").write_text("x", encoding="utf-8")
-    runtime = project.joinpath(*RUNTIME)
-    atomic_json(runtime / "service.json", {"state": "blocked", "reason": "restart_limit",
-                                           "at": NOW.isoformat()})  # fmt: skip
+def test_restart_request_points_to_extension_popup(project, monkeypatch):
+    """확장 수집은 Chrome 확장 아이콘에서 재개한다 — 안내만 보내고 플래그를 지운다."""
+    _patch(monkeypatch)
+    _register(project)
     deps = _deps(project)
-    assert job.watch(deps, None)["service"] != "실행 중" and not spawned  # 정지 중이라 안 뜬다
     _request_restart(deps)
     out = job.watch(deps, None)
-    assert out["restart"] == "정지 기록 지움" and _flag(deps) is None
-    assert automation.read(runtime / "service.json")["state"] == "stopped"
-    assert len(spawned) == 1 and out["service"].startswith("시작")
+    assert "Chrome" in out["restart"] and _flag(deps) is None
+    assert any("Chrome" in m for m in deps.notifier.msgs)
     assert "restart" not in job.watch(deps, None)  # 소비했으니 다음 틱엔 없음
 
 
-def test_extension_restart_uses_popup_instead_of_legacy_reset(project, monkeypatch):
-    """확장 백엔드는 Chrome 확장 아이콘에서 재개한다 — 옛 정지 기록 지우기를 하지 않고 안내만
-    보낸 뒤 플래그를 지운다."""
+def test_restart_notice_failure_is_logged_and_flag_still_deleted(project, monkeypatch, caplog):
+    """안내 전송이 실패해도 로그로 남기고 플래그는 지운다 — 매 틱 반복하지 않는다."""
     _patch(monkeypatch)
-    cleared = []
-    monkeypatch.setattr(automation, "clear_blocks", lambda home: cleared.append(home))
-    atomic_json(project.joinpath(*RUNTIME) / "bridge-config.json", {"backend": "extension"})
     deps = _deps(project)
+
+    def boom(text, *, escape=True):
+        raise OSError("전송 실패")
+
+    deps.notifier.send = boom
     _request_restart(deps)
-    out = job.watch(deps, None)
-    assert cleared == [] and _flag(deps) is None
-    assert "Chrome" in out["restart"]
-    assert any("Chrome" in m for m in deps.notifier.msgs)
-
-
-def test_restart_failure_is_logged_and_flag_still_deleted(project, monkeypatch, caplog):
-    """재시작 행동이 실패해도(예: 파일 권한) 실패를 로그·알림으로 남기고 플래그는 지운다 — 매 틱
-    반복하지 않는다. 행동이 끝나기 전 죽으면 플래그가 남아 다음 틱에 다시 한다
-    (clear_blocks 멱등)."""
-    _patch(monkeypatch)
-    calls = []
-
-    def boom(home):
-        calls.append(home)
-        raise PermissionError("runtime 쓰기 거부")
-
-    monkeypatch.setattr(automation, "clear_blocks", boom)
-    deps = _deps(project)
-    _request_restart(deps)
-    with caplog.at_level("ERROR", logger="trader.saveticker"):
+    with caplog.at_level("ERROR", logger="trader.features.saveticker"):
         out = job.watch(deps, None)
-    assert len(calls) == 1 and _flag(deps) is None
-    assert out["restart"].startswith("실패")
+    assert out["restart"].startswith("실패") and _flag(deps) is None
     assert any("다시 시작" in r.getMessage() and r.exc_info for r in caplog.records)
-    assert any("실패" in m for m in deps.notifier.msgs)
-    assert "restart" not in job.watch(deps, None) and len(calls) == 1
+    assert "restart" not in job.watch(deps, None)

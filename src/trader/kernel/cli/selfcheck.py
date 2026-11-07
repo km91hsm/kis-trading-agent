@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import sys
-from pathlib import Path
 
 import typer
 
@@ -24,7 +22,6 @@ HEAVY_MODULES = (
     "fastapi",
     "uvicorn",
     "apscheduler",
-    "playwright",
     "httpx",
     "yaml",
     "pydantic",
@@ -68,20 +65,9 @@ def _optional() -> dict[str, bool]:
     return out
 
 
-def _playwright_driver() -> bool:
-    """Playwright 드라이버(node)가 실행 가능한 파일로 있는지. 네트워크·브라우저 기동 없음."""
-    try:
-        from playwright._impl._driver import compute_driver_executable
-
-        node = Path(compute_driver_executable()[0])
-        return node.is_file() and os.access(node, os.X_OK)
-    except Exception:  # noqa: BLE001 - 드라이버를 못 찾는 어떤 경우든 False
-        return False
-
-
 @config_errors
 def selfcheck() -> None:
-    """환경·원장 버전·기능 목록·웹 dist·무거운 스택 import·드라이버를 JSON 1줄로 출력한다.
+    """환경·원장 버전·기능 목록·웹 dist·무거운 스택 import 를 JSON 1줄로 출력한다.
 
     무거운 모듈 import 가 하나라도 실패하면 exit 1."""
     b = boot(conn=False)
@@ -97,7 +83,6 @@ def selfcheck() -> None:
         "modules": modules,
         "failed": failed,
         "optional": _optional(),
-        "playwright_driver": _playwright_driver(),
     }
     typer.echo(json.dumps(info, ensure_ascii=False))
     if failed:

@@ -43,15 +43,12 @@ if EXT.is_dir():
 # 기능 agents md: _internal/trader/features/<기능>/agents/*.md, 기능 README: boot() 계약 검사가 요구
 datas += collect_data_files("trader", includes=["**/agents/*.md", "features/*/README.md"])
 datas += collect_data_files("tzdata")
-# 세이브티커 수집기: Playwright 드라이버(node + package). Chromium 은 첫 실행에 내려받는다.
-datas += collect_data_files("playwright")
 
 hiddenimports = (
     collect_submodules("trader")
     + collect_submodules("sklearn")
     + collect_submodules("uvicorn")
     + collect_submodules("apscheduler")
-    + collect_submodules("playwright")
     + ["pypdf"]
     + ["pyarrow", "pyarrow.parquet", "tzdata", "youtube_transcript_api", "bs4"]
     + ["PIL.Image", "PIL.PngImagePlugin"]

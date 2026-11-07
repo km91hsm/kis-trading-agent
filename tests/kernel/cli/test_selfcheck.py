@@ -22,7 +22,6 @@ KEYS = [
     "modules",
     "failed",
     "optional",
-    "playwright_driver",
 ]
 
 
@@ -67,7 +66,6 @@ def test_selfcheck_imports_heavy_stacks(project, monkeypatch):
     assert data["ok"] is True and code == 0, data
     assert data["modules"] == list(selfcheck_mod.HEAVY_MODULES)
     assert data["failed"] == []
-    assert isinstance(data["playwright_driver"], bool)
 
     real = importlib.import_module
 
