@@ -475,6 +475,17 @@ def compact_context(inputs: dict) -> dict:
             candidate = _delivery_coverage(candidate)
             if _size(candidate) <= 8000:
                 return candidate
+        # 한 글의 과도한 식별자가 다른 정상 글까지 밀어내지 않게 한다.
+        # 같은 크기라면 뒤의 글부터 제외해 기존 최신순을 유지한다.
+        while candidate["blog_posts"]:
+            largest = max(
+                range(len(candidate["blog_posts"])),
+                key=lambda i: (_size(candidate["blog_posts"][i]), i),
+            )
+            candidate["blog_posts"].pop(largest)
+            candidate = _delivery_coverage(candidate)
+            if _size(candidate) <= 8000:
+                return candidate
     result = shrink(_delivery_coverage(data), 8000)
     if isinstance(blogs, list) and isinstance(result.get("blog_posts"), list):
         # 극단적인 크기로 키까지 생략된 글은 출처 없는 근거로 전달하지 않는다.

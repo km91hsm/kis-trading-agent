@@ -414,3 +414,28 @@ def test_compact_context_counts_only_nonempty_excerpts_when_many_posts_are_trimm
     assert coverage["items"] == 4 and coverage["original_items"] == 12
     assert out["blog_posts"][0]["body"] == ""
     assert _size(out) <= 8000
+
+
+def test_compact_context_skips_one_oversized_blog_without_losing_other_posts():
+    from trader.kernel.session.tooling import compact_context
+
+    for oversized_index in (0, 2, 4):
+        posts = [
+            {"source": "naver_blog/ranto28", "title": f"합성 글 {i}",
+             "url": "https://example.test/" + ("x" * 9000 if i == oversized_index else str(i)),
+             "body": "근거 발췌 " * 100, "posted_at": "2026-11-06T01:00:00Z",
+             "received_at": "2026-11-07T01:00:00Z"}
+            for i in range(5)
+        ]
+        out = compact_context({"blog_posts": posts, "source_coverage": {
+            "naver_blog/ranto28": {"status": "present", "items": 5, "data_gaps": []}},
+            "macro": {"sp500": {"data": {"value": "6500"}, "source": "KIS"}}})
+        assert [p["url"] for p in out["blog_posts"]] == [
+            p["url"] for i, p in enumerate(posts) if i != oversized_index
+        ]
+        assert all(p["body"].strip(" …") for p in out["blog_posts"])
+        assert out["macro"]["sp500"]["data"]["value"] == "6500"
+        coverage = out["source_coverage"]["naver_blog/ranto28"]
+        assert coverage["status"] == "partial"
+        assert coverage["items"] == 4 and coverage["original_items"] == 5
+        assert _size(out) <= 8000
