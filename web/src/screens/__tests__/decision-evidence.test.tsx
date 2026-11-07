@@ -1,4 +1,5 @@
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { Decision } from "../decision/Decision.tsx";
 import type { DecisionInputs } from "../decision/InputEvidence";
@@ -116,4 +117,30 @@ test("절 이름 근거는 기사 하나를 인용했다고 과장하지 않고 
   expect(link?.textContent).toContain("뉴스 입력 묶음");
   expect(document.getElementById("input-group-news")).not.toBeNull();
   expect(document.querySelector(".input-items")?.textContent).not.toContain("보고서·토론에서 인용");
+});
+
+
+test("다른 결정으로 이동 중이거나 입력 조회가 실패하면 이전 결정 자료와 근거를 숨긴다", async () => {
+  let complete: (value: Response) => void = () => {};
+  const pending = new Promise<Response>(resolve => { complete = resolve; });
+  const debate = [{ round: 0, side: "bull", stance: "BULLISH", conviction: .8, issues: [{ issue_id: "bull:growth", topic: "다음 결정 쟁점", claim: "다음 결정 주장", evidence: ["news:17"] }] }];
+  ff = installFakeFetch({
+    "GET /api/decisions/spot/7": fixtureSpotDetail(),
+    "GET /api/decisions/spot/7/trace": fixtureSpotTrace(),
+    "GET /api/decisions/spot/7/inputs": inputs(),
+    "GET /api/decisions/spot/8": fixtureSpotDetail({ decision: { ...fixtureSpotDetail().decision, id: 8 } }),
+    "GET /api/decisions/spot/8/trace": fixtureSpotTrace({ debate }),
+    "GET /api/decisions/spot/8/inputs": () => pending,
+  });
+  const { container } = render(<MemoryRouter initialEntries={["/decisions/spot/7"]}><Link to="/decisions/spot/8">다음 결정</Link><Routes><Route path="/decisions/:asset/:id" element={<Decision />} /></Routes></MemoryRouter>);
+  await flush();
+  expect(document.getElementById("inputs")?.textContent).toContain("합성 입력 A");
+  act(() => container.querySelector<HTMLAnchorElement>('a[href="/decisions/spot/8"]')!.click());
+  await flush();
+  expect(document.getElementById("inputs")?.textContent).not.toContain("합성 입력 A");
+  expect(document.getElementById("comparison")?.querySelector('a[href^="#input-"]')).toBeNull();
+  await act(async () => complete(new Response(JSON.stringify({ detail: "입력 읽기 실패" }), { status: 503 })));
+  await flush();
+  expect(document.getElementById("inputs")?.textContent).toContain("입력 읽기 실패");
+  expect(document.getElementById("inputs")?.textContent).not.toContain("합성 입력 A");
 });

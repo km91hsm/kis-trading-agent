@@ -1,5 +1,4 @@
 // 설정 요약 — GET /settings 를 세 묶음(AI 사용 한도 · 거래 리스크 · 접속 환경)의 Stats 로, 역할별 모델 표는 details 로 접는다(역할은 glossary role.*).
-import { fmtPct } from "../../lib/format";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { GLOSSARY } from "../../lib/glossary";
@@ -26,7 +25,8 @@ export function SettingsPanel() {
   const res = useResource<SettingsResp>("/settings", undefined, ["control"]);
   return body(res, "설정", (s) => {
     const models = Object.entries(s.models).map(([role, model]) => ({ role, model }));
-    const pct = (key: string) => typeof s.risk?.[key] === "number" ? fmtPct(s.risk[key] as number, 0) : "미기록";
+    const pct = (key: string) => typeof s.risk?.[key] === "number" && Number.isFinite(s.risk[key])
+      ? (s.risk[key] as number).toLocaleString("ko-KR", { style: "percent", maximumSignificantDigits: 15 }) : "미기록";
     return (
       <>
         <CodexDebate />

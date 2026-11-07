@@ -45,7 +45,7 @@ function chartHref(r: ActivityRow, params: URLSearchParams) {
   return `/data?${next}#stock-chart`;
 }
 const columns = (params: URLSearchParams): Column<ActivityRow>[] => [
-  { key: "ticker", label: "종목 · 차트", width: "20%", long: true, render: (r) => <Link data-activity-ticker to={chartHref(r, params)}>{r.ticker}{r.name && r.name !== r.ticker ? ` ${r.name}` : ""}</Link> },
+  { key: "ticker", label: "종목 · 차트", width: "20%", long: true, render: (r) => <Link data-activity-ticker title={`${r.ticker} ${r.name ?? ""}`.trim()} to={chartHref(r, params)}>{r.ticker}{r.name && r.name !== r.ticker ? ` ${r.name}` : ""}</Link> },
   { key: "exchange", label: "거래소 / 원천 순위", width: "16%", render: (r) => `${r.exchange} / ${r.source_rank ?? "—"}` },
   { key: "price", label: "가격", width: "15%", align: "num", render: (r) => `${fmtMoney(r.price, r.currency)} ${r.currency}` },
   { key: "change_pct", label: "가격 등락률", width: "12%", align: "num", render: (r) => fmtPct(r.change_pct) },

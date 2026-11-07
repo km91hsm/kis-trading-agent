@@ -58,3 +58,13 @@ test("risk overview displays configured numeric limits rather than only presence
   expect(container.textContent).toContain("-5%");
   expect(container.textContent).toContain("기본 손절");
 });
+
+
+test("소수 리스크 설정을 정수 백분율로 반올림하지 않는다", async () => {
+  ff = installFakeFetch({ ...routes(), "GET /api/settings": { markets: ["KR"], risk: { max_position_pct: 0.0075, risk_per_trade_pct: 0.0025, daily_loss_stop_pct: -0.005 }, debate_rounds: 1, models: {}, llm: { daily_session_cap: 80, budget_usd: 5 }, web: { bind: "127.0.0.1", port: 8787, tailscale_hosts_count: 0, tailscale_users_count: 0 } } });
+  const { container } = render(<MemoryRouter><SettingsPanel /></MemoryRouter>);
+  await flush();
+  expect(container.textContent).toContain("0.75%");
+  expect(container.textContent).toContain("0.25%");
+  expect(container.textContent).toContain("-0.5%");
+});

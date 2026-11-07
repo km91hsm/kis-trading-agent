@@ -165,11 +165,17 @@ function Checkpoints({ asset, id, stages }: { asset: string; id: string; stages:
 }
 
 export function Decision() {
+  const { asset, id } = useParams();
+  return <DecisionContent key={`${asset}:${id}`} />;
+}
+
+function DecisionContent() {
   const { asset = "spot", id = "" } = useParams();
   const spot = asset === "spot";
   const detail = useResource<SpotDetail | FoDetail>(`/decisions/${asset}/${id}`, undefined, ["decisions"]);
   const rawTrace = useResource<unknown>(`/decisions/${asset}/${id}/trace`, undefined, ["decisions", "orders"]);
   const inputs = useResource<DecisionInputs>(`/decisions/spot/${id}/inputs`, undefined, ["decisions"], { enabled: spot });
+  const inputData = !inputs.error && inputs.data?.decision_id === Number(id) ? inputs.data : null;
 
   const notFound = [detail.error, rawTrace.error].find((e) => e?.status === 404);
   if (notFound) {
@@ -218,11 +224,11 @@ export function Decision() {
       {spot ? <>
         <section id="inputs" className="screen-section">
           <h2>입력 내역</h2>
-          {inputs.data ? <InputEvidence data={inputs.data} /> : <Pending res={inputs} what="입력 내역" />}
+          {inputData ? <InputEvidence data={inputData} /> : <Pending res={inputs} what="입력 내역" />}
         </section>
         <section id="comparison" className="screen-section">
           <h2>쟁점별 비교</h2>
-          {t ? <DebateComparison turns={t.debate} items={inputs.data?.items ?? []} groups={inputs.data?.groups ?? []} /> : <Pending res={rawTrace} what="토론" />}
+          {t ? <DebateComparison turns={t.debate} items={inputData?.items ?? []} groups={inputData?.groups ?? []} /> : <Pending res={rawTrace} what="토론" />}
         </section>
       </> : null}
 
