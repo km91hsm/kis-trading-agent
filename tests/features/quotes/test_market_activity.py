@@ -230,3 +230,81 @@ def test_coverage_exposes_venue_page_and_candidate_bounds(conn):
         "status": "ok",
         "rows": 0,
     }
+
+
+def test_latest_partition_queries_have_bounded_work_when_success_never_exists(conn):
+    """이력이 늘어나도 성공 없는 partition을 찾느라 archive 전체를 훑지 않아야 한다."""
+    from trader.features.quotes import activity_store
+
+    for i in range(512):
+        activity_store.append(
+            conn,
+            "US",
+            received_at=T + timedelta(seconds=30 * i),
+            partitions={
+                "NAS:turnover": {"ok": True, "rows": [{"ticker": "AAA"}]},
+                "AMS:loss": {"ok": False, "rows": [], "error": "TimeoutError"},
+            },
+        )
+    statements = []
+    conn.set_trace_callback(statements.append)
+    instructions = []
+    conn.set_progress_handler(lambda instructions=instructions: instructions.append(1) or 0, 1)
+    try:
+        assert (
+            activity_store.latest(conn, "US", "AMS:loss", asof=T + timedelta(days=1), success=True)
+            is None
+        )
+    finally:
+        conn.set_progress_handler(None, 0)
+        conn.set_trace_callback(None)
+    assert len(instructions) < 500, f"absent-success lookup executed {len(instructions)} VM steps"
+    plan = conn.execute("EXPLAIN QUERY PLAN " + statements[-1]).fetchall()
+    assert not any("SCAN" in row[3] and "CONSTANT" not in row[3] for row in plan)
+    assert not any("TEMP B-TREE" in row[3] for row in plan)
+
+
+def test_latest_partition_index_keeps_pit_and_last_success_semantics(conn):
+    from trader.features.quotes import activity_store
+
+    put(conn, T, "100")
+    for i in range(1, 513):
+        put(conn, T + timedelta(seconds=30 * i), error="TimeoutError")
+    for success in (False, True):
+        instructions = []
+        conn.set_progress_handler(lambda instructions=instructions: instructions.append(1) or 0, 1)
+        try:
+            got = activity_store.latest(
+                conn, "US", "NAS:turnover", asof=T + timedelta(seconds=60), success=success
+            )
+        finally:
+            conn.set_progress_handler(None, 0)
+        assert got[0] == (T if success else T + timedelta(seconds=60)).isoformat()
+        assert len(instructions) < 500
+    # 장기간 실패해도 마지막 성공을 버리지 않으며, 그 조회도 과거 전체 역스캔이 아니다.
+    instructions = []
+    conn.set_progress_handler(lambda instructions=instructions: instructions.append(1) or 0, 1)
+    try:
+        got = activity_store.latest(
+            conn, "US", "NAS:turnover", asof=T + timedelta(days=1), success=True
+        )
+    finally:
+        conn.set_progress_handler(None, 0)
+    assert got[0] == T.isoformat() and got[1]["rows"][0]["turnover"] == "100"
+    assert len(instructions) < 500
+
+
+def test_append_rolls_back_archive_when_partition_metadata_write_fails(conn):
+    from trader.features.quotes import activity_store
+
+    conn.execute("""CREATE TRIGGER reject_partition BEFORE INSERT ON market_activity_partitions
+        BEGIN SELECT RAISE(ABORT, 'synthetic metadata storage failure'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic metadata storage failure"):
+        activity_store.append(
+            conn,
+            "US",
+            received_at=T,
+            partitions={"NAS:turnover": {"ok": True, "rows": []}},
+        )
+    assert conn.execute("SELECT count(*) FROM market_activity_batches").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM market_activity_partitions").fetchone()[0] == 0
