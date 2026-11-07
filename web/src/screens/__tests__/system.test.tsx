@@ -357,14 +357,15 @@ describe("시스템 화면", () => {
     tokenStore.set("tok");
     await mount(routes());
     const s = section("secrets");
+    act(() => button(s, "연결 키 설정 열기").click());
     expect(s.textContent).toContain("설정됨");
     expect(s.textContent).toContain("비어 있음");
     expect(s.textContent).toContain("환경변수 우선");
-    const input = s.querySelector('input[aria-label="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement;
+    const input = s.querySelector('input[name="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement;
     expect(input.type).toBe("password");
     const loads = callsTo("/settings/secrets").length;
     type(input, "secret-value-1");
-    await act(async () => button(s, "저장").click());
+    await act(async () => button(s, "변경 내용 저장").click());
     await flush();
     // 확인 대화상자 — 키 이름만 보이고 값은 보이지 않는다
     const dlg = document.querySelector('[role="dialog"]') as HTMLElement;
@@ -374,7 +375,9 @@ describe("시스템 화면", () => {
     await act(async () => button(dlg, "확인").click());
     await flush();
     expect(bodiesTo("/settings/secrets", "POST")).toEqual([{ values: { TELEGRAM_BOT_TOKEN: "secret-value-1" } }]);
-    expect((s.querySelector('input[aria-label="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement).value).toBe("");
+    expect(s.querySelector("form")).toBeNull();
+    act(() => button(s, "연결 키 설정 열기").click());
+    expect((s.querySelector('input[name="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement).value).toBe("");
     expect(s.textContent).not.toContain("secret-value-1");
     expect(s.textContent).toContain("재시작");
     expect(callsTo("/settings/secrets")).toHaveLength(loads + 1); // 저장 뒤 다시 읽음
@@ -386,6 +389,7 @@ describe("시스템 화면", () => {
     const off = onAuthError((e) => seen.push(e));
     try {
       await mount(routes({ "GET /api/settings/secrets": forbidden }));
+      act(() => button(section("secrets"), "연결 키 설정 열기").click());
       expect(section("secrets").textContent).toContain("이 PC 에서만");
       expect(seen).toHaveLength(0);
     } finally {
@@ -397,8 +401,9 @@ describe("시스템 화면", () => {
     tokenStore.set("tok");
     await mount(routes({ "POST /api/settings/secrets": forbidden }));
     const s = section("secrets");
-    type(s.querySelector('input[aria-label="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement, "v");
-    await act(async () => button(s, "저장").click());
+    act(() => button(s, "연결 키 설정 열기").click());
+    type(s.querySelector('input[name="TELEGRAM_BOT_TOKEN"]') as HTMLInputElement, "v");
+    await act(async () => button(s, "변경 내용 저장").click());
     await flush();
     await act(async () => button(document.querySelector('[role="dialog"]') as HTMLElement, "확인").click());
     await flush();
