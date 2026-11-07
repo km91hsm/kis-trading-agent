@@ -486,6 +486,8 @@ def compact_context(inputs: dict) -> dict:
             candidate = _delivery_coverage(candidate)
             if _size(candidate) <= 8000:
                 return candidate
+        # 일반 축약으로 넘어가도 이미 제외한 큰 식별자를 다시 넣지 않는다.
+        data["blog_posts"] = candidate["blog_posts"]
     result = shrink(_delivery_coverage(data), 8000)
     if isinstance(blogs, list) and isinstance(result.get("blog_posts"), list):
         # 극단적인 크기로 키까지 생략된 글은 출처 없는 근거로 전달하지 않는다.
