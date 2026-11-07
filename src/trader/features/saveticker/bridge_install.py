@@ -215,7 +215,13 @@ def _copy_extension(source: Path, package: Path) -> Path:
     _manifest(fresh)
     if extension.exists():
         extension.rename(old)
-    fresh.rename(extension)
+    try:
+        fresh.rename(extension)
+    except OSError:
+        if old.exists() and not extension.exists():
+            old.rename(extension)  # 옛 복사본을 되살린다 — 다음 기동 때 다시 시도
+        shutil.rmtree(fresh, ignore_errors=True)
+        raise
     shutil.rmtree(old, ignore_errors=True)
     return extension
 
