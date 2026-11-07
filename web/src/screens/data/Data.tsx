@@ -65,7 +65,7 @@ function MarketData() {
   const [params] = useSearchParams();
   return <>
     <MacroOverview market={market} />
-    <MarketActivity />
+    <MarketActivity key={market} />
     <div id="stock-chart" className="stock-chart-section">
       <h3>종목 차트</h3>
       <ChartView key={`${market}:${params.get("ticker") ?? ""}:${params.get("exchange") ?? ""}`} />
