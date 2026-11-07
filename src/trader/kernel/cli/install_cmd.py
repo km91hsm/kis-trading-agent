@@ -16,6 +16,25 @@ from trader.kernel.platform.claude_bin import find_claude
 logger = logging.getLogger("trader.cli")
 
 
+def register(
+    settings, *, kind: str = "daemon", dry_run: bool = False, reload: bool = True
+) -> dict:
+    """`trader install` 과 같은 인자로 로그온 등록(트레이 '로그인 시 자동 시작' 도 이것을 쓴다)."""
+    extra: list[Path] = []
+    try:  # launchd 는 셸 PATH 가 없다 — claude 디렉터리를 PATH 앞에 둔다
+        extra.append(find_claude(settings.claude_bin).parent)
+    except ConfigError as e:
+        logger.warning("claude 실행파일을 찾지 못해 PATH 에 넣지 않음: %s", e)
+    return installer.install(
+        dry_run=dry_run,
+        kind=kind,
+        extra_paths=extra,
+        # 종료 시 데몬이 실행 중인 세션을 기다리므로 launchd SIGKILL 을 그보다 늦춘다
+        exit_timeout_s=int(settings.llm.timeout_s) + 60,
+        reload=reload,
+    )
+
+
 @config_errors
 def install(
     dry_run: bool = typer.Option(False, "--dry-run", help="파일을 쓰지 않고 내용·명령만 출력"),
@@ -30,17 +49,5 @@ def install(
     if uninstall:
         r = installer.uninstall(kind=kind)
     else:
-        settings = boot(settings=True).settings
-        extra: list[Path] = []
-        try:  # launchd 는 셸 PATH 가 없다 — claude 디렉터리를 PATH 앞에 둔다
-            extra.append(find_claude(settings.claude_bin).parent)
-        except ConfigError as e:
-            logger.warning("claude 실행파일을 찾지 못해 PATH 에 넣지 않음: %s", e)
-        r = installer.install(
-            dry_run=dry_run,
-            kind=kind,
-            extra_paths=extra,
-            # 종료 시 데몬이 실행 중인 세션을 기다리므로 launchd SIGKILL 을 그보다 늦춘다
-            exit_timeout_s=int(settings.llm.timeout_s) + 60,
-        )
+        r = register(boot(settings=True).settings, kind=kind, dry_run=dry_run)
     typer.echo(json.dumps({**r, "path": str(r["path"]), "kind": kind}, ensure_ascii=False))

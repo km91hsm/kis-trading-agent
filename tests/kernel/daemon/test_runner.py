@@ -416,3 +416,29 @@ def test_shutdown_continues_when_teardown_raises(project):
     )  # fmt: skip
     d.shutdown()
     assert calls == ["b"]
+
+
+def test_daemon_refuses_when_other_root_holds_global_lock(project, tmp_path):
+    """개발 폴더 ↔ 설치 앱처럼 데이터 루트가 달라도 데몬은 사용자당 하나만 뜬다(중복 주문 방지)."""
+    from trader.kernel.daemon.lock import global_lock
+
+    other = tmp_path / "other-root"
+    other.mkdir()
+    g = global_lock(other)
+    assert g.acquire() is True
+    d = make_deps(project)
+    daemon = make_daemon(d, spec(id="a"))
+    try:
+        assert daemon.start(install_signals=False) is False
+        assert daemon._scheduler is None
+        assert not (d.state / "daemon.lock").exists()  # 로컬 잠금도 되돌린다
+    finally:
+        daemon.shutdown(wait=False)
+        g.release()
+    daemon2 = make_daemon(d, spec(id="a"))
+    try:
+        assert daemon2.start(install_signals=False) is True
+        assert daemon2._global.held() is True
+    finally:
+        daemon2.shutdown(wait=False)
+    assert daemon2._global.held() is False

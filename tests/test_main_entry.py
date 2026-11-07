@@ -85,6 +85,48 @@ def test_translocated_path_detected():
     assert not entry.translocated("/Users/me/trader/Trader.app/Contents/MacOS/TraderApp")
 
 
+def test_translocated_launch_is_blocked_with_applications_hint(tmp_path, monkeypatch):
+    """App Translocation 에서 더블클릭하면 앱을 띄우지 않고 /Applications 로 옮기라고 안내한다."""
+    import pytest
+
+    from trader.kernel.platform import notify_os
+
+    calls = []
+    monkeypatch.setattr(main_mod, "app", lambda args=None: calls.append(args))
+    monkeypatch.setattr(notify_os, "alert", lambda t, m: True)
+    monkeypatch.setattr(entry, "_startup_log_dirs", lambda: [tmp_path])
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "argv", ["TraderApp"])
+    monkeypatch.setattr(
+        sys,
+        "executable",
+        "/private/var/folders/x/T/AppTranslocation/ABC/d/Trader.app/Contents/MacOS/TraderApp",
+    )
+    with pytest.raises(SystemExit) as e:
+        entry.main()
+    assert e.value.code == 1 and calls == []
+    assert "/Applications" in entry.TRANSLOCATED_MSG
+    assert "응용 프로그램" in entry.TRANSLOCATED_MSG
+    text = (tmp_path / "startup-error.log").read_text(encoding="utf-8")
+    assert "/Applications" in text
+
+
+def test_startup_log_dirs_fall_back_to_user_data_then_home(tmp_path, monkeypatch):
+    """데이터 루트를 못 얻으면 user_data_dir()/state/logs → 홈 순으로 남긴다."""
+    from trader.kernel.platform import bundle, paths
+
+    def broken():
+        raise paths.ProjectRootNotFound("없음")
+
+    monkeypatch.setattr(paths, "state_dir", broken)
+    monkeypatch.setattr(bundle, "user_data_dir", lambda: tmp_path / "data")
+    dirs = entry._startup_log_dirs()
+    assert dirs == [tmp_path / "data" / "state" / "logs", entry.Path.home()]
+    entry._record_startup_error("기동 실패 테스트")
+    text = (tmp_path / "data" / "state" / "logs" / "startup-error.log").read_text(encoding="utf-8")
+    assert "기동 실패 테스트" in text
+
+
 def test_ensure_streams_replaces_none(monkeypatch):
     monkeypatch.setattr(sys, "stdout", None)
     monkeypatch.setattr(sys, "stderr", None)

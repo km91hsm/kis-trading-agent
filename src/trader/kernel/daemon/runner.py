@@ -23,7 +23,7 @@ from trader.kernel.config import KST
 from trader.kernel.daemon import heartbeat as heartbeat_mod
 from trader.kernel.daemon.heartbeat import Heartbeat
 from trader.kernel.daemon.jobs import ScheduledJob, build
-from trader.kernel.daemon.lock import Lock
+from trader.kernel.daemon.lock import Lock, global_lock, other_root_message
 from trader.kernel.ledger import runs
 from trader.kernel.registry import hooks as hooks_mod
 from trader.kernel.registry.types import Feature
@@ -154,6 +154,8 @@ class Daemon:
         self._jobs: list[ScheduledJob] = []
         self._scheduler: BackgroundScheduler | None = None
         self._lock = Lock(deps.state / heartbeat_mod.LOCK_NAME, now=deps.now)
+        # 데이터 루트가 다른 데몬(개발 폴더 ↔ 설치 앱)과의 중복 기동 방지(사용자 단위 1개)
+        self._global = global_lock(deps.state.parent, now=deps.now)
         self._hb = Heartbeat(deps.state, deps.now)
         self._guard = threading.Lock()
         self._started = False
@@ -173,6 +175,11 @@ class Daemon:
             schedule=deps.schedule, settings=deps.settings, markets=deps.markets, ctx=deps,
         )  # fmt: skip
         if not self._lock.acquire():
+            return False
+        if not self._global.acquire():
+            owner = self._global.holder_meta().get("root") or "알 수 없음"
+            logger.error(other_root_message(owner))
+            self._lock.release()
             return False
         sched = BackgroundScheduler(timezone=KST)
         hb_started = False
@@ -226,6 +233,7 @@ class Daemon:
             if hb_started:  # 시작 전 stop 은 직전 하트비트 파일을 빈 상태로 덮으므로 건너뛴다
                 self._hb.stop()
             self._restore_signals()
+            self._global.release()
             self._lock.release()
             raise
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
@@ -289,6 +297,7 @@ class Daemon:
                 self._hb.stop()
         finally:
             self._restore_signals()
+            self._global.release()
             self._lock.release()
 
     def _run_teardowns(self) -> None:

@@ -3,6 +3,10 @@ subprocess, 셸 스크립트 없음.
 
 - macOS: ~/Library/LaunchAgents/com.trader.daemon.plist + `launchctl load -w`
 - Windows: %USERPROFILE%/trader-daemon.xml + `schtasks /Create /TN trader-daemon /XML … /F`
+
+작업 폴더·TRADER_HOME 은 `paths.project_root()`(번들은 OS 사용자 데이터 폴더). Windows XML 에는
+env 가 없지만 번들의 기본 데이터 루트가 같은 폴더라 그대로 맞는다. 등록 여부는 템플릿 파일 존재로
+본다(`installed`, 트레이 '로그인 시 자동 시작' 체크).
 """
 
 from __future__ import annotations
@@ -209,9 +213,13 @@ def install(
     extra_paths: list[Path] | None = None,
     exit_timeout_s: int = DEFAULT_EXIT_TIMEOUT_S,
     kind: Literal["daemon", "watchdog"] = "daemon",
+    reload: bool = True,
 ) -> dict:
     """템플릿을 쓰고 OS 등록 명령을 실행한다. dry_run 이면 아무것도 쓰지 않고 명령만 돌려준다.
-    kind="watchdog" 은 `trader watchdog` 를 5분 간격 1회 실행으로 등록한다."""
+    kind="watchdog" 은 `trader watchdog` 를 5분 간격 1회 실행으로 등록한다.
+
+    reload=False(macOS 만): plist 만 쓰고 `launchctl unload/load` 는 하지 않는다 — launchd 가 띄운
+    그 프로세스(트레이)가 다시 켤 때 unload 로 자기 자신을 내리지 않게. 다음 로그인부터 적용."""
     home = home or Path.home()
     watchdog = kind == "watchdog"
     program = program or (bundle.watchdog_argv() if watchdog else bundle.service_argv())
@@ -236,6 +244,8 @@ def install(
     path.parent.mkdir(parents=True, exist_ok=True)
     (project_root / "state" / "logs").mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8" if platform == "darwin" else "utf-16")
+    if platform == "darwin" and not reload:
+        return {"path": path, "command": [], "written": True, "content": text}
     if platform == "darwin":  # 이미 로드된 라벨은 load 가 실패하므로 먼저 내린다 (실패 무시)
         run(
             ["launchctl", "unload", "-w", str(path)],
@@ -248,16 +258,34 @@ def install(
     return {"path": path, "command": command, "written": True, "content": text}
 
 
+def installed(
+    *,
+    platform: str = sys.platform,
+    home: Path | None = None,
+    kind: Literal["daemon", "watchdog"] = "daemon",
+) -> bool:
+    """로그온 등록 템플릿(plist·XML)이 있으면 True. 지원하지 않는 OS 는 False."""
+    try:
+        return _target(platform, home or Path.home(), kind).is_file()
+    except ConfigError:
+        return False
+
+
 def uninstall(
     *,
     run: Callable[..., object] = subprocess.run,
     platform: str = sys.platform,
     home: Path | None = None,
     kind: Literal["daemon", "watchdog"] = "daemon",
+    unload: bool = True,
 ) -> dict:
     """등록을 내리고 템플릿 파일을 지운다(Windows 는 파일이 없어도 작업 삭제를 시도). 멱등:
     Windows 에서 파일이 없고 작업 삭제가 실패하면 등록돼 있지 않은 것으로 보고 `note` 만
-    남긴다(T9). 파일이 있는데 삭제가 실패하면 ConfigError."""
+    남긴다(T9). 파일이 있는데 삭제가 실패하면 ConfigError.
+
+    unload=False(macOS 만): `launchctl unload` 없이 plist 만 지운다 — launchd 가 띄운 그 프로세스
+    안에서(트레이) 해제하면 unload 가 자기 자신을 SIGTERM 으로 내리기 때문이다. 다음 로그인부터
+    시작되지 않는다."""
     home = home or Path.home()
     path = _target(platform, home, kind)
     task = WATCHDOG_TASK if kind == "watchdog" else TASK_NAME
@@ -267,7 +295,10 @@ def uninstall(
         command = ["schtasks", "/Delete", "/TN", task, "/F"]
     out: dict = {"path": path, "command": command}
     if path.exists():
-        _run(run, command)
+        if platform == "darwin" and not unload:
+            out["command"] = []
+        else:
+            _run(run, command)
         path.unlink()
     elif platform == "win32":
         try:
@@ -276,3 +307,13 @@ def uninstall(
             logger.info("작업 삭제 실패 — 등록돼 있지 않은 것으로 봄: %s", e)
             out["note"] = "등록돼 있지 않음"
     return out
+
+
+def launched_by_service(platform: str = sys.platform, env: dict | None = None) -> bool:
+    """지금 프로세스가 로그온 등록(launchd 의 데몬 라벨)으로 떴는지. launchd 는 잡 프로세스에
+    `XPC_SERVICE_NAME=<라벨>` 을 넣는다. Windows 작업 스케줄러는 삭제해도 실행 중인 작업을 죽이지
+    않으므로 구분하지 않는다(False)."""
+    import os
+
+    env = os.environ if env is None else env
+    return platform == "darwin" and env.get("XPC_SERVICE_NAME") == LABEL

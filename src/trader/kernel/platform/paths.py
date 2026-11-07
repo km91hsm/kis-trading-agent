@@ -12,7 +12,8 @@ class ProjectRootNotFound(RuntimeError):
 
 
 def project_root() -> Path:
-    """TRADER_HOME → (번들이면) 실행파일 폴더 → cwd 에서 위로 올라가며 pyproject.toml 탐색."""
+    """TRADER_HOME → (번들이면) OS 사용자 데이터 폴더(`bundle.user_data_dir`) → cwd 에서 위로
+    올라가며 pyproject.toml 탐색."""
     env = os.environ.get("TRADER_HOME")
     if env:
         # 세션 cwd 는 저장소 밖 임시 디렉터리고 tool 서브프로세스가 이 값을 상속한다 → 절대경로

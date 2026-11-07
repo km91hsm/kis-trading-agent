@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import signal
 import socket
@@ -23,7 +24,7 @@ import typer
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.config.secrets import ensure_web_token
 from trader.kernel.daemon.runner import Daemon
-from trader.kernel.platform import bundle, paths, procs
+from trader.kernel.platform import bundle, installer, paths, procs
 from trader.kernel.platform import tray as tray_mod
 from trader.kernel.platform.tray import TrayUnavailable, run_tray
 
@@ -46,6 +47,14 @@ def running_web() -> tuple[str, int] | None:
         return None
     b = boot(settings=True)
     return b.settings.web.bind, b.settings.web.port
+
+
+def other_daemon_root() -> str | None:
+    """데이터 루트가 다른 데몬(개발 폴더 ↔ 설치 앱)이 사용자 전역 잠금을 쥐고 있으면 그 경로.
+    호출자는 '이미 실행 중' 과 같게 안내 후 exit 0 으로 끝낸다(launchd 재기동 반복 방지)."""
+    from trader.kernel.daemon.lock import other_root_running
+
+    return other_root_running(paths.project_root())
 
 
 def wait_for_port(
@@ -123,12 +132,43 @@ def _toggle_pause_fn(boot_: Boot, conn_factory):
     return lambda: tray_mod.toggle_pause(conn_factory, set_fn=set_fn)
 
 
+def _autostart_available() -> bool:
+    """App Translocation 경로에서 돌면 그 임시 경로가 등록에 박히므로 자동 시작을 막는다."""
+    return not bundle.is_translocated(bundle.executable())
+
+
 def _state_fn(boot_: Boot, conn_factory, url: str):
     port = (boot_.ports or {}).get("accounts")
     paused_fn = getattr(port, "paused", None)
-    return lambda: tray_mod.read_state(
-        conn_factory, url, paused_fn=paused_fn if callable(paused_fn) else None
-    )
+
+    def read() -> tray_mod.TrayState:
+        st = tray_mod.read_state(
+            conn_factory, url, paused_fn=paused_fn if callable(paused_fn) else None
+        )
+        return dataclasses.replace(
+            st, autostart=installer.installed(), autostart_available=_autostart_available()
+        )
+
+    return read
+
+
+def _toggle_autostart_fn(boot_: Boot):
+    """트레이 '로그인 시 자동 시작': 등록돼 있으면 해제, 아니면 `trader install` 과 같은 인자로
+    등록. launchd 가 띄운 이 프로세스 안에서는 unload/load 로 자기 자신을 내리지 않게 파일만
+    바꾼다(다음 로그인부터 적용)."""
+    from trader.kernel.cli.install_cmd import register
+
+    def toggle() -> None:
+        if not _autostart_available():
+            logger.warning("App Translocation 경로에서는 로그인 시 자동 시작을 등록하지 않습니다")
+            return
+        live = not installer.launched_by_service()
+        if installer.installed():
+            installer.uninstall(kind="daemon", unload=live)
+        else:
+            register(boot_.settings, kind="daemon", reload=live)
+
+    return toggle
 
 
 def run_app(
@@ -217,6 +257,8 @@ def run_app(
                     on_toggle_pause=_toggle_pause_fn(boot_, conn_factory),
                     on_open_web=lambda: webbrowser.open(url),
                     on_open_logs=lambda: procs.open_folder(paths.state_dir() / "logs"),
+                    on_open_data=lambda: procs.open_folder(paths.project_root()),
+                    on_toggle_autostart=_toggle_autostart_fn(boot_),
                     on_quit=shutdown,
                     icon_dir=bundle.icons_dir(),
                     stop_event=stop,
@@ -267,6 +309,12 @@ def app(
         typer.echo(f"이미 실행 중입니다 — {url}")
         if not no_browser and wait_for_port(host, port, timeout_s=RUNNING_PORT_WAIT_S):
             webbrowser.open(url)
+        return
+    other = other_daemon_root()
+    if other is not None:
+        from trader.kernel.daemon.lock import other_root_message
+
+        typer.echo(other_root_message(other))
         return
     b = boot(ports=True, schedule=True, log_name="app")
     try:

@@ -20,6 +20,15 @@ def _isolate_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_global_lock(tmp_path_factory: pytest.TempPathFactory, monkeypatch) -> Path:
+    """데몬 전역 잠금(`~/.trader/daemon-global.lock`)이 실제 홈을 건드리지 않게 테스트마다 임시
+    폴더로 돌린다."""
+    d = tmp_path_factory.mktemp("global-lock")
+    monkeypatch.setenv("TRADER_GLOBAL_LOCK_DIR", str(d))
+    return d
+
+
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """임시 프로젝트 루트를 만들고 TRADER_HOME 과 cwd 를 그곳으로 옮긴다."""

@@ -241,6 +241,30 @@ def test_daemon_exits_0_when_another_instance_holds_lock(project, monkeypatch):
     assert "이미 실행 중입니다 — http://127.0.0.1:8787" in r.output
 
 
+def test_daemon_exits_0_when_other_root_holds_global_lock(project, tmp_path, monkeypatch):
+    """다른 데이터 루트의 데몬이 전역 잠금을 쥐고 있으면 무거운 조립 전에 안내 + exit 0."""
+    from trader.kernel.daemon.lock import global_lock
+
+    other = tmp_path / "installed"
+    other.mkdir()
+    g = global_lock(other)
+    assert g.acquire() is True
+
+    def must_not_boot(**kw):
+        raise AssertionError("전역 잠금 보유면 무거운 boot 를 하지 않는다")
+
+    real_boot = main_mod.boot
+    monkeypatch.setattr(
+        main_mod, "boot", lambda **kw: must_not_boot(**kw) if kw.get("ports") else real_boot(**kw)
+    )
+    try:
+        r = CliRunner().invoke(app, ["daemon"])
+    finally:
+        g.release()
+    assert r.exit_code == 0, r.output
+    assert f"다른 폴더({other.resolve()})의 데몬이 실행 중입니다" in r.output
+
+
 def test_daemon_blocks_then_shuts_down(project, monkeypatch):
     calls = []
 

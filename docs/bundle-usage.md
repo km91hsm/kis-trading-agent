@@ -5,6 +5,11 @@ Python·uv 를 설치하지 않고 쓰는 배포본입니다. GitHub Releases �
 
 ## 1. 폴더 구조
 
+> **데이터 폴더가 바뀌었습니다.** 이번 버전부터 `config/ secrets/ state/ docs/` 는 앱 옆이 아니라 OS 표준
+> 사용자 데이터 폴더에 생깁니다 — macOS `~/Library/Application Support/Trader`, Windows `%LOCALAPPDATA%\Trader`.
+> 트레이 메뉴 「데이터 폴더 열기」로 열 수 있고, 옛 폴더의 데이터는 `trader migrate-home --from <옛 trader 폴더>` 로
+> 옮깁니다(원본은 지우지 않음). 아래 구조도는 다음 버전에서 갱신합니다.
+
 ```
 trader/                ← 이 폴더가 TRADER_HOME. 폴더째 다른 PC 로 복사해도 된다
   Trader.app           ← macOS: 더블클릭 = 메뉴바 아이콘 + 데몬 + 웹 UI + 브라우저 (Dock 에는 안 뜬다)

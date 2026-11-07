@@ -250,3 +250,69 @@ def test_uninstall_win32_is_idempotent_when_not_registered(tmp_path):
     (tmp_path / "trader-daemon.xml").write_text("x", encoding="utf-8")
     with pytest.raises(ConfigError):
         installer.uninstall(run=run, platform="win32", home=tmp_path)
+
+
+def _ok_run(calls):
+    def run(cmd, **kw):
+        calls.append(cmd)
+
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return R()
+
+    return run
+
+
+def test_installed_reflects_template_file(tmp_path):
+    assert installer.installed(platform="darwin", home=tmp_path) is False
+    calls: list = []
+    installer.install(
+        dry_run=False, run=_ok_run(calls), platform="darwin", home=tmp_path, program=PY,
+        project_root=tmp_path / "proj",
+    )  # fmt: skip
+    assert installer.installed(platform="darwin", home=tmp_path) is True
+    assert installer.installed(platform="darwin", home=tmp_path, kind="watchdog") is False
+    installer.uninstall(run=_ok_run(calls), platform="darwin", home=tmp_path)
+    assert installer.installed(platform="darwin", home=tmp_path) is False
+    assert installer.installed(platform="linux", home=tmp_path) is False
+
+
+def test_install_and_uninstall_without_launchctl_for_self_launched_service(tmp_path):
+    """launchd 가 띄운 프로세스(트레이) 안에서는 unload/load 로 자기 자신을 내리지 않는다."""
+    calls: list = []
+    r = installer.install(
+        dry_run=False, run=_ok_run(calls), platform="darwin", home=tmp_path, program=PY,
+        project_root=tmp_path / "proj", reload=False,
+    )  # fmt: skip
+    assert r["written"] is True and r["command"] == [] and calls == []
+    assert installer.installed(platform="darwin", home=tmp_path) is True
+    out = installer.uninstall(run=_ok_run(calls), platform="darwin", home=tmp_path, unload=False)
+    assert calls == [] and out["command"] == []
+    assert installer.installed(platform="darwin", home=tmp_path) is False
+
+
+def test_launched_by_service_reads_launchd_label():
+    env = {"XPC_SERVICE_NAME": installer.LABEL}
+    assert installer.launched_by_service("darwin", env) is True
+    assert installer.launched_by_service("darwin", {"XPC_SERVICE_NAME": "0"}) is False
+    assert installer.launched_by_service("win32", env) is False
+
+
+def test_install_defaults_root_to_bundle_data_dir(tmp_path, monkeypatch):
+    """번들: plist 의 WorkingDirectory·TRADER_HOME 은 project_root() = 사용자 데이터 폴더."""
+    import sys
+
+    monkeypatch.setenv("HOME", str(tmp_path / "userhome"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "userhome"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "userhome" / "AppData" / "Local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "userhome" / "xdg"))
+    monkeypatch.delenv("TRADER_HOME", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    from trader.kernel.platform import bundle
+
+    data = bundle.user_data_dir()
+    r = installer.install(dry_run=True, platform="darwin", home=tmp_path, program=EXE)
+    assert f"<key>TRADER_HOME</key><string>{data.resolve()}</string>" in r["content"]

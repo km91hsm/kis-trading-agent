@@ -44,7 +44,7 @@ def test_root_not_found(tmp_path, monkeypatch):
 
 def test_relative_trader_home_is_resolved(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
     monkeypatch.setenv("TRADER_HOME", ".")
     root = paths.project_root()
     assert root.is_absolute() and root == tmp_path.resolve()
@@ -77,3 +77,22 @@ def test_playwright_browsers_dir_win32_uses_localappdata(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LA"))
     assert paths.playwright_browsers_dir() == tmp_path / "LA" / "ms-playwright"
+
+
+def test_frozen_without_trader_home_uses_user_data_dir(tmp_path, monkeypatch):
+    """번들은 cwd·실행파일 위치와 무관하게 OS 사용자 데이터 폴더를 데이터 루트로 쓴다."""
+    import sys
+
+    from trader.kernel.platform import bundle
+
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(tmp_path / "userhome"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "userhome" / "AppData" / "Local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "userhome" / "xdg"))
+    monkeypatch.delenv("TRADER_HOME", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.chdir(tmp_path)
+    root = paths.project_root()
+    assert root == bundle.user_data_dir().resolve()
+    assert root.is_relative_to((tmp_path / "userhome").resolve())
+    assert paths.state_dir() == root / "state"

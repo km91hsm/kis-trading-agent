@@ -128,3 +128,45 @@ def test_lock_uses_injected_clock(tmp_path):
     assert lock.acquire() is True
     assert json.loads(p.read_text(encoding="utf-8"))["started_at"] == later.isoformat()
     lock.release()
+
+
+# --- 사용자 단위 전역 잠금(데이터 루트가 다른 데몬끼리) ---
+
+
+def test_global_lock_path_follows_env(tmp_path, monkeypatch):
+    from trader.kernel.daemon import lock as lock_mod
+
+    monkeypatch.setenv(lock_mod.GLOBAL_LOCK_ENV, str(tmp_path / "g"))
+    assert lock_mod.global_lock_path() == tmp_path / "g" / "daemon-global.lock"
+    monkeypatch.delenv(lock_mod.GLOBAL_LOCK_ENV)
+    assert lock_mod.global_lock_path() == Path.home() / ".trader" / "daemon-global.lock"
+
+
+def test_global_lock_records_owner_root_and_reports_other_root(tmp_path):
+    from trader.kernel.daemon import lock as lock_mod
+
+    root_a, root_b = tmp_path / "a", tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    assert lock_mod.global_owner() is None
+    g = lock_mod.global_lock(root_a)
+    assert g.acquire() is True
+    try:
+        assert lock_mod.global_owner() == str(root_a.resolve())
+        assert lock_mod.other_root_running(root_a) is None  # 같은 루트는 state/daemon.lock 이 판단
+        assert lock_mod.other_root_running(root_b) == str(root_a.resolve())
+        assert lock_mod.global_lock(root_b).acquire() is False
+        assert str(root_a.resolve()) in lock_mod.other_root_message(str(root_a.resolve()))
+    finally:
+        g.release()
+    assert lock_mod.global_owner() is None
+    assert lock_mod.other_root_running(root_b) is None
+
+
+def test_global_lock_dead_owner_is_not_running(tmp_path):
+    from trader.kernel.daemon import lock as lock_mod
+
+    path = lock_mod.global_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pid": DEAD_PID, "root": "/x"}), encoding="utf-8")
+    assert lock_mod.other_root_running(tmp_path) is None
