@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from tests.features.ingest.helpers import FakeMarket
 from trader.features.ingest.api import SourcesConfig
@@ -407,7 +408,7 @@ def test_public_research_context_keeps_per_index_fallback_through_compaction(con
         def get_index_us_daily(self, symbol, *, asof):
             if symbol == "SPX":
                 raise RuntimeError("합성 SPX 원천 실패")
-            return {"value": 20000, "date": "2026-11-05", "symbol": symbol}
+            return {"value": Decimal("20000.50"), "date": "2026-11-05", "symbol": symbol}
 
     fred = respx_mock.get("https://api.stlouisfed.org/fred/series/observations").respond(
         200, json={"observations": [{"value": "4300", "date": "2026-11-05"}]}
@@ -432,4 +433,5 @@ def test_public_research_context_keeps_per_index_fallback_through_compaction(con
     assert compact["macro"]["sp500"]["data"]["value"] == 4300
     assert coverage["nasdaq"]["source"] == "KIS" and coverage["nasdaq"]["series_id"] == "COMP"
     assert coverage["nasdaq"]["basis"] == "daily_observation"
+    assert out["macro"]["nasdaq"]["data"]["value"] == "20000.50"
     assert "NASDAQCOM" not in {c.request.url.params["series_id"] for c in fred.calls}

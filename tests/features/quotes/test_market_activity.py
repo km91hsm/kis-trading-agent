@@ -308,3 +308,17 @@ def test_append_rolls_back_archive_when_partition_metadata_write_fails(conn):
         )
     assert conn.execute("SELECT count(*) FROM market_activity_batches").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM market_activity_partitions").fetchone()[0] == 0
+
+
+def test_legacy_turnover_has_explicit_unknown_unit_through_research_compaction(conn):
+    from trader.kernel.session.tooling import compact_context
+
+    put(conn, T, "123456.78")
+    snapshot = api.activity_snapshot(conn, "US", asof=T)
+    context = compact_context({"market_activity": snapshot})
+    row = context["market_activity"]["rankings"]["turnover"][0]
+    assert row["turnover"] == "123456.78" and row["currency"] == "USD"
+    assert row["turnover_unit"] == "unknown"
+    assert row["turnover_basis"] == "source_reported"
+    assert row["turnover_source_field"] is None
+    assert "turnover_unit_unverified" in context["market_activity"]["data_gaps"]

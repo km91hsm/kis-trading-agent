@@ -760,7 +760,7 @@ def checkpoint_bundle(
             "own_previous": own.model_dump() if own else None,
             "opponent_previous": opp.model_dump() if opp else None,
         }
-        return {"ok": True, "data": _shrink(data, BUNDLE_LIMIT_BYTES)}
+        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "trader":
         if _latest_decision_stage(d) is None:
             if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):

@@ -346,25 +346,24 @@ def test_post_ingest_without_deps_only_events(conn):
 def test_discover_request_wires_inputs_research_port_to_generated_payload(
     conn, project, monkeypatch
 ):
-    from trader.features.ingest import macro as macro_sources
+    from types import SimpleNamespace
+
     from trader.features.ingest.ports import InputsPortImpl
     from trader.features.ingest.settings import SourcesConfig
     from trader.kernel.config import Secrets
     from trader.kernel.session.run_store import market_dir, read_checkpoint
 
     deps = trigger_deps(project, conn, notifier=Sent())
-    deps.ports["inputs"] = InputsPortImpl(Secrets(), SourcesConfig())
-    monkeypatch.setattr(
-        macro_sources,
-        "collect_macro",
-        lambda *a, **kw: {
-            "dxy": {
-                "data": {"value": 123, "date": NOW.date().isoformat()},
-                "received_at": NOW.isoformat(),
-                "error": None,
-            }
-        },
-    )
+    calls = []
+
+    def index(symbol, *, asof):
+        calls.append(symbol)
+        return {"value": Decimal("4200.50"), "date": "2026-10-07"}
+
+    market = SimpleNamespace(get_index_us_daily=index)
+    monkeypatch.setattr(deps.ports["accounts"], "market_client", lambda: market)
+    cfg = SourcesConfig.model_validate({"macro": {"fred": False, "ecos": False}})
+    deps.ports["inputs"] = InputsPortImpl(Secrets(), cfg, deps.ports)
     monkeypatch.setattr(ingest_api, "load_universe", lambda: UNI)
     monkeypatch.setattr(
         triggers, "run_session", lambda *a, **kw: SimpleNamespace(ok=True, error=None)
@@ -376,5 +375,9 @@ def test_discover_request_wires_inputs_research_port_to_generated_payload(
     generated = read_checkpoint(market_dir(NOW.date(), "KR", deps.state), "_discovery_inputs")[
         "data"
     ]
-    assert generated["macro"]["dxy"]["data"]["value"] == 123
-    assert generated["source_coverage"]["macro"]["dxy"]["status"] == "present"
+    for key, symbol in (("sp500", "SPX"), ("nasdaq", "COMP")):
+        assert generated["macro"][key]["data"]["value"] == "4200.50"
+        coverage = generated["source_coverage"]["macro"][key]
+        assert coverage["status"] == "present" and coverage["source"] == "KIS"
+        assert coverage["series_id"] == symbol
+    assert calls == ["SPX", "COMP"]

@@ -29,6 +29,7 @@ class Market:
                     exchange=exchange,
                     currency="USD",
                     turnover="100",
+                    turnover_source_field="tamt",
                     price="20",
                     source_rank=4,
                 )
@@ -65,6 +66,11 @@ def test_collector_isolates_venue_failure_and_persists_for_readers(project):
     assert len(got["errors"]) == 3
     assert got["coverage"]["failed"] == ["NYS:turnover", "NYS:gain", "NYS:loss"]
     assert got["rankings"]["turnover"][0]["growth"]["status"] == "unavailable"
+    from trader.kernel.session.tooling import compact_context
+
+    row = compact_context({"market_activity": got})["market_activity"]["rankings"]["turnover"][0]
+    assert row["turnover_unit"] == "unknown" and row["turnover_basis"] == "source_reported"
+    assert row["turnover_source_field"] == "tamt" and row["turnover"] == "100"
     assert len(mc.calls) == 9 and all(call[3:] == (2, 100) for call in mc.calls)
     spec = {j.id: j for j in FEATURE.jobs}["market_activity"]
     assert spec.interval_s == 30 and spec.enabled(d.settings)

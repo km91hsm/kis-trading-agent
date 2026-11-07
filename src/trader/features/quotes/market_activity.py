@@ -175,11 +175,17 @@ def snapshot(
                     continue
                 row = copy.deepcopy(raw)
                 row.update(
+                    turnover_unit=raw.get("turnover_unit") or "unknown",
+                    turnover_basis=raw.get("turnover_basis") or "source_reported",
+                    turnover_source_field=raw.get("turnover_source_field"),
                     received_at=stamp,
                     stale=stale,
                     source_asof=raw.get("source_asof"),
                     basis=raw.get("basis", "unknown"),
                 )
+                if row["turnover_unit"] == "unknown":
+                    if "turnover_unit_unverified" not in out["data_gaps"]:
+                        out["data_gaps"].append("turnover_unit_unverified")
                 row["growth"] = _growth(row, stamp, observations, stale=stale)
                 stale_rows.append(stale)
                 out["rankings"][kind].append(row)

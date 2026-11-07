@@ -341,7 +341,7 @@ def test_generated_market_context_collects_configured_blog_for_us(lctx, monkeypa
         "collect_macro",
         lambda *a, **kw: {
             "nasdaq": {
-                "data": {"value": 20000, "date": D.isoformat()},
+                "data": {"value": Decimal("20000.50"), "date": D.isoformat()},
                 "received_at": T0.isoformat(),
                 "error": None,
             }
@@ -361,4 +361,4 @@ def test_generated_market_context_collects_configured_blog_for_us(lctx, monkeypa
     out = compact_context(generated)
     assert out["blog_posts"][0]["body"] == "달러와 미국 주식"
     assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
-    assert out["macro"]["nasdaq"]["data"]["value"] == 20000
+    assert out["macro"]["nasdaq"]["data"]["value"] == "20000.50"

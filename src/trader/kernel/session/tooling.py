@@ -194,6 +194,9 @@ _IDENTITY_FIELDS = {
     "value",
     "price",
     "turnover",
+    "turnover_unit",
+    "turnover_basis",
+    "turnover_source_field",
     "recent_5m",
     "previous_5m",
 }
@@ -333,6 +336,75 @@ def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
         if _size(compact) <= limit:
             return compact
     return {}
+
+
+_DEBATE_PROSE = frozenset(
+    {
+        "summary",
+        "bullets",
+        "key_risks",
+        "counter_evidence",
+        "data_gaps",
+        "claim",
+        "topic",
+        "response",
+        "arguments",
+        "rebuttals",
+        "what_would_change_my_mind",
+        "reason",
+        "condition",
+        "price_zone",
+        "excerpt",
+        "body",
+    }
+)
+
+
+def _debate_prose(value: Any, chars: int, field: str = "") -> Any:
+    """근거·쟁점·응답 목록과 식별자를 그대로 두고 설명문만 줄인다."""
+    if isinstance(value, dict):
+        return {key: _debate_prose(item, chars, key) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_debate_prose(item, chars, field) for item in value]
+    if isinstance(value, str) and field in _DEBATE_PROSE:
+        return _cut(value, chars)
+    return value
+
+
+def compact_debate(obj: dict, limit: int = 24_000) -> dict:
+    """양 모델의 토론 입력을 같은 규칙으로 제한한다. 필수 식별자는 생략하지 않는다."""
+    original = _size(obj)
+    if original <= limit:
+        return obj
+    protected = {"reports", "own_previous", "opponent_previous", "research_policy"}
+    metadata = {
+        "truncated": True,
+        "original_bytes": original,
+        "limit_bytes": limit,
+        "evidence_dropped": False,
+        "note": "설명문·보조 context 일부 축약; 모든 근거·쟁점·응답 식별자와 항목 보존",
+    }
+    for chars in (300, 140, 64):
+        reduced = {
+            key: _debate_prose(value, chars) if key in protected else value
+            for key, value in obj.items()
+        }
+        for context_limit in (8000, 4000, 2000, 500):
+            compact = {**reduced, "truncation": metadata}
+            for key in ("input_context", "regime", "market_view", "index"):
+                if isinstance(compact.get(key), dict):
+                    compact[key] = shrink(compact[key], context_limit)
+            if _size(compact) <= limit:
+                return compact
+    raise ValueError(f"토론 필수 근거·쟁점 구조가 {limit:,} UTF-8 bytes 상한을 넘습니다")
+
+
+def debate_bundle(obj: dict, limit: int = 24_000) -> dict:
+    """Claude 도구 경계에서도 필수 구조 초과를 자료 없는 성공으로 숨기지 않는다."""
+    try:
+        return {"ok": True, "data": compact_debate(obj, limit)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def compact_context(inputs: dict) -> dict:

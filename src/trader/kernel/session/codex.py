@@ -13,7 +13,7 @@ from typing import Any
 
 from trader.kernel.config import KST, CodexDebateSettings
 from trader.kernel.execution.ledger import day_bounds
-from trader.kernel.platform.codex_bin import find_codex
+from trader.kernel.platform.codex_bin import child_env, find_codex
 from trader.kernel.session.schemas import DebateTurn
 
 # --ignore-user-config는 인증 저장소를 유지하면서 config.toml을 차단한다. 임시 cwd에는
@@ -79,6 +79,7 @@ _ALLOWED = {
     "own_previous",
     "opponent_previous",
     "input_context",
+    "truncation",
     "proxy",
     "regime",
     "market_activity",
@@ -128,24 +129,6 @@ def sanitize(data: dict) -> dict:
         return value
 
     return clean({k: v for k, v in data.items() if k in _ALLOWED})
-
-
-def child_env(bin_path: Path) -> dict[str, str]:
-    # 로그인에 필요한 기존 auth store를 가리킬 뿐 자격증명을 복사/출력하지 않는다.
-    keep = (
-        "HOME",
-        "USERPROFILE",
-        "SYSTEMROOT",
-        "WINDIR",
-        "APPDATA",
-        "LOCALAPPDATA",
-        ("CODEX_HOME"),
-    )
-    env = {k: os.environ[k] for k in keep if k in os.environ}
-    env["PATH"] = os.pathsep.join(
-        [str(bin_path.parent), "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"]
-    )
-    return env
 
 
 def command(bin_path: Path, schema: Path, output: Path, cfg: CodexDebateSettings) -> list[str]:

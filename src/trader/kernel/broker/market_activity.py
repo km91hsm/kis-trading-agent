@@ -26,6 +26,9 @@ class ActivityRow(BaseModel):
     change_pct: float | None = None
     volume: int | None = None
     turnover: Decimal | None = None
+    turnover_unit: str = "unknown"
+    turnover_basis: str = "source_reported"
+    turnover_source_field: str | None = None
     source_asof: str | None = None
     basis: str = "unknown"
 
@@ -76,6 +79,7 @@ def _parse(raw: dict, market: str, exchange: str) -> ActivityRow | None:
         change_pct=pct_float,
         volume=_integer(raw.get("tvol" if us else "acml_vol")),
         turnover=finite_decimal(raw.get("tamt" if us else "acml_tr_pbmn")),
+        turnover_source_field="tamt" if us else "acml_tr_pbmn",
     )
 
 

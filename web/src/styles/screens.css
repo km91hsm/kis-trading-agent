@@ -272,6 +272,14 @@
 .perf-filters input,
 .perf-filters .btn { min-height: var(--touch); }
 
+/* 단위 미확인 거래대금의 원천값과 안내는 숫자 셀의 nowrap을 상속하지 않는다. */
+.market-activity .activity-turnover,
+.market-activity .activity-turnover > span {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* 거래대금은 통화와 긴 숫자를 함께 읽어야 하므로 좁은 화면에서는 한 줄에 한 항목. */
 @media (max-width: 600px) {
   .market-activity .row-card-fields { grid-template-columns: 1fr; }

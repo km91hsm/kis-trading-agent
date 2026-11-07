@@ -44,7 +44,9 @@ test("market data shows source and stale/partial truth, preserves currency and u
   expect(container.textContent).toContain("갱신 지연");
   expect(container.textContent).toContain("거래 세션 미확인");
   expect(container.textContent).toContain("USD");
-  expect(container.textContent).toContain("2,025.50");
+  expect(container.textContent).toContain("2025.50 (원천값 · 단위 미확인)");
+  expect(container.textContent).toContain("20.25 USD");
+  expect(container.textContent).not.toContain("2,025.50 USD");
   expect(container.textContent).toContain("150.0%");
   expect(container.textContent).toContain("2.50%");
   const msft = Array.from(container.querySelectorAll("tbody tr")).find((r) => r.textContent?.includes("MSFT"));
@@ -82,7 +84,7 @@ test("fresh growth expires after 120 seconds without SSE events while historical
   expect(container.textContent).not.toContain("150.0%");
   const aapl = Array.from(container.querySelectorAll("tbody tr")).find((r) => r.textContent?.includes("AAPL"));
   expect(aapl?.textContent).toContain("계산 불가");
-  expect(aapl?.textContent).toContain("2,025.50 USD");
+  expect(aapl?.textContent).toContain("2025.50 (원천값 · 단위 미확인)");
   expect(container.textContent).toContain("2026-11-07 10:00:00 KST");
   expect(ff.calls).toHaveLength(1);
 });
@@ -114,5 +116,5 @@ test.each([null, "invalid", "2026-11-07T01:00:01Z"])("untrustworthy received_at 
   expect(container.textContent).toContain("갱신 지연");
   expect(container.textContent).toContain("계산 불가");
   expect(container.textContent).not.toContain("150.0%");
-  expect(container.textContent).toContain("2,025.50 USD");
+  expect(container.textContent).toContain("2025.50 (원천값 · 단위 미확인)");
 });

@@ -41,6 +41,9 @@ def test_us_activity_uses_official_parameters_and_preserves_missing(real_client,
         Decimal("212.30"),
         Decimal("123456.78"),
     )
+    assert a.turnover_unit == "unknown"
+    assert a.turnover_basis == "source_reported"
+    assert a.turnover_source_field == "tamt"
     assert a.change_pct == pytest.approx(-0.0125)
     assert b.price is None and b.turnover is None and b.volume is None
     q = route.calls[0].request.url.params

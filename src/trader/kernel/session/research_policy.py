@@ -242,7 +242,10 @@ def payload(conn, settings, d, scope, round_no):
         "opponent_previous": previous.get("bull"),
         "input_context": tooling.compact_context(inputs),
     }
-    return codex.sanitize(data), policy
+    try:
+        return tooling.compact_debate(codex.sanitize(data)), policy
+    except ValueError as exc:
+        raise ResearchPolicyError(str(exc)) from exc
 
 
 def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel=None):

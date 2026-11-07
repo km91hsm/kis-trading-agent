@@ -1,5 +1,6 @@
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -907,3 +908,34 @@ def test_stuck_sections_are_not_resubmitted_beyond_cap(project):
             break
         time.sleep(0.02)
     assert not any(inputs_mod._STUCK.values())
+
+
+def test_macro_memo_respects_us_cutoff_and_reuses_matching_requests(project):
+    from trader.kernel.config.time import MARKET_TZ
+
+    latest = datetime(2026, 11, 7, 6, tzinfo=UTC)
+    earlier = datetime(2026, 11, 7, 1, tzinfo=UTC)
+    calls = []
+
+    class IndexMarket:
+        def get_index_us_daily(self, symbol, *, asof):
+            calls.append((symbol, asof))
+            day = asof.astimezone(MARKET_TZ["US"]).date() - timedelta(days=1)
+            return {"value": Decimal("4200.50"), "date": day.isoformat()}
+
+    dep = deps(now=lambda: latest)
+    dep.market = IndexMarket()
+    cfg = SourcesConfig.model_validate({"macro": {"fred": False, "ecos": False}})
+    inputs._MACRO_MEMO.clear()
+    try:
+        def fetch(asof):
+            return inputs._macro_memoized(cfg, Secrets(), "KR", asof, dep, dep.now)
+
+        assert fetch(latest)["sp500"]["data"]["date"] == "2026-11-06"
+        assert fetch(earlier)["sp500"]["data"]["date"] == "2026-11-05"
+        assert fetch(earlier + timedelta(hours=1))["sp500"]["data"]["date"] == "2026-11-05"
+        assert len(calls) == 4
+        cfg.macro.kis_indices = False
+        assert fetch(earlier)["sp500"]["data"] is None
+    finally:
+        inputs._MACRO_MEMO.clear()

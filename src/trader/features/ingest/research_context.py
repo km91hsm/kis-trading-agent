@@ -8,6 +8,7 @@ from typing import Any
 from trader.features.ingest import macro as macro_sources
 from trader.features.ingest.base import owned_client
 from trader.features.ingest.input_quality import activity_context, macro_context, source_coverage
+from trader.features.ingest.inputs import jsonable
 from trader.features.ingest.naver_blog import NaverBlogSource
 from trader.features.ingest.settings import SourcesConfig
 from trader.kernel.config import Secrets
@@ -65,12 +66,14 @@ def collect_research_context(
             gaps.append(f"blogs: {type(exc).__name__}: {exc}")
     activity = activity_context(conn, market, asof=asof, port=activity_port)
     gaps.extend(activity.get("data_gaps") or [])
-    return {
-        "macro": macro,
-        "market_activity": activity,
-        "blog_posts": posts,
-        "source_coverage": source_coverage(
-            macro, community={"sources": statuses}, blog_posts=posts, blog_config=blogs
-        ),
-        "data_gaps": gaps,
-    }
+    return jsonable(
+        {
+            "macro": macro,
+            "market_activity": activity,
+            "blog_posts": posts,
+            "source_coverage": source_coverage(
+                macro, community={"sources": statuses}, blog_posts=posts, blog_config=blogs
+            ),
+            "data_gaps": gaps,
+        }
+    )

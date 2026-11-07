@@ -5,6 +5,7 @@ inputs 포트가 없으면 이연(`news_macro.error`), 있으면 `recent`(M12 T1
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 from tests.features.fo._support import (
@@ -220,7 +221,7 @@ def test_fo_collects_public_research_context_through_real_inputs_port(conn, monk
 
     macro = {
         key: {
-            "data": {"value": i + 1, "date": D.isoformat()},
+            "data": {"value": Decimal(str(i + 1)), "date": D.isoformat()},
             "received_at": NOW.isoformat(),
             "error": None,
         }

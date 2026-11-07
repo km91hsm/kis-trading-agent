@@ -11,6 +11,7 @@ type ActivityRow = {
   ticker: string; name: string | null; market: string; exchange: string;
   currency: "KRW" | "USD"; source_rank: number | null;
   price: string | null; change_pct: number | null; volume: number | null; turnover: string | null;
+  turnover_unit?: string;
   received_at: string | null; stale: boolean;
   growth: { status: string; value: number | null; reason: string | null };
 };
@@ -31,7 +32,7 @@ const columns: Column<ActivityRow>[] = [
   { key: "exchange", label: "거래소 / 원천 순위", width: "16%", render: (r) => `${r.exchange} / ${r.source_rank ?? "—"}` },
   { key: "price", label: "가격", width: "15%", align: "num", render: (r) => `${fmtMoney(r.price, r.currency)} ${r.currency}` },
   { key: "change_pct", label: "가격 등락률", width: "12%", align: "num", render: (r) => fmtPct(r.change_pct) },
-  { key: "turnover", label: "누적 거래대금", width: "19%", align: "num", render: (r) => `${fmtMoney(r.turnover, r.currency)} ${r.currency}` },
+  { key: "turnover", label: "누적 거래대금", width: "19%", align: "num", render: (r) => r.turnover === null ? "—" : r.turnover_unit === r.currency ? `${fmtMoney(r.turnover, r.currency)} ${r.currency}` : <span className="activity-turnover"><span>{r.turnover}</span>{" "}<span className="data-muted">(원천값 · 단위 미확인)</span></span> },
   { key: "growth", label: "5분 거래대금 증감률", width: "18%", align: "num", render: (r) => !r.stale && r.growth.status === "available" && r.growth.value !== null ? fmtPct(r.growth.value, 1) : <span className="data-muted" title="같은 거래일·거래 세션의 유효한 관측값이 필요합니다">계산 불가</span> },
 ];
 

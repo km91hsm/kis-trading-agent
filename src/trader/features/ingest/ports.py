@@ -84,6 +84,10 @@ class InputsPortImpl:
         now: Callable[[], datetime] | None = None,
     ) -> dict:
         """거시·공개 블로그·KIS 활동 입력. 계좌·포지션·주문은 포함하지 않는다."""
+        if market_client is None:
+            accounts = self._ports.get("accounts")
+            if accounts is not None:
+                market_client = accounts.market_client()
         return collect_research_context(
             self._cfg,
             self._secrets,

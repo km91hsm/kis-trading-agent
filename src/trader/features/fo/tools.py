@@ -313,7 +313,7 @@ def fo_bundle(
         )  # fmt: skip
         data["input_context"] = tooling.compact_context(inputs)
         data["research_policy"] = research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH)
-        return {"ok": True, "data": tooling.shrink(data, BUNDLE_LIMIT_BYTES)}
+        return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "trader":
         if not _fo_decision_stages(d):
             if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):

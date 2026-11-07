@@ -365,14 +365,19 @@ def _with_store_news(news: dict, ticker: str, market: str, asof, cfg, deps) -> d
 
 
 MACRO_MEMO_TTL = timedelta(minutes=15)
-_MACRO_MEMO: dict[tuple[str, str], tuple[datetime, dict[str, Any]]] = {}
+_MACRO_MEMO: dict[tuple[str, ...], tuple[datetime, dict[str, Any]]] = {}
 _MACRO_MEMO_LOCK = threading.Lock()
 
 
 def _macro_memoized(cfg, secrets, market: str, asof: datetime, deps, now) -> dict[str, Any]:
     """거시 지표(FRED·ECOS·지수)는 종목과 무관하다 — 같은 시장·운영일의 수집은 15분 동안 재사용해
     종목마다 8회씩 외부 API 를 다시 부르지 않는다. 전부 실패한 결과는 메모하지 않는다."""
-    key = (market, asof.astimezone(UTC).date().isoformat())
+    key = (
+        market,
+        asof.astimezone(UTC).date().isoformat(),
+        (asof.astimezone(MARKET_TZ["US"]).date() - timedelta(days=1)).isoformat(),
+        cfg.macro.model_dump_json(),
+    )
     t = now()
     with _MACRO_MEMO_LOCK:
         hit = _MACRO_MEMO.get(key)

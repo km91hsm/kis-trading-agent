@@ -198,7 +198,8 @@ def test_screen_context_has_regime_and_todays_market_view(conn):
 def test_regular_screen_wires_inputs_research_port_to_scout_payload(
     project, conn, settings, monkeypatch
 ):
-    from trader.features.ingest import macro as macro_sources
+    from types import SimpleNamespace
+
     from trader.features.ingest.api import Universe
     from trader.features.ingest.ports import InputsPortImpl
     from trader.features.ingest.settings import SourcesConfig
@@ -207,18 +208,16 @@ def test_regular_screen_wires_inputs_research_port_to_scout_payload(
 
     monkeypatch.setenv("FAKE_CLAUDE", "1")
     ctx = lane(conn, settings, accounts=[_acct()])
-    ctx.ports["inputs"] = InputsPortImpl(Secrets(), SourcesConfig())
-    monkeypatch.setattr(
-        macro_sources,
-        "collect_macro",
-        lambda *a, **kw: {
-            "dxy": {
-                "data": {"value": 124, "date": D.isoformat()},
-                "received_at": ctx.now().isoformat(),
-                "error": None,
-            }
-        },
-    )
+    calls = []
+
+    def index(symbol, *, asof):
+        calls.append(symbol)
+        return {"value": Decimal("4200.50"), "date": "2026-10-07"}
+
+    market = SimpleNamespace(get_index_us_daily=index)
+    monkeypatch.setattr(ctx.ports["accounts"], "market_client", lambda: market)
+    cfg = SourcesConfig.model_validate({"macro": {"fred": False, "ecos": False}})
+    ctx.ports["inputs"] = InputsPortImpl(Secrets(), cfg, ctx.ports)
     screener.run_screen(
         ctx,
         market="KR",
@@ -229,5 +228,9 @@ def test_regular_screen_wires_inputs_research_port_to_scout_payload(
         universe=Universe(kr=["000000"]),
     )
     generated = read_checkpoint(market_dir(D, "KR", ctx.state), "_discovery_inputs")["data"]
-    assert generated["macro"]["dxy"]["data"]["value"] == 124
-    assert generated["source_coverage"]["macro"]["dxy"]["status"] == "present"
+    for key, symbol in (("sp500", "SPX"), ("nasdaq", "COMP")):
+        assert generated["macro"][key]["data"]["value"] == "4200.50"
+        coverage = generated["source_coverage"]["macro"][key]
+        assert coverage["status"] == "present" and coverage["source"] == "KIS"
+        assert coverage["series_id"] == symbol
+    assert calls == ["SPX", "COMP"]
