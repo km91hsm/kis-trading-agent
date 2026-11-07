@@ -30,6 +30,36 @@ def _read(path: Path, limit: int) -> tuple[dict, str]:
         return {}, "unreadable"
 
 
+def _receipt_sections(value) -> list[dict]:
+    """새 전달 기록의 원천별 상태만 읽고 옛 기록은 빈 목록으로 유지한다."""
+    if not isinstance(value, list):
+        return []
+    result = []
+    for section in value[:500]:
+        if not isinstance(section, dict):
+            continue
+        section_id, count = section.get("id"), section.get("count")
+        status = section.get("status")
+        if (
+            not isinstance(section_id, str)
+            or not re.fullmatch(r"[a-zA-Z0-9_.:-]{1,150}", section_id)
+            or type(count) is not int
+            or count < 0
+            or status not in ("present", "empty", "error", "partial", "skipped")
+        ):
+            continue
+        result.append(
+            {
+                "id": section_id,
+                "count": count,
+                "status": status,
+                "source": _source_text(section, "source"),
+                "received_at": _source_text(section, "received_at"),
+            }
+        )
+    return result
+
+
 def _receipt(value: dict) -> dict | None:
     """손상되거나 덧붙은 필드가 원문/임의 링크로 UI에 노출되지 않게 allowlist로 읽는다."""
     if value.get("version") != 1 or value.get("kind") != "prepared_context":
@@ -95,6 +125,7 @@ def _receipt(value: dict) -> dict | None:
                 "refs": safe_refs,
                 "identifiers_omitted": omitted,
                 "source_counts": source_counts,
+                "sections": _receipt_sections(group.get("sections")),
             }
         )
     return {
@@ -220,6 +251,7 @@ def view(conn, dec: dict, state: Path) -> dict:
                 "reconstructed_count": count,
                 "omitted_count": max(0, group["count"] - count) if count is not None else None,
                 "status": group["status"],
+                "sections": group["sections"],
                 "received_at": group["received_at"],
                 "listed_count": group["listed_count"],
                 "refs": group_refs,

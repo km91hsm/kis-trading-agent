@@ -9,34 +9,17 @@ import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict
+from typing import Any
 
 import httpx
+
+from trader.kernel.input_sections import SKIP_REASONS as SKIP_REASONS
+from trader.kernel.input_sections import Section as Section
 
 logger = logging.getLogger("trader.sources")
 
 # 과거 asof 재수집·스냅샷 허용 한도(룩어헤드 방지). inputs.collect_and_save·features.snapshot 공용
 MAX_PAST = timedelta(hours=24)
-
-# 의도적으로 건너뛴 절의 error 값. 00_inputs.errors 에 집계하지 않는다.
-SKIP_REASONS = frozenset(
-    {
-        "disabled",
-        "phase6",
-        "phase7",
-        "phase8",
-        "no saveticker dir",
-        "not available for US",
-        "no manual input",
-        "no sector peers",
-    }
-)
-
-
-class Section(TypedDict):
-    data: Any
-    received_at: str
-    error: str | None
 
 
 def utc_now() -> datetime:

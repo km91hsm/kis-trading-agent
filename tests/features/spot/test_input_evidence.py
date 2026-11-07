@@ -285,3 +285,66 @@ def test_reconstruction_reports_dropped_root_as_zero_not_unrecorded(case):
     assert blogs["stored_count"] == 5
     assert blogs["reconstructed_count"] == 0
     assert blogs["omitted_count"] == 5
+
+
+def test_nested_collection_failures_remain_visible_in_saved_input_and_receipt(case):
+    from trader.kernel.session import input_receipts
+
+    client, did, rd = case
+    rd.mkdir(parents=True)
+    data = {
+        "meta": {"asof": ASOF},
+        "technical": {
+            "quote": {
+                "data": None,
+                "error": "TimeoutError /private/path",
+                "source": "fixture-q",
+                "received_at": ASOF,
+            }
+        },
+        "sentiment": {
+            "community": {
+                "data": None,
+                "error": "TimeoutError",
+                "source": "fixture-c",
+                "received_at": ASOF,
+            }
+        },
+    }
+    run_store.write_checkpoint(rd, "00_inputs", data)
+    input_receipts.record(rd, data, stage="checkpoint:00_inputs", provider=None, recorded_at=ASOF)
+    body = client.get(f"/api/decisions/spot/{did}/inputs").json()
+    groups = {row["id"]: row for row in body["groups"]}
+    assert groups["technical"]["stored_count"] == 0
+    assert groups["technical"]["status"] == "error"
+    assert groups["technical"]["sections"][0]["id"] == "technical:quote"
+    assert groups["community"]["status"] == "error"
+    assert groups["community"]["received_at"] == ASOF
+    receipt_groups = {row["id"]: row for row in body["delivery"]["receipts"][0]["groups"]}
+    assert receipt_groups["technical"]["sections"][0]["status"] == "error"
+    assert receipt_groups["technical"]["source_counts"] == {}
+    assert "/private/path" not in json.dumps(body)
+
+
+def test_intentional_skip_survives_input_api_and_receipt_allowlist(case):
+    from trader.kernel.session import input_receipts
+
+    client, did, rd = case
+    rd.mkdir(parents=True)
+    data = {
+        "meta": {"asof": ASOF},
+        "sentiment": {
+            "short_interest": {"data": None, "error": "phase6"},
+            "trends": {"data": None, "error": "phase8"},
+        },
+    }
+    run_store.write_checkpoint(rd, "00_inputs", data)
+    before = (rd / "00_inputs.json").read_bytes()
+    input_receipts.record(rd, data, stage="checkpoint:00_inputs", provider=None, recorded_at=ASOF)
+    body = client.get(f"/api/decisions/spot/{did}/inputs").json()
+    group = body["groups"][0]
+    assert group["status"] == "skipped" and group["stored_count"] == 0
+    assert all(section["status"] == "skipped" for section in group["sections"])
+    receipt = body["delivery"]["receipts"][0]["groups"][0]
+    assert all(section["status"] == "skipped" for section in receipt["sections"])
+    assert (rd / "00_inputs.json").read_bytes() == before

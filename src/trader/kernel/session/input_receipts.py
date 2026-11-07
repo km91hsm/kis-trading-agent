@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from trader.kernel.input_sections import SKIP_REASONS
 from trader.kernel.platform.fsutil import atomic_replace
 
 ROOTS = (
@@ -70,10 +71,12 @@ def public_context(data: dict) -> dict:
     context["sentiment"] = {
         key: value for key, value in sentiment.items() if key not in {"community", "saveticker"}
     }
-    community = _unwrap(sentiment.get("community"))
-    posts = community.get("posts") if isinstance(community, dict) else []
-    posts = posts if isinstance(posts, list) else []
-    blogs = data.get("blog_posts") or [
+    original = sentiment.get("community")
+    community = _unwrap(original)
+    posts = community.get("posts") if isinstance(community, dict) else None
+    valid_posts = isinstance(posts, list)
+    posts = posts if valid_posts else []
+    blogs = [
         p
         for p in posts
         if isinstance(p, dict) and str(p.get("source", "")).startswith("naver_blog/")
@@ -83,10 +86,15 @@ def public_context(data: dict) -> dict:
         for p in posts
         if isinstance(p, dict) and not str(p.get("source", "")).startswith("naver_blog/")
     ]
-    if blogs:
-        context["blog_posts"] = blogs
-    if others:
-        context["community"] = others
+    # Section의 error/수집 시각을 목록과 함께 보존한다. 이미 정규화한 최상위 절은
+    # 다시 덮어쓰지 않아 public_context(public_context(x)) == public_context(x)다.
+    envelope = original if isinstance(original, dict) and "data" in original else None
+    failed = isinstance(original, dict) and bool(original.get("error"))
+    if "blog_posts" not in context and blogs:
+        context["blog_posts"] = {**envelope, "data": blogs} if envelope else blogs
+    if "community" not in context and (others or failed or (valid_posts and not blogs)):
+        content = others if valid_posts else None
+        context["community"] = {**envelope, "data": content} if envelope else content
     if "saveticker" in sentiment and "saveticker" not in context:
         context["saveticker"] = sentiment["saveticker"]
     if not context["sentiment"]:
@@ -115,6 +123,25 @@ def _entries(value, path, inherited=None):
             yield path, data, meta
 
 
+def _section_status(value, section_id: str, count: int) -> dict:
+    """자료 건수와 오류 상태는 분리한다. 원래 오류 문자열은 반환하지 않는다."""
+    meta = value if isinstance(value, dict) else {}
+    error = meta.get("error")
+    if isinstance(error, str) and error in SKIP_REASONS:
+        status = "skipped"
+    elif error:
+        status = "partial" if count else "error"
+    else:
+        status = "present" if count else "empty"
+    return {
+        "id": section_id,
+        "count": count,
+        "status": status,
+        "source": _text(meta.get("source")),
+        "received_at": _text(meta.get("received_at")),
+    }
+
+
 def describe(context: dict) -> list[dict]:
     """웹용 제한된 설명. receipt는 이 중 식별자·건수만 저장한다."""
     context = public_context(context)
@@ -123,14 +150,22 @@ def describe(context: dict) -> list[dict]:
         if group not in context:
             continue
         value = context[group]
-        rows = []
-        if group in {"macro", "technical", "fundamental", "sentiment"} and isinstance(value, dict):
+        rows, sections = [], []
+        if (
+            group in {"macro", "technical", "fundamental", "sentiment"}
+            and isinstance(value, dict)
+            and "data" not in value
+        ):
             for key, item in value.items():
                 if group == "sentiment" and key in {"community", "saveticker"}:
                     continue
-                rows.extend(_entries(item, f"{group}:{key}"))
+                section_id = f"{group}:{key}"
+                section_rows = list(_entries(item, section_id))
+                rows.extend(section_rows)
+                sections.append(_section_status(item, section_id, len(section_rows)))
         else:
             rows = list(_entries(value, group))
+            sections.append(_section_status(value, group, len(rows)))
         items = []
         for key, row, inherited in rows[:MAX_ITEMS]:
             url = safe_url(row.get("url"))
@@ -162,12 +197,28 @@ def describe(context: dict) -> list[dict]:
                 }
             )
         meta = value if isinstance(value, dict) else {}
+        failed = _section_status(value, group, len(rows))["status"] in {"error", "partial"} or any(
+            section["status"] in {"error", "partial"} for section in sections
+        )
+        all_skipped = bool(sections) and all(section["status"] == "skipped" for section in sections)
+        status = (
+            "partial"
+            if failed and rows
+            else "error"
+            if failed
+            else "skipped"
+            if all_skipped
+            else "present"
+            if rows
+            else "empty"
+        )
         groups.append(
             {
                 "id": group,
                 "count": len(rows),
                 "items": items,
-                "status": "error" if meta.get("error") else "present" if rows else "empty",
+                "status": status,
+                "sections": sections,
                 "received_at": _text(meta.get("received_at")),
                 "listed_count": len(items),
             }
@@ -187,6 +238,7 @@ def record(
                 "count": g["count"],
                 "refs": list(dict.fromkeys(ref for item in g["items"] for ref in item["refs"])),
                 "identifiers_omitted": g["count"] - g["listed_count"],
+                "sections": g["sections"],
                 "source_counts": dict(
                     Counter(item["source"] or "unrecorded" for item in g["items"])
                 ),
@@ -213,5 +265,5 @@ def record(
         atomic_replace(temp, final)
         return True
     except Exception:  # noqa: BLE001 - 보조 감사 기록은 분석/주문 성공 여부를 바꾸지 않는다
-        logger.warning("input_receipt_unrecorded: stage=%s", stage)
+        logger.warning("입력 전달 기록 미기록: stage=%s", stage)
         return False

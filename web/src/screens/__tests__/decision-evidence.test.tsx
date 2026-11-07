@@ -144,3 +144,42 @@ test("다른 결정으로 이동 중이거나 입력 조회가 실패하면 이�
   expect(document.getElementById("inputs")?.textContent).toContain("입력 읽기 실패");
   expect(document.getElementById("inputs")?.textContent).not.toContain("합성 입력 A");
 });
+
+
+test("하위 원천의 오류와 정상 0건을 구분하고 일부 자료도 오류 기록을 보인다", async () => {
+  const data = inputs();
+  data.groups = [
+    { id: "technical", stored_count: 1, reconstructed_count: null, omitted_count: null, status: "partial", received_at: null, listed_count: 1, sections: [
+      { id: "technical:quote", count: 0, status: "error", source: "fixture-q", received_at: "2026-11-04T01:00:00Z" },
+      { id: "technical:indicators", count: 1, status: "present", source: "fixture-i", received_at: "2026-11-04T01:00:00Z" },
+    ] },
+    { id: "community", stored_count: 0, reconstructed_count: null, omitted_count: null, status: "error", received_at: null, listed_count: 0, sections: [{ id: "community", count: 0, status: "error", source: "fixture-c", received_at: null }] },
+    { id: "events", stored_count: 0, reconstructed_count: 0, omitted_count: 0, status: "empty", received_at: null, listed_count: 0, sections: [{ id: "events", count: 0, status: "empty", source: null, received_at: null }] },
+  ];
+  data.items = [];
+  await mount(data);
+  const section = document.getElementById("inputs")!;
+  expect(section.textContent).toContain("일부 자료·오류 기록");
+  const detail = Array.from(section.querySelectorAll("details")).find(node => node.querySelector("summary")?.textContent === "원천별 수집 결과")!;
+  expect(detail?.textContent).toContain("technical:quote");
+  expect(detail.textContent).toContain("fixture-q");
+  expect(detail.textContent).toContain("자료 없음·오류 기록");
+  expect(detail.textContent).toContain("events");
+  expect(detail.textContent).toContain("0건");
+});
+
+
+test("의도적인 수집 생략은 오류 경고 없이 한글로 표시한다", async () => {
+  const data = inputs();
+  data.groups = [{ id: "sentiment", stored_count: 0, reconstructed_count: null, omitted_count: null, status: "skipped", received_at: null, listed_count: 0, sections: [
+    { id: "sentiment:short_interest", count: 0, status: "skipped", source: null, received_at: null },
+    { id: "sentiment:trends", count: 0, status: "skipped", source: null, received_at: null },
+  ] }];
+  data.items = [];
+  await mount(data);
+  const section = document.getElementById("inputs")!;
+  expect(section.textContent).toContain("의도적 생략");
+  expect(section.textContent).not.toContain("자료 없음·오류 기록");
+  expect(section.textContent).not.toContain("일부 자료·오류 기록");
+  expect(section.querySelector('.chip[data-tone="warn"]')).toBeNull();
+});

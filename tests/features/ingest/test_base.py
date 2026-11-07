@@ -48,3 +48,20 @@ def test_strip_tags_unescapes_twice():
     assert base.strip_tags("&lt;b&gt;삼성&lt;/b&gt; &amp;amp; 전자") == "삼성 & 전자"
     assert base.strip_tags("<p>a\xa0b</p>") == "a b" and base.strip_tags(None) == ""
     assert base.utc_now().tzinfo is not None
+
+
+def test_section_contract_reexport_keeps_existing_ingest_api_compatible():
+    from trader.kernel import input_sections
+
+    assert base.SKIP_REASONS is input_sections.SKIP_REASONS
+    assert base.Section is input_sections.Section
+    assert base.skipped_section("phase6", now=lambda: T0) == {
+        "data": None,
+        "received_at": T0.isoformat(),
+        "error": "phase6",
+    }
+    assert base.run_section(lambda: {"x": 1}, now=lambda: T0) == {
+        "data": {"x": 1},
+        "received_at": T0.isoformat(),
+        "error": None,
+    }
