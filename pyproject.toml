@@ -71,3 +71,5 @@ select = ["E", "F", "I", "W", "UP", "B"]
 testpaths = ["tests"]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
 markers = ["slow: 학습·백필 등 8초 이상 걸리는 테스트"]
+# 테스트 하나가 5분을 넘기면 모든 스레드의 스택을 출력한다(CI 무한 대기 진단용 — 테스트를 죽이지는 않는다)
+faulthandler_timeout = 300
