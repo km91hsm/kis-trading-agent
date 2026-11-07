@@ -248,6 +248,7 @@ def test_compact_context_keeps_each_macro_and_blog_evidence_under_realistic_load
                         {
                             "title": f"blog-{i}",
                             "body": "나" * 1800,
+                            "url": f"https://example.test/posts/{i}?label=" + "경제" * 25,
                             "source": "naver_blog/ranto28",
                             "posted_at": "2026-11-06T01:00:00Z",
                             "received_at": "2026-11-07T01:00:00Z",
@@ -260,6 +261,14 @@ def test_compact_context_keeps_each_macro_and_blog_evidence_under_realistic_load
     }
     out = compact_context(inputs)
     assert _size(out) <= 8000
+    assert len(out["blog_posts"]) == 5
+    for i, post in enumerate(out["blog_posts"]):
+        assert len(post["body"].strip(" …")) >= 63
+        assert post["url"] == f"https://example.test/posts/{i}?label=" + "경제" * 25
+        assert post["source"] == "naver_blog/ranto28"
+        assert post["posted_at"] == "2026-11-06T01:00:00Z"
+        assert post["received_at"] == "2026-11-07T01:00:00Z"
+    assert inputs["sentiment"]["community"]["data"]["posts"][0]["body"] == "나" * 1800
     assert out["blog_posts"][0]["body"]
     assert out["blog_posts"][0]["posted_at"] == "2026-11-06T01:00:00Z"
     assert out["news"]["data"]["stock"][0]["title"] == "news-0"
@@ -275,6 +284,7 @@ def test_compact_context_keeps_each_macro_and_blog_evidence_under_realistic_load
     assert "events" in out and "saveticker" in out
     blog_coverage = out["source_coverage"]["naver_blog/ranto28"]
     assert blog_coverage["items"] == len(out["blog_posts"])
+    assert blog_coverage["status"] == "present"
     if len(out["blog_posts"]) < 5:
         assert blog_coverage["status"] == "partial"
         assert blog_coverage["data_gaps"]
@@ -345,3 +355,62 @@ def test_shrink_keeps_bounded_fallback_reason_and_daily_source_metadata(limit):
     assert coverage["observed_date"] == "2026-11-05"
     assert coverage["timestamp_precision"] == "day"
     assert coverage["session"] == "daily_observation"
+
+
+def test_compact_context_preserves_blog_links_when_only_partial_posts_fit():
+    from trader.kernel.session.tooling import compact_context
+
+    posts = [
+        {"title": f"글 {i}", "body": "합성 근거 문장 " * 300,
+         "url": f"https://example.test/{i}?query=" + "x" * 7500,
+         "source": "naver_blog/ranto28", "posted_at": "2026-11-06T01:00:00Z",
+         "received_at": "2026-11-07T01:00:00Z"}
+        for i in range(5)
+    ]
+    out = compact_context({"blog_posts": posts, "source_coverage": {
+        "naver_blog/ranto28": {"status": "present", "items": 5, "data_gaps": []}}})
+    assert _size(out) <= 8000
+    assert len(out.get("blog_posts", [])) <= 1
+    for post in out.get("blog_posts", []):
+        assert post["url"] in {p["url"] for p in posts}
+    coverage = out["source_coverage"]["naver_blog/ranto28"]
+    assert coverage["status"] in {"partial", "dropped"}
+    assert coverage["original_items"] == 5
+    assert coverage["items"] < 5
+    assert coverage["data_gaps"]
+
+
+def test_compact_context_repeated_excerpts_keep_all_five_posts_and_truncation():
+    from trader.kernel.session.tooling import compact_context
+
+    inputs = {"blog_posts": [
+        {"title": f"합성 글 {i}", "body": "각 글의 서로 다른 근거 " * 200,
+         "url": f"https://example.test/{i}", "source": "naver_blog/ranto28",
+         "posted_at": "2026-11-06T01:00:00Z", "received_at": "2026-11-07T01:00:00Z"}
+        for i in range(5)], "source_coverage": {
+        "naver_blog/ranto28": {"status": "present", "items": 5, "data_gaps": []}}}
+    first = compact_context(inputs)
+    second = compact_context(first)
+    assert len(first["blog_posts"]) == len(second["blog_posts"]) == 5
+    assert second["blog_posts"] == first["blog_posts"]
+    assert second["truncation"] == first["truncation"]
+    assert second["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
+    assert _size(second) <= 8000
+
+
+def test_compact_context_counts_only_nonempty_excerpts_when_many_posts_are_trimmed():
+    from trader.kernel.session.tooling import compact_context
+
+    posts = [
+        {"source": "naver_blog/ranto28", "url": f"https://example.test/{i}",
+         "body": "" if i == 0 else "합성 자료 " * 1000}
+        for i in range(12)
+    ]
+    out = compact_context({"blog_posts": posts, "source_coverage": {
+        "naver_blog/ranto28": {"status": "present", "items": 12, "data_gaps": []}}})
+    assert len(out["blog_posts"]) == 5
+    coverage = out["source_coverage"]["naver_blog/ranto28"]
+    assert coverage["status"] == "partial"
+    assert coverage["items"] == 4 and coverage["original_items"] == 12
+    assert out["blog_posts"][0]["body"] == ""
+    assert _size(out) <= 8000
