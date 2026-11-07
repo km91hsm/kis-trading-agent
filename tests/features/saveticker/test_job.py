@@ -181,3 +181,41 @@ def test_restart_notice_failure_is_logged_and_flag_still_deleted(project, monkey
     assert out["restart"].startswith("실패") and _flag(deps) is None
     assert any("다시 시작" in r.getMessage() and r.exc_info for r in caplog.records)
     assert "restart" not in job.watch(deps, None)
+
+
+def test_first_tick_syncs_extension_and_notifies_once(project, monkeypatch):
+    """앱 업데이트 뒤 첫 틱: 설치된 확장 복사본이 번들과 다르면 교체(`bridge_install.sync`)하고
+    'Chrome 확장 새로고침' 안내를 한 번만 보낸다. 같은 프로세스의 다음 틱은 다시 보지 않는다."""
+    from trader.features.saveticker import bridge_install
+
+    _patch(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        bridge_install,
+        "sync",
+        lambda: calls.append(1) or {"extension_updated": True, "host_updated": False},
+    )
+    deps = _deps(project)
+    out = job.watch(deps, None)
+    assert out["extension_sync"]["extension_updated"] is True
+    assert sum("새로고침" in m for m in deps.notifier.msgs) == 1
+    assert "extension_sync" not in job.watch(deps, None)
+    assert calls == [1]
+
+
+def test_sync_without_update_is_silent_and_failure_is_isolated(project, monkeypatch):
+    from trader.features.saveticker import bridge_install
+
+    _patch(monkeypatch)
+    monkeypatch.setattr(bridge_install, "sync", lambda: {"skipped": "not_installed"})
+    deps = _deps(project)
+    out = job.watch(deps, None)
+    assert "extension_sync" not in out and not deps.notifier.msgs
+    job.reset_state()
+
+    def boom():
+        raise OSError("synthetic")
+
+    monkeypatch.setattr(bridge_install, "sync", boom)
+    out = job.watch(deps, None)
+    assert out["extension_sync"].startswith("실패") and out["service"] == "확장 미등록"

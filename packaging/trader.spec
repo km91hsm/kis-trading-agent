@@ -33,7 +33,7 @@ datas = [
 for rel, dst in (("web/dist", "web/dist"), ("docs/bundle-usage.md", "docs")):
     if (ROOT / rel).exists():
         datas.append((str(ROOT / rel), dst))
-# 세이브티커 Chrome 확장(번들의 `saveticker extension prepare` 가 복사한다). tests/ 는 빼고 파일 단위로
+# 세이브티커 Chrome 확장(번들의 `saveticker extension install` 이 데이터 폴더로 복사한다). tests/ 는 빼고 파일 단위로
 EXT = ROOT / "extensions/saveticker"
 if EXT.is_dir():
     for f in sorted(EXT.rglob("*")):

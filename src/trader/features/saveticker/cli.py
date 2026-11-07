@@ -1,4 +1,4 @@
-"""SaveTicker 전용 CLI. 수집은 Chrome 확장이 하고, 이 CLI 는 조회·확장 준비·등록만 한다.
+"""SaveTicker 전용 CLI. 수집은 Chrome 확장이 하고, 이 CLI 는 조회·확장 설치·등록만 한다.
 브로커·LLM·거래 데몬을 실행하지 않는다."""
 
 from __future__ import annotations
@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
 
 import typer
 
@@ -87,7 +86,7 @@ def export_cmd():
     _print({"ok": True, "root": str(root())})
 
 
-extension_app = typer.Typer(help="일반 Chrome 상시 수집 확장 준비·등록", no_args_is_help=True)
+extension_app = typer.Typer(help="일반 Chrome 상시 수집 확장 설치·등록", no_args_is_help=True)
 app.add_typer(extension_app, name="extension")
 
 
@@ -101,36 +100,31 @@ def _bridge_action(function, *args, **kwargs):
         raise typer.Exit(1) from None
 
 
-@extension_app.command("prepare")
-def extension_prepare(destination: Annotated[Path, typer.Option("--destination")]):
-    """설치·활성화 없이 검토할 확장 패키지와 권한 목록을 만든다."""
-    from trader.features.saveticker.bridge_install import prepare
+@extension_app.command("install")
+def extension_install():
+    """확장을 `<데이터 루트>/saveticker-extension/extension` 으로 복사하고 설치된 앱을 Native host
+    로 등록한다(재실행 가능 — 우리 등록은 교체). 결과의 next_steps 대로 Chrome 에 로드한다."""
+    from trader.features.saveticker.bridge_install import install
 
-    _bridge_action(prepare, destination)
-
-
-@extension_app.command("install-host")
-def extension_install(package: Path):
-    """사용자 승인 후 Native host를 등록한다."""
-    from trader.features.saveticker.bridge_install import install_host
-
-    _bridge_action(install_host, package)
+    _bridge_action(install)
 
 
-@extension_app.command("uninstall-host")
-def extension_uninstall(package: Path):
-    """확장 중지 후 Native host 등록을 지운다."""
-    from trader.features.saveticker.bridge_install import uninstall_host
+@extension_app.command("uninstall")
+def extension_uninstall():
+    """확장 팝업에서 중지한 뒤 우리 Native host 등록을 지운다."""
+    from trader.features.saveticker.bridge_install import uninstall
 
-    _bridge_action(uninstall_host, package)
+    _bridge_action(uninstall)
 
 
 @extension_app.command("status")
 def extension_status():
-    """확장 등록 여부·Native host 연결 상태·작업별 상태를 표시한다."""
+    """확장 등록 여부·Native host 연결 상태·작업별 상태 + 설치(`install`: 등록 JSON path·확장
+    버전·업데이트 필요 여부)를 표시한다."""
     from trader.features.saveticker.automation import status
+    from trader.features.saveticker.bridge_install import install_status
 
-    _print(status(home()))
+    _print({**status(home()), "install": install_status()})
 
 
 @app.command("native-host", hidden=True)

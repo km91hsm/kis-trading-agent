@@ -39,7 +39,7 @@ def read(path):
 
 
 def registered(home) -> bool:
-    """Native host 가 등록돼 확장 수집을 쓰는 중인지(`extension install-host` 가 남긴 설정)."""
+    """Native host 가 등록돼 확장 수집을 쓰는 중인지(`extension install` 이 남긴 설정)."""
     return (read(home / "runtime" / "bridge-config.json") or {}).get("backend") == "extension"
 
 

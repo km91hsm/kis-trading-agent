@@ -1,6 +1,6 @@
 """데몬 잡: 세이브티커 Chrome 확장 수집 감시(장애·복구 텔레그램)·운영일 1회 보관 정리·웹
-'다시 시작' 요청(control `saveticker_restart_requested`) 소비. 수집 자체는 일반 Chrome 의 확장과
-Native host 가 하므로 이 잡은 아무것도 띄우지 않는다."""
+'다시 시작' 요청(control `saveticker_restart_requested`) 소비·기동 뒤 첫 틱의 확장 복사본
+동기화. 수집 자체는 일반 Chrome 의 확장과 Native host 가 하므로 이 잡은 아무것도 띄우지 않는다."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from datetime import date
 from typing import Any
 
 from trader.features.saveticker import automation
-from trader.features.saveticker.messages import saveticker_health
+from trader.features.saveticker.messages import EXTENSION_RELOAD_NOTE, saveticker_health
 from trader.features.saveticker.paths import resolve_dir
 from trader.features.saveticker.restart import EXTENSION_NOTE, RESTART_FLAG
 from trader.features.saveticker.settings import load_cfg
@@ -27,9 +27,10 @@ SAVETICKER_WATCH_S = 60
 
 @dataclass
 class _State:
-    """데몬 프로세스 안의 잡 상태(마지막 정리일)."""
+    """데몬 프로세스 안의 잡 상태(마지막 정리일·확장 동기화 여부)."""
 
     pruned: date | None = None
+    synced: bool = False
 
 
 _STATE = _State()
@@ -61,6 +62,31 @@ def consume_restart(ctx: Any) -> str | None:
     return result
 
 
+def sync_extension(ctx: Any) -> dict | str | None:
+    """프로세스당 1회(앱 기동 뒤 첫 틱): 설치된 확장 복사본·Native host 등록을 지금 앱에 맞춘다
+    (`bridge_install.sync`). 확장 JS 가 바뀌었으면 Chrome 새로고침 안내를 한 번 보낸다. 실패는
+    로그로 남기고 수집 감시는 계속한다. 바뀐 게 없으면 None."""
+    if _STATE.synced:
+        return None
+    _STATE.synced = True
+    from trader.features.saveticker import bridge_install
+
+    try:
+        result = bridge_install.sync()
+    except Exception as e:  # noqa: BLE001 — 동기화 실패가 수집 감시를 막지 않게
+        logger.exception("세이브티커 확장 동기화 실패")
+        return f"실패: {type(e).__name__}"
+    if not (result.get("extension_updated") or result.get("host_updated")):
+        return None
+    logger.info("세이브티커 확장 동기화: %s", result)
+    if result.get("extension_updated"):
+        try:
+            ctx.notifier.send(saveticker_health(EXTENSION_RELOAD_NOTE))
+        except Exception:  # noqa: BLE001 — 안내 실패는 로그만
+            logger.exception("세이브티커 확장 새로고침 안내 전송 실패")
+    return result
+
+
 def watch(ctx: Any, job: Any) -> dict:
     """세이브티커 확장 수집 감시. 웹 '다시 시작' 요청을 소비하고, 확장(Native host)이 등록돼
     있으면 수집기 감시(`automation.monitor`)가 판정한 장애·복구를 텔레그램으로 한 번씩 보내고,
@@ -72,6 +98,9 @@ def watch(ctx: Any, job: Any) -> dict:
     if ctx.stop_event.is_set():
         return {"skipped": "종료 중"}
     out: dict[str, Any] = {}
+    synced = sync_extension(ctx)
+    if synced is not None:
+        out["extension_sync"] = synced
     restart = consume_restart(ctx)
     if restart is not None:
         out["restart"] = restart
