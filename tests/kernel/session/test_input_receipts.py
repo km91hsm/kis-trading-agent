@@ -312,3 +312,116 @@ def test_all_skipped_sections_remain_skipped_in_receipt(tmp_path):
         for group in receipt["groups"]
         for section in group["sections"]
     )
+
+
+@pytest.mark.parametrize(
+    ("items", "expected"),
+    [([], "error"), ([{"source": "합성 매체", "title": "합성 기사"}], "partial")],
+)
+def test_collector_inner_failure_is_not_hidden_by_successful_outer_section(
+    tmp_path, items, expected
+):
+    from copy import deepcopy
+
+    from trader.kernel.session import input_receipts
+
+    context = {
+        "news": {
+            "data": {
+                "stock": items,
+                "macro": [],
+                "sources": {"google_rss": "ConnectError: /private/account/path", "naver": "ok"},
+            },
+            "error": None,
+            "received_at": "2026-11-04T01:00:00Z",
+        }
+    }
+    before = deepcopy(context)
+    digest = hashlib.sha256(
+        json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    group = input_receipts.describe(context)[0]
+    assert group["status"] == expected and group["count"] == len(items)
+    assert group["sections"][0]["source_outcomes"] == [
+        {"source": "google_rss", "status": "error", "count": None},
+        {"source": "naver", "status": "success", "count": None},
+    ]
+    input_receipts.record(
+        tmp_path, context, stage="trader", provider=None, recorded_at="2026-11-04T01:00:00Z"
+    )
+    raw = next((tmp_path / "input_receipts").glob("*.json")).read_text()
+    receipt = json.loads(raw)
+    assert receipt["context_hash"] == digest
+    assert receipt["groups"][0]["source_counts"] == ({"합성 매체": 1} if items else {})
+    assert (
+        receipt["groups"][0]["sections"][0]["source_outcomes"]
+        == group["sections"][0]["source_outcomes"]
+    )
+    assert "/private/account/path" not in raw and "합성 기사" not in raw
+    assert context == before
+
+
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        ({"google_rss": "ok", "naver": "no api key"}, "empty"),
+        ({"reddit": "not available for KR"}, "skipped"),
+        ({"reddit": "not available for US", "clien": "disabled"}, "skipped"),
+        ({"store": "0건 합침"}, "empty"),
+    ],
+)
+def test_inner_source_success_and_explicit_skip_do_not_become_errors(sources, expected):
+    from trader.kernel.session import input_receipts
+
+    group = input_receipts.describe(
+        {"news": {"data": {"stock": [], "sources": sources}, "error": None}}
+    )[0]
+    assert group["status"] == expected and group["count"] == 0
+    outcomes = group["sections"][0]["source_outcomes"]
+    assert all(row["status"] in {"success", "skipped"} and row["count"] is None for row in outcomes)
+
+
+@pytest.mark.parametrize("failed_blog", [False, True])
+def test_community_split_keeps_each_source_failure_without_changing_ids(failed_blog):
+    from copy import deepcopy
+
+    from trader.kernel.session import input_receipts
+
+    source = "clien" if failed_blog else "naver_blog/fixture"
+    context = {
+        "sentiment": {
+            "community": {
+                "data": {
+                    "posts": [
+                        {"source": source, "body": "합성 본문", "url": "https://example.test/post"}
+                    ],
+                    "sources": {
+                        "clien": "ok" if failed_blog else "ConnectError: /private/path",
+                        "naver_blog/fixture": "ConnectError: /private/path"
+                        if failed_blog
+                        else "ok",
+                        "reddit": "not available for KR",
+                    },
+                },
+                "error": None,
+                "received_at": "2026-11-04T01:00:00Z",
+            }
+        }
+    }
+    before = deepcopy(context)
+    canonical = input_receipts.public_context(context)
+    assert input_receipts.public_context(canonical) == canonical
+    groups = {row["id"]: row for row in input_receipts.describe(context)}
+    present, failed = ("community", "blog_posts") if failed_blog else ("blog_posts", "community")
+    assert (groups[present]["status"], groups[present]["count"]) == ("present", 1)
+    assert (groups[failed]["status"], groups[failed]["count"]) == ("error", 0)
+    assert groups[present]["items"][0]["id"] == f"{present}:0"
+    assert groups["blog_posts"]["sections"][0]["source_outcomes"] == [
+        {
+            "source": "naver_blog/fixture",
+            "status": "error" if failed_blog else "success",
+            "count": None,
+        },
+    ]
+    assert "/private/path" not in json.dumps(groups)
+    assert context == before

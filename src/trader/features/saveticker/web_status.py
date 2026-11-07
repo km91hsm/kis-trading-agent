@@ -230,19 +230,33 @@ def _label(name: str) -> str:
     return name
 
 
-def _recovery(state: dict, now: datetime) -> dict:
+def _lane(name: str) -> str:
+    return (
+        "background"
+        if name.startswith("calendar") or name == "news_reports"
+        else name.split("_")[0]
+    )
+
+
+def _recovery(state: dict, now: datetime, successes: dict[str, str]) -> dict:
     lanes = []
     for lane, block in state["lane_blocks"].items():
         at = block["at"]
         retry = (
             datetime.fromisoformat(at) + timedelta(seconds=automation.LANE_RETRY_S) if at else None
         )
+        if retry and retry > now:
+            status, text = "waiting", "접근 제한으로 대기 중"
+        elif at and successes.get(lane, "") > at:
+            status, text = "recovered", "차단 이후 유효 자료 수집 확인"
+        else:
+            status, text = "unknown", "재시도 결과 미확인"
         lanes.append(
             {
                 "lane": lane,
-                "state": "waiting" if retry and retry > now else "unknown",
+                "state": status,
                 "retry_after_at": retry.isoformat() if retry else None,
-                "text": "접근 제한으로 대기 중" if retry and retry > now else "재시도 결과 미확인",
+                "text": text,
             }
         )
     service = state["service"]["state"]
@@ -252,8 +266,12 @@ def _recovery(state: dict, now: datetime) -> dict:
         status, text = "waiting", "오류 후 자동 재시도 대기 중"
     elif service == "waiting_chrome":
         status, text = "waiting", "Chrome에서 로그인과 확장 연결을 확인하세요"
-    elif lanes:
+    elif any(lane["state"] == "waiting" for lane in lanes):
         status, text = "partial", "접근이 제한된 작업은 재시도 대기 중입니다"
+    elif any(lane["state"] == "unknown" for lane in lanes):
+        status, text = "unknown", "일부 작업의 재시도 결과가 미확인입니다"
+    elif lanes:
+        status, text = "recovered", "차단 이후 유효 자료 수집을 확인했습니다"
     else:
         status, text = "none", "복구 대기 없음"
     return {"state": status, "text": text, "lanes": lanes}
@@ -307,7 +325,21 @@ def read_status(root: Path, *, now: datetime) -> dict:
         for name in names
     }
     changes, responses, history_bad = _history(root, cutoffs, now)
-    recovery = _recovery(state, now)
+    successes: dict[str, str] = {}
+    for name in names:
+        row = raw[name] if isinstance(raw[name], dict) else {}
+        success = _stamp(row.get("last_success_at"), now)
+        count = row.get("count")
+        if (
+            success
+            and success == cutoffs[name]
+            and _known(row.get("status"), {"ok", "partial"})
+            and type(count) is int
+            and 0 < count <= 1_000_000
+        ):
+            lane = _lane(name)
+            successes[lane] = max(successes.get(lane, ""), success)
+    recovery = _recovery(state, now, successes)
     streams = []
     for name in names:
         row = raw[name] if isinstance(raw[name], dict) else {}
@@ -318,11 +350,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
         count = count if type(count) is int and 0 <= count <= 1_000_000 else None
         interval = row.get("target_interval_s")
         interval = interval if type(interval) in (int, float) and 2 <= interval <= 86400 else 30
-        lane = (
-            "background"
-            if name.startswith("calendar") or name == "news_reports"
-            else name.split("_")[0]
-        )
+        lane = _lane(name)
         block = next((b for b in recovery["lanes"] if b["lane"] == lane), None)
         lane_row = state["lanes"].get(lane, {})
         lane_at = lane_row.get("updated_at")
@@ -344,7 +372,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result, error = "login_required", "로그인 또는 사이트 확인이 필요합니다"
         elif lane_current and lane_row.get("state") in {"error", "failed"}:
             result, error = "error", "최근 수집 작업에 오류가 있습니다"
-        elif block:
+        elif block and block["state"] == "waiting":
             result = "stopped"
         elif (now - datetime.fromisoformat(attempt)).total_seconds() > max(120, interval * 3):
             result = "delayed"

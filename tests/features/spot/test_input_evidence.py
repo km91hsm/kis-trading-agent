@@ -348,3 +348,46 @@ def test_intentional_skip_survives_input_api_and_receipt_allowlist(case):
     receipt = body["delivery"]["receipts"][0]["groups"][0]
     assert all(section["status"] == "skipped" for section in receipt["sections"])
     assert (rd / "00_inputs.json").read_bytes() == before
+
+
+def test_inner_source_outcomes_are_sanitized_and_preserved_through_receipt_api(case):
+    from trader.kernel.session import input_receipts
+
+    client, did, rd = case
+    rd.mkdir(parents=True)
+    data = {
+        "news_macro": {
+            "news": {
+                "data": {
+                    "stock": [],
+                    "sources": {
+                        "google_rss": "ConnectError /private/account/path",
+                        "naver": "no api key",
+                    },
+                },
+                "error": None,
+                "received_at": ASOF,
+            }
+        }
+    }
+    run_store.write_checkpoint(rd, "00_inputs", data)
+    input_receipts.record(rd, data, stage="checkpoint:00_inputs", provider=None, recorded_at=ASOF)
+    path = next((rd / "input_receipts").glob("*.json"))
+    receipt = json.loads(path.read_text())
+    receipt["groups"][0]["sections"][0]["source_outcomes"] = [
+        {"source": "google_rss", "status": "error", "count": None, "error": "SECRET_PATH"},
+        {"source": "naver", "status": "skipped", "count": None},
+    ]
+    path.write_text(json.dumps(receipt))
+    body = client.get(f"/api/decisions/spot/{did}/inputs").json()
+    group = body["groups"][0]
+    assert group["status"] == "error" and group["stored_count"] == 0
+    expected = [
+        {"source": "google_rss", "status": "error", "count": None},
+        {"source": "naver", "status": "skipped", "count": None},
+    ]
+    assert group["sections"][0]["source_outcomes"] == expected
+    assert (
+        body["delivery"]["receipts"][0]["groups"][0]["sections"][0]["source_outcomes"] == expected
+    )
+    assert "SECRET_PATH" not in json.dumps(body) and "/private/account/path" not in json.dumps(body)

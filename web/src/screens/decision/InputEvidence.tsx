@@ -10,7 +10,8 @@ export type InputItem = {
   url: string | null; received_at: string | null; source_asof: string | null;
   cited: boolean; excerpt_truncated: boolean;
 };
-type InputSection = { id: string; count: number; status: string; source: string | null; received_at: string | null };
+type SourceOutcome = { source: string; status: string; count: null };
+type InputSection = { id: string; count: number; status: string; source: string | null; received_at: string | null; source_outcomes?: SourceOutcome[] };
 export type InputGroup = { id: string; stored_count: number; reconstructed_count: number | null; omitted_count: number | null; status: string; received_at: string | null; listed_count: number; refs?: string[]; cited?: boolean; sections?: InputSection[] };
 type InputReceipt = {
   stage: string; provider: string | null; recorded_at: string; context_hash: string;
@@ -70,12 +71,18 @@ const columns: Column<InputGroup>[] = [
   { key: "received_at", label: "수집 시각", width: "13%", render: row => fmtWhen(row.received_at) },
 ];
 
+const outcomeStatus: Record<string, string> = { success: "성공", error: "실패", skipped: "의도적 생략", unrecorded: "미기록" };
+function SourceOutcomes({ outcomes }: { outcomes?: SourceOutcome[] }) {
+  if (!outcomes?.length) return <span className="data-muted">미기록</span>;
+  return <><ul className="evidence-refs">{outcomes.map((outcome, i) => <li key={`${outcome.source}-${i}`}>{outcome.source === "unrecorded" ? "원천 미기록" : outcome.source}: {outcomeStatus[outcome.status] ?? "미기록"}</li>)}</ul><span className="data-muted">원천별 건수 미기록</span></>;
+}
 const sectionColumns: Column<InputSection>[] = [
-  { key: "id", label: "입력 원천", width: "30%", long: true },
-  { key: "status", label: "수집 결과", width: "25%", render: row => groupStatus[row.status] ?? "미기록" },
-  { key: "count", label: "저장 자료", width: "12%", render: row => `${row.count}건` },
-  { key: "source", label: "출처", width: "18%", render: row => row.source ?? "미기록" },
+  { key: "id", label: "입력 원천", width: "20%", long: true },
+  { key: "status", label: "수집 결과", width: "20%", render: row => groupStatus[row.status] ?? "미기록" },
+  { key: "count", label: "저장 자료", width: "10%", render: row => `${row.count}건` },
+  { key: "source", label: "출처", width: "15%", render: row => row.source ?? "미기록" },
   { key: "received_at", label: "수집 시각", width: "15%", render: row => fmtWhen(row.received_at) },
+  { key: "source_outcomes", label: "세부 원천 결과", width: "20%", render: row => <SourceOutcomes outcomes={row.source_outcomes} /> },
 ];
 
 function Receipt({ receipt, items }: { receipt: InputReceipt; items: InputItem[] }) {
@@ -89,6 +96,7 @@ function Receipt({ receipt, items }: { receipt: InputReceipt; items: InputItem[]
     <p>{receipt.groups.map(group => `${label(group.id)} ${group.count}건${group.identifiers_omitted ? ` (식별자 ${group.identifiers_omitted}건 생략)` : ""}`).join(", ") || "공개 입력 항목 없음"}</p>
     {receipt.groups.some(group => Object.keys(group.source_counts ?? {}).length) ? <ul>{receipt.groups.map(group => <li key={group.id}>{label(group.id)} 출처: {Object.entries(group.source_counts ?? {}).map(([source, count]) => `${source === "unrecorded" ? "출처 미기록" : source} ${count}건`).join(", ") || "미기록"}{group.identifiers_omitted ? " (표시된 식별자 범위)" : ""}</li>)}</ul> : null}
     {receipt.groups.some(group => group.sections?.some(section => ["error", "partial"].includes(section.status))) ? <p className="data-muted">오류 기록: {receipt.groups.flatMap(group => group.sections ?? []).filter(section => ["error", "partial"].includes(section.status)).map(section => `${section.id} ${groupStatus[section.status]} (자료 ${section.count}건)`).join(", ")}</p> : null}
+    {receipt.groups.flatMap(group => group.sections ?? []).filter(section => section.source_outcomes?.length).map(section => <div key={section.id}><strong>{section.id} 원천 응답</strong><SourceOutcomes outcomes={section.source_outcomes} /></div>)}
     <EvidenceLinks refs={[...new Set(receipt.groups.flatMap(group => group.refs))].slice(0, 30)} items={items} />
     {receipt.groups.reduce((count, group) => count + group.refs.length, 0) > 30 ? <p className="data-muted">입력 연결은 앞의 30개 식별자까지 표시합니다.</p> : null}
     <details><summary>컨텍스트 해시</summary><code className="evidence-hash">{receipt.context_hash}</code></details>

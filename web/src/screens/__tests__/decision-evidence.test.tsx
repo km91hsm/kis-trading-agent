@@ -183,3 +183,18 @@ test("의도적인 수집 생략은 오류 경고 없이 한글로 표시한다"
   expect(section.textContent).not.toContain("일부 자료·오류 기록");
   expect(section.querySelector('.chip[data-tone="warn"]')).toBeNull();
 });
+
+test("내부 원천 실패와 성공을 표시하되 원천별 건수를 추정하지 않는다", async () => {
+  const data = inputs();
+  data.groups[0].status = "partial";
+  data.groups[0].sections = [{ id: "news", count: 2, status: "partial", source: null, received_at: null, source_outcomes: [
+    { source: "google_rss", status: "error", count: null },
+    { source: "naver", status: "success", count: null },
+  ] }];
+  await mount(data);
+  const detail = Array.from(document.querySelectorAll("#inputs details")).find(node => node.querySelector("summary")?.textContent === "원천별 수집 결과")!;
+  expect(detail?.textContent).toContain("google_rss: 실패");
+  expect(detail.textContent).toContain("naver: 성공");
+  expect(detail.textContent).toContain("원천별 건수 미기록");
+  expect(detail.textContent).not.toContain("naver: 성공 2건");
+});

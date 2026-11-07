@@ -59,6 +59,57 @@ def _unwrap(value):
     return value.get("data") if isinstance(value, dict) and "data" in value else value
 
 
+def sanitize_source_outcomes(value) -> list[dict]:
+    """원천 식별자·분류만 허용한다. 수집기는 개별 건수를 기록하지 않는다."""
+    if not isinstance(value, list):
+        return []
+    rows = []
+    for item in value[:MAX_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source")
+        if not isinstance(source, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.@-]{1,80}(?:/[A-Za-z0-9_.@-]{1,80})?", source
+        ):
+            source = "unrecorded"
+        status = item.get("status")
+        if status not in ("success", "error", "skipped", "unrecorded"):
+            status = "unrecorded"
+        rows.append({"source": source, "status": status, "count": None})
+    return rows
+
+
+def _source_outcomes(value) -> list[dict]:
+    content = _unwrap(value)
+    sources = content.get("sources") if isinstance(content, dict) else None
+    if not isinstance(sources, dict):
+        return (
+            sanitize_source_outcomes(value.get("source_outcomes"))
+            if isinstance(value, dict)
+            else []
+        )
+    rows = []
+    for source, outcome in list(sources.items())[:MAX_ITEMS]:
+        if not isinstance(outcome, str) or not outcome:
+            status = "unrecorded"
+        elif outcome == "ok" or re.fullmatch(r"\d+건 합침", outcome):
+            status = "success"
+        elif outcome in SKIP_REASONS or outcome in {"no api key", "not available for KR"}:
+            # data.sources에는 Section.error와 달리 API 키 미설정/시장 제외도 기록된다.
+            status = "skipped"
+        else:
+            status = "error"
+        rows.append({"source": source, "status": status})
+    return sanitize_source_outcomes(rows)
+
+
+def _with_source_outcomes(value, outcomes: list[dict]):
+    if not outcomes:
+        return value
+    envelope = value if isinstance(value, dict) and "data" in value else {"data": value}
+    return {**envelope, "source_outcomes": outcomes}
+
+
 def public_context(data: dict) -> dict:
     """원본 역할별 입력과 이미 축약된 공개 컨텍스트에 같은 항목 식별 규칙을 쓴다."""
     context = {key: data[key] for key in ROOTS if key in data}
@@ -90,11 +141,20 @@ def public_context(data: dict) -> dict:
     # 다시 덮어쓰지 않아 public_context(public_context(x)) == public_context(x)다.
     envelope = original if isinstance(original, dict) and "data" in original else None
     failed = isinstance(original, dict) and bool(original.get("error"))
-    if "blog_posts" not in context and blogs:
+    outcomes = _source_outcomes(original)
+    blog_outcomes = [row for row in outcomes if row["source"].startswith("naver_blog/")]
+    other_outcomes = [row for row in outcomes if not row["source"].startswith("naver_blog/")]
+    if "blog_posts" not in context and (blogs or blog_outcomes):
         context["blog_posts"] = {**envelope, "data": blogs} if envelope else blogs
-    if "community" not in context and (others or failed or (valid_posts and not blogs)):
+    if "blog_posts" in context:
+        context["blog_posts"] = _with_source_outcomes(context["blog_posts"], blog_outcomes)
+    if "community" not in context and (
+        others or failed or other_outcomes or (valid_posts and not blogs)
+    ):
         content = others if valid_posts else None
         context["community"] = {**envelope, "data": content} if envelope else content
+    if "community" in context:
+        context["community"] = _with_source_outcomes(context["community"], other_outcomes)
     if "saveticker" in sentiment and "saveticker" not in context:
         context["saveticker"] = sentiment["saveticker"]
     if not context["sentiment"]:
@@ -127,10 +187,13 @@ def _section_status(value, section_id: str, count: int) -> dict:
     """자료 건수와 오류 상태는 분리한다. 원래 오류 문자열은 반환하지 않는다."""
     meta = value if isinstance(value, dict) else {}
     error = meta.get("error")
+    outcomes = _source_outcomes(value)
     if isinstance(error, str) and error in SKIP_REASONS:
         status = "skipped"
-    elif error:
+    elif error or any(row["status"] == "error" for row in outcomes):
         status = "partial" if count else "error"
+    elif not count and outcomes and all(row["status"] == "skipped" for row in outcomes):
+        status = "skipped"
     else:
         status = "present" if count else "empty"
     return {
@@ -139,6 +202,7 @@ def _section_status(value, section_id: str, count: int) -> dict:
         "status": status,
         "source": _text(meta.get("source")),
         "received_at": _text(meta.get("received_at")),
+        **({"source_outcomes": outcomes} if outcomes else {}),
     }
 
 

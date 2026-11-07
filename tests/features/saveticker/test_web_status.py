@@ -97,6 +97,74 @@ def test_partial_lane_is_reported_without_hiding_other_successes(project, client
     assert data["recovery"]["lanes"][0]["state"] == "waiting"
 
 
+@pytest.mark.parametrize(
+    "blocked_at, success_at, expected_stream, expected_recovery",
+    [
+        (SECOND, FIRST, "stopped", "waiting"),
+        ("2026-11-04T00:58:00+00:00", FIRST, "stopped", "waiting"),
+        ("2026-11-03T18:00:00+00:00", FIRST, "normal", "recovered"),
+        ("2026-11-03T19:00:00+00:00", FIRST, "normal", "recovered"),
+        (
+            "2026-11-03T18:00:00+00:00",
+            "2026-11-03T17:59:00+00:00",
+            "delayed",
+            "unknown",
+        ),
+        (None, FIRST, "normal", "unknown"),
+        ("2026-11-05T01:00:00+00:00", FIRST, "normal", "unknown"),
+    ],
+    ids=[
+        "active-old-success",
+        "active-new-success",
+        "expired-new-success",
+        "expiry-boundary",
+        "expired-old-success",
+        "missing-time",
+        "future-time",
+    ],
+)
+def test_lane_cooldown_only_stops_streams_during_a_valid_retry_window(
+    project, client, blocked_at, success_at, expected_stream, expected_recovery
+):
+    save(stream="market_gain_live", when=success_at)
+    block = {"reason": "AccessDenied"}
+    if blocked_at is not None:
+        block["at"] = blocked_at
+    block_path = home() / "runtime/lane-blocked.json"
+    atomic_json(block_path, {"market": block})
+    before = block_path.read_bytes()
+
+    data = get(client)
+    assert data["streams"][0]["state"] == expected_stream
+    assert data["summary"]["state"] == expected_stream
+    assert data["recovery"]["lanes"][0]["state"] == expected_recovery
+    if expected_recovery != "waiting":
+        assert data["recovery"]["state"] == expected_recovery
+        assert "대기 중" not in data["recovery"]["text"]
+    assert block_path.read_bytes() == before
+
+
+def test_expired_block_with_zero_item_response_does_not_claim_recovery(project, client):
+    save(stream="market_gain_live", when="2026-11-03T17:59:00+00:00")
+    save(
+        stream="market_gain_live",
+        when=FIRST,
+        status="partial",
+        items=[],
+        reason="empty_or_unavailable",
+    )
+    atomic_json(
+        home() / "runtime/lane-blocked.json",
+        {
+            "market": {"reason": "AccessDenied", "at": "2026-11-03T18:00:00+00:00"},
+        },
+    )
+    data = get(client)
+    assert data["streams"][0]["state"] == "empty"
+    assert data["recovery"]["lanes"][0]["state"] == "unknown"
+    assert data["recovery"]["state"] == "unknown"
+
+
 def test_latest_failure_keeps_last_response_and_sanitizes_reason(project, client):
     save()
     save(when=SECOND, status="auth_required", items=[], reason="/private/secret?token=bad")

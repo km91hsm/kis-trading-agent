@@ -55,6 +55,15 @@ def _receipt_sections(value) -> list[dict]:
                 "status": status,
                 "source": _source_text(section, "source"),
                 "received_at": _source_text(section, "received_at"),
+                **(
+                    {
+                        "source_outcomes": input_receipts.sanitize_source_outcomes(
+                            section["source_outcomes"]
+                        )
+                    }
+                    if "source_outcomes" in section
+                    else {}
+                ),
             }
         )
     return result
