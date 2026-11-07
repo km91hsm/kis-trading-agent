@@ -280,7 +280,7 @@ describe("시스템 화면", () => {
     const grid = j.querySelector(".job-grid") as HTMLElement;
     expect(grid).not.toBeNull();
     const groups = Array.from(grid.querySelectorAll("[data-lane]")).map((g) => g.getAttribute("data-lane"));
-    expect(groups).toEqual(["spot", "data"]);
+    expect(groups).toEqual(["data", "spot"]);
     expect(button(grid, "현물 매매")).toBeTruthy();
     expect(button(grid, "지표 스냅샷")).toBeTruthy();
     expect(Array.from(j.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("일정");
@@ -330,10 +330,12 @@ describe("시스템 화면", () => {
     type(input, "manual-tok");
     act(() => button(t, "저장").click());
     expect(tokenStore.get()).toBe("manual-tok");
-    expect(input.value).toBe("");
+    expect(t.querySelector("form")).toBeNull();
     expect(t.textContent).toContain("설정됨");
     expect(t.textContent).not.toContain("manual-tok");
 
+    act(() => button(t, "토큰 설정 열기").click());
+    expect((t.querySelector("input") as HTMLInputElement).value).toBe("");
     await act(async () => button(t, "이 PC 에서 받기").click());
     await flush();
     const boot = callsTo("/system/bootstrap-token", "POST");

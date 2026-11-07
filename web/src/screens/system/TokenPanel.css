@@ -1,0 +1,2 @@
+.token-panel-status { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.token-panel-status p { margin: 0; }

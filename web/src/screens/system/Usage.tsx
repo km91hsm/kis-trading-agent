@@ -7,10 +7,12 @@ import { RunJobButton } from "../../components/RunJobButton";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, patchJson, postPublic } from "../../lib/api";
+import { useCodexUsage } from "../../lib/codex-usage";
 import { termLabel } from "../../lib/glossary";
 import { useNow, useResource } from "../../lib/hooks";
 import type { UsageResp, UsageWindow } from "../../lib/usage";
 import { body } from "../performance/ResourceView";
+import { CodexUsage } from "./CodexUsage";
 import { throttleLine, usageMeters } from "./system.ts";
 
 type Fresh = { fresh?: boolean; age_s?: number; skipped?: string; throttled?: boolean; queued?: boolean; already?: boolean };
@@ -41,6 +43,7 @@ function windowSub(w: UsageWindow): string {
 
 export function Usage() {
   const usage = useResource<UsageResp>("/system/usage", undefined, ["usage"]);
+  const codex = useCodexUsage();
   const now = useNow(30000);
   const { reload } = usage;
   const [fresh, setFresh] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export function Usage() {
   return (
     <>
       <div className="perf-filters">
-        <button type="button" className="btn" onClick={() => void ensure()}>
+        <button type="button" className="btn" onClick={() => { void ensure(); codex.reload(); }}>
           새로고침
         </button>
         <RunJobButton kind="usage_probe" label="지금 확인" trading={false} realAccounts={[]} onDone={() => setFresh("새 관측을 요청했습니다 — 데몬이 곧 처리합니다")} />
@@ -86,6 +89,7 @@ export function Usage() {
       </div>
       {body(usage, "사용량", (u) => (
         <>
+          <h3 className="perf-sub">Claude 사용량</h3>
           <ul className="sys-meters">
             {usageMeters(u, now)
               .filter((m) => m.key !== "spend" || m.used_pct !== null)
@@ -136,6 +140,7 @@ export function Usage() {
           />
         </>
       ))}
+      <CodexUsage resource={codex} now={now} />
     </>
   );
 }

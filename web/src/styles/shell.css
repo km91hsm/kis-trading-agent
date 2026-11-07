@@ -82,7 +82,7 @@
 .usage-chip[data-level="warn"] { color: var(--warn); background: var(--warn-bg); }
 .usage-chip[data-level="fail"] { color: var(--fail); background: var(--fail-bg); }
 
-/* 지수·환율 칩 — 장중만 보임. 등락은 한국 관례(상승 적·하락 청). 낡은 값은 흐리게. */
+/* 지수·환율 칩 — 등락은 한국 관례(상승 적·하락 청). 지연은 글자로 표시한다. */
 .index-chips {
   display: flex;
   gap: var(--space-2);
@@ -101,7 +101,8 @@
 .index-chip-label { color: var(--fg-muted); }
 .index-chip[data-dir="up"] .index-chip-change { color: var(--up); }
 .index-chip[data-dir="down"] .index-chip-change { color: var(--down); }
-.index-chip[data-stale] { opacity: 0.6; }
+.index-chip[data-stale] { box-shadow: inset 0 0 0 1px var(--neutral-line); }
+.index-stale { color: var(--warn); font-weight: 600; }
 
 /* 좁은 폭의 「더 보기」 — 지수·사용률 칩을 접는다 */
 .statusbar-more { position: relative; }
@@ -117,9 +118,9 @@
 }
 .statusbar-more > summary::-webkit-details-marker { display: none; }
 .statusbar-more-body {
-  position: absolute;
-  right: 0;
-  top: 100%;
+  position: fixed;
+  inset-inline: var(--space-4);
+  top: var(--bar);
   z-index: var(--z-sticky);
   display: grid;
   gap: var(--space-2);
@@ -128,7 +129,10 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.12));
+  max-height: calc(100dvh - var(--bar) - var(--space-4));
+  overflow-y: auto;
 }
+.statusbar-more-body .index-chips { flex-wrap: wrap; min-width: 0; }
 
 .clock {
   display: flex;

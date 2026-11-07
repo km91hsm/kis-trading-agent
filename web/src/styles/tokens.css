@@ -24,6 +24,9 @@
   --down: #1F5FD0;
   --live: #B3420F;
   --live-bg: #FDF0E7;
+  --neutral-fg: #344154;
+  --neutral-bg: #E8EDF3;
+  --neutral-line: #CBD4E0;
   --shadow: 0 1px 3px rgba(20, 24, 31, 0.12);
 
   --space-1: 4px;
@@ -80,6 +83,9 @@
   --down: #6FB1FF;
   --live: #FFA05C;
   --live-bg: #3F2314;
+  --neutral-fg: #F1F5FA;
+  --neutral-bg: #303C4E;
+  --neutral-line: #53637B;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 
   --space-1: 4px;
