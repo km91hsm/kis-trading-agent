@@ -70,7 +70,8 @@ def is_translocated(path: str | os.PathLike[str]) -> bool:
     """격리 속성이 남은 앱을 '우클릭 → 열기' 로 실행하면 Gatekeeper 가 읽기 전용 임시 경로
     (`.../AppTranslocation/<UUID>/d/Trader.app`)에서 돌린다 — 그 경로가 로그온 등록·확장 호스트에
     박히면 다음 실행에서 깨진다."""
-    return "/AppTranslocation/" in str(path)
+    # Windows 의 Path 문자열은 `\` 구분자라 구분자를 통일해 본다
+    return "/AppTranslocation/" in str(path).replace("\\", "/")
 
 
 def bundle_root() -> Path:

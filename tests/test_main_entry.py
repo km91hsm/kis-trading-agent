@@ -113,7 +113,10 @@ def test_translocated_launch_is_blocked_with_applications_hint(tmp_path, monkeyp
 
 def test_startup_log_dirs_fall_back_to_user_data_then_home(tmp_path, monkeypatch):
     """데이터 루트를 못 얻으면 user_data_dir()/state/logs → 홈 순으로 남긴다."""
-    from trader.kernel.platform import bundle, paths
+    from trader.kernel.platform import bundle, notify_os, paths
+
+    # 실제 OS 알림을 띄우면 Windows 는 MessageBox 가 확인을 기다리며 테스트가 멈춘다(CI 1시간 정지)
+    monkeypatch.setattr(notify_os, "alert", lambda t, m: True)
 
     def broken():
         raise paths.ProjectRootNotFound("없음")
