@@ -5,8 +5,8 @@
 - `TraderApp`(console=False): 더블클릭용 — 트레이/메뉴바 아이콘 + 데몬 + 웹. `__main__` 은 frozen 이고
   실행파일명이 `traderapp*` 이면 `trader app --tray` 로 분기한다. macOS·Windows 의 파일시스템은
   대소문자를 무시하므로 `Trader` 가 아니라 `TraderApp` (tests/kernel/platform/test_bundle.py).
-- macOS 는 BUNDLE 로 `Trader.app` 을 만든다. TRADER_HOME 은 `.app` 의 부모 폴더
-  (src/trader/kernel/platform/bundle.py).
+- macOS 는 BUNDLE 로 `Trader.app` 을 만든다. 데이터 루트(TRADER_HOME)는 앱 위치와 무관한 OS 표준
+  사용자 데이터 폴더(`bundle.user_data_dir()`, src/trader/kernel/platform/bundle.py).
 
 _internal/(sys._MEIPASS) 리소스 레이아웃은 platform/bundle.py 가 기대하는 대로:
 templates/ icons/ web/dist/ extensions/saveticker/ docs/, 기능 agents md 는 모듈 옆

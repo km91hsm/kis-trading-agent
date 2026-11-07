@@ -2,7 +2,7 @@
 import 한다.
 
 - macOS 는 메뉴바, Windows 는 작업표시줄 알림 영역. 메뉴: 웹 UI 열기 / 일시정지·재개 /
-  로그 폴더 열기 / 종료.
+  로그 폴더 열기 / 데이터 폴더 열기 / 로그인 시 자동 시작(체크) / 종료.
 - pystray 의 Icon.run() 은 **메인 스레드**에서 돌아야 한다(macOS AppKit). 데몬은
   트레이 진입점이 백그라운드 스레드에 둔다.
 - 일시정지는 원장 control 의 `paused` 플래그다. 커널은 기능을 모르므로 기본은 플래그를 직접
@@ -35,6 +35,8 @@ class TrayState:
     pending_approvals: int
     last_error: str | None
     web_url: str
+    autostart: bool = False  # 로그온 등록(installer.installed) 여부
+    autostart_available: bool = True  # App Translocation 등에서는 등록 불가(메뉴 비활성)
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,13 @@ def menu_model(state: TrayState) -> list[MenuItem]:
         MenuItem("open_web", "웹 UI 열기"),
         MenuItem("toggle_pause", "재개" if state.paused else "일시정지", checked=state.paused),
         MenuItem("open_logs", "로그 폴더 열기"),
+        MenuItem("open_data", "데이터 폴더 열기"),
+        MenuItem(
+            "autostart",
+            "로그인 시 자동 시작",
+            enabled=state.autostart_available,
+            checked=state.autostart,
+        ),
         MenuItem("quit", "종료"),
     ]
 
@@ -203,9 +212,11 @@ class TrayController:
         on_quit: Callable[[], None],
         initial: TrayState,
         run_on_main: Callable[[Callable[[], None]], None] = on_main,
+        on_toggle_autostart: Callable[[], None] | None = None,
     ) -> None:
         self._state_fn = state_fn
         self._on_toggle_pause = on_toggle_pause
+        self._on_toggle_autostart = on_toggle_autostart
         self._on_quit = on_quit
         self._run_on_main = run_on_main
         self.state = initial
@@ -218,6 +229,9 @@ class TrayController:
 
     def checked(self, key: str) -> bool:
         return next(i.checked for i in menu_model(self.state) if i.key == key)
+
+    def enabled(self, key: str) -> bool:
+        return next(i.enabled for i in menu_model(self.state) if i.key == key)
 
     def title(self) -> str:
         return QUITTING_TITLE if self.quitting.is_set() else title_text(self.state)
@@ -277,6 +291,24 @@ class TrayController:
 
         threading.Thread(target=work, name="trader-tray-pause", daemon=True).start()
 
+    def autostart_action(self, icon: Any = None, _item: Any = None) -> None:
+        """로그인 시 자동 시작 토글(launchctl·schtasks 는 느릴 수 있어 워커 스레드)."""
+        toggle = self._on_toggle_autostart
+        if toggle is None or not self.state.autostart_available:
+            return
+
+        def work() -> None:
+            try:
+                toggle()
+            except Exception:  # noqa: BLE001 - 등록 명령 실패 등
+                logger.exception("로그인 시 자동 시작 토글 실패")
+            try:
+                self.refresh_state()
+            except Exception:  # noqa: BLE001
+                logger.debug("트레이 상태 갱신 실패", exc_info=True)
+
+        threading.Thread(target=work, name="trader-tray-autostart", daemon=True).start()
+
 
 QUITTING_TITLE = "trader · 종료 중"
 STOPPED_TITLE = "trader · 데몬 중단"
@@ -293,28 +325,49 @@ def run_tray(
     poll_s: float = 30.0,
     stop_event: threading.Event | None = None,
     finished: threading.Event | None = None,
+    on_open_data: Callable[[], None] | None = None,
+    on_toggle_autostart: Callable[[], None] | None = None,
 ) -> None:
     """메인 스레드에서 아이콘을 띄우고 종료 메뉴·on_quit 까지 블로킹한다. 돌아오면 아이콘은
     내려간 뒤다. `on_quit` 은 워커 스레드에서 돌고 그동안 제목이 '종료 중' 이다(런루프 유지).
-    `finished` 가 서면(데몬 스레드 종료) 제목을 바꾸고 아이콘을 내린다."""
+    `finished` 가 서면(데몬 스레드 종료) 제목을 바꾸고 아이콘을 내린다.
+    `on_open_data`·`on_toggle_autostart` 가 없으면 그 메뉴 항목은 빠진다."""
     try:
         import pystray
     except Exception as e:  # ImportError 외에 macOS 에서 AppKit 바인딩 오류도 온다
         raise TrayUnavailable(f"트레이를 띄울 수 없습니다: {e}") from e
 
     ctl = TrayController(
-        state_fn=state_fn, on_toggle_pause=on_toggle_pause, on_quit=on_quit, initial=state_fn()
+        state_fn=state_fn,
+        on_toggle_pause=on_toggle_pause,
+        on_quit=on_quit,
+        initial=state_fn(),
+        on_toggle_autostart=on_toggle_autostart,
     )
 
     def label(key: str):
         return lambda _item: ctl.label(key)
 
-    menu = pystray.Menu(
+    items = [
         pystray.MenuItem(label("open_web"), lambda icon, it: on_open_web()),
         pystray.MenuItem(
             label("toggle_pause"), ctl.pause_action, checked=lambda _it: ctl.checked("toggle_pause")
         ),
         pystray.MenuItem(label("open_logs"), lambda icon, it: on_open_logs()),
+    ]
+    if on_open_data is not None:
+        items.append(pystray.MenuItem(label("open_data"), lambda icon, it: on_open_data()))
+    if on_toggle_autostart is not None:
+        items.append(
+            pystray.MenuItem(
+                label("autostart"),
+                ctl.autostart_action,
+                checked=lambda _it: ctl.checked("autostart"),
+                enabled=lambda _it: ctl.enabled("autostart"),
+            )
+        )
+    menu = pystray.Menu(
+        *items,
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(label("quit"), ctl.quit_action),
     )

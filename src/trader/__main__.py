@@ -14,17 +14,17 @@ import traceback
 from pathlib import Path
 
 TRANSLOCATED_MSG = (
-    "macOS 가 앱을 격리된 임시 경로(App Translocation)에서 실행했어요 — "
-    "여기서는 설정·원장을 만들 수 없습니다. 터미널에서 "
-    "`xattr -dr com.apple.quarantine <압축 푼 trader 폴더>` 를 실행하거나 "
-    "Finder 로 폴더를 다른 곳에 옮긴 뒤 다시 여세요."
+    "macOS 가 앱을 격리된 임시 경로(App Translocation)에서 실행했어요 — 이 경로가 로그인 시 "
+    "자동 시작·확장 호스트 등록에 박히면 다음 실행에서 깨집니다. "
+    "Finder 에서 Trader.app 을 응용 프로그램(/Applications) 폴더로 옮긴 뒤 실행하세요."
 )
 
 
 def translocated(path: str) -> bool:
-    """격리 속성이 남은 앱을 '우클릭 → 열기' 로 실행하면 Gatekeeper 가 읽기 전용 임시 경로
-    (`.../AppTranslocation/<UUID>/d/Trader.app`)에서 돌린다 — TRADER_HOME 이 그 경로가 된다."""
-    return "/AppTranslocation/" in str(path)
+    """App Translocation 경로에서 실행 중인지 (`bundle.is_translocated`)."""
+    from trader.kernel.platform import bundle
+
+    return bundle.is_translocated(path)
 
 
 def _ensure_streams() -> None:
@@ -37,19 +37,16 @@ def _ensure_streams() -> None:
 
 def _record_startup_error(text: str) -> None:
     """창 없는 앱의 시작 실패는 화면·콘솔 어디에도 안 보인다 — state/logs/startup-error.log 에
-    남기고(경로를 못 얻으면 홈) 가능하면 OS 알림을 띄운다."""
-    try:
-        from trader.kernel.platform import paths
-
-        log_dir = paths.state_dir() / "logs"
-    except Exception:  # noqa: BLE001 - 경로 자체가 실패 원인일 수 있다
-        log_dir = Path.home()
-    try:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        with (log_dir / "startup-error.log").open("a", encoding="utf-8") as f:
-            f.write(text + "\n")
-    except OSError:
-        pass
+    남기고(데이터 루트를 못 얻으면 `user_data_dir()/state/logs`, 그것도 안 되면 홈) 가능하면 OS
+    알림을 띄운다."""
+    for log_dir in _startup_log_dirs():
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "startup-error.log").open("a", encoding="utf-8") as f:
+                f.write(text + "\n")
+            break
+        except OSError:
+            continue
     try:
         from trader.kernel.platform import notify_os
 
@@ -57,6 +54,25 @@ def _record_startup_error(text: str) -> None:
         notify_os.alert("Trader 시작 실패", lines[-1][:200])
     except Exception:  # noqa: BLE001
         pass
+
+
+def _startup_log_dirs() -> list[Path]:
+    """startup-error.log 후보 폴더 순서: state_dir → user_data_dir()/state/logs → 홈."""
+    dirs: list[Path] = []
+    try:
+        from trader.kernel.platform import paths
+
+        dirs.append(paths.state_dir() / "logs")
+    except Exception:  # noqa: BLE001 - 경로 자체가 실패 원인일 수 있다
+        pass
+    try:
+        from trader.kernel.platform import bundle
+
+        dirs.append(bundle.user_data_dir() / "state" / "logs")
+    except Exception:  # noqa: BLE001
+        pass
+    dirs.append(Path.home())
+    return dirs
 
 
 def _pause_if_console() -> None:

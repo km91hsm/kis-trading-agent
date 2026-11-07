@@ -127,7 +127,82 @@ def test_app_tray_runs_daemon_in_thread_and_quits(fakes, monkeypatch):
     assert names.count("shutdown") == 1 and ("shutdown", True) in calls
     kw = seen["kw"]
     assert {"state_fn", "on_toggle_pause", "on_open_web", "on_open_logs", "icon_dir"} <= set(kw)
+    assert {"on_open_data", "on_toggle_autostart"} <= set(kw)
     assert kw["stop_event"] is not None
+
+
+def test_app_tray_open_data_and_autostart_toggle(fakes, project, monkeypatch):
+    """'데이터 폴더 열기' 는 project_root, '로그인 시 자동 시작' 은 installer 등록 여부를 체크로
+    보이고 토글은 `trader install` 과 같은 등록(register)·해제(uninstall)를 부른다."""
+    from trader.kernel.cli import install_cmd
+    from trader.kernel.platform import installer, procs
+
+    calls = fakes
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    reg = {"on": False}
+    actions: list = []
+    opened: list = []
+    monkeypatch.setattr(installer, "installed", lambda **kw: reg["on"])
+    monkeypatch.setattr(installer, "launched_by_service", lambda *a, **kw: False)
+
+    def fake_uninstall(**kw):
+        actions.append(("uninstall", kw))
+        reg["on"] = False
+
+    def fake_register(settings, **kw):
+        actions.append(("register", kw))
+        reg["on"] = True
+
+    monkeypatch.setattr(installer, "uninstall", fake_uninstall)
+    monkeypatch.setattr(install_cmd, "register", fake_register)
+    monkeypatch.setattr(procs, "open_folder", lambda p: opened.append(p))
+    seen = {}
+
+    def fake_tray(**kw):
+        seen["before"] = kw["state_fn"]()
+        kw["on_open_data"]()
+        kw["on_toggle_autostart"]()
+        seen["after_on"] = kw["state_fn"]()
+        kw["on_toggle_autostart"]()
+        seen["after_off"] = kw["state_fn"]()
+        kw["on_quit"]()
+
+    monkeypatch.setattr(app_cmd, "run_tray", fake_tray)
+    r = CliRunner().invoke(app, ["app", "--tray", "--no-browser"])
+    assert r.exit_code == 0, r.output
+    assert opened == [project.resolve()]
+    assert seen["before"].autostart is False and seen["before"].autostart_available is True
+    assert seen["after_on"].autostart is True and seen["after_off"].autostart is False
+    assert actions == [
+        ("register", {"kind": "daemon", "reload": True}),
+        ("uninstall", {"kind": "daemon", "unload": True}),
+    ]
+
+
+def test_app_tray_autostart_disabled_when_translocated(fakes, monkeypatch):
+    from trader.kernel.platform import bundle, installer
+
+    calls = fakes
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    monkeypatch.setattr(
+        bundle,
+        "executable",
+        lambda: bundle.Path("/private/var/x/AppTranslocation/A/d/Trader.app/Contents/MacOS/t"),
+    )
+    monkeypatch.setattr(installer, "installed", lambda **kw: False)
+    touched = []
+    monkeypatch.setattr(installer, "install", lambda **kw: touched.append(kw))
+    seen = {}
+
+    def fake_tray(**kw):
+        seen["st"] = kw["state_fn"]()
+        kw["on_toggle_autostart"]()
+        kw["on_quit"]()
+
+    monkeypatch.setattr(app_cmd, "run_tray", fake_tray)
+    r = CliRunner().invoke(app, ["app", "--tray", "--no-browser"])
+    assert r.exit_code == 0, r.output
+    assert seen["st"].autostart_available is False and touched == []
 
 
 def test_app_tray_toggle_pause_uses_accounts_port_with_tray_channel(fakes, monkeypatch):
@@ -226,6 +301,27 @@ def test_app_lock_held_no_browser_exits_0_without_opening(project, fakes, monkey
     r = CliRunner().invoke(app, ["app", "--no-browser"])
     assert r.exit_code == 0, r.output
     assert "이미 실행 중입니다" in r.output
+    assert seen == [] and calls == [] and FakeServer.instances == []
+
+
+def test_app_other_root_daemon_exits_0(project, fakes, tmp_path, monkeypatch):
+    """설치 앱과 개발 폴더처럼 데이터 루트가 다른 데몬이 돌고 있으면 띄우지 않고 안내 후 0."""
+    from trader.kernel.daemon.lock import global_lock
+
+    calls = fakes
+    other = tmp_path / "dev-folder"
+    other.mkdir()
+    g = global_lock(other)
+    assert g.acquire() is True
+    monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
+    seen = []
+    monkeypatch.setattr("webbrowser.open", lambda url: seen.append(url) or True)
+    try:
+        r = CliRunner().invoke(app, ["app"])
+    finally:
+        g.release()
+    assert r.exit_code == 0, r.output
+    assert f"다른 폴더({other.resolve()})의 데몬이 실행 중입니다" in r.output
     assert seen == [] and calls == [] and FakeServer.instances == []
 
 

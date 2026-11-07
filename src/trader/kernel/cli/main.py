@@ -11,7 +11,15 @@ from datetime import UTC, datetime
 import typer
 
 from trader import __version__
-from trader.kernel.cli import app_cmd, init_cmd, install_cmd, selfcheck, status_cmd, watchdog_cmd
+from trader.kernel.cli import (
+    app_cmd,
+    init_cmd,
+    install_cmd,
+    migrate_cmd,
+    selfcheck,
+    status_cmd,
+    watchdog_cmd,
+)
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
@@ -139,6 +147,12 @@ def daemon(dry_run: bool = typer.Option(False, "--dry-run", help="주문 없이 
     running = app_cmd.running_web()
     if running is not None:
         typer.echo(f"이미 실행 중입니다 — http://{running[0]}:{running[1]}")
+        return
+    other = app_cmd.other_daemon_root()
+    if other is not None:
+        from trader.kernel.daemon.lock import other_root_message
+
+        typer.echo(other_root_message(other))
         return
     b = boot(ports=True, schedule=True, log_name="daemon")
     d = Daemon(b.features, build_daemon_deps(b, dry_run=dry_run))
@@ -275,6 +289,7 @@ def build_app(features: list[Feature]) -> typer.Typer:
     root.command("status")(status_cmd.status)
     root.command("watchdog")(watchdog_cmd.watchdog)
     root.command("install")(install_cmd.install)
+    root.command("migrate-home")(migrate_cmd.migrate_home)
     root.command("daemon")(daemon)
     root.command("web")(web)
     root.command("app")(app_cmd.app)

@@ -5,9 +5,9 @@
 ## platform
 
 - 책임: OS 분기가 허용되는 유일한 계층. 경로·파일락·프로세스·로깅·번들 판별·로그온 등록·OS 알림·트레이.
-- 공개면: `paths`(`project_root`·`config_dir`·`state_dir`·`secrets_path`·`docs_dir`·`web_dist`), `bundle`(`is_frozen`·`bundle_root`·`resource_dir`·`templates_dir`·`tool_command`·`tool_bin_dir`·`cli_argv`·`service_argv`(로그온 등록 = `app --no-browser`)·`watchdog_argv`·`icons_dir`·`first_run_init`), `procs`(`pid_alive`·`same_process`·`spawn_detached`·`stop_tree`·`open_folder`), `filelock`(`locked`·`try_hold`), `logging_setup`(`configure`·`file_handler`·`quiet_httpx`), `installer`(`install`·`uninstall`·`render` — launchd plist / 작업 스케줄러 XML, `kind` = `daemon`|`watchdog`), `notify_os`(`alert` — 창 없는 실행의 OS 알림), `tray`(`run_tray`·`TrayUnavailable`·`TrayState`·`menu_model`·`read_state`·`toggle_pause`·`watch_signals` — pystray 는 `run_tray` 안에서만 import), `claude_bin`(`find_claude`).
+- 공개면: `paths`(`project_root`·`config_dir`·`state_dir`·`secrets_path`·`docs_dir`·`web_dist`), `bundle`(`is_frozen`·`user_data_dir`·`bundle_root`·`is_translocated`·`resource_dir`·`templates_dir`·`tool_command`·`tool_bin_dir`·`cli_argv`·`service_argv`(로그온 등록 = `app --no-browser`)·`watchdog_argv`·`icons_dir`·`first_run_init`), `procs`(`pid_alive`·`same_process`·`spawn_detached`·`stop_tree`·`open_folder`), `filelock`(`locked`·`try_hold`), `logging_setup`(`configure`·`file_handler`·`quiet_httpx`), `installer`(`install`·`uninstall`·`installed`·`launched_by_service`·`render` — launchd plist / 작업 스케줄러 XML, `kind` = `daemon`|`watchdog`), `notify_os`(`alert` — 창 없는 실행의 OS 알림), `tray`(`run_tray`·`TrayUnavailable`·`TrayState`·`menu_model`·`read_state`·`toggle_pause`·`watch_signals` — pystray 는 `run_tray` 안에서만 import), `claude_bin`(`find_claude`).
 - 규약:
-  - 루트 탐색은 `TRADER_HOME`(절대경로로 resolve) → 없으면 cwd 에서 위로 `pyproject.toml`. 못 찾으면 `ProjectRootNotFound`.
+  - 루트 탐색은 `TRADER_HOME`(절대경로로 resolve) → 번들(frozen)이면 `bundle.bundle_root()` = OS 표준 사용자 데이터 폴더 `bundle.user_data_dir()`(macOS `~/Library/Application Support/Trader`, Windows `%LOCALAPPDATA%\Trader`, 그 외 `$XDG_DATA_HOME/Trader`·`~/.local/share/Trader`, 없으면 만든다 — 앱 위치와 무관) → 개발이면 cwd 에서 위로 `pyproject.toml`. 못 찾으면 `ProjectRootNotFound`. 옛 휴대용 폴더(실행파일 옆 데이터)는 `trader migrate-home --from <옛 폴더>` 로 옮긴다.
   - `templates_dir()` 는 `bundle` 에만 둔다(`paths` 에 두지 않는다). 소스 실행 시 저장소 `templates/` 를 가리키므로 `TRADER_HOME` 이 저장소 밖이어도 `init` 이 동작한다.
   - 로그 파일은 `trader.log` / `trader-<name>.log`, 로거는 `trader.platform`. 회전 핸들러는 프로세스 간 공유 가능.
   - OS 분기(`sys.platform`)는 이 모듈 안에서만.
@@ -146,7 +146,8 @@
 - 규약:
   - `JobSpec.schedule_key` 는 `schedule.yaml` 의 **점 경로**이고 `{market}` 자리를 시장 코드로 채운다(`"{market}.scan"` → `KR.scan`). 값은 `"HH:MM"` 또는 `{time, tz}`(tz 기본 KST).
   - 잡 본문 호출은 `body(ctx, job)`. `runs` 행은 `kind=spec.kind`, `market=job.market`.
-  - `Daemon.start()` 는 `bool` 을 돌려준다. 잠금을 못 얻으면 `False`. 실패 경로에서는 스케줄러·시그널·잠금을 되돌린다.
+  - **전역 데몬 잠금**: `state/daemon.lock` 에 더해 데이터 루트와 무관한 사용자 단위 잠금 `~/.trader/daemon-global.lock`(`TRADER_GLOBAL_LOCK_DIR` 로 위치 변경, 테스트는 conftest 가 임시 폴더로)을 같은 `Lock` 으로 잡고 pid 파일에 소유 데이터 루트(`root`)를 적는다. 개발 폴더와 설치 앱처럼 데이터 루트가 달라도 데몬은 사용자당 하나다(중복 주문 방지). `daemon`·`app` 은 무거운 조립 전에 `lock.other_root_running` 으로 보고 「다른 폴더(<경로>)의 데몬이 실행 중입니다」 안내 뒤 exit 0.
+  - `Daemon.start()` 는 `bool` 을 돌려준다. 잠금(로컬 → 전역)을 못 얻으면 `False`. 실패 경로에서는 스케줄러·시그널·잠금을 되돌린다.
   - 하트비트는 30초 주기 스케줄러 잡 `daemon_heartbeat`. `read_status` 가 웹의 `daemon` SSE 키와 상태 표시에 쓰인다.
   - 게이트가 사유를 돌려주면 cron 잡은 `skipped` 행을 남기고 interval 잡은 행을 남기지 않는다.
   - `DaemonDeps` 가 데몬이 받는 의존성 전부다(설정·스케줄·연결 팩토리·상태 폴더·시계·시장·게이트·정지 이벤트·`dry_run`).
@@ -217,14 +218,15 @@ M11b(플랜 `docs/superpowers/plans/2026-11-05-m11b-web-ui.md`). React 19 + Vite
 
 ## cli
 
-- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`status`·`watchdog`·`install`·`daemon`·`web`·`app`·`notify-test` 과 그룹 `telegram`·`dev`·`tool`·`jobs` 를 둔다.
-- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `status_cmd`, `watchdog_cmd`, `install_cmd`, `app_cmd`(`run_app`·`WebThread`·`wait_for_port`·`running_web`), `dev`(`gen-sse-keys`·`gen-nav`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`), `jobs_cmd`.
+- 책임: typer 루트와 부트스트랩. 커널 명령 `init`·`selfcheck`·`status`·`watchdog`·`install`·`migrate-home`·`daemon`·`web`·`app`·`notify-test` 과 그룹 `telegram`·`dev`·`tool`·`jobs` 를 둔다.
+- 공개면: `main`(`app`·`TraderApp`·`build_app`), `boot`(`boot`·`Boot`·`config_errors`), `init_cmd`, `selfcheck`, `status_cmd`, `watchdog_cmd`, `install_cmd`(`register` — 트레이 자동 시작 토글도 같은 인자), `migrate_cmd`(`migrate`·`plan`·`reset_saveticker_dir`), `app_cmd`(`run_app`·`WebThread`·`wait_for_port`·`running_web`·`other_daemon_root`), `dev`(`gen-sse-keys`·`gen-nav`), `tool_cmd`(`build_tool_app`·`run_tool`·`emit`), `jobs_cmd`.
 - 규약:
   - 명령 부트스트랩(로깅·설정·레지스트리·스키마 적용 원장 연결)은 `boot()` 하나다. 명령마다 따로 조립하지 않는다.
   - 설정 오류는 `config_errors` 데코레이터가 사용자용 메시지로 바꾼다.
   - cli 는 `features` 를 정적 import 하지 않는다. 기능은 `discover()` 를 거쳐 sub-app 으로 마운트된다.
   - `selfcheck` 는 JSON 1줄 — 키 `ok python root frozen ledger_version features web_dist modules failed optional`. 원장 DB 를 만들지 않고(파일이 없으면 `ledger_version: null`), `HEAVY_MODULES` import 실패가 있으면 exit 1(`optional` 의 lightgbm·stable_baselines3 는 없어도 ok). `init` 은 템플릿 중 없는 파일만 복사한다.
-  - `app`(번들 더블클릭 진입점)은 한 프로세스: `Daemon.start(install_signals=False)`(잡은 스케줄러 스레드) + 웹 `uvicorn.Server`(`trader-web` 스레드, `build_web_deps` 그대로) + 메인 스레드 트레이(`--tray`) 또는 대기. 종료는 웹 `should_exit` → `Daemon.shutdown(wait=True)`. 다른 인스턴스(daemon·app)가 잠금을 쥐고 있으면 무거운 조립 전에(`running_web` — 설정만 읽음) 「이미 실행 중입니다 — <url>」 안내 뒤 exit 0(`--no-browser` 가 아니고 포트가 2초 안에 열려 있으면 브라우저만 연다). `daemon` 도 같다 — launchd `KeepAlive{SuccessfulExit:false}` 가 재기동을 반복하지 않는다. 그 밖의 기동 실패(설정 오류·포트 점유·잠금 경합)는 exit 1. `install` 의 로그온 등록 argv 는 `bundle.service_argv()` = `app --no-browser`(데몬 + 웹 UI, 브라우저 없음). `web`·`app` 은 부트 전에 `ensure_web_token()` 을 부른다.
+  - `app`(번들 더블클릭 진입점)은 한 프로세스: `Daemon.start(install_signals=False)`(잡은 스케줄러 스레드) + 웹 `uvicorn.Server`(`trader-web` 스레드, `build_web_deps` 그대로) + 메인 스레드 트레이(`--tray`) 또는 대기. 종료는 웹 `should_exit` → `Daemon.shutdown(wait=True)`. 다른 인스턴스(daemon·app)가 잠금을 쥐고 있으면 무거운 조립 전에(`running_web` — 설정만 읽음) 「이미 실행 중입니다 — <url>」 안내 뒤 exit 0(`--no-browser` 가 아니고 포트가 2초 안에 열려 있으면 브라우저만 연다). `daemon` 도 같다 — launchd `KeepAlive{SuccessfulExit:false}` 가 재기동을 반복하지 않는다. 그 밖의 기동 실패(설정 오류·포트 점유·잠금 경합)는 exit 1. `install` 의 로그온 등록 argv 는 `bundle.service_argv()` = `app --no-browser`(데몬 + 웹 UI, 브라우저 없음). `web`·`app` 은 부트 전에 `ensure_web_token()` 을 부른다. 트레이 메뉴는 웹 UI 열기 / 일시정지 / 로그 폴더 열기 / 데이터 폴더 열기(`project_root()`) / 로그인 시 자동 시작(체크 = `installer.installed()`, 토글 = `install_cmd.register`·`installer.uninstall`; App Translocation 이면 비활성, launchd 가 띄운 프로세스 안에서는 `launchctl unload/load` 없이 plist 만 바꿔 자기 자신을 내리지 않는다 — 다음 로그인부터 적용) / 종료.
+  - `migrate-home --from <옛 폴더> [--saveticker-from <수집 폴더>] [--dry-run]`: 옛 폴더의 `config/ secrets/ state/ docs/` 를 현재 데이터 루트로 복사(원본 유지). `*.db` 는 sqlite3 backup API, `-wal/-shm/-journal`·`*.lock`·`*.lock.os`·`daemon_heartbeat.json`·`*.tmp` 제외, secrets 0700/0600. 대상에 `state/trader.db` 가 있거나 원본·대상 데몬 잠금(전역 잠금 소유 포함)이 잡혀 있으면 거부. `--saveticker-from` 은 `data/`·`runtime/bridge-config.json` 을 `state/external/saveticker/` 로 가져오고 `sources.yaml` 의 절대경로 `saveticker.dir` 을 기본값으로 그 줄만 치환. 결과 JSON 1줄.
   - 경량 기동: `uvicorn`·`create_app` 은 명령 안에서 지연 import 한다. `trader --help` 는 아직 fastapi·pandas 를 올린다(기능 `routes` 모듈 수준 `APIRouter`·briefing→evaluation→ml 체인 — `docs/TODO.md` 「M12 이후」).
   - 콘솔 UTF-8 강제는 `TraderApp` 진입점에서 한다.
   - `trader tool` 루트(`tool_cmd`): 기능이 선언한 `ToolCommand` 를 모아 단 하나의 그룹으로 마운트한다(이름 중복은 `RegistryError`). 출력은 JSON 1줄뿐이고 `emit` 은 `ok: false` 면 종료 코드 1, `run_tool` 은 예외를 `{"ok": false, "error": "<Type>: <msg>"}` 로 바꾼다. 세션의 허용 명령은 `bundle.tool_command()`(번들 `trader tool` / 개발 `python -m trader tool`)와 같은 문자열이고, 세션 PATH 앞에 `bundle.tool_bin_dir()`(`platform.bundle`, 번들은 실행파일 폴더·개발은 venv bin)를 둔다. claude 실행파일 탐색은 `platform.claude_bin`(`find_claude`·`child_path`·`ClaudeNotFound`).

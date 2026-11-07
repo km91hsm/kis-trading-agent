@@ -1,15 +1,20 @@
 """PyInstaller 번들(frozen) 분기는 이 모듈 한 곳에서만 답한다.
 
-- 실행파일 폴더(macOS `.app` 은 그 부모 폴더)가 TRADER_HOME 이다 (config/ secrets/ state/ docs/
-  하위 폴더, 폴더째 이동 가능).
+- 데이터 루트(TRADER_HOME)는 OS 표준 사용자 데이터 폴더다(`user_data_dir()` — macOS
+  `~/Library/Application Support/Trader`, Windows `%LOCALAPPDATA%\\Trader`). 앱(`/Applications/
+  Trader.app`·설치 폴더)은 읽기 전용으로 두고 config/ secrets/ state/ docs/ 는 여기에 만든다.
+  `TRADER_HOME` env 가 있으면 그것이 최우선(`paths.project_root`).
 - 런타임 리소스(웹 dist·설정 템플릿·아이콘·docs)는 `_internal/`(sys._MEIPASS) 아래에 있다.
 - 세션의 도구 명령: frozen 이면 `trader tool`, 개발 환경이면 `python -m trader tool`.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+APP_DIR_NAME = "Trader"
 
 
 def is_frozen() -> bool:
@@ -46,12 +51,36 @@ def app_bundle_dir() -> Path | None:
     return None
 
 
+def user_data_dir() -> Path:
+    """OS 표준 사용자 데이터 폴더(만들지는 않는다): macOS `~/Library/Application Support/Trader`,
+    Windows `%LOCALAPPDATA%\\Trader`(env 없으면 `~/AppData/Local/Trader`), 그 외
+    `$XDG_DATA_HOME/Trader` 또는 `~/.local/share/Trader`."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_DIR_NAME
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / APP_DIR_NAME
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return base / APP_DIR_NAME
+
+
+def is_translocated(path: str | os.PathLike[str]) -> bool:
+    """격리 속성이 남은 앱을 '우클릭 → 열기' 로 실행하면 Gatekeeper 가 읽기 전용 임시 경로
+    (`.../AppTranslocation/<UUID>/d/Trader.app`)에서 돌린다 — 그 경로가 로그온 등록·확장 호스트에
+    박히면 다음 실행에서 깨진다."""
+    # Windows 의 Path 문자열은 `\` 구분자라 구분자를 통일해 본다
+    return "/AppTranslocation/" in str(path).replace("\\", "/")
+
+
 def bundle_root() -> Path:
-    """TRADER_HOME: `.app` 이면 그 부모 폴더(config/secrets/state 가 .app 옆), 아니면 실행파일 폴더,
-    개발 환경은 저장소 루트."""
+    """TRADER_HOME 기본값: 번들이면 `user_data_dir()`(없으면 만든다 — 앱 위치와 무관), 개발 환경은
+    저장소 루트(`paths.project_root`)."""
     if is_frozen():
-        app = app_bundle_dir()
-        return app.parent if app is not None else executable().parent
+        root = user_data_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        return root.resolve()
     from trader.kernel.platform import paths
 
     return paths.project_root()

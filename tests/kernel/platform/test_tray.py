@@ -32,9 +32,22 @@ def _state(**over):
 
 def test_menu_model_order_and_labels():
     items = tray.menu_model(_state())
-    assert [i.key for i in items] == ["open_web", "toggle_pause", "open_logs", "quit"]
-    assert [i.label for i in items] == ["웹 UI 열기", "일시정지", "로그 폴더 열기", "종료"]
+    assert [i.key for i in items] == [
+        "open_web", "toggle_pause", "open_logs", "open_data", "autostart", "quit",
+    ]  # fmt: skip
+    assert [i.label for i in items] == [
+        "웹 UI 열기", "일시정지", "로그 폴더 열기", "데이터 폴더 열기",
+        "로그인 시 자동 시작", "종료",
+    ]  # fmt: skip
     assert all(i.enabled for i in items)
+
+
+def test_menu_model_autostart_checked_and_disabled_when_unavailable():
+    item = next(i for i in tray.menu_model(_state(autostart=True)) if i.key == "autostart")
+    assert item.checked is True and item.enabled is True
+    items = tray.menu_model(_state(autostart_available=False))
+    item = next(i for i in items if i.key == "autostart")
+    assert item.checked is False and item.enabled is False
 
 
 def test_menu_model_paused_shows_resume_checked():
@@ -137,7 +150,7 @@ class _FakeIcon:
         self.updated_evt.set()
 
 
-def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None):
+def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None, on_autostart=None):
     icon = _FakeIcon()
     ctl = tray.TrayController(
         state_fn=state_fn,
@@ -145,6 +158,7 @@ def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None):
         on_quit=on_quit,
         initial=state_fn(),
         run_on_main=lambda fn: fn(),
+        on_toggle_autostart=on_autostart,
     )
     ctl.icon = icon
     return ctl, icon
@@ -209,3 +223,26 @@ def test_on_main_falls_back_to_direct_call_without_appkit(monkeypatch):
     done = []
     tray.on_main(lambda: done.append(1))
     assert done == [1]
+
+
+def test_autostart_action_toggles_on_worker_and_refreshes_check():
+    reg = {"on": False}
+
+    def toggle():
+        reg["on"] = not reg["on"]
+
+    ctl, icon = _controller(lambda: _state(autostart=reg["on"]), on_autostart=toggle)
+    assert ctl.checked("autostart") is False
+    ctl.autostart_action(icon, None)
+    assert icon.updated_evt.wait(5)
+    assert reg["on"] is True and ctl.checked("autostart") is True
+
+
+def test_autostart_action_noop_when_unavailable():
+    called = []
+    ctl, icon = _controller(
+        lambda: _state(autostart_available=False), on_autostart=lambda: called.append(1)
+    )
+    assert ctl.enabled("autostart") is False
+    ctl.autostart_action(icon, None)
+    assert called == [] and icon.menu_updates == 0

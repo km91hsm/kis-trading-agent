@@ -22,9 +22,16 @@ class Lock:
 
     FRESH_S = 10  # 내용 없는 잠금이 이 시간 안에 생겼으면 다른 데몬이 쓰는 중
 
-    def __init__(self, path: Path, *, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        now: Callable[[], datetime] | None = None,
+        meta: dict[str, str] | None = None,
+    ) -> None:
         self.path = path
         self._now = now or (lambda: datetime.now(UTC))  # 신선도·started_at 시계(데몬은 deps.now)
+        self._meta = dict(meta or {})  # pid 파일에 함께 적을 표시용 값(전역 잠금의 데이터 루트)
         self._hold = None
 
     def _holder(self) -> tuple[int, str | None]:
@@ -33,6 +40,14 @@ class Lock:
             return int(data.get("pid", 0)), data.get("proc_start") or None
         except (ValueError, OSError, AttributeError):
             return 0, None
+
+    def holder_meta(self) -> dict:
+        """pid 파일 내용(표시용). 못 읽으면 빈 dict."""
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (ValueError, OSError):
+            return {}
 
     def held(self) -> bool:
         """지금 살아 있는 (이 잠금을 잡은 그) 프로세스가 쥐고 있는지 — 잡지 않고 보기만 한다."""
@@ -77,11 +92,13 @@ class Lock:
     def _acquire_pidfile(self) -> bool:
         payload = json.dumps(
             {
+                **self._meta,
                 "pid": os.getpid(),
                 "started_at": self._now().isoformat(),
                 # pid 재사용 대비: 프로세스 시작 시각 식별자를 함께 적고 비교한다
                 "proc_start": process_start(os.getpid()),
-            }
+            },
+            ensure_ascii=False,
         )
         tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
         tmp.write_text(payload, encoding="utf-8")
@@ -120,3 +137,51 @@ class Lock:
         finally:
             filelock.release_hold(self._hold)
             self._hold = None
+
+
+# --- 사용자 단위 전역 데몬 잠금 ---
+# 개발 폴더와 설치 앱은 데이터 루트가 달라 `state/daemon.lock` 만으로는 데몬 둘이 동시에 돌 수
+# 있다(같은 계좌로 중복 주문). 데이터 루트와 무관한 고정 위치의 잠금을 하나 더 잡는다.
+GLOBAL_LOCK_ENV = "TRADER_GLOBAL_LOCK_DIR"
+GLOBAL_LOCK_NAME = "daemon-global.lock"
+
+
+def global_lock_path() -> Path:
+    """전역 데몬 잠금 경로: `TRADER_GLOBAL_LOCK_DIR`(테스트·특수 환경) 또는 `~/.trader/`."""
+    env = os.environ.get(GLOBAL_LOCK_ENV)
+    base = Path(env).expanduser() if env else Path.home() / ".trader"
+    return base / GLOBAL_LOCK_NAME
+
+
+def global_lock(root: Path, *, now: Callable[[], datetime] | None = None) -> Lock:
+    """데이터 루트 `root` 소유로 기록하는 전역 잠금(잡지는 않는다)."""
+    return Lock(global_lock_path(), now=now, meta={"root": str(_norm(root))})
+
+
+def global_owner() -> str | None:
+    """전역 잠금을 살아 있는 프로세스가 쥐고 있으면 그 소유 데이터 루트(모르면 빈 문자열), 아니면
+    None."""
+    lock = Lock(global_lock_path())
+    if not lock.held():
+        return None
+    return str(lock.holder_meta().get("root") or "")
+
+
+def other_root_running(root: Path) -> str | None:
+    """다른 데이터 루트의 데몬이 전역 잠금을 쥐고 있으면 그 경로, 아니면 None(같은 루트는 기존
+    `state/daemon.lock` 경로가 판단한다)."""
+    owner = global_owner()
+    if owner is None or owner == str(_norm(root)):
+        return None
+    return owner or "알 수 없음"
+
+
+def other_root_message(owner: str) -> str:
+    return f"다른 폴더({owner})의 데몬이 실행 중입니다 — 그 데몬을 먼저 종료하세요"
+
+
+def _norm(root: Path) -> Path:
+    try:
+        return Path(root).resolve()
+    except OSError:
+        return Path(root)
