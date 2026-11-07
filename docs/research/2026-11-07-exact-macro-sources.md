@@ -102,3 +102,13 @@ FRED의 `SP500`·`NASDAQCOM`에도 저작권 표시가 있다. 정부 데이터�
 검증은 SPX/COMP 식별자 혼동, 미정렬/빈/휴일 행, 실패 `rt_cd`, 수신시간과 관측일 혼합, 미래 일자, 장중 일봉을 확정 종가로 단정하는 경우, `%`/지수/배럴 단위 혼동, fallback의 proxy 표지 유실을 중심으로 한다. 위 항목은 조사에서 도출한 설계 권고이며 검증 완료 주장과 구분한다.
 
 이번 구현의 확정 범위는 **KIS `N/SPX`·`N/COMP` 일별 우선 조회와 동일 상품 FRED fallback**이다. KIS US10Y·WTI 선물·exact DXY 연결은 추가 검증과 계약 확인이 필요한 후속으로 제외한다.
+
+## 후속 확인: 일간 WTI와 시세 권한
+
+2026-11-07 공식 일간 API도 확인했다. `GET /uapi/overseas-futureoption/v1/quotations/daily-ccnl`, TR `HHDFC55020100`이며 `SRS_CD`, `EXCH_CD`, `CLOSE_DATE_TIME`(YYYYMMDD), 최초 `QRY_TP=Q`, `QRY_CNT`(최대40)를 받는다. 시작시각·묶음·최초 이전조회키는 빈 값이다. 날짜와 가격은 `output2` 동일 행의 `data_date/last_price`로 연결해야 하며 정산가라고 표시하면 안 된다. 공식 샘플의 재귀는 조회구분과 이전조회키를 그대로 재사용하므로 그 연속조회 코드를 검증 없이 복사하지 않는다. [공식 일간 API](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_futureoption/daily_ccnl/daily_ccnl.py), [응답 필드](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_futureoption/daily_ccnl/chk_daily_ccnl.py)
+
+03:40 UTC에 기존 프로그램의 인증 조립과 공유 토큰·조회 제한기를 사용하여 `CLZ26`, `EXCH_CD=CME`, 요청3행으로 GET 1회만 확인했다. 결과는 `KisApiError`, `msg_cd=HTTP500`으로 시세를 확보하지 못했다. 이 실패만으로 특정 권한 미가입이나 일시적 서버 장애를 단정하지 않는다. 주문·시세 신청·계약 변경은 하지 않았다. 따라서 exact WTI는 운영에 활성화하지 않으며 기존 FRED 현물 proxy를 유지한다.
+
+KIS 공식 공지는 CME/CBOT/NYMEX/COMEX의 API 시세를 별도 신청 대상으로 설명한다. 현재 각 sub 거래소 월 USD 228.8, 2027-01-01부터 USD 236.5(VAT 포함)로 공지됐다. 무료 HTS/MTS와 API 이용 조건이 다르며, 이 일별 REST 조회만 사용할 때의 권한·예외 조건까지 공지로 확정되지는 않는다. 신규 구독을 자동 신청하지 않았다. 실제 시세 이용 계약, 지연 여부, `data_date`의 거래일/시간대, 월물 선택·roll 규칙 확인이 통합의 선행 조건이다. [KIS 공식 비용 안내](https://m.koreainvestment.com/main/customer/notice/Notice.jsp?cmd=TF04ga000002&num=47411)
+
+ICE는 정확 DXY의 공식 공급 경로로 Data API·Data Files·Feed 등을 명시한다. 여섯 통화의 고정 가중치와 현물 호가로 계산하는 지수이며 DX 선물이나 연준 광의 달러지수와 다르다. 공개 카탈로그만으로 익명 자동수집 API나 현재 사용자의 계약 권한이 확보되는 것은 아니다. ICE 또는 허가된 공급자의 이용 권한·상품 식별자·시각 정의를 확보할 때 연결한다. [ICE 공식 Currency Indices 카탈로그](https://developer.ice.com/fixed-income-data-services/catalog/ice-data-indices-currency-indices)

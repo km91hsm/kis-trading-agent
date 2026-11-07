@@ -170,6 +170,7 @@ _QUALITY_KEYS = frozenset(
 
 
 _IDENTITY_FIELDS = {
+    "url",
     "source",
     "requested_source",
     "source_asof",
@@ -421,6 +422,7 @@ def compact_context(inputs: dict) -> dict:
             "market_activity",
             "data_gaps",
             "source_coverage",
+            "truncation",
         )
         if k in inputs
     }
@@ -448,7 +450,56 @@ def compact_context(inputs: dict) -> dict:
     ]
     if blogs:
         data["blog_posts"] = blogs
-    return shrink(_delivery_coverage(data), 8000)
+    # 긴 첫 글만 남기기 전에 최근 글들의 발췌를 함께 담는다.
+    # 이 단계도 뉴스·매크로·출처를 함께 계산해 전체 byte 상한을 지킨다.
+    if isinstance(blogs, list) and blogs and _size(data) > 8000:
+        for chars in (240, 140, 64):
+            candidate = _compact(data, 5, chars)
+            for original, post in zip(blogs, candidate["blog_posts"], strict=False):
+                if not isinstance(post, dict):
+                    continue
+                if "title" in post:
+                    post["title"] = _cut(post["title"], 160)
+                post["excerpt_truncated"] = bool(original.get("excerpt_truncated")) or any(
+                    isinstance(original.get(key), str) and len(original[key]) > chars
+                    for key in ("body", "excerpt")
+                )
+            candidate["truncation"] = {
+                **(data.get("truncation") or {}),
+                "truncated": True,
+                "original_bytes": _size(data),
+                "limit_bytes": 8000,
+                "list_policy": "head; ascending candles tail",
+                "blog_policy": "recent five source excerpts before dropping posts",
+            }
+            candidate = _delivery_coverage(candidate)
+            if _size(candidate) <= 8000:
+                return candidate
+        # 한 글의 과도한 식별자가 다른 정상 글까지 밀어내지 않게 한다.
+        # 같은 크기라면 뒤의 글부터 제외해 기존 최신순을 유지한다.
+        while candidate["blog_posts"]:
+            largest = max(
+                range(len(candidate["blog_posts"])),
+                key=lambda i: (_size(candidate["blog_posts"][i]), i),
+            )
+            candidate["blog_posts"].pop(largest)
+            candidate = _delivery_coverage(candidate)
+            if _size(candidate) <= 8000:
+                return candidate
+    result = shrink(_delivery_coverage(data), 8000)
+    if isinstance(blogs, list) and isinstance(result.get("blog_posts"), list):
+        # 극단적인 크기로 키까지 생략된 글은 출처 없는 근거로 전달하지 않는다.
+        identity = ("url", "source", "posted_at", "received_at")
+        result["blog_posts"] = [
+            post for post in result["blog_posts"]
+            if isinstance(post, dict) and any(
+                isinstance(original, dict)
+                and all(post.get(key) == original.get(key) for key in identity)
+                for original in blogs
+            )
+        ]
+        result = shrink(_delivery_coverage(result), 8000)
+    return result
 
 
 def evidence_stats(reports: list[dict]) -> dict:

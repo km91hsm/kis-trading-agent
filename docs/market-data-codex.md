@@ -59,6 +59,8 @@ KIS 지수는 `sources.yaml`의 `macro.kis_indices`(기본 `true`)로 제어합�
 
 네이버 블로그는 공개 RSS 발췌를 사용하며 사실 확인된 공식 지표와 구분합니다. 개인 `config/sources.yaml`에서 다음처럼 등록할 수 있습니다. 기존 채널이 있으면 유지하며 목록에 추가합니다.
 
+공통 context가 8KB를 넘으면 최근 글 5건을 함께 전달하도록 각 본문을 240→140→64자 순서로 줄입니다. 제목은 최대 160자이며 원래 URL·출처·발행시각·수신시각을 유지합니다. 이는 원문의 짧은 발췌이며 생성형 요약이 아닙니다. 링크 자체가 너무 길어 일부 글을 담지 못하거나 본문이 비어 있으면 실제 전달 건수와 `partial`/`dropped` 상태를 표시합니다. 2026-11-07 공개 RSS 5건을 저장해 KR·US context로 재생한 결과 각각 7,268bytes, 5건과 모든 출처 식별자가 보존됐습니다.
+
 ```yaml
 channels:
   naver_blog: [ranto28]
@@ -69,6 +71,6 @@ channels:
 
 ## 확인 범위
 
-합성 KIS 응답, 가짜 Codex CLI, 임시 원장으로 검증합니다. 실제 KIS 순위의 단위·세션 범위·지연과 실제 Claude·Codex 토론 품질은 별도 운영 검증이 필요합니다. 이 작업은 실주문이나 실행 중 서비스의 자동 재시작을 수행하지 않습니다.
+합성 응답과 임시 원장의 회귀 테스트 외에 [실제 KIS 시세 조회](research/2026-11-07-live-market-validation.md), [실제 Claude·Codex 토론](research/2026-11-07-live-debate-validation.md)을 검증했습니다. KIS 순위의 단위·세션 범위·지연, 장중 5분 증감률 실측과 전략 수익성은 아직 미검증입니다. 실제 모델의 재답변 누락 1회는 거부 후 제한된 재시도로 확인했으며, 단일 합성 토론의 성공이 운영 품질을 보증하지는 않습니다.
 
 공식 원천: [KIS 순위 샘플](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/overseas_stock), [FRED 광의 달러지수](https://fred.stlouisfed.org/series/DTWEXBGS), [FRED WTI 현물](https://fred.stlouisfed.org/series/DCOILWTICO).
