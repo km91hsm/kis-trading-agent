@@ -55,9 +55,9 @@
 - [ ] 운영 요약, 설정 바로가기/리스크 값, 중복 제목 정리, 본문 바로가기 및 스타일 구현.
 - [ ] 대상 테스트 GREEN 및 390/768/1440px 라이트·다크 실제 브라우저 확인.
 
-### Task 6: 통합 검증·리뷰·머지·운영 반영
-**Files:** docs 설명/검증 기록, private evidence 및 백업.
+### Task 6: 통합 검증·리뷰·머지
+**Files:** docs 설명/검증 기록 및 private evidence.
 - [ ] ruff/gen-nav/gen-sse/typecheck/Vitest/build/전체 pytest 한 번 실행. 모두 최종 종료 확인.
 - [ ] fresh spec/standards 리뷰, 실제 결함은 RED→GREEN 수정, GitHub CI/리뷰 스레드 확인 후 PR 머지.
-- [ ] 백업/변경 설정·원장 보존 확인, 검증된 main/웹 반영 및 정상 재시작 후 읽기 검증.
+- [x] 운영 반영과 재시작은 기존 사용자 지시에 따라 보류한다. 운영 checkout과 설정·원장은 변경하지 않는다.
 - [ ] 완료 항목과 장중/장기잠금/정확DXYWTI 등 별도 검증 잔여를 구분해 보고.

@@ -29,6 +29,7 @@ SEGMENT_RESOURCE = {
     "names": "quotes",
     "charts": "quotes",
     "features": "quotes",
+    "macro": "quotes",  # ingest가 소유한 저장 매크로 관측 읽기
     "ml": "quotes",
     "runs": "jobs",
     "calls": "jobs",
@@ -50,6 +51,7 @@ EXPECTED = [
     ("GET", "/api/decisions"),
     ("GET", "/api/decisions/spot/{id}"),
     ("GET", "/api/decisions/spot/{id}/trace"),
+    ("GET", "/api/decisions/spot/{id}/inputs"),
     ("GET", "/api/decisions/spot/{id}/outcomes"),
     ("GET", "/api/decisions/spot/{id}/checkpoints/{stage}"),
     ("GET", "/api/decisions/spot/news-refs"),
@@ -87,6 +89,8 @@ EXPECTED = [
     ("GET", "/api/quotes/book"),
     ("GET", "/api/quotes/fo"),  # 플랜 §Global 추가
     ("GET", "/api/quotes/fx"),  # 플랜 §Global 추가
+    ("GET", "/api/macro"),
+    ("GET", "/api/system/market-clock"),
     ("GET", "/api/names"),
     ("GET", "/api/names/search"),
     ("GET", "/api/charts"),

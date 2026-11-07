@@ -101,6 +101,12 @@ async function mount(r: Routes, page: Page = "quotes", path = "/data") {
   await flush();
   return out;
 }
+test("US 거래대금 차트 링크는 종목명 검색에 없어도 거래소를 보존한다", async () => {
+  await mount(routes({ "GET /api/names/search": [] }), "quotes", "/data?market=US&ticker=XYZ&exchange=NYS");
+  await flush();
+  expect(callsTo("/charts").at(-1)?.searchParams.get("exchange")).toBe("NYS");
+});
+
 const section = (id: string) => document.getElementById(id) as HTMLElement;
 function LocationProbe() {
   const { search } = useLocation();
@@ -433,6 +439,20 @@ describe("데이터 화면", () => {
     expect(callsTo("/names/search")[0].searchParams.get("q")).toBe("005930");
     expect(callsTo("/charts")[0].searchParams.get("ticker")).toBe("005930");
     expect(Array.from(section("quotes").querySelectorAll("h3")).some((h) => h.textContent?.includes("삼성전자"))).toBe(true);
+  });
+
+  test("순위 종목 링크는 같은 페이지에서 차트를 바꾸고 선택한 정렬을 보존한다", async () => {
+    const { container } = await mount(routes({ "GET /api/quotes/activity": {
+      market: "KR", currency: "KRW", status: "partial", stale: false, received_at: new Date().toISOString(),
+      coverage: { successful: ["KRX:turnover"], failed: [], pending: [] },
+      rankings: { turnover: [{ ticker: "000660", name: "합성 종목", market: "KR", exchange: "KRX", currency: "KRW", price: "100", turnover: "1000", change_pct: 0.1, stale: false, received_at: new Date().toISOString(), growth: { status: "available", value: 0.5, reason: null } }], gain: [], loss: [] },
+    } }), "quotes", "/data?ticker=005930&sort=growth");
+    expect(callsTo("/charts").at(-1)?.searchParams.get("ticker")).toBe("005930");
+    const link = container.querySelector<HTMLAnchorElement>('a[data-activity-ticker]')!;
+    expect(link.getAttribute("href")).toContain("sort=growth");
+    await act(async () => link.click());
+    await flush();
+    expect(callsTo("/charts").at(-1)?.searchParams.get("ticker")).toBe("000660");
   });
 
   test("호가는 next_poll_ms 마다 다시 부르고, 언마운트하면 멈춘다", async () => {

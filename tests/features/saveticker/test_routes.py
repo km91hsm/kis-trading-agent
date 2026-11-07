@@ -75,4 +75,4 @@ def test_restart_on_extension_backend_points_to_chrome(project, client):
 
 def test_feature_declares_restart_namespace_and_nav():
     assert FLAG in FEATURE.control_namespaces
-    assert NavItem("system", "saveticker", "저장소", 40) in FEATURE.nav
+    assert NavItem("system", "saveticker", "데이터 수집", 40) in FEATURE.nav

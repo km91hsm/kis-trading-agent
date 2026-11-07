@@ -25,6 +25,12 @@ export function Shell() {
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content" onClick={(e) => {
+        e.preventDefault();
+        const main = document.getElementById("main-content");
+        main?.focus();
+        main?.scrollIntoView?.({ block: "start" });
+      }}>본문으로 바로가기</a>
       <StatusBar />
       {authNotice ? (
         <div className="auth-notice" role="alert" data-auth-notice>
@@ -39,7 +45,7 @@ export function Shell() {
       ) : null}
       <div className="shell-body">
         <Nav />
-        <main className="shell-main">
+        <main id="main-content" tabIndex={-1} className="shell-main">
           <Outlet />
         </main>
       </div>

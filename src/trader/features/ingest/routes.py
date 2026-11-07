@@ -18,12 +18,13 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from trader.features.ingest import manual_inputs, news_store
+from trader.features.ingest import macro_view, manual_inputs, news_store
 from trader.kernel.registry.types import SseKey
 from trader.kernel.web.auth import require_same_origin, require_token
 
 router = APIRouter(prefix="/news", tags=["news"])
-ROUTERS = (router,)
+macro_router = APIRouter(prefix="/macro", tags=["macro"])
+ROUTERS = (router, macro_router)
 WRITE = [Depends(require_token), Depends(require_same_origin)]
 
 
@@ -31,6 +32,14 @@ def _market(value: str | None) -> str:
     if value not in ("KR", "US"):
         raise HTTPException(status_code=400, detail=f"시장은 KR 또는 US: {value!r}")
     return value
+
+
+@macro_router.get("")
+def macro_overview(request: Request, market: str = Query("KR")) -> dict:
+    """최근 저장된 입력의 매크로 관측값. GET은 외부 수집이나 키 읽기를 하지 않는다."""
+    m = _market(market)
+    deps = request.app.state.deps
+    return macro_view.overview(deps.state, m, now=deps.now())
 
 
 @router.get("")

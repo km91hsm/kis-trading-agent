@@ -14,6 +14,8 @@ import { GLOSSARY, sideLabel, termLabel } from "../../lib/glossary";
 import { useResource, type Resource } from "../../lib/hooks";
 import { normalizeTrace, SIGNAL, type FoCheck, type TraceDebate, type TraceGate, type TraceOrder, type TraceResp } from "../../lib/trace";
 import { actionLabel, decisionHeader, roundRows, timingLabel, type FoDetail, type RoundRow, type SpotDetail } from "./decision.ts";
+import { InputEvidence, type DecisionInputs } from "./InputEvidence";
+import { DebateComparison } from "./DebateComparison";
 
 function BackLink() {
   const navigate = useNavigate();
@@ -167,6 +169,7 @@ export function Decision() {
   const spot = asset === "spot";
   const detail = useResource<SpotDetail | FoDetail>(`/decisions/${asset}/${id}`, undefined, ["decisions"]);
   const rawTrace = useResource<unknown>(`/decisions/${asset}/${id}/trace`, undefined, ["decisions", "orders"]);
+  const inputs = useResource<DecisionInputs>(`/decisions/spot/${id}/inputs`, undefined, ["decisions"], { enabled: spot });
 
   const notFound = [detail.error, rawTrace.error].find((e) => e?.status === 404);
   if (notFound) {
@@ -211,6 +214,17 @@ export function Decision() {
           <Pending res={detail} what="결정" />
         )}
       </section>
+
+      {spot ? <>
+        <section id="inputs" className="screen-section">
+          <h2>입력 내역</h2>
+          {inputs.data ? <InputEvidence data={inputs.data} /> : <Pending res={inputs} what="입력 내역" />}
+        </section>
+        <section id="comparison" className="screen-section">
+          <h2>쟁점별 비교</h2>
+          {t ? <DebateComparison turns={t.debate} items={inputs.data?.items ?? []} groups={inputs.data?.groups ?? []} /> : <Pending res={rawTrace} what="토론" />}
+        </section>
+      </> : null}
 
       {spot ? (
         <section id="rounds" className="screen-section">

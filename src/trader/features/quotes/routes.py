@@ -443,4 +443,8 @@ def activity(request: Request, market: str = "KR") -> dict:
         raise HTTPException(400, "market은 KR 또는 US여야 합니다")
     deps = request.app.state.deps
     with closing(deps.conn_factory()) as conn:
-        return snapshot(conn, market, asof=deps.now())
+        result = snapshot(conn, market, asof=deps.now())
+    result["enabled"] = deps.settings.quotes.activity_enabled
+    if not result["enabled"]:
+        result["collection_state"] = "disabled"
+    return result

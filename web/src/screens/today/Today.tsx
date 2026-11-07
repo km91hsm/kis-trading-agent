@@ -19,6 +19,7 @@ import { NextJobs } from "./NextJobs";
 import { NoticesFeed } from "./NoticesFeed";
 import { OrdersTimeline } from "./OrdersTimeline";
 import { Pipeline } from "./Pipeline";
+import { OperationsSummary } from "./OperationsSummary";
 import { RiskChecks } from "./RiskChecks";
 import type { MarketToday, RiskCheck } from "./morning.ts";
 import {
@@ -116,6 +117,8 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
         <DatePicker value={date} onChange={(v) => v && setDate(v)} max={today} />
       </header>
       <PageTabs screen="today" label="오늘 페이지" search={search} />
+
+      <OperationsSummary historical={date !== today} />
 
       <section id="approvals" className="screen-section" hidden={!pending.length && !approvals.error}>
         <h2>승인 대기 {pending.length}건</h2>

@@ -10,8 +10,17 @@ from decimal import Decimal
 
 from trader.features.quotes import activity_store
 from trader.kernel.broker.market_activity import finite_decimal
+from trader.kernel.config import market_hours
 
 KINDS = ("turnover", "gain", "loss")
+
+
+def _timestamp(value: str) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(value)
+        return stamp if stamp.tzinfo is not None else None
+    except (ValueError, TypeError):
+        return None
 
 
 def _unavailable(reason: str) -> dict:
@@ -36,9 +45,9 @@ def _observations(history: list) -> dict:
     indexed = {}
     for batch_at, partitions in history:
         for part in partitions.values():
-            at = (
-                datetime.fromisoformat(part["received_at"]) if part.get("received_at") else batch_at
-            )
+            at = _timestamp(part["received_at"]) if part.get("received_at") else batch_at
+            if at is None:
+                continue
             for row in part.get("rows", []):
                 indexed.setdefault(_identity(row), {})[at] = finite_decimal(row.get("turnover"))
     return indexed
@@ -101,6 +110,7 @@ def snapshot(
         raise ValueError("market은 KR 또는 US여야 합니다")
     at = activity_store.utc(asof)
     venues = ["KRX"] if market == "KR" else ["NAS", "NYS", "AMS"]
+    poll_open = market_hours.is_open(market, at)
     out = dict(
         source="kis",
         market=market,
@@ -110,10 +120,14 @@ def snapshot(
         basis="unknown",
         status="unavailable",
         stale=True,
+        poll_window="open" if poll_open else "closed",
+        poll_window_basis="regular_calendar_rules",
+        collection_state="awaiting_first" if poll_open else "waiting_for_open",
         coverage=dict(
             expected=venues,
             successful=[],
             failed=[],
+            pending=[],
             scope="bounded_rankings",
             complete=False,
             session="unknown",
@@ -124,7 +138,7 @@ def snapshot(
         data_gaps=["source_asof_unknown", "source_session_unknown", "bounded_ranking_coverage"],
     )
     observations = _observations(activity_store.history(conn, market, asof=at))
-    stale_rows = []
+    stale_partitions = []
     for venue in venues:
         for kind in KINDS:
             label = f"{venue}:{kind}"
@@ -157,12 +171,17 @@ def snapshot(
                         dict(exchange=venue, kind=kind, error=p["error"], received_at=stamp)
                     )
             if not success:
-                out["coverage"]["failed"].append(label)
+                category = "failed" if newest else "pending"
+                out["coverage"][category].append(label)
                 continue
             stamp, p = success
             stamp = p.get("received_at") or stamp
             failed = bool(newest and (not newest[1].get("ok") or newest[1].get("error")))
-            stale = (at - datetime.fromisoformat(stamp)).total_seconds() > max_age_s or failed
+            instant = _timestamp(stamp)
+            stale = (
+                instant is None or not 0 <= (at - instant).total_seconds() <= max_age_s or failed
+            )
+            stale_partitions.append(stale)
             out["coverage"]["successful"].append(label)
             if failed:
                 out["coverage"]["failed"].append(label)
@@ -187,7 +206,6 @@ def snapshot(
                     if "turnover_unit_unverified" not in out["data_gaps"]:
                         out["data_gaps"].append("turnover_unit_unverified")
                 row["growth"] = _growth(row, stamp, observations, stale=stale)
-                stale_rows.append(stale)
                 out["rankings"][kind].append(row)
     for kind, rows in out["rankings"].items():
         key = "turnover" if kind == "turnover" else "change_pct"
@@ -203,7 +221,14 @@ def snapshot(
         rows.sort(key=order)
     if out["coverage"]["successful"]:
         out["status"] = "partial"  # bounded rankings never prove the entire market
-        out["stale"] = any(stale_rows) if stale_rows else True
+        out["stale"] = any(stale_partitions)
+        out["collection_state"] = (
+            "outside_window" if not poll_open else
+            "delayed" if out["stale"] else
+            "observed" if any(out["rankings"].values()) else "empty"
+        )
+    if out["coverage"]["failed"]:
+        out["collection_state"] = "partial_error" if out["coverage"]["successful"] else "error"
     return out
 
 

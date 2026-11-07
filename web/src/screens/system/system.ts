@@ -328,6 +328,22 @@ export function secretRows(secrets: SecretsResp): SecretRow[] {
 // ── 기능 상태 응답(화면에 쓰는 칸만) ─────────────────────────────────────────
 export type RegimeMarket = { market: string; state: string; count: number; since: string | null; asof: string | null };
 export type RegimeResp = { enabled: boolean; max_weight_pct: number; markets: RegimeMarket[]; killswitch: { on: boolean; reason: string | null } };
+export type CollectionState = "normal" | "waiting" | "login_required" | "stopped" | "error" | "partial" | "empty" | "delayed" | "unknown";
+export type SavetickerStream = {
+  id: string;
+  label: string;
+  state: CollectionState;
+  status: string | null;
+  scope?: "active" | "historical" | "unconfirmed";
+  last_attempt_at: string | null;
+  last_response_at: string | null;
+  last_success_at: string | null;
+  last_change_at: string | null;
+  change_state: "changed" | "unchanged" | "empty" | "unknown";
+  count: number | null;
+  error: string | null;
+  recovery: string | null;
+};
 export type SavetickerResp = {
   configured: boolean;
   backend: string;
@@ -336,6 +352,9 @@ export type SavetickerResp = {
   reason_text: string | null;
   last_success_at: string | null;
   health: string | null;
+  streams?: SavetickerStream[];
+  summary?: { state: CollectionState; recorded: number; active_recorded?: number; historical?: number; unconfirmed?: number; note: string | null } & Record<CollectionState, number>;
+  recovery?: { state: string; text: string; lanes: { lane: string; state: string; retry_after_at?: string | null; text?: string }[] };
 };
 export type ScalpResp = { enabled: boolean; judge: boolean; max_weight_pct: number; max_positions: number; markets: Record<string, { open: unknown[]; closed: unknown[]; halted: boolean }> };
 export type FoAccount = { id: string; env: string; mode: string; paused: boolean; state: string | null; enabled: boolean; triggers: unknown[] };

@@ -67,6 +67,64 @@ def test_no_data_is_explicit_and_market_scoped(conn):
         api.activity_snapshot(conn, "ALL", asof=T)
 
 
+def test_missing_partitions_are_pending_not_failed(conn):
+    got = api.activity_snapshot(conn, "US", asof=T)
+    assert got["coverage"]["failed"] == []
+    assert len(got["coverage"]["pending"]) == 9
+    assert got["collection_state"] == "awaiting_first"
+    assert got["poll_window"] == "open"
+    assert got["coverage"]["session"] == "unknown"
+
+
+def test_closed_empty_market_is_waiting_not_error(conn):
+    got = api.activity_snapshot(conn, "KR", asof=datetime(2026, 11, 7, 3, tzinfo=UTC))
+    assert got["collection_state"] == "waiting_for_open"
+    assert got["poll_window"] == "closed"
+    assert got["coverage"]["failed"] == []
+    assert len(got["coverage"]["pending"]) == 3
+    assert got["status"] == "unavailable"  # 휴장을 정상 수집으로 바꾸지 않는다.
+
+
+def test_request_failure_remains_failure_even_when_poll_window_closed(conn):
+    put(conn, T, error="TimeoutError")
+    got = api.activity_snapshot(conn, "US", asof=T + timedelta(days=1))
+    assert got["collection_state"] == "error"
+    assert got["coverage"]["failed"] == ["NAS:turnover"]
+    assert len(got["coverage"]["pending"]) == 8
+
+
+def test_successful_empty_response_is_not_a_failure_or_delayed(conn):
+    put(conn, T, ticker=None)
+    got = api.activity_snapshot(conn, "US", asof=T)
+    assert got["collection_state"] == "empty"
+    assert got["coverage"]["failed"] == []
+    assert not got["stale"]
+    assert got["rankings"]["turnover"] == []
+
+
+def test_outside_window_retains_old_values_without_claiming_freshness(conn):
+    put(conn, T)
+    got = api.activity_snapshot(conn, "US", asof=T + timedelta(days=1))
+    assert got["collection_state"] == "outside_window"
+    assert got["stale"]
+    assert got["rankings"]["turnover"][0]["turnover"] == "100"
+
+
+@pytest.mark.parametrize("stamp", ["invalid", "2026-11-06T15:00:30+00:00", "2026-11-06T15:00:00"])
+def test_untrusted_partition_timestamp_is_never_fresh(conn, stamp):
+    from trader.features.quotes import activity_store
+
+    activity_store.append(conn, "US", received_at=T, partitions={"NAS:turnover": {
+        "ok": True, "received_at": stamp, "rows": [{
+            "ticker": "AAA", "market": "US", "exchange": "NAS", "currency": "USD",
+            "turnover": "100",
+        }],
+    }})
+    got = api.activity_snapshot(conn, "US", asof=T)
+    assert got["stale"] and got["collection_state"] == "delayed"
+    assert got["rankings"]["turnover"][0]["growth"]["status"] == "unavailable"
+
+
 def test_asof_excludes_future_and_preserves_last_success_with_latest_failure(conn):
     assert hasattr(api, "activity_snapshot"), "stored activity API required"
     put(conn, T, "100")

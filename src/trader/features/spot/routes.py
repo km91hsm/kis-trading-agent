@@ -25,7 +25,13 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from trader.features.spot import approvals, decisions_view, positions_view, risk_view
+from trader.features.spot import (
+    approvals,
+    decisions_view,
+    input_evidence,
+    positions_view,
+    risk_view,
+)
 from trader.features.spot.excluded import excluded_tickers
 from trader.features.spot.executor import sector_of_for
 from trader.kernel.daemon import queue as jobq
@@ -202,6 +208,15 @@ def decision_outcomes(request: Request, decision_id: int) -> dict:
     with closing(request.app.state.deps.conn_factory()) as conn:
         dec = _decision_or_404(conn, decision_id)
         return {"decision": dec, "outcomes": decisions_view.outcomes(conn, decision_id)}
+
+
+@decisions_router.get("/decisions/spot/{decision_id}/inputs")
+def decision_inputs(request: Request, decision_id: int) -> dict:
+    """세션 당시 저장 입력·전달 준비 기록·인용을 분리한 읽기 전용 설명."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        dec = _decision_or_404(conn, decision_id)
+        return input_evidence.view(conn, dec, deps.state)
 
 
 @decisions_router.get("/decisions/spot/{decision_id}/checkpoints/{stage}")

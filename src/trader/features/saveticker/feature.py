@@ -11,6 +11,6 @@ from trader.kernel.registry.types import Feature, NavItem
 
 FEATURE = Feature(
     id="saveticker", tier="service", sections=(SECTION,), jobs=(JOB,), cli=app, routes=ROUTERS,
-    control_namespaces=(RESTART_FLAG,), nav=(NavItem("system", "saveticker", "저장소", 40),),
+    control_namespaces=(RESTART_FLAG,), nav=(NavItem("system", "saveticker", "데이터 수집", 40),),
     health_areas=(HEALTH,),
 )  # fmt: skip
