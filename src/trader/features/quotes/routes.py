@@ -432,3 +432,15 @@ def fx_quote(request: Request, pair: str = "USDKRW") -> dict:
         detail = f"{pair} 환율 원천이 없습니다(KIS·거시 모두 실패)"
         raise HTTPException(status_code=404, detail=detail)
     return got
+
+
+@router.get("/quotes/activity")
+def activity(request: Request, market: str = "KR") -> dict:
+    """KIS 시장 활동 저장 이력만 읽는다. 화면 새로고침은 브로커 호출을 만들지 않는다."""
+    from trader.features.quotes.market_activity import snapshot
+
+    if market not in {"KR", "US"}:
+        raise HTTPException(400, "market은 KR 또는 US여야 합니다")
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        return snapshot(conn, market, asof=deps.now())

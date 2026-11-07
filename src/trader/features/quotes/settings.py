@@ -15,6 +15,11 @@ _NAME_KEY_RE = re.compile(r"(KR|US):[A-Za-z0-9.\-]+")
 class QuotesSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # 실전 공용 KIS 키가 준비된 데몬에서 정규장 관측 창에만 수집한다.
+    activity_enabled: bool = True
+    activity_max_pages: int = Field(2, ge=1, le=5)
+    activity_limit: int = Field(100, ge=1, le=200)
+
     # 국내 정규장 실시간 허브(KIS 웹소켓). 끄면 국내도 REST 폴링만
     realtime_ws: bool = True
     # 미국 정규장 REST 폴링 주기(ms) — 화면이 `next_poll_ms` 로 받는다
@@ -35,7 +40,6 @@ class QuotesSettings(BaseModel):
         if not v:
             raise ValueError("quotes.fx_code 는 비어 있을 수 없습니다(예: FX@KRW)")
         return v
-
 
     @field_validator("instrument_names")
     @classmethod
@@ -61,3 +65,14 @@ class NamesFillSchedule(BaseModel):
 
 SECTION = Section("settings", "quotes", QuotesSettings, QuotesSettings)
 SCHEDULE_SECTION = Section("schedule", "names_fill", NamesFillSchedule, NamesFillSchedule)
+
+
+class ActivitySchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interval_s: int = Field(30, ge=30, le=3600)
+
+
+ACTIVITY_SCHEDULE_SECTION = Section(
+    "schedule", "market_activity", ActivitySchedule, ActivitySchedule
+)

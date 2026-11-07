@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from trader.features.quotes import fx, routes
+from trader.features.quotes.market_activity import for_ticker as activity_for_ticker
+from trader.features.quotes.market_activity import snapshot as activity_snapshot
 
 
 def fx_rate(settings: Any, conn: sqlite3.Connection, pair: str = "USDKRW") -> dict | None:
@@ -25,4 +27,4 @@ def prepare_fx(deps: Any) -> None:
     routes.runtime_for(deps)
 
 
-__all__ = ["fx_rate", "prepare_fx"]
+__all__ = ["fx_rate", "prepare_fx", "activity_snapshot", "activity_for_ticker"]
