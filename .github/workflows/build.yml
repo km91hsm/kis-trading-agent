@@ -7,14 +7,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 태그 릴리스에 zip 첨부 (기본 토큰은 읽기 전용)
+  contents: write  # 태그 릴리스에 설치 파일 첨부 (기본 토큰은 읽기 전용)
 
 jobs:
   bundle:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest 는 arm64 — Intel Mac 용은 macos-15-intel 로 따로 만든다 (zip 이름에 arch 가 들어간다)
+        # macos-latest 는 arm64 — Intel Mac 용은 macos-15-intel 로 따로 만든다 (설치 파일 이름에 arch 가 들어간다)
         os: [macos-latest, macos-15-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -39,15 +39,28 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: 번들 빌드·스모크·zip
+      - name: Inno Setup 6 보장 (Windows — 러너에 없을 때만 설치)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          $std = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not $iscc -and -not (Test-Path $std)) {
+            choco install innosetup -y --no-progress
+          }
+      - name: 번들 빌드·스모크·설치 파일
         run: uv run --group build python packaging/build.py --skip-web
       - uses: actions/upload-artifact@v4
         with:
           name: trader-${{ github.ref_name }}-${{ matrix.os }}
-          path: dist/trader-*.zip
+          path: |
+            dist/trader-*.dmg
+            dist/trader-*-setup.exe
           if-no-files-found: error
       - name: 릴리스 첨부 (태그 푸시)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/trader-*.zip
+          files: |
+            dist/trader-*.dmg
+            dist/trader-*-setup.exe

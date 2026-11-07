@@ -1,9 +1,12 @@
-"""번들 빌드: (웹 빌드) → PyInstaller → 스모크 → zip. 셸 스크립트 대신 파이썬.
+"""번들 빌드: (웹 빌드) → PyInstaller → 스모크 → 설치 파일. 셸 스크립트 대신 파이썬.
 
-실제 빌드는 `v*` 태그 CI(.github/workflows/build.yml)에서만 돈다(P18).
+배포 빌드는 `v*` 태그 CI(.github/workflows/build.yml)에서 돈다(P18).
 
 사용: uv run --group build python packaging/build.py [--skip-web] [--skip-smoke]
-산출: dist/trader/ (실행파일 + _internal/) 와 dist/trader-<버전>-<os>-<arch>.zip
+산출: dist/trader/ (실행파일 + _internal/ 또는 Trader.app) 와 설치 파일
+  - macOS: dist/trader-<버전>-macos-<arch>.dmg (Trader.app + 응용 프로그램 바로가기)
+  - Windows: dist/trader-<버전>-windows-x86_64-setup.exe (Inno Setup 6, packaging/trader.iss)
+데이터(config/ secrets/ state/ docs/)는 OS 사용자 데이터 폴더에 있고 설치 파일에는 들어가지 않는다.
 """
 
 from __future__ import annotations
@@ -14,11 +17,9 @@ import os
 import platform
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -102,8 +103,9 @@ def _remove(p: Path) -> None:
         shutil.rmtree(p)
 
 
-# 번들 폴더 = 운용 중인 TRADER_HOME 일 수 있다(Trader.app 의 부모). 빌드는 이 이름들을 건드리지
-# 않고 zip 에도 넣지 않는다 — 원장·키·설정이 지워지던 문제(전체 검토 2026-10-27)
+# 옛 휴대용 배포에서는 번들 폴더 = 운용 중인 TRADER_HOME 이었다(Trader.app 의 부모). 빌드는
+# 이 이름들을 건드리지 않고 설치 파일에도 넣지 않는다 — 원장·키·설정이 지워지던 문제
+# (전체 검토 2026-10-27)
 USER_DATA = ("config", "secrets", "state", "docs")
 # macOS 번들 폴더에서 빌드가 바꾸는 것(COLLECT 가 남긴 평면 산출물 포함)
 BUNDLE_ENTRIES = ("Trader.app", "trader", "TraderApp", "_internal", "README.md")
@@ -179,7 +181,8 @@ def smoke(exe: Path) -> dict:
         if not (internal / rel).exists():
             raise SystemExit(f"번들 리소스 누락: {internal.name}/{rel}")
     # 번들 **안**(리소스 폴더)에 운용 데이터가 섞였는지만 본다 — dist/trader 바로 아래의
-    # secrets·state 는 운용 중인 TRADER_HOME 의 사용자 데이터라 정상이다(zip 은 USER_DATA 를 뺀다)
+    # secrets·state 는 옛 휴대용 TRADER_HOME 의 사용자 데이터일 수 있다
+    # (설치 파일은 USER_DATA 를 뺀다)
     for bad in ("secrets", "state"):
         if (internal / bad).exists():
             raise SystemExit(f"번들에 {bad}/ 가 들어갔습니다")
@@ -199,7 +202,7 @@ ARCH_NAMES = {"amd64": "x86_64", "x64": "x86_64", "aarch64": "arm64"}
 
 
 def project_version() -> str:
-    """버전의 출처는 pyproject.toml 하나 (태그·zip 이름·Info.plist 가 같은 값을 쓴다)."""
+    """버전의 출처는 pyproject.toml 하나 (태그·설치 파일 이름·Info.plist·AppVersion)."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
     if not m:
@@ -208,36 +211,110 @@ def project_version() -> str:
 
 
 def dist_name(version: str, sys_platform: str, machine: str) -> str:
-    """zip 이름: trader-<버전>-<macos|windows|linux>-<arch>."""
+    """설치 파일 이름 바탕: trader-<버전>-<macos|windows|linux>-<arch> (+ Windows `-setup`)."""
     arch = machine.lower()
     arch = ARCH_NAMES.get(arch, arch)
     return f"trader-{version}-{PLATFORM_NAMES.get(sys_platform, sys_platform)}-{arch}"
 
 
-def make_zip(dist_dir: Path, name: str, *, readme: Path | None = None) -> Path:
-    """dist_dir 을 `trader/` 최상위로 압축한다. 심링크는 링크로 보존하고(macOS framework·CLI 링크가
-    실제 파일로 풀리면 크기가 1.5배가 된다), README 가 있으면 최상위에 동봉한다."""
-    if readme is not None:
-        shutil.copy2(readme, dist_dir / "README.md")
-    target = dist_dir.parent / f"{name}.zip"
+DMG_STAGE = ROOT / "build" / "dmg-stage"
+ISS = ROOT / "packaging" / "trader.iss"
+
+
+def stage_dmg(dist_dir: Path, stage: Path) -> Path:
+    """dmg 에 담을 폴더를 새로 만든다: `Trader.app`(심링크 보존) + `Applications → /Applications`.
+
+    dist_dir 의 다른 항목(터미널용 `trader` 링크·USER_DATA)은 복사하지 않는다 — 원장·키·설정이
+    설치 파일에 섞이지 않게(데이터는 사용자 데이터 폴더에 있다)."""
+    app = dist_dir / "Trader.app"
+    if not app.is_dir():
+        raise SystemExit(f"Trader.app 이 없습니다: {app}")
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    shutil.copytree(app, stage / "Trader.app", symlinks=True)
+    os.symlink("/Applications", stage / "Applications")
+    return stage
+
+
+def make_dmg(dist_dir: Path, name: str, *, stage: Path = DMG_STAGE, run=None) -> Path:
+    """macOS 설치 디스크 이미지 `<dist>/<name>.dmg` (끌어다 놓기 설치)."""
+    run = run or _run
+    stage_dmg(dist_dir, stage)
+    target = dist_dir.parent / f"{name}.dmg"
     if target.exists():
         target.unlink()
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in sorted(dist_dir.rglob("*")):
-            rel = p.relative_to(dist_dir)
-            if rel.parts and rel.parts[0] in USER_DATA:
-                continue  # 운용 데이터(원장·키·설정)는 배포 zip 에 절대 넣지 않는다
-            arc = (Path("trader") / rel).as_posix()
-            if p.is_symlink():
-                zi = zipfile.ZipInfo(arc)
-                zi.create_system = 3  # unix: external_attr 의 상위 16비트가 st_mode
-                zi.external_attr = (stat.S_IFLNK | 0o755) << 16
-                zf.writestr(zi, os.readlink(p))
-            elif p.is_dir():
-                continue
-            else:
-                zf.write(p, arc)
+    run(
+        [
+            "hdiutil",
+            "create",
+            "-volname",
+            "Trader",
+            "-srcfolder",
+            str(stage),
+            "-ov",
+            "-format",
+            "UDZO",
+            str(target),
+        ]
+    )
+    shutil.rmtree(stage, ignore_errors=True)
     return target
+
+
+def find_iscc(env: dict | None = None, which=shutil.which) -> Path:
+    """Inno Setup 6 컴파일러: PATH(`iscc`·`ISCC.exe`) → `%ProgramFiles(x86)%` → `%ProgramFiles%`."""
+    env = os.environ if env is None else env
+    for cand in ("iscc", "ISCC.exe"):
+        found = which(cand)
+        if found:
+            return Path(found)
+    for var in ("ProgramFiles(x86)", "ProgramFiles"):
+        base = env.get(var)
+        if base:
+            exe = Path(base) / "Inno Setup 6" / "ISCC.exe"
+            if exe.is_file():
+                return exe
+    raise SystemExit(
+        "Inno Setup 6 의 ISCC.exe 를 찾을 수 없습니다 — https://jrsoftware.org/isinfo.php 에서 "
+        "설치하거나 `choco install innosetup` 후 다시 실행하세요"
+    )
+
+
+def make_setup(
+    dist_dir: Path, name: str, version: str, *, iscc: Path | None = None, run=None
+) -> Path:
+    """Windows 설치 프로그램 `<dist>/<name>-setup.exe` (packaging/trader.iss, 사용자 권한)."""
+    run = run or _run
+    iscc = iscc or find_iscc()
+    out_dir = dist_dir.parent
+    base = f"{name}-setup"
+    target = out_dir / f"{base}.exe"
+    target.unlink(missing_ok=True)  # 지난 빌드의 산출물을 이번 것으로 착각하지 않게
+    run(
+        [
+            str(iscc),
+            "/Qp",
+            f"/DMyVersion={version}",
+            f"/DBundleDir={dist_dir}",
+            f"/O{out_dir}",
+            f"/F{base}",
+            str(ISS),
+        ]
+    )
+    if not target.exists():
+        raise SystemExit(f"설치 프로그램이 만들어지지 않았습니다: {target}")
+    return target
+
+
+def make_installer(
+    dist_dir: Path, name: str, version: str, sys_platform: str = sys.platform
+) -> Path:
+    if sys_platform == "darwin":
+        return make_dmg(dist_dir, name)
+    if sys_platform == "win32":
+        return make_setup(dist_dir, name, version)
+    raise SystemExit(f"설치 파일을 만들지 않는 플랫폼입니다: {sys_platform}")
 
 
 def main() -> None:
@@ -261,14 +338,16 @@ def main() -> None:
         build_web()
     # 빌드는 dist/trader 의 번들 항목만 바꾸고(PyInstaller 출력은 STAGE) 사용자 데이터는 옮기지도
     # 지우지도 않는다 — 실행 중인 앱의 데몬이 같은 폴더를 쓰고 있어도 안전. 스모크는 임시
-    # TRADER_HOME, zip 은 USER_DATA 를 빼고 묶는다
+    # TRADER_HOME, 설치 파일(dmg·setup.exe)은 USER_DATA 를 담지 않는다
     exe = build_bundle()
     result = {"exe": str(exe)}
     if not args.skip_smoke:
         result["smoke"] = smoke(exe)
-    name = dist_name(project_version(), sys.platform, platform.machine())
-    result["zip"] = str(make_zip(DIST, name, readme=ROOT / "docs" / "bundle-usage.md"))
-    result["zip_name"] = f"{name}.zip"
+    version = project_version()
+    name = dist_name(version, sys.platform, platform.machine())
+    installer = make_installer(DIST, name, version)
+    result["installer"] = str(installer)
+    result["installer_name"] = installer.name
     print(json.dumps(result, ensure_ascii=False, indent=1))
 
 

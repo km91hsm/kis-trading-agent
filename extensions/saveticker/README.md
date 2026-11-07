@@ -2,7 +2,7 @@
 
 일반 Chrome의 로그인된 SaveTicker 화면을 네 개의 전용 탭에서 읽어 Native host `com.trader.saveticker`로 전달합니다. 확장 ID는 `gfchfnjghmjiidifohjglpodaakdphho`입니다. 수집은 수집 시작 시 한 번 표시하는 전용 Chrome 창에서 네 lane의 탭을 차례대로 활성화하여 진행합니다. 사용자 탭은 URL이 같아도 가져오지 않습니다. 확장 storage의 임의 소유 token과 URL 마커가 모두 일치하는 탭만 복구합니다.
 
-확장 설치·호스트 등록·backend 변경은 운영자의 최종 승인 후 별도 설치 명령으로 진행합니다. 이 디렉터리를 작성하는 것으로 Chrome에 설치되거나 사용자 프로필이 바뀌지 않습니다.
+확장 설치·호스트 등록은 운영자가 `trader saveticker extension install` 로 직접 진행합니다(데이터 폴더 `saveticker-extension/extension` 으로 복사한 뒤 Chrome 에서 압축해제된 확장으로 로드). 이 디렉터리를 작성하는 것으로 Chrome에 설치되거나 사용자 프로필이 바뀌지 않습니다.
 
 권한은 alarms/storage/nativeMessaging/downloads와 `https://www.saveticker.com/*`입니다. 쿠키·로그인 값·요청 헤더를 읽지 않고 자동 로그인을 하지 않습니다. MAIN world 요청 관찰은 사용하지 않으며 매 작업에서 실제 선택 상태를 확인한 새 DOM만 보냅니다. DOM의 스크립트·폼·입력·메뉴·탐색 영역을 제거합니다. 가상 목록을 두 번 스크롤한 수집과 본문 확인이 불가능한 항목은 **partial**로 남습니다.
 

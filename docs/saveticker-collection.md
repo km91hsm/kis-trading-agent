@@ -7,13 +7,16 @@
 ## 설치
 
 ```text
-uv run trader saveticker extension prepare --destination <새 패키지 경로>   # 검토용 패키지(설치·활성화 없음)
-uv run trader saveticker extension install-host <패키지 경로>              # Native host 등록(사용자 승인 후)
-uv run trader saveticker extension status                                   # 등록·연결·작업별 상태
-uv run trader saveticker extension uninstall-host <패키지 경로>             # 확장 중지 후 등록 해제
+uv run trader saveticker extension install     # 확장 복사 + Native host 등록(재실행 가능)
+uv run trader saveticker extension status      # 등록·등록 JSON path·확장 버전·연결·작업별 상태
+uv run trader saveticker extension uninstall   # 확장 팝업에서 중지한 뒤 등록 해제
 ```
 
-`prepare` 결과의 `REVIEW.md`·`extension/manifest.json` 을 확인한 뒤 `install-host` 로 등록하고, `chrome://extensions` 개발자 모드에서 패키지의 `extension/` 을 압축해제된 확장으로 로드한다. 확장 팝업에서 시작·중지·재개한다. Chrome 과 컴퓨터가 켜져 있어야 수집하며, 세션 만료·사이트 보안 확인은 사용자가 Chrome 에서 직접 마친 뒤 팝업의 재개를 눌러야 한다(우회하지 않는다).
+`install` 은 경로 인자가 없다. 패키지는 고정 `<데이터 루트>/saveticker-extension/`(번들은 macOS `~/Library/Application Support/Trader/saveticker-extension`, Windows `%LOCALAPPDATA%\Trader\saveticker-extension`)이고, 번들의 확장을 그 안 `extension/` 으로 복사한 뒤 **설치된 앱의 콘솔 `trader` 를 Native host 로 직접 등록**한다(macOS 는 `env TRADER_HOME=… SAVETICKER_NATIVE_ROOT=… <trader>` 래퍼 `native-host`, Windows 는 등록 JSON `path` = 설치 폴더 `trader.exe` + HKCU 레지스트리). 앱 복사본(옛 `native-runtime/`)은 만들지 않는다. Gatekeeper 번역 경로(`AppTranslocation`)나 마운트한 디스크 이미지(`/Volumes/…`)에서 실행 중이면 `app_translocated` 로 거부한다 — 앱을 `/Applications` 로 옮긴 뒤 다시 실행한다.
+
+다시 실행해도 된다: 같은 이름(`com.trader.saveticker`)·같은 확장 ID 의 기존 등록(옛 `prepare` 패키지 등록 포함)은 교체하고, 다른 소유자의 등록이면 `registration_exists` 로 거부한다. 결과의 `next_steps` 대로 `chrome://extensions` → 개발자 모드 → (다른 경로로 로드된 옛 확장이 있으면 먼저 삭제) → 「압축해제된 확장 프로그램 로드」 → `<패키지>/extension` → 확장 팝업에서 시작한다. 확장 팝업에서 시작·중지·재개한다.
+
+앱을 업데이트하면 데몬 잡 `saveticker` 의 첫 틱이 설치된 `extension/manifest.json` 버전을 번들과 비교해 다르면 복사본을 교체하고 「Chrome 확장 프로그램 화면에서 Trader 수집 확장을 새로고침하세요」 텔레그램 알림을 한 번 보낸다. 등록이 현재 실행파일을 가리키지 않으면(앱 위치 변경) 그것도 다시 맞춘다. 업데이트 전에는 확장 팝업에서 수집을 중지해 두는 것이 안전하다. 리포트 PDF 는 Chrome 기본 다운로드 폴더(`~/Downloads/SaveTicker`)를 거치므로 Chrome 다운로드 폴더를 바꾸지 않는다. Chrome 과 컴퓨터가 켜져 있어야 수집하며, 세션 만료·사이트 보안 확인은 사용자가 Chrome 에서 직접 마친 뒤 팝업의 재개를 눌러야 한다(우회하지 않는다).
 
 ## 조회
 
@@ -45,7 +48,7 @@ feed.sqlite3                  변경 이력 원본(WAL)
 2026-10-25/calendar.jsonl      일정·발표값 변경분
 latest/<stream>.json          스트림별 최근 유효 캡처
 status.json                   시도·유효 수집 시각, 상태, 처리 소요·목표 주기
-../runtime/bridge-config.json  확장 등록 기록(`extension install-host` 가 만든다)
+../runtime/bridge-config.json  확장 등록 기록(`extension install` 이 만든다)
 ../runtime/bridge.json        Native host 하트비트(pid·상태·사유·기록 시각)
 ../runtime/bridge-host.lock   Native host 중복 실행 잠금
 ../runtime/runner.json        Native host 마지막 상태

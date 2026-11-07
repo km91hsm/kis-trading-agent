@@ -11,9 +11,15 @@
 _internal/(sys._MEIPASS) 리소스 레이아웃은 platform/bundle.py 가 기대하는 대로:
 templates/ icons/ web/dist/ extensions/saveticker/ docs/, 기능 agents md 는 모듈 옆
 trader/features/<기능>/agents/*.md (`Path(__file__).parent / "agents"`), 기능 README.md 는 boot() 계약 검사용.
-secrets/·state/ 는 넣지 않는다.
-실제 빌드는 v* 태그 CI 에서만 돈다(packaging/build.py, .github/workflows/build.yml)."""
+secrets/·state/ 는 넣지 않는다 — 사용자 데이터는 앱 밖의 사용자 데이터 폴더(macOS
+`~/Library/Application Support/Trader`, Windows `%LOCALAPPDATA%\\Trader`)에만 있다.
+build.py 가 이 산출물로 설치 파일(macOS .dmg, Windows Inno Setup `packaging/trader.iss`)을 만든다.
+배포 빌드는 v* 태그 CI 에서 돈다(packaging/build.py, .github/workflows/build.yml).
 
+코드 서명: 기본은 서명 없음(ad-hoc). macOS 에서 환경변수 `TRADER_CODESIGN_IDENTITY`(그리고 필요하면
+`TRADER_ENTITLEMENTS_FILE`)가 있을 때만 EXE 에 넘긴다 — BUNDLE 은 EXE 의 서명 설정을 따른다."""
+
+import os
 import re
 import sys
 from pathlib import Path
@@ -24,6 +30,9 @@ ROOT = Path(SPECPATH).resolve().parent  # packaging/ → 저장소 루트
 VERSION = re.search(
     r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.M
 ).group(1)
+# 서명 자리: 환경변수가 없으면 None(= PyInstaller 기본 ad-hoc 서명)
+CODESIGN_IDENTITY = os.environ.get("TRADER_CODESIGN_IDENTITY") or None
+ENTITLEMENTS_FILE = os.environ.get("TRADER_ENTITLEMENTS_FILE") or None
 ICON = str(ROOT / "packaging" / "icons" / ("trader.icns" if sys.platform == "darwin" else "trader.ico"))
 
 datas = [
@@ -33,7 +42,7 @@ datas = [
 for rel, dst in (("web/dist", "web/dist"), ("docs/bundle-usage.md", "docs")):
     if (ROOT / rel).exists():
         datas.append((str(ROOT / rel), dst))
-# 세이브티커 Chrome 확장(번들의 `saveticker extension prepare` 가 복사한다). tests/ 는 빼고 파일 단위로
+# 세이브티커 Chrome 확장(번들의 `saveticker extension install` 이 데이터 폴더로 복사한다). tests/ 는 빼고 파일 단위로
 EXT = ROOT / "extensions/saveticker"
 if EXT.is_dir():
     for f in sorted(EXT.rglob("*")):
@@ -80,6 +89,8 @@ exe_cli = EXE(
     console=True,
     icon=ICON,
     disable_windowed_traceback=False,
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=ENTITLEMENTS_FILE,
 )
 exe_app = EXE(
     pyz,
@@ -89,6 +100,8 @@ exe_app = EXE(
     console=False,
     icon=ICON,
     disable_windowed_traceback=True,
+    codesign_identity=CODESIGN_IDENTITY,
+    entitlements_file=ENTITLEMENTS_FILE,
 )
 coll = COLLECT(exe_cli, exe_app, a.binaries, a.datas, name="trader", contents_directory="_internal")
 
