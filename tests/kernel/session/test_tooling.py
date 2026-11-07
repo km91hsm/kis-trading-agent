@@ -175,3 +175,139 @@ def test_compact_context_preserves_blog_reference_and_source_coverage():
     out = compact_context(inputs)
     assert out["source_coverage"]["macro"]["dxy"]["status"] == "missing"
     assert [p["source"] for p in out["blog_posts"]] == ["naver_blog/ranto28"]
+
+
+def test_compact_context_keeps_each_macro_and_blog_evidence_under_realistic_load():
+    from trader.kernel.session.tooling import compact_context
+
+    macro = {
+        key: {
+            "data": {"value": i + 10, "date": "2026-11-06"},
+            "source": "FRED",
+            "source_asof": "2026-11-06",
+            "received_at": "2026-11-07T01:00:00Z",
+            "status": "available",
+            "stale": None,
+        }
+        for i, key in enumerate(("sp500", "nasdaq", "wti", "dxy", "us10y"))
+    }
+    coverage = {
+        key: {
+            "status": "present",
+            "source": "FRED",
+            "series_id": series,
+            "instrument": instrument,
+            "source_asof": "2026-11-06",
+            "received_at": "2026-11-07T01:00:00Z",
+            "stale": None,
+            "data_gaps": ["Investing.com source not collected; FRED series used"],
+        }
+        for key, series, instrument in (
+            ("sp500", "SP500", "S&P 500"),
+            ("nasdaq", "NASDAQCOM", "NASDAQ Composite"),
+            ("wti", "DCOILWTICO", "WTI crude oil spot price"),
+            ("dxy", "DTWEXBGS", "Federal Reserve broad US dollar index"),
+            ("us10y", "DGS10", "US Treasury 10-year constant maturity yield"),
+        )
+    }
+    inputs = {
+        "meta": {"market": "KR", "asof": "2026-11-07T01:00:00Z"},
+        "market_activity": {
+            "source": "kis",
+            "market": "KR",
+            "status": "partial",
+            "rankings": {"turnover": [{"ticker": "005930", "turnover": "100"}]},
+        },
+        "data_gaps": ["partial activity coverage"],
+        "source_coverage": {
+            "macro": coverage,
+            "naver_blog/ranto28": {
+                "status": "present",
+                "items": 5,
+                "source": "Naver blog RSS",
+                "data_gaps": [],
+            },
+        },
+        "news_macro": {
+            "news": {
+                "data": {
+                    "stock": [
+                        {"title": f"news-{i}", "summary": "가" * 360, "source": "news"}
+                        for i in range(5)
+                    ]
+                }
+            },
+            "macro": macro,
+            "events": {"recent": [], "upcoming": []},
+        },
+        "sentiment": {
+            "saveticker": {"data": {"source": "saveticker", "stale": ["market_gain"]}},
+            "community": {
+                "data": {
+                    "posts": [
+                        {
+                            "title": f"blog-{i}",
+                            "body": "나" * 1800,
+                            "source": "naver_blog/ranto28",
+                            "posted_at": "2026-11-06T01:00:00Z",
+                            "received_at": "2026-11-07T01:00:00Z",
+                        }
+                        for i in range(5)
+                    ]
+                }
+            },
+        },
+    }
+    out = compact_context(inputs)
+    assert _size(out) <= 8000
+    assert out["blog_posts"][0]["body"]
+    assert out["blog_posts"][0]["posted_at"] == "2026-11-06T01:00:00Z"
+    assert out["news"]["data"]["stock"][0]["title"] == "news-0"
+    assert set(out["source_coverage"]["macro"]) == {"sp500", "nasdaq", "wti", "dxy", "us10y"}
+    assert out["source_coverage"]["macro"]["dxy"]["series_id"] == "DTWEXBGS"
+    assert (
+        out["source_coverage"]["macro"]["us10y"]["instrument"]
+        == "US Treasury 10-year constant maturity yield"
+    )
+    for key in ("sp500", "nasdaq", "wti", "dxy", "us10y"):
+        assert out["macro"][key]["data"]["date"] == "2026-11-06"
+        assert isinstance(out["macro"][key]["data"]["value"], int)
+    assert "events" in out and "saveticker" in out
+    blog_coverage = out["source_coverage"]["naver_blog/ranto28"]
+    assert blog_coverage["items"] == len(out["blog_posts"])
+    if len(out["blog_posts"]) < 5:
+        assert blog_coverage["status"] == "partial"
+        assert blog_coverage["data_gaps"]
+
+
+def test_compact_context_marks_coverage_dropped_when_referenced_evidence_is_missing():
+    from trader.kernel.session.tooling import compact_context
+
+    out = compact_context(
+        {
+            "source_coverage": {
+                "macro": {"dxy": {"status": "present", "series_id": "DTWEXBGS", "data_gaps": []}},
+                "naver_blog/ranto28": {"status": "present", "items": 5, "data_gaps": []},
+            }
+        }
+    )
+    assert out["source_coverage"]["macro"]["dxy"]["status"] == "dropped"
+    assert out["source_coverage"]["macro"]["dxy"]["data_gaps"]
+    blog = out["source_coverage"]["naver_blog/ranto28"]
+    assert blog["status"] == "dropped" and blog["items"] == 0 and blog["original_items"] == 5
+    assert blog["data_gaps"]
+
+
+def test_compact_context_does_not_count_ellipsis_as_delivered_blog_evidence():
+    from trader.kernel.session.tooling import compact_context
+
+    out = compact_context(
+        {
+            "source_coverage": {
+                "naver_blog/ranto28": {"status": "present", "items": 1, "data_gaps": []}
+            },
+            "blog_posts": [{"source": "naver_blog/ranto28", "body": "…"}],
+        }
+    )
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "dropped"
+    assert out["source_coverage"]["naver_blog/ranto28"]["items"] == 0

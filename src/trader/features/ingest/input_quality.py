@@ -14,12 +14,27 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
             out[key] = section
             continue
         data = section.get("data")
-        observation = (data.get("date") or data.get("asof")) if isinstance(data, dict) else None
+        observation = (data.get("asof") or data.get("date")) if isinstance(data, dict) else None
         source = "ECOS" if key == "base_rate_kr" else "KIS" if key == "kospi" else "FRED"
-        future = bool(
-            observation and str(observation)[:10] > asof.astimezone(UTC).date().isoformat()
-        )
+        future = False
+        timestamp_error = None
+        if observation:
+            raw = str(observation)
+            if "T" in raw or " " in raw:
+                try:
+                    observed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if observed.tzinfo is None:
+                        raise ValueError("observation timestamp timezone unavailable")
+                    future = observed.astimezone(UTC) > asof.astimezone(UTC)
+                except ValueError as exc:
+                    timestamp_error = str(exc)
+            else:
+                # Date/month observations have no release timestamp. Preserve their
+                # precision and unknown release freshness instead of inventing a time.
+                future = raw[:10] > asof.astimezone(UTC).date().isoformat()
         gaps = []
+        if timestamp_error:
+            gaps.append(timestamp_error)
         if section.get("error"):
             gaps.append(str(section["error"]))
         if future:
@@ -30,10 +45,10 @@ def macro_context(macro: dict, *, asof: datetime) -> dict:
             )
         out[key] = {
             **section,
-            "data": None if future else data,
+            "data": None if future or timestamp_error else data,
             "source": source,
             "source_asof": observation,
-            "status": "unavailable" if future or data is None else "available",
+            "status": "unavailable" if future or timestamp_error or data is None else "available",
             "stale": None,
             "data_gaps": gaps,
         }

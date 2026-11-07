@@ -84,3 +84,32 @@ def test_requested_macro_coverage_distinguishes_dxy_proxy_and_nasdaq_composite()
     assert coverage["macro"]["dxy"]["source"] == "FRED"
     assert coverage["naver_blog/ranto28"]["status"] == "present"
     assert coverage["naver_blog/ranto28"]["configured"] is True
+
+
+def test_intraday_macro_rejects_same_day_future_timestamp_after_timezone_conversion():
+    asof = datetime(2026, 11, 7, 1, tzinfo=UTC)
+    for observed in ("2026-11-07T05:00:00+00:00", "2026-11-07T14:00:00+09:00"):
+        out = input_quality.macro_context(
+            {
+                "kospi": {
+                    "data": {"value": 3000, "date": "2026-11-07", "asof": observed},
+                    "received_at": "2026-11-07T01:00:00+00:00",
+                    "error": None,
+                }
+            },
+            asof=asof,
+        )
+        assert out["kospi"]["data"] is None
+        assert out["kospi"]["status"] == "unavailable"
+        assert out["kospi"]["source_asof"] == observed
+    current = input_quality.macro_context(
+        {
+            "kospi": {
+                "data": {"value": 2990, "asof": "2026-11-07T09:59:59+09:00"},
+                "received_at": "2026-11-07T01:00:00+00:00",
+                "error": None,
+            }
+        },
+        asof=asof,
+    )
+    assert current["kospi"]["data"]["value"] == 2990

@@ -168,19 +168,105 @@ _QUALITY_KEYS = frozenset(
 )
 
 
-def _compact(v: Any, keep: int, chars: int | None, path: tuple[str, ...] = ()) -> Any:
+_IDENTITY_FIELDS = {
+    "source",
+    "source_asof",
+    "asof",
+    "received_at",
+    "observed_at",
+    "generated_at",
+    "market",
+    "currency",
+    "scope",
+    "basis",
+    "status",
+    "series_id",
+    "instrument",
+    "ticker",
+    "date",
+    "posted_at",
+    "value",
+    "price",
+    "turnover",
+    "recent_5m",
+    "previous_5m",
+}
+
+
+def _compact(
+    v: Any,
+    keep: int,
+    chars: int | None,
+    path: tuple[str, ...] = (),
+    *,
+    mapping_limit: int | None = None,
+) -> Any:
     if isinstance(v, str):
-        return _cut(v, chars) if chars is not None else v
+        if chars is not None and path[-1:] in (("data_gaps",), ("error",)):
+            return _cut(v, max(chars, 300))
+        return (
+            _cut(v, chars)
+            if chars is not None and (not path or path[-1] not in _IDENTITY_FIELDS)
+            else v
+        )
     if isinstance(v, list):
         tail = any(k in _ASCENDING_SERIES for k in path[-2:])
         selected = v[-keep:] if tail else v[:keep]
-        return [_compact(x, keep, chars, path) for x in selected]
+        return [_compact(x, keep, chars, path, mapping_limit=mapping_limit) for x in selected]
     if isinstance(v, dict):
-        priority = [k for k in v if k in _QUALITY_KEYS]
-        ordinary = [k for k in v if k not in _QUALITY_KEYS][:keep]
-        selected = set(priority + ordinary)
-        return {k: _compact(x, keep, chars, (*path, k)) for k, x in v.items() if k in selected}
+        keys = list(v)
+        if mapping_limit is not None and "source_coverage" not in path:
+            priority = [k for k in v if k in _QUALITY_KEYS]
+            ordinary = [k for k in v if k not in _QUALITY_KEYS][:mapping_limit]
+            keys = priority + ordinary
+        return {
+            k: _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit) for k in keys
+        }
     return v
+
+
+def _delivery_coverage(value: Any) -> Any:
+    """Coverage describes evidence in this delivered object, including nested contexts."""
+    if isinstance(value, list):
+        return [_delivery_coverage(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    result = {k: _delivery_coverage(v) for k, v in value.items()}
+    coverage = result.get("source_coverage")
+    if not isinstance(coverage, dict):
+        return result
+    macro = result.get("macro") or (result.get("news_macro") or {}).get("macro") or {}
+    for key, details in (coverage.get("macro") or {}).items():
+        if isinstance(details, dict) and details.get("status") in ("present", "partial"):
+            observation = (macro.get(key) or {}).get("data")
+            if not isinstance(observation, dict) or observation.get("value") is None:
+                details["status"] = "dropped"
+                details["data_gaps"] = [
+                    *(details.get("data_gaps") or []),
+                    "observation not included in delivered context",
+                ]
+    for source, details in coverage.items():
+        if not source.startswith("naver_blog/") or not isinstance(details, dict):
+            continue
+        if details.get("status") not in ("present", "partial"):
+            continue
+        community = ((result.get("sentiment") or {}).get("community") or {}).get("data") or {}
+        posts = result.get("blog_posts") or community.get("posts") or []
+        actual = sum(
+            1
+            for p in posts
+            if isinstance(p, dict)
+            and p.get("source") == source
+            and any(str(p.get(k) or "").strip(" …") for k in ("body", "excerpt"))
+        )
+        original = details.get("original_items", details.get("items", actual))
+        if isinstance(original, int) and actual < original:
+            details.update(
+                status="partial" if actual else "dropped", items=actual, original_items=original
+            )
+            gap = "some blog evidence omitted from delivered context"
+            details["data_gaps"] = list(dict.fromkeys([*(details.get("data_gaps") or []), gap]))
+    return result
 
 
 def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
@@ -216,14 +302,21 @@ def shrink(obj: dict, limit: int, *, drop_evidence: bool = False) -> dict:
     }
     for chars in (None, 300, 140, 64, 16, 1):
         for keep in (120, 60, 30, 10, 3, 1):
-            compact = {**_compact(obj, keep, chars), **metadata}
+            compact = _delivery_coverage({**_compact(obj, keep, chars), **metadata})
             if _size(compact) <= limit:
                 return compact
+    # Only after text and list reduction may pathological mappings lose keys.
+    for mapping_limit in (120, 30, 3, 1):
+        compact = _delivery_coverage(
+            {**_compact(obj, 1, 1, mapping_limit=mapping_limit), **metadata}
+        )
+        if _size(compact) <= limit:
+            return compact
     # Pathological objects can contain arbitrarily many quality keys at every level.
     # Preserve a small top-level quality summary before the final tiny-budget fallback.
     quality = {k: v for k, v in obj.items() if k in _QUALITY_KEYS}
     for chars in (64, 16, 1):
-        compact = {**_compact(quality, 1, chars), **metadata}
+        compact = _delivery_coverage({**_compact(quality, 1, chars), **metadata})
         if _size(compact) <= limit:
             return compact
     for compact in ({"truncation": {"truncated": True}}, {}):
@@ -265,7 +358,7 @@ def compact_context(inputs: dict) -> dict:
     ]
     if blogs:
         data["blog_posts"] = blogs
-    return shrink(data, 8000)
+    return shrink(_delivery_coverage(data), 8000)
 
 
 def evidence_stats(reports: list[dict]) -> dict:
