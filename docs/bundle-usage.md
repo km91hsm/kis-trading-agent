@@ -1,6 +1,6 @@
 # 설치 안내 — macOS · Windows
 
-Python·uv 없이 쓰는 설치판입니다. [GitHub Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서
+Python·uv 없이 쓰는 설치판입니다. 제품 개요와 사용법은 [사용자 설명서](user-guide.md)에 있습니다. [GitHub Releases](https://github.com/km91hsm/kis-trading-agent/releases) 에서
 운영체제에 맞는 파일 하나를 받습니다.
 
 | 운영체제 | 파일 |
