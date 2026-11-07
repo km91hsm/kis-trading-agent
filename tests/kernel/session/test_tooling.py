@@ -441,9 +441,7 @@ def test_compact_context_skips_one_oversized_blog_without_losing_other_posts():
         assert _size(out) <= 8000
 
 
-def test_compact_context_keeps_macro_and_rankings_after_excluding_oversized_blog():
-    from trader.kernel.session.tooling import compact_context
-
+def _dense_market_context(posts):
     macro = {
         key: {"data": {"value": i + 10, "date": "2026-11-06"}, "source": "FRED",
               "source_asof": "2026-11-06", "received_at": "2026-11-07T01:00:00Z"}
@@ -458,16 +456,23 @@ def test_compact_context_keeps_macro_and_rankings_after_excluding_oversized_blog
         "status": "partial", "basis": "unknown", "stale": False,
         "data_gaps": ["원천 누적 범위와 거래대금 단위 미확인; 합성 시험 자료"] * 3,
     } for i in range(10)]
-    inputs = {
+    return {
         "macro": macro,
         "market_activity": {"source": "KIS", "status": "partial", "rankings": {
             key: rows for key in ("turnover", "gain", "loss")}},
         "source_coverage": {
             "macro": {key: {"status": "present"} for key in macro},
-            "naver_blog/ranto28": {"status": "present", "items": 1, "data_gaps": []}},
-        "blog_posts": [{"url": "https://example.test/" + "x" * 9000,
-                        "source": "naver_blog/ranto28", "body": "합성 발췌"}],
+            "naver_blog/ranto28": {"status": "present", "items": len(posts), "data_gaps": []}},
+        "blog_posts": posts,
     }
+
+
+def test_compact_context_keeps_macro_and_rankings_after_excluding_oversized_blog():
+    from trader.kernel.session.tooling import compact_context
+
+    inputs = _dense_market_context([{"url": "https://example.test/" + "x" * 9000,
+                                    "source": "naver_blog/ranto28", "body": "합성 발췌"}])
+    macro = inputs["macro"]
     out = compact_context(inputs)
     assert set(out["macro"]) == set(macro)
     assert all(out["macro"][key]["data"]["value"] == macro[key]["data"]["value"] for key in macro)
@@ -478,4 +483,23 @@ def test_compact_context_keeps_macro_and_rankings_after_excluding_oversized_blog
     assert not out.get("blog_posts")
     assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "dropped"
     assert inputs["blog_posts"][0]["url"] == "https://example.test/" + "x" * 9000
+    assert _size(out) <= 8000
+
+
+def test_compact_context_preserves_five_blogs_when_rank_lists_need_further_reduction():
+    from trader.kernel.session.tooling import compact_context
+
+    inputs = _dense_market_context([
+        {"source": "naver_blog/ranto28", "url": f"https://example.test/{i}",
+         "body": "합성 근거 " * 100, "posted_at": "2026-11-06T01:00:00Z",
+         "received_at": "2026-11-07T01:00:00Z"}
+        for i in range(5)
+    ])
+    out = compact_context(inputs)
+    assert len(out["blog_posts"]) == 5
+    assert [p["url"] for p in out["blog_posts"]] == [p["url"] for p in inputs["blog_posts"]]
+    assert all(p["body"].strip(" …") for p in out["blog_posts"])
+    assert out["macro"] == inputs["macro"]
+    assert all(out["market_activity"]["rankings"][k] for k in ("turnover", "gain", "loss"))
+    assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
     assert _size(out) <= 8000

@@ -475,17 +475,22 @@ def compact_context(inputs: dict) -> dict:
             candidate = _delivery_coverage(candidate)
             if _size(candidate) <= 8000:
                 return candidate
-        # 한 글의 과도한 식별자가 다른 정상 글까지 밀어내지 않게 한다.
-        # 같은 크기라면 뒤의 글부터 제외해 기존 최신순을 유지한다.
-        while candidate["blog_posts"]:
+        # 글을 버리기 전에 다른 긴 목록을 줄여 다섯 발췌의 공간을 확보한다.
+        while True:
+            for keep in (5, 3, 1):
+                reduced = _compact(candidate, keep, None)
+                reduced["blog_posts"] = candidate["blog_posts"]
+                reduced = _delivery_coverage(reduced)
+                if _size(reduced) <= 8000:
+                    return reduced
+            if not candidate["blog_posts"]:
+                break
+            # 그래도 안 들어가면 큰 식별자부터 제외한다. 동률이면 뒤의 글을 뺀다.
             largest = max(
                 range(len(candidate["blog_posts"])),
                 key=lambda i: (_size(candidate["blog_posts"][i]), i),
             )
             candidate["blog_posts"].pop(largest)
-            candidate = _delivery_coverage(candidate)
-            if _size(candidate) <= 8000:
-                return candidate
         # 일반 축약으로 넘어가도 이미 제외한 큰 식별자를 다시 넣지 않는다.
         data["blog_posts"] = candidate["blog_posts"]
     result = shrink(_delivery_coverage(data), 8000)
