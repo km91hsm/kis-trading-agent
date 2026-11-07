@@ -1,0 +1,9 @@
+.provider-usage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+.provider-usage-chips .usage-chips { flex-wrap: wrap; align-items: center; }
+.usage-provider { font-size: var(--text-xs); color: var(--fg-muted); }

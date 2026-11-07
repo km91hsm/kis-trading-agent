@@ -80,12 +80,14 @@ export function IndexChips() {
           <span key={key} className="index-chip" data-index-chip={key} data-dir={c.dir} data-stale={val.stale ? "" : undefined}>
             <span className="index-chip-label">{key}</span> <span className="num">{fmtIndex(val.price)}</span>
             {c.text ? <span className="index-chip-change num">{c.text}</span> : null}
+            {val.stale ? <span className="index-stale">지연</span> : null}
           </span>
         );
       })}
       {rate ? (
-        <span className="index-chip" data-index-chip={rate.pair} data-dir="flat" title={`${rate.as_of} · ${rate.source}`}>
+        <span className="index-chip" data-index-chip={rate.pair} data-dir="flat" data-stale={rate.stale ? "" : undefined} title={`${rate.as_of} · ${rate.source}`}>
           <span className="index-chip-label">USD/KRW</span> <span className="num">{fmtRate(rate.rate)}</span>
+          {rate.stale ? <span className="index-stale">지연</span> : null}
         </span>
       ) : null}
     </div>

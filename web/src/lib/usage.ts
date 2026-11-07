@@ -41,6 +41,43 @@ export type UsageResp = {
   note: string;
 };
 
+export type CodexLimits = {
+  status: "ready" | "stale" | "unavailable";
+  reason: string | null;
+  observed_at: string | null;
+  age_s: number | null;
+  five_hour: LimitWindow;
+  seven_day: LimitWindow;
+};
+
+export type CodexUsageResp = {
+  enabled: boolean;
+  rate_limits: CodexLimits;
+  usage: { calls: number; daily_call_cap: number; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+};
+
+export function codexLimitReason(reason: string | null | undefined): string {
+  const reasons: Record<string, string> = {
+    cli_missing: "Codex CLI가 설치되지 않았습니다",
+    authentication_required: "Codex CLI의 ChatGPT 로그인을 확인하세요",
+    timeout: "구독 한도 조회 시간이 초과되었습니다",
+    not_provided: "계정에서 5시간·7일 구독 한도를 제공하지 않았습니다",
+    invalid_response: "구독 한도 응답을 확인할 수 없습니다",
+    cli_error: "Codex CLI에 연결하지 못했습니다",
+    rpc_error: "구독 한도 조회에 실패했습니다",
+    connection_error: "사용량 서버에 연결하지 못했습니다",
+  };
+  return reasons[reason ?? ""] ?? "구독 한도를 확인할 수 없습니다";
+}
+
+export function codexUsageChip(window: LimitWindow, limits: CodexLimits | undefined, now: Date) {
+  if (!window || window.used_pct === null) {
+    return { text: limits?.status === "ready" ? "미제공" : "확인 불가", level: "none" as const };
+  }
+  const chip = usageChip(window, now);
+  return limits?.status === "stale" ? { ...chip, text: `${chip.text} · 이전 관측` } : chip;
+}
+
 export type UsageLevel = "ok" | "warn" | "fail";
 
 /** 70% 미만 ok, 90% 미만 warn, 그 밖 fail. */

@@ -1,4 +1,4 @@
-// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests 최대 200, 30행씩 ?rpage=N;
+// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests limit=200, 진행 중 전체 포함; 30행씩 ?rpage=N).
 // 상태 칩·인자 요약, 대기 중 행만 「취소」 → Confirm → DELETE /jobs/{id})(RunJobButton — trading 은 kind 값, realAccounts 는 GET /accounts 의 실전 계좌).
 // 일정 표는 상태 페이지의 데몬 절(같은 42행)에만 둔다 — 「데몬 ›」 링크.
 import { useMemo, useState } from "react";
@@ -13,28 +13,83 @@ import { fmtWhen } from "../../lib/format";
 import { termLabel } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
 import { pagePathOf } from "../../lib/nav";
-import { PAGE_SIZE, usePaged } from "../../lib/usePaged";
+import { PAGE_SIZE, usePaged, usePageReset } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
-import { jobRows, requestRows, type JobsResp, type KindRow, type RequestRow, type RequestsResp } from "./system.ts";
+import { jobRows, requestRows, type JobRequest, type JobsResp, type KindRow, type RequestRow, type RequestsResp } from "./system.ts";
+import "./JobQueue.css";
 
 const REQ_PARAMS = { limit: "200" };
 type AccountLite = { id: string; env: string };
 
-/** 레인별 묶음(등장 순서 유지). */
+const LANE_ORDER = ["fast", "reeval", "slow", "info"];
+type RequestSort = "active" | "recent";
+
+/** 실행 버튼은 고정 레인 순서, 같은 레인 안에서는 이름순. 실제 큐 우선순위와 무관하다. */
 function byLane(kinds: KindRow[]): [string, KindRow[]][] {
   const out = new Map<string, KindRow[]>();
-  for (const k of kinds) out.set(k.lane, [...(out.get(k.lane) ?? []), k]);
-  return Array.from(out.entries());
+  const sorted = [...kinds].sort((a, b) => a.label.localeCompare(b.label, "ko") || a.kind.localeCompare(b.kind));
+  for (const k of sorted) out.set(k.lane, [...(out.get(k.lane) ?? []), k]);
+  const rank = (lane: string) => {
+    const index = LANE_ORDER.indexOf(lane);
+    return index < 0 ? LANE_ORDER.length : index;
+  };
+  return Array.from(out.entries()).sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+function timestamp(value: string | null): number {
+  const time = value ? Date.parse(value) : NaN;
+  return Number.isFinite(time) ? time : 0;
+}
+
+/** 표시 순서만 바꾼다. 대기는 큐 저장소와 같은 priority DESC, id ASC. */
+function sortedRequests(requests: JobRequest[], sort: RequestSort, status: string): JobRequest[] {
+  const rank = (request: JobRequest) => request.status === "running" ? 0 : request.status === "queued" ? 1 : 2;
+  return requests.filter((request) => !status || request.status === status).sort((a, b) => {
+    if (sort === "recent") return timestamp(b.requested_at) - timestamp(a.requested_at) || b.id - a.id;
+    const group = rank(a) - rank(b);
+    if (group) return group;
+    if (rank(a) < 2) return (b.priority ?? 0) - (a.priority ?? 0) || a.id - b.id;
+    return (timestamp(b.finished_at) || timestamp(b.requested_at)) - (timestamp(a.finished_at) || timestamp(a.requested_at)) || b.id - a.id;
+  });
 }
 
 /** 요청 기록 30행씩 ?rpage=N(같은 페이지의 실행 기록 ?page 와 따로) — body() 콜백 안에서는 훅을 못 쓰므로 부품으로. */
-function PagedRequests({ rows, columns }: { rows: RequestRow[]; columns: Column<RequestRow>[] }) {
+function PagedRequests({ requests, columns }: { requests: JobRequest[]; columns: Column<RequestRow>[] }) {
+  const [sort, setSort] = useState<RequestSort>("active");
+  const [status, setStatus] = useState("");
+  const rows = useMemo(() => requestRows(sortedRequests(requests, sort, status)), [requests, sort, status]);
   const paged = usePaged(rows, PAGE_SIZE, "rpage");
+  const resetPage = usePageReset("rpage");
   return (
-    <>
-      <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty="최근 요청 없음" />
+    <div className="job-requests" data-pagination-region tabIndex={-1} role="region" aria-label="요청 기록">
+      <div className="perf-filters job-request-filters">
+        <label>
+          정렬
+          <select aria-label="요청 정렬" value={sort} onChange={(event) => { setSort(event.target.value as RequestSort); resetPage(); }}>
+            <option value="active">진행 우선</option>
+            <option value="recent">최신 요청순</option>
+          </select>
+        </label>
+        <label>
+          상태
+          <select aria-label="요청 상태" value={status} onChange={(event) => { setStatus(event.target.value); resetPage(); }}>
+            <option value="">전체</option>
+            <option value="running">실행 중</option>
+            <option value="queued">대기</option>
+            <option value="ok">완료</option>
+            <option value="error">오류</option>
+            <option value="skipped">건너뜀</option>
+          </select>
+        </label>
+        <span className="data-muted" aria-live="polite">{rows.length} / {requests.length}건</span>
+      </div>
+      <p className="data-muted job-request-guide">
+        {sort === "active" ? "실행 중 → 대기(우선순위·접수 순) → 종료(종료 시각 최신순)" : "요청 시각이 최신인 순서"}
+        <br />화면 정렬은 실제 실행 순서를 변경하지 않습니다. 실제 실행은 작업 종류와 데몬 상태에 따라 달라집니다.
+      </p>
+      <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty={status ? "선택한 상태의 요청 없음" : "최근 요청 없음"} />
       <Pager {...paged} />
-    </>
+    </div>
   );
 }
 
@@ -85,7 +140,7 @@ export function JobQueue() {
   );
 
   return (
-    <>
+    <div className="job-queue">
       <h3 className="perf-sub">수동 실행</h3>
       {body(jobs, "잡 목록", (j) => {
         const rows = jobRows(j);
@@ -94,13 +149,13 @@ export function JobQueue() {
           <div className="job-grid">
             {byLane(rows.kinds).map(([lane, kinds]) => (
               <div key={lane} className="job-lane" data-lane={lane}>
-                <h4>{termLabel(`lane.${lane}`)}</h4>
+                <h4>{termLabel(`lane.${lane}`)} <span className="num">{kinds.length}</span></h4>
                 <div className="job-lane-buttons">
                   {kinds.map((k) =>
                     settled ? (
-                      <span key={k.kind} title={k.kind}>
+                      <div key={k.kind} title={k.kind}>
                         <RunJobButton kind={k.kind} label={k.label} trading={k.trading} realAccounts={realAccounts} onDone={reloadRequests} />
-                      </span>
+                      </div>
                     ) : (
                       <span key={k.kind}>…</span>
                     ),
@@ -114,10 +169,11 @@ export function JobQueue() {
       <h3 className="perf-sub">요청 기록</h3>
       {body(requests, "잡 요청", (r) => (
         <>
-          <p className="data-muted">
+          <p className="data-muted job-request-summary">
             {r.alive ? "데몬 동작 중" : "데몬 꺼짐"} · 진행 중 {r.active}
+            <br />최근 요청 200건 기준으로 조회하며, 실행 중·대기 요청은 모두 포함합니다.
           </p>
-          <PagedRequests rows={requestRows(r.requests)} columns={reqColumns} />
+          <PagedRequests requests={r.requests} columns={reqColumns} />
           {error ? (
             <p className="data-error" role="alert">
               {error}
@@ -135,6 +191,6 @@ export function JobQueue() {
       <p className="data-muted">
         정기 일정과 다음 실행 시각은 <Link to={`${pagePathOf("system", "daemon")}#daemon`}>데몬 ›</Link> 절에.
       </p>
-    </>
+    </div>
   );
 }

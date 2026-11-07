@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Icon } from "../../components/Icon";
-import { onAuthError } from "../../lib/api";
+import { onAuthError, onTokenChange, tokenStore } from "../../lib/api";
 import { Nav } from "./Nav";
 import { StatusBar } from "./StatusBar";
 import "../../styles/shell.css";
@@ -21,6 +21,9 @@ function useHashScroll(): void {
 export function Shell() {
   const [authNotice, setAuthNotice] = useState(false);
   useEffect(() => onAuthError(() => setAuthNotice(true)), []);
+  useEffect(() => onTokenChange(() => {
+    if (tokenStore.get()) setAuthNotice(false);
+  }), []);
   useHashScroll();
 
   return (

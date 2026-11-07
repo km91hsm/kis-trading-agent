@@ -188,6 +188,22 @@ def usage_ensure_fresh(request: Request) -> dict:
     return {"queued": True, "id": rid}
 
 
+@router.get("/codex-usage")
+def codex_usage_view(request: Request) -> dict:
+    """Codex 구독 한도 읽기와 오늘 프로그램 기록. 토론 참여 설정과 무관하게 조회한다."""
+    from trader.kernel.session import codex_usage, research_policy
+
+    deps = _deps(request)
+    now = deps.now()
+    with closing(deps.conn_factory()) as conn:
+        status = research_policy.status(conn, deps.settings, now=now)
+    return {
+        "enabled": status["enabled"],
+        "usage": status["usage"],
+        "rate_limits": codex_usage.read_limits(deps.settings.llm.codex_debate.bin, now=now),
+    }
+
+
 @router.post(
     "/bootstrap-token",
     dependencies=[Depends(require_direct_local), Depends(require_same_origin)],

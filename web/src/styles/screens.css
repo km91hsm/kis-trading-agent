@@ -271,6 +271,9 @@
 .perf-filters select,
 .perf-filters input,
 .perf-filters .btn { min-height: var(--touch); }
+.perf-filters label,
+.perf-filters select,
+.perf-filters input { min-width: 0; max-width: 100%; }
 
 /* 단위 미확인 거래대금의 원천값과 안내는 숫자 셀의 nowrap을 상속하지 않는다. */
 .market-activity .activity-turnover,

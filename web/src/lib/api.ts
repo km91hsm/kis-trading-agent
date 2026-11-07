@@ -5,6 +5,13 @@ import { noteServerTime } from "./clock";
 
 const BASE = "/api";
 const TOKEN_KEY = "trader.webToken";
+const tokenListeners = new Set<() => void>();
+
+/** 저장 완료 신호만 전달한다. 토큰 값은 이벤트에 싣지 않는다. */
+export function onTokenChange(listener: () => void): () => void {
+  tokenListeners.add(listener);
+  return () => { tokenListeners.delete(listener); };
+}
 
 export class ApiError extends Error {
   status: number;
@@ -33,6 +40,9 @@ export const tokenStore = {
     try {
       if (token) localStorage.setItem(TOKEN_KEY, token);
       else localStorage.removeItem(TOKEN_KEY);
+      for (const listener of tokenListeners) {
+        try { listener(); } catch { /* 화면 갱신 실패가 저장 결과를 바꾸지 않는다 */ }
+      }
     } catch {
       /* 저장 불가 환경이면 저장 없이 진행 */
     }

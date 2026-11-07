@@ -5,6 +5,7 @@ import App from "../../app/App";
 import { Icon, ICON_NAMES } from "../../components/Icon";
 import { NAV } from "../../generated/nav";
 import { clearResourceCache } from "../../lib/cache";
+import { tokenStore } from "../../lib/api";
 import { noteServerTime } from "../../lib/clock";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
@@ -355,6 +356,21 @@ test("좁은 폭(<768)에서는 상단 띠가 한 줄: 사용률 칩은 details 
   }
 });
 
+test("오래된 지수와 환율은 읽을 수 있는 값과 지연 글자로 구분한다", async () => {
+  fake = installFakeFetch({ ...ok,
+    "GET /api/quotes/indices": { session: "open", at: "2026-11-07T00:00:00Z", next_poll_ms: 60000, indices: {
+      KOSPI: { price: "2500.00", change_pct: 1.2, at: "2026-11-06T00:00:00Z", source: "fixture", stale: true },
+      KOSDAQ: { price: "800.00", change_pct: -0.2, at: "2026-11-07T00:00:00Z", source: "fixture", stale: false },
+    } },
+    "GET /api/quotes/fx": { pair: "USDKRW", rate: "1400", as_of: "2026-11-06", source: "fixture", stale: true },
+  });
+  const { container } = app(); await flush();
+  expect(container.querySelector('[data-index-chip="KOSPI"]')?.textContent).toContain("지연");
+  expect(container.querySelector('[data-index-chip="KOSPI"]')?.textContent).toContain("2,500.00");
+  expect(container.querySelector('[data-index-chip="KOSDAQ"]')?.textContent).not.toContain("지연");
+  expect(container.querySelector('[data-index-chip="USDKRW"]')?.textContent).toContain("지연");
+});
+
 test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", async () => {
   fake = installFakeFetch({
     "GET /api/system/health": () => new Response(JSON.stringify({ detail: "토큰" }), { status: 401 }),
@@ -368,6 +384,19 @@ test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", 
   expect(notice?.querySelector("a")?.textContent).toBe("시스템 › 관리 › 쓰기 토큰");
   act(() => (notice!.querySelector("button") as HTMLButtonElement).click());
   expect(container.querySelector("[data-auth-notice]")).toBeNull();
+});
+
+test("토큰을 저장하면 이전 토큰 필요 안내가 남아 중복되지 않는다", async () => {
+  fake = installFakeFetch({
+    "GET /api/system/health": () => new Response(JSON.stringify({ detail: "토큰" }), { status: 401 }),
+    "GET /api/system/usage": fixtureUsage(),
+  });
+  const { container } = app();
+  await flush();
+  expect(container.querySelector("[data-auth-notice]")).not.toBeNull();
+  act(() => tokenStore.set("fixture-replacement"));
+  expect(container.querySelector("[data-auth-notice]")).toBeNull();
+  expect(container.textContent).not.toContain("fixture-replacement");
 });
 
 test("모르는 경로는 / 로 돌려보내고, 깊은 경로는 그 화면 메뉴를 현재로 표시한다", async () => {
