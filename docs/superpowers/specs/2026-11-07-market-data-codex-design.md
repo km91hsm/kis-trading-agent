@@ -33,11 +33,15 @@
 - SaveTicker reader와 scout에서 freshness/부분수집 정보를 버리지 않는다. '자료 없음'을 '순위 미진입'으로 단정하지 않는다.
 - `shrink`는 최신순 뉴스의 앞부분과 오름차순 시계열의 뒷부분을 보존하며 UTF-8 24,000 bytes 상한을 실제로 지킨다. 축약 기록과 핵심 품질/출처 정보를 남긴다.
 - 거래대금 관련 전달 경로는 기존 SaveTicker regular 값을 KIS 성공처럼 덮어쓰지 않고 `market_activity`로 분리한다. 수집 실패·미준비인 값은 모델이 확인할 data gap이다.
+- 사용자 추가 요청: S&P500·나스닥종합·WTI·달러지수·미국채10년물과 `ranto28` 블로그의 실제 전달을 항목별 `source_coverage`로 기록한다. 기존 FRED `SP500`, `NASDAQCOM`, `DCOILWTICO`, `DTWEXBGS`, `DGS10`을 구분하며 Investing.com 직접 수집으로 표시하지 않는다. WTI 현물과 선물, 연준 광의달러와 ICE DXY는 동등한 지표로 표시하지 않는다. 블로그 RSS의 발행·수신시각과 발췌를 보존한다.
+- 정확한 지표와 안정적인 수집원을 우선한다는 추천에 따라 S&P500·나스닥종합은 공식 KIS `N/SPX`, `N/COMP` 일간 관측을 우선하고 실패 시 FRED로 대체한다. `output2`의 동일 행 값과 일자를 짝지으며 `output1` 현재값에 과거 일자를 붙이지 않는다. asof의 미국 시장 날짜 전일까지 사용하고 일간 참고임을 밝힌다. `macro.kis_indices`로 끌 수 있다. DXY·WTI 선물의 자동 원천과 KIS 국채 단위·선물 계약 롤은 검증되지 않았으므로 추가하지 않으며 기존 자료의 상품 차이와 지연을 명시한다.
+- 공개 `InputsPort.research_context`를 통해 FO·시장·scout에도 매크로/블로그/거래대금/coverage를 전달한다. 블로그 언어가 한국어라는 이유로 US 분석에서 제외하지 않는다. FO의 Section 뉴스 구조를 풀어서 compact context에 포함한다.
 
 ## Codex 토론 계약
 
 - `llm.codex_debate`: enabled(default false), model(optional/default CLI), timeout_s, daily_call_cap, bin(optional). 웹 control override로 ON/OFF 저장. 변경은 다음 새 연구 세션부터 적용한다.
 - ON의 spot/시장/FO 새 연구는 bull=Claude, bear=Codex, 반박 횟수 `max(1, debate_rounds)`. 라운드0은 독립 의견, 이후 각자 상대 이전 턴을 보고 반박한다. 합의에 의한 토론 생략은 ON에서 금지한다. OFF 기존 경로·횟수는 유지한다.
+- 양쪽이 각각 독립 쟁점과 근거를 먼저 제시한다. 쟁점 ID를 이용해 상대 쟁점에 대한 반론 누락을 검증하며 이후 라운드에 재답변한다. 달러·유가·금리 상승을 일방적 악재로 고정하지 않고 성장·인플레·공급 충격 및 업종별 효과를 검토한다.
 - Codex는 JSON 입력과 DebateTurn schema만 받는다. 부모 Python이 검증·저장하며 모델이 주문/브로커/계좌/프로그램 경로를 받지 않는다. scope/market/asof/ticker/currency를 명시한다.
 - CLI는 임시 cwd, 최소 env, `--ignore-user-config --ephemeral --sandbox read-only --output-schema --json --output-last-message`를 사용한다. shell, MCP, apps, browser/computer, multi-agent, hooks, web 등 토론에 불필요한 도구를 child에서 차단한다. 권한 우회 플래그와 `--ignore-rules`는 사용하지 않는다. 인증정보를 복사하거나 출력하지 않는다.
 - 세션 정책을 시작 시 고정한다. provider/model/입력·프롬프트·스키마 해시가 다른 기존 턴을 Codex 참여로 재사용하지 않는다. 일반 checkpoint_write로 Codex 증명을 위조할 수 없다.

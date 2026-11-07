@@ -1,0 +1,72 @@
+# 시장 자료와 Claude·Codex 토론
+
+## 화면과 설정
+
+`시스템 → 관리 → 설정 → Codex 토론 참여`에서 켜거나 끕니다. 기본값은 꺼짐이며 다음 **새 연구**부터 적용됩니다. 켜면 Claude가 강세 측, Codex가 약세 측을 담당합니다. 각자 독립 쟁점을 제시한 뒤 상대 쟁점에 반론합니다. 쟁점별 근거와 반론은 결정 상세의 토론 턴에서 펼쳐 볼 수 있습니다.
+
+Codex는 설치된 CLI의 ChatGPT 로그인을 사용합니다. 화면의 `설치됨`은 로그인 성공을 보증하지 않으며 실행 시 확인합니다. Codex 미설치·인증 실패·상한 소진·출력 오류·시간초과와 필수 반론 누락은 새 결정의 완료를 막습니다. 기존 결정이나 진행 중 연구를 새 설정으로 바꾸지 않습니다. 미완료 연구의 정책이 충돌하면 기존 자료를 보존하고 재분석 필요 오류를 표시합니다.
+
+설정 파일의 기본값은 다음과 같습니다. 화면에서 저장한 ON/OFF가 우선합니다.
+
+```yaml
+llm:
+  codex_debate:
+    enabled: false
+    model: null
+    timeout_s: 180
+    daily_call_cap: 80
+    bin: null
+```
+
+토큰 수·소요·오류는 Codex 전용 기록입니다. CLI가 제공하지 않은 비용과 구독 사용률을 0으로 표시하거나 Claude 사용량과 합산하지 않습니다. Codex 자식 프로세스는 계좌·주문 자료를 제외한 요약 입력으로 토론하고, 주문 집행은 기존 파이썬 경로가 담당합니다.
+
+## 시세 수집과 거래대금
+
+`데이터 → 시세·차트`에서 시장을 선택해 KIS 거래대금·상승률·하락률 순위를 볼 수 있습니다. 데몬은 기본 30초 간격으로 정규장 관측창에 자료를 저장하며, 화면과 LLM은 저장된 자료를 읽습니다. 브라우저 창이나 SaveTicker 로그인 세션을 시세 수집에 사용하지 않습니다. Mac 화면 잠금과 별개인 컴퓨터 잠자기는 데몬 실행을 멈출 수 있습니다.
+
+순위는 거래소별 API의 제한된 페이지·종목 범위입니다. 미국 NAS/NYS/AMS별 원천 순위를 보존하며 전체 시장 순위라고 단정하지 않습니다. 30초는 조회 주기이며 원천의 체결 지연이나 시간외 포함 범위는 확인되지 않았습니다. `source_asof=null`, `basis=unknown`, `coverage.complete=false`로 이 제약을 표시합니다. 수신 120초 초과 자료는 오래된 관측으로 표시합니다.
+
+5분 거래대금 증감률은 `(최근 5분 거래대금 / 직전 5분 거래대금) - 1`입니다. 실제 누적 거래대금의 세 관측 경계를 사용하며 각 경계 허용 오차는 60초입니다. 같은 종목·거래소·통화·운영일·관측창만 비교합니다. 이력 부족, 누적액 초기화, 음수, 분모 0, 오래된 관측은 계산 불가입니다. 원천 누적액의 세션 범위가 확정된 실시간 지표는 아닙니다.
+
+```yaml
+quotes:
+  activity_enabled: true
+  activity_max_pages: 2
+  activity_limit: 100
+```
+
+`schedule.yaml`의 `market_activity.interval_s` 기본값은 30입니다. 수집 자료는 migration16의 append-only 원장에 남습니다. 대량 장기 운영에서는 원장 크기를 관찰해야 합니다.
+
+## LLM이 받는 자료
+
+종목·시장·발굴·파생 분석에는 역할별 뉴스와 공통 매크로·블로그·KIS `market_activity`가 전달됩니다. 경제 일정과 SaveTicker 자료는 각 분석 입력에 수집된 범위로 포함됩니다. 역할별 자료는 요약되며 모든 원문이 모든 모델에 제공되는 것은 아닙니다. 전달 자료는 최신 뉴스 우선으로 최대 24,000 UTF-8 bytes, 공통 토론 context는 최대 8,000 bytes로 축약됩니다. 생략·오류·출처·시각은 `truncation`, `data_gaps`, `source_coverage`에서 확인합니다.
+
+| 요청 지표 | 현재 원천 | 구분할 점 |
+|---|---|---|
+| S&P500 | KIS `SPX` → 실패 시 FRED `SP500` | 일간 관측, Investing.com 직접 수집 아님 |
+| 나스닥종합 | KIS `COMP` → 실패 시 FRED `NASDAQCOM` | 나스닥100(`NDX`)과 구분 |
+| WTI | FRED `DCOILWTICO` | Cushing 현물, WTI 선물과 구분 |
+| 달러지수 | FRED `DTWEXBGS` | 연준 광의 달러지수, ICE DXY와 구성·수치가 다름 |
+| 미국채 10년물 | FRED `DGS10` | 일간 constant maturity yield, 특정 채권의 장중 수익률과 구분 |
+
+수집 시각과 지표 관측일은 다릅니다. FRED는 지연될 수 있으며, 월간 지표를 하루 지났다는 이유만으로 오염된 자료로 처리하지 않습니다. 발표 주기·시각을 알 수 없으면 신선도는 미확인입니다. 모델은 달러·유가·금리 상승의 원인과 업종별 상반된 효과를 검토해야 합니다.
+
+KIS 지수는 `sources.yaml`의 `macro.kis_indices`(기본 `true`)로 제어합니다. 실제 같은 일봉 행의 값과 영업일만 사용하며, 과거 시점 분석에 뒤늦은 당일 최종값이 유입되지 않도록 기준시각의 미국 시장 날짜 전일까지 선택합니다. 따라서 당일 장마감 직후에도 직전 일자의 값이 선택될 수 있습니다. KIS 실패 후 FRED를 사용한 경우 원천 변경과 실패 원인을 기록합니다.
+
+정확한 DXY·WTI 선물의 안정적인 자동 수집원은 이번에 확보하지 못했습니다. Investing.com 일반 HTTP 요청은 403이었고 공개 API도 제공하지 않습니다. 시세 권한과 계약·시각을 검증하지 않은 선물 원천을 붙이지 않았습니다. 구체적 후보와 확인 범위는 [공식 수집원 조사](research/2026-11-07-exact-macro-sources.md)에 남겼습니다.
+
+네이버 블로그는 공개 RSS 발췌를 사용하며 사실 확인된 공식 지표와 구분합니다. 개인 `config/sources.yaml`에서 다음처럼 등록할 수 있습니다. 기존 채널이 있으면 유지하며 목록에 추가합니다.
+
+```yaml
+channels:
+  naver_blog: [ranto28]
+  naver_blog_posts: 5
+```
+
+2026-11-07 점검 당시 운영 설정은 빈 목록이었습니다. 공개 RSS 및 실제 파서에서 최근 5건 수집은 확인했지만, 이 코드 변경만으로 운영 설정이 자동 변경되지는 않습니다. `source_coverage`의 configured/present/missing과 발행·수신시각으로 실제 포함 여부를 구분합니다.
+
+## 확인 범위
+
+합성 KIS 응답, 가짜 Codex CLI, 임시 원장으로 검증합니다. 실제 KIS 순위의 단위·세션 범위·지연과 실제 Claude·Codex 토론 품질은 별도 운영 검증이 필요합니다. 이 작업은 실주문이나 실행 중 서비스의 자동 재시작을 수행하지 않습니다.
+
+공식 원천: [KIS 순위 샘플](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/overseas_stock), [FRED 광의 달러지수](https://fred.stlouisfed.org/series/DTWEXBGS), [FRED WTI 현물](https://fred.stlouisfed.org/series/DCOILWTICO).

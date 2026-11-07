@@ -3,6 +3,8 @@
 ## 책임
 
 - 화면 시세(tier=service, 조회 전용 — 웹 프로세스는 주문을 내지 않는다): 국내 실시간 허브(`hub.QuoteHub`, KIS 웹소켓 하나), `/quotes*` 웹 자원(`routes.py`), 종목명(`names.py`)·차트(`charts.py`) 웹 자원, 환율 원천·하루 캐시(`fx.py`).
+- 데몬의 `market_activity` 잡은 KIS 거래대금·등락 순위를 기본30초마다 수집한다. migration16의 배치·분할 메타데이터를 원자적으로 append-only 저장하며 성공/실패 조회 인덱스로 과거 JSON 전체 스캔을 피한다. 화면과 다른 기능은 `api.activity_snapshot` / `market_activity` 포트 또는 `GET /quotes/activity?market=KR|US`로 원장만 읽는다.
+- `change_pct`와 `growth.value`는 소수 비율이다(0.025=2.5%). 금액은 Decimal 문자열, 결측은 null. 누적 거래대금 3경계로 최근5분/직전5분을 비교하며 경계오차60초·동일거래소/통화/운영일/관측창을 강제한다. 상세 계산·자료제약은 [운영 안내](../../../../docs/market-data-codex.md)를 참고한다.
 - 시세 클라이언트는 시크릿의 공용 실전 키(`load_secrets().kis_creds(env="real")` → `kernel.broker.factory.build_market`)로 직접 만든다. 공용 실전 키가 없으면 시세 클라이언트·허브 없이 빈 값·스냅샷만 돌려준다. 런타임(시세 클라이언트 + 허브)은 원장 위치(`WebDeps.state`)마다 프로세스에 한 번(`routes.runtime_for`, 테스트는 `routes.install/reset`).
 - quotes 는 accounts 를 import 하지 않는다(accounts 통합 현황이 `quotes.api.fx_rate` 를 쓰므로 순환 방지). 다른 기능은 `ingest.api`(FRED·유니버스)·`scan.api`(관심종목, 검색 순위)만 쓴다. 레인은 import 하지 않고 원장 표(`ticker_names`·`ticker_exchanges`·`decisions`·`orders`·`fills`·`positions_snapshot`)만 읽는다 — 쓰기는 데몬 잡 `names_fill` 의 `ticker_names` 하나(이름 없는 행에만 INSERT).
 

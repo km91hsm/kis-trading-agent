@@ -30,7 +30,7 @@
 
 ---
 
-### Task1: KIS broker + quotes persistent market activity
+### Task 1: KIS broker + quotes persistent market activity
 
 **Files:** broker `market.py/models.py/tr_ids.py` 및 필요한 분리 모듈; quotes `market_activity.py`, `activity_store.py`, `migrations.py`, `ports.py`, `settings.py`, `jobs.py`, `feature.py`, `api.py`, `routes.py`; templates settings/schedule; 해당 tests.
 
@@ -42,7 +42,7 @@
 - [ ] migration16과 제한된30초 collector·저장소·읽기 API/port·설정/템플릿을 구현한다.
 - [ ] 해당 tests와 ruff를 통과시키고 변경/근거를 보고한다.
 
-### Task2: LLM input correctness and market activity wiring
+### Task 2: LLM input correctness and market activity wiring
 
 **Files:** ingest `ports.py/inputs.py`, saveticker `reader.py`, scan `discovery.py`, regime `market_view.py`, kernel/session `tooling.py`, 필요한 analyst prompt; 해당 tests.
 
@@ -53,8 +53,9 @@
 - [ ] 설정주입, 품질/시장표시, 압축수정과 수집/축약 metadata를 구현한다.
 - [ ] quotes market_activity를 종목/시장/scout 입력에 연결하고 자료없음/미래/시장분리를 테스트한다.
 - [ ] 모든 analyst/researcher 전달에 필요한 compact context 계약을 root/Task3와 맞추고 해당 tests를 통과시킨다.
+- [ ] 사용자 추가 요청의 S&P500·나스닥종합·WTI·DXY·10년물 및 ranto28을 개별 source_coverage로 감사한다. FRED/Investing·광의달러/DXY·현물/선물을 구분하고 블로그 발행시각·발췌를 토론에 전달한다.
 
-### Task3: Codex research bridge and participation policy
+### Task 3: Codex research bridge and participation policy
 
 **Files:** kernel `config/__init__.py`, `platform/codex_bin.py`, `session/codex.py`, `session/research_policy.py`, `session/runner.py`, `session/agents.py`, `session/schemas.py`, `session/migrations.py`, `registry/types.py`, 필요 boot migration등록; spot/fo/regime tools/tool_cli/session_kinds/agents; kernel web system routes 및 accounts GETsettings; 해당 tests; templates settings(Codex부분만).
 
@@ -65,8 +66,9 @@
 - [ ] spot/시장/FO ON의독립의견+최소1반박, 합의생략차단, 공급자/입력변경, 위조/누락턴, Claude 정상종료로실패숨기기 방지 테스트를 작성한다.
 - [ ] 전용research CLI와 backend 검증·prompt를 연결한다. 기존결정/주문을 삭제하지 않고 다음새연구 적용을 강제한다.
 - [ ] WRITE인증/영속ONOFF/실패·사용량 및 GETsettings 확장을 구현하고 해당 tests를 통과시킨다.
+- [ ] 양쪽 독립 쟁점 ID와 근거를 기록하고 상대 쟁점별 반론 누락을 검증한다. 달러·유가·금리 상승의 원인/업종 영향을 일방적 악재로 단정하지 않는다.
 
-### Task4: Web settings, market data and provider visibility
+### Task 4: Web settings, market data and provider visibility
 
 **Files:** web `screens/system/SettingsPanel.tsx`, `screens/data/MarketActivity.tsx`, `screens/data/Data.tsx`, `screens/decision/Decision.tsx`, fixtures/tests; 필요한 backend serialized provider 필드.
 
@@ -74,10 +76,18 @@
 - [ ] 기존 컴포넌트/스타일로 기능을 구현한다. 구현용 rawJSON이나계정비밀은 표시하지 않는다.
 - [ ] typecheck, 관련vitest를 통과시킨다.
 
-### Task5: Integration, review and delivery
+### Task 5: Integration, review and delivery
+
+사용자의 추가 지표 요청으로 아래 Task6을 먼저 완료한 뒤 최종 검증한다.
 
 - [ ] Task별 spec/품질 리뷰 후 결함을 수정한다. 통합프롬프트가 실제입력키/시장/출처와 맞는지 확인한다.
 - [ ] 전체 pytest1개, ruff, web typecheck/vitest/build, registry/generatedSSE검사를 수행한다.
 - [ ] 실제주문/생산모델세션 없이 합성CLI·임시데이터 e2e를 확인한다.
 - [ ] README/운영안내에 설정위치, 적용범위, 자료제약, 입력감사결과와 검증근거를 기록한다.
 - [ ] 독립 전체branch리뷰 후 커밋/PR/CI를 완료한다. 실행중서비스 업데이트와주문경로병합은 기존사용자승인범위에따라 별도판단한다.
+
+### Task 6: Exact index source selection
+
+- [ ] 공식 KIS 마스터·API 문서에 따라 N/SPX, N/COMP 일간 지수 어댑터를 TDD한다. 같은 행의 값·일자를 사용하고 미래/당일/비정상값을 거부한다.
+- [ ] `macro.kis_indices=true`와 KIS 우선/FRED 대체를 추가한다. source_coverage·compact context에서 실제 원천, 대체 이유, 일간 관측일을 보존한다.
+- [ ] DXY/WTI 선물 및 국채 실응답의 미확인 범위는 수집 성공으로 표시하지 않는다. 공식 조사와 운영 제한을 문서화하고 대상 테스트·독립 리뷰를 완료한다.
