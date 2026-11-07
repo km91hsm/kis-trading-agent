@@ -36,7 +36,7 @@
 | `uv run trader ml features snapshot\|backfill\|derive` | 피처 스토어 오늘 스냅샷·과거 백필·파생 열 재계산 |
 | `uv run trader jobs list [--limit]\|run <kind> [--param k=v … --priority n]\|kinds` | 잡 큐 조회·요청 등록(데몬 실행 중이어야 `run` 가능)·요청 가능한 kind 목록 |
 | `uv run trader tool …` | 세션 전용 — LLM 이 쓰는 도구 명령(JSON 1줄). 사람이 직접 돌리지 않는다 |
-| `uv run trader saveticker status\|import-capture <파일>\|query\|export\|extension {prepare\|install-host\|uninstall-host\|status}` | 세이브티커 조회·Chrome 확장 준비·Native host 등록(수집은 Chrome 확장만) |
+| `uv run trader saveticker status\|import-capture <파일>\|query\|export\|extension {install\|uninstall\|status}` | 세이브티커 조회·Chrome 확장 설치(고정 `<데이터 루트>/saveticker-extension/` 복사 + 설치된 `trader` 를 Native host 로 등록, 재실행 가능)·해제·상태(수집은 Chrome 확장만) |
 | `uv run trader notify-test` | 텔레그램 시험 메시지 1건 |
 | `uv run trader evaluation reflect\|readiness\|backtest\|paper-review\|calibration build\|rl {train\|models\|report\|promote\|demote}` | 복기·준비도·백테스트·페이퍼 리뷰·보정·RL 사이저 (`reflect` 는 `FAKE_CLAUDE=1` 없이 금지, `rl promote\|demote` 는 사용자 전용) |
 | `uv run trader telegram poll\|loop [--interval]` | 텔레그램 명령 수신 1회 / 반복 (내장 `/run <kind>` 큐 요청·`/daily` 일일 리포트·`/watch add\|remove\|list` 관심종목 포함) |
