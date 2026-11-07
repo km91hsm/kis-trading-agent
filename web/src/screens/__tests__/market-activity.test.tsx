@@ -1,18 +1,25 @@
 import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MarketActivity } from "../data/MarketActivity";
 import { clearResourceCache } from "../../lib/cache";
+import { noteServerTime } from "../../lib/clock";
 import { setEventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | undefined;
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-07T01:00:00Z"));
+  noteServerTime(new Date().toISOString());
   clearResourceCache();
   setEventsClient({ subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} });
 });
-afterEach(() => ff?.restore());
+afterEach(() => {
+  ff?.restore();
+  vi.useRealTimers();
+});
 
 const row = (ticker: string, growth: number | null = null) => ({
   ticker, name: ticker, market: "US", exchange: "NAS", currency: "USD", source_rank: 1,
@@ -59,4 +66,53 @@ test("empty collection is unavailable and refresh is a read-only request", async
   await flush();
   expect(ff.calls).toHaveLength(2);
   expect(ff.calls.every((c) => c.init?.method === "GET")).toBe(true);
+});
+
+test("fresh growth expires after 120 seconds without SSE events while historical amounts and time remain", async () => {
+  ff = installFakeFetch({ "GET /api/quotes/activity": { ...snapshot(), stale: false } });
+  const { container } = render(<MemoryRouter><MarketActivity /></MemoryRouter>);
+  await flush();
+  expect(container.textContent).not.toContain("갱신 지연");
+  expect(container.textContent).toContain("150.0%");
+  await act(async () => vi.advanceTimersByTime(120_000));
+  expect(container.textContent).not.toContain("갱신 지연");
+  expect(container.textContent).toContain("150.0%");
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(container.textContent).toContain("갱신 지연");
+  expect(container.textContent).not.toContain("150.0%");
+  const aapl = Array.from(container.querySelectorAll("tbody tr")).find((r) => r.textContent?.includes("AAPL"));
+  expect(aapl?.textContent).toContain("계산 불가");
+  expect(aapl?.textContent).toContain("2,025.50 USD");
+  expect(container.textContent).toContain("2026-11-07 10:00:00 KST");
+  expect(ff.calls).toHaveLength(1);
+});
+
+test("an older individual row expires even when the snapshot timestamp is still fresh", async () => {
+  vi.setSystemTime(new Date("2026-11-07T01:02:00Z"));
+  const fresh = { ...row("MSFT", 0.5), received_at: "2026-11-07T01:02:00Z" };
+  ff = installFakeFetch({ "GET /api/quotes/activity": {
+    ...snapshot(), received_at: "2026-11-07T01:02:00Z", stale: false,
+    rankings: { turnover: [row("AAPL", 1.5), fresh], gain: [], loss: [] },
+  } });
+  const { container } = render(<MemoryRouter><MarketActivity /></MemoryRouter>);
+  await flush();
+  expect(container.textContent).toContain("150.0%");
+  await act(async () => vi.advanceTimersByTime(1000));
+  const rows = Array.from(container.querySelectorAll("tbody tr"));
+  expect(rows.find((r) => r.textContent?.includes("AAPL"))?.textContent).toContain("계산 불가");
+  expect(rows.find((r) => r.textContent?.includes("MSFT"))?.textContent).toContain("50.0%");
+  expect(container.textContent).toContain("갱신 지연");
+});
+
+test.each([null, "invalid", "2026-11-07T01:00:01Z"])("untrustworthy received_at %s cannot show current growth", async (received_at) => {
+  ff = installFakeFetch({ "GET /api/quotes/activity": {
+    ...snapshot(), received_at, stale: false,
+    rankings: { turnover: [{ ...row("AAPL", 1.5), received_at }], gain: [], loss: [] },
+  } });
+  const { container } = render(<MemoryRouter><MarketActivity /></MemoryRouter>);
+  await flush();
+  expect(container.textContent).toContain("갱신 지연");
+  expect(container.textContent).toContain("계산 불가");
+  expect(container.textContent).not.toContain("150.0%");
+  expect(container.textContent).toContain("2,025.50 USD");
 });
