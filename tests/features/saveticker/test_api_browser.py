@@ -68,6 +68,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
                 f"--user-data-dir={profile}",
                 "--remote-debugging-port=0",
                 "--no-first-run",
+                "--headless=new",  # 실행 중 화면에 창을 띄우지 않는다(확장 지원 headless)
                 "--no-default-browser-check",
                 "--disable-background-networking",
                 "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost",
@@ -226,6 +227,7 @@ chrome.runtime.connectNative=()=>{const p={onMessage:event(),onDisconnect:event(
                     f"--user-data-dir={profile}",
                     "--remote-debugging-port=0",
                     "--no-first-run",
+                    "--headless=new",  # 실행 중 화면에 창을 띄우지 않는다(확장 지원 headless)
                     "--no-default-browser-check",
                     "--disable-background-networking",
                     "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost",
