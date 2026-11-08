@@ -208,7 +208,7 @@ describe("계좌·보유 통합 화면", () => {
   });
 
   test("파생 계좌 state=entries_paused 는 「새 진입 멈춤」 칩", async () => {
-    await mount(routes({ "GET /api/fo/summary": json(fixtureFoSummary({ mode: "auto", paused: true, state: "entries_paused" })) }));
+    await mount(routes({ "GET /api/fo/summary": fixtureFoSummary({ mode: "auto", paused: true, state: "entries_paused" }) }));
     const chips = Array.from(section("fo-positions").querySelectorAll(".chip")).map((c) => c.textContent);
     expect(chips).toContain("새 진입 멈춤");
     expect(chips).not.toContain("기록만");
