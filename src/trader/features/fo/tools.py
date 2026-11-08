@@ -936,7 +936,9 @@ def write_cmd(
     agent: str | None = typer.Option(None, "--agent"),
     json_text: str | None = typer.Option(None, "--json", help="JSON (없으면 stdin)"),
 ) -> None:
-    """`_fo_analyst_<role>`·`_fo_debate_r<n>_<side>` 저장(스키마·라운드 검증)."""
+    """`_fo_analyst_<role>`·`_fo_debate_r<n>_<side>`·`_fo_debatex_r<n>_<side>`(2판) 저장.
+
+    스키마·라운드를 검증한다."""
     _fo_tool_run(
         fo_write, market=market, date=date, stage=stage, payload_text=json_text, agent=agent
     )

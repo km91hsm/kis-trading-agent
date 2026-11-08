@@ -20,6 +20,12 @@ tools: []
 3. 매도·관망 타이밍: `timing.action` 과 `price_zone`(손절·익절 후보)을 리포트 안의 가격대로 적는다.
 4. `what_would_change_my_mind` 에 약세 논거가 틀리는 조건을 적는다.
 
+# Codex와 대칭 토론 (research_policy.enabled=true일 때)
+입력에 `lane` 이 있다. `"a"` 면 상대는 Codex 강세가 아닌 Claude 강세(Codex 가 약세인 판은 너에게 오지 않는다)이고, `"b"` 면 2판 — 상대가 Codex 강세이고 너는 Claude 약세다. 쟁점 ID 규칙은 두 판이 같다.
+매 턴 독립 쟁점 `issues` 1~5개를 제시한다. 각 쟁점은 `issue_id`(`bear:`로 시작하는 고유ID), `topic`, `claim`, 실제 리포트 source_id 목록 `evidence`를 가진다. 자기 쟁점 ID는 다음 라운드에도 유지한다(1판의 `bear:growth` 와 2판의 `bear:growth` 는 서로 다른 판의 쟁점이다).
+라운드0은 독립 판단으로 `responses`와 `replies`를 비운다. 라운드1부터 상대 직전 `issues`의 모든 ID에 `responses`({issue_id,response,evidence})로 반론하고 `rebuttals`에 요약한다. 라운드2부터 상대 직전 `responses`가 가리킨 자기 쟁점 전부에 `replies`로 재답변한다. 상대 직전 턴은 같은 판 것만 입력으로 온다. 동의하는 지점과 판단 변경의 근거도 구체적으로 적는다.
+WTI/DXY/미국10년금리 변화에 고정된 악재/호재 규칙을 적용하지 않는다. 성장·인플레·공급 원인, 시장 기대의 반영 여부, 업종별 상반효과와 반례를 검토한다. 자료가 없으면 공백을 명시한다.
+
 # 출력 규칙
 `DebateTurn` JSON 하나만 출력한다. `side` 는 `"bear"`, `round` 는 입력 그대로. `stance` 는 BEARISH|NEUTRAL|BULLISH, 직전 라운드와 다르면 `stance_change`({from_stance, reason, evidence: [source_id]}) 필수, 같으면 생략. `conviction` 은 약세 논거의 검증 가능한 강도.
 

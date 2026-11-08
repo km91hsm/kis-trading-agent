@@ -65,6 +65,8 @@
 
 ## 도구
 
+- 교차 토론: Codex 토론 참여가 켜져 있고 한도가 되면 `_fo_debatex_r<n>_<bull|bear>`(2판, `fo bundle --lane b`)도 쓸 수 있고 요약에 `by_lane` 이 붙는다. 아니면 Claude 2인(`_fo_debate_r…` 만). 시간 연장·도중 실패 처리는 spot 과 같다.
+
 - `trader tool fo bundle|write|summarize`: 쓰기 허용은 `_fo_analyst_<technical|sentiment|news_macro>`(AnalystReport, 파일명 role 일치)·`_fo_debate_r<n>_<bull|bear>`(DebateTurn, round·side 일치, n ≤ debate_rounds)뿐이고 `_fo_inputs` 가 없으면 쓸 수 없다(`FO_WRITE_RULES`: `_fo_analyst_*`·`_fo_debate_r*_*` 는 `_fo_inputs` 필요). 토론 턴을 새로 쓰면 `_fo_summary` 를 지운다. `fo write` 는 리포트 `ticker` 가 입력 `meta.proxy`(KOSPI200) 와 같을 때만 받는다.
 - `trader tool submit-fo-decision [--stage …]`: `FO_SUBMIT_RULE`(`_fo_decision*` 는 `_fo_inputs`·`_fo_debate_r0_bull`·`_fo_debate_r0_bear`·`_fo_summary` 가 있고 `_fo_analyst_*` 가 서로 다른 역할 ≥ 2). 아침 봉투는 `account_id·position_id·expected_version` 이 비어 있고 `request_id` 가 `_fo_inputs.meta.request_id` 와 같아야 한다. 재평가(`_fo_decision_r<n>_<계좌>`)는 봉투 네 값이 요청과 같고 포지션 `version` 이 지금도 `expected_version` 일 때만 받아 `reeval.apply` 로 넘긴다.
 - 도구 서브프로세스는 파생 도구일 때만 브로커·시세·**캐시만의 마스터**(`fo_master.load(offline=True)`)·원장 국면·시장 뷰로 컨텍스트를 스스로 만든다.

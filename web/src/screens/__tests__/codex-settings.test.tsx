@@ -44,7 +44,7 @@ test("Codex participation can be enabled and disabled, persists server result, a
   await act(async () => toggle().click());
   await flush();
   expect(toggle().getAttribute("aria-checked")).toBe("true");
-  expect(container.textContent).toContain("강세 Claude / 약세 Codex");
+  expect(container.textContent).toContain("1판은 Claude 강세 · Codex 약세, 2판은 Codex 강세 · Claude 약세");
   expect(container.textContent).toContain("사용률 미제공");
   await act(async () => toggle().click());
   await flush();

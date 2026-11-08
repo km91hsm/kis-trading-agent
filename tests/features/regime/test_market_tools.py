@@ -336,10 +336,11 @@ def test_market_summarize_rejects_lane_b_without_lane_b_policy(ctx, monkeypatch)
 def test_market_summarize_cross_policy_incomplete_lane_b_rejected(ctx, monkeypatch):
     monkeypatch.delenv("FAKE_CLAUDE", raising=False)
     d = _with_report(ctx, cross=True)
-    for side in ("bull", "bear"):
-        _save_turn(d, f"_market_debate_r0_{side}", ok_turn(side, 0), "claude")
+    for n in (0, 1):
+        for side in ("bull", "bear"):
+            _save_turn(d, f"_market_debate_r{n}_{side}", ok_turn(side, n), "claude")
     out = tools.market_summarize(ctx, market="KR", date=D)
-    assert out == {"ok": False, "error": "Codex 필수 토론 미완료: r1_bull"}
+    assert out["ok"] is False and "2판 r0_bull" in out["error"]
     assert read_checkpoint(d, "_market_summary") is None
 
 

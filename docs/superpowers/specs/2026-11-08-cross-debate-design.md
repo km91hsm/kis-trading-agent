@@ -47,7 +47,7 @@
 
 ### 5. 요약·최종 판단
 - 판별 `research_summary`(기존 함수) → `merge_lanes()`. 1판이면 지금과 똑같은 출력.
-- **합친 턴의 형태는 `DebateTurn` 그대로**(소비자 수정 최소화): 같은 편 두 턴을 부호 붙인 확신(bullish +c, bearish −c, neutral 0)으로 평균 → 대표 `stance`(합 > 0.1 bullish, < −0.1 bearish, 그 밖 neutral)·`conviction`(|평균|), `arguments`·`rebuttals` 는 두 판에서 번갈아 골라 5개 상한. 판별 원본은 요약의 별도 키 `by_lane: {a: {...}, b: {...}}`(턴 밖)에 둔다. `round0` 도 같은 방식.
+- **합친 턴의 형태는 `DebateTurn` 그대로**(소비자 수정 최소화): 같은 편 두 턴을 부호 붙인 확신(bullish +c, bearish −c, neutral 0)으로 평균 → 대표 `stance`(부호 확신 **평균** > 0.1 bullish, < −0.1 bearish, 그 밖 neutral)·`conviction`(|평균|), `arguments`·`rebuttals` 는 두 판에서 번갈아 골라 5개 상한. 판별 원본은 요약의 별도 키 `by_lane: {a: {...}, b: {...}}`(턴 밖)에 둔다. `round0` 도 같은 방식.
 - **경고 신호(사용자 결정: 한 판이라도 켜지면 적용)**: `sycophantic`·`convergence_review` 는 판별 값의 OR, `preferred` 는 어느 판이든 `round0` 이면 `round0`. `convergence`·`gap_round0/gap_final`·`timing_agree` 는 합친 턴으로 다시 계산(정의 불변).
 - `trader.md`·시장 전략가·fo 판단 프롬프트: 「강세·약세 각각 Claude·Codex 두 의견을 합친 것, 의견이 갈리면 by_lane 참고」 한 단락. `tooling.trader_summary` 의 24KB 축약은 합친 결과에 적용.
 - `evaluation/metrics` 수렴률은 **판 단위**로 센다(각 판이 실제 강세·약세 한 쌍의 토론이므로) — 4인 토론 결정은 표본 2개. 원장 `lane` 열로 묶는다. 리포트에 표본 정의를 한 줄 적는다.

@@ -759,7 +759,8 @@ def test_session_with_v1_codex_research_runs_legacy_mode(project, conn):
     result, captured = _capture_session(project, conn, llm=_codex_on(), before=before)
     assert "researcher-bear" not in captured["agents"]
     assert "Claude bear를 쓰지 않는다" in captured["prompt"]
-    assert "--lane b" not in captured["prompt"]
+    # md 의 조건부 안내(「교차 토론이면」)는 남지만 런타임 절의 2판 지시는 붙지 않는다
+    assert "2판 Claude 턴" not in captured["prompt"]
     assert captured["timeout"] == 900
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
     assert not result.ok and "Codex" in result.error
