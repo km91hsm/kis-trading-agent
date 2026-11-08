@@ -197,3 +197,21 @@ def test_scalp_body_skips_without_switches_or_state(make_deps, settings, conn, p
     prev = day - timedelta(days=engine.CARRY_DAYS)  # 이월 창 끝
     save_state(state, prev, "KR", {"open": [{"ticker": "005930", "entry_at": "x"}]})
     assert scalp_jobs.has_scalp_state(state, "KR", day)
+
+
+def test_has_scalp_state_fails_safe_on_corrupt_file(make_deps, settings, project, monkeypatch):
+    """상태 파일을 못 읽으면(깨진 JSON) 열린 다리가 있을 수 있다고 보고 틱을 돌린다."""
+    from datetime import timedelta
+
+    from trader.features.scalp.state import state_dir
+
+    cfg = settings.scalp.model_copy(update={"enabled": False})
+    deps = make_deps(settings=settings.model_copy(update={"scalp": cfg}))
+    state = project / "state"
+    day = run_date_for("KR", NOW)
+    d = state_dir(state, day - timedelta(days=1))
+    d.mkdir(parents=True)
+    (d / "KR.json").write_text("{깨짐", encoding="utf-8")
+    assert scalp_jobs.has_scalp_state(state, "KR", day) is True
+    monkeypatch.setattr(scalp_jobs.engine, "tick", lambda *a, **k: {"ran": True})
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"ran": True}  # 건너뛰지 않고 틱으로

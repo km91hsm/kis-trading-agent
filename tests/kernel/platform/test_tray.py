@@ -101,6 +101,7 @@ def test_set_pause_writes_explicit_value_with_injected_setter(conn):
     assert get_flag(conn, "paused", False) is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 시그널")
 def test_watch_signals_delivers_while_python_handler_cannot_run():
     """트레이 모드의 메인 스레드는 AppKit 런루프에 막혀 파이썬 핸들러가 돌지 않는다 →
     wakeup fd 를 읽는 감시 스레드가 시그널 번호를 넘겨야 한다."""
