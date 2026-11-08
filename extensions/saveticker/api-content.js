@@ -57,9 +57,12 @@
     // 계속 복구 중 로그아웃이면 사이트의 일반 이메일 로그인 대화상자를 채운다. 보안 확인 화면은 건드리지 않고,
     // 비밀번호는 입력란에만 넣으며 저장·반환하지 않는다. 결과는 고정 코드만 돌려준다.
     const pause = () => new Promise(resolve => setTimeout(resolve, 200));
-    async function waitFor(check, ms) {
-        for (let i = 0; i <= ms / 200; i++) { const v = check(); if (v) return v; await pause(); }
-        return null;
+    // 숨은 탭은 타이머가 느려지므로 횟수가 아닌 시각으로 기다린다. 전체 마감(워커 40초보다 짧음)을 넘기면 멈춘다.
+    const LOGIN_DEADLINE_MS = 30000;
+    let loginBusy = false;
+    async function waitFor(check, ms, deadline = Infinity) {
+        const end = Math.min(Date.now() + ms, deadline);
+        for (;;) { const v = check(); if (v) return v; if (Date.now() >= end) return null; await pause(); }
     }
     const exact = (selector, label, root = document) => [...root.querySelectorAll(selector)].slice(0, 512).find(e => e.textContent?.trim() === label) || null;
     const authenticated = () => !!document.querySelector('[aria-label="프로필 메뉴"]');
@@ -71,26 +74,37 @@
         input.dispatchEvent(new input.ownerDocument.defaultView.Event('change', { bubbles: true }));
     }
     async function login(email, password) {
+        const deadline = Date.now() + LOGIN_DEADLINE_MS;
         if (barrier()) return 'challenge';
         if (authenticated()) return 'logged_in';
-        const opener = await waitFor(() => exact('button,[role=button]', '이메일로 로그인'), 15000);
+        const emailButton = () => exact('button,[role=button]', '이메일로 로그인');
+        let opener = await waitFor(emailButton, 8000, deadline);
+        if (!opener) {
+            // 헤더의 「로그인」 버튼(링크 아님 — 페이지 이동은 전용 탭 소유 표시를 지운다)이 선택 창을 여는 경우.
+            const header = barrier() ? null : exact('button', '로그인');
+            if (header) { header.click(); opener = await waitFor(emailButton, 4000, deadline); }
+        }
         if (!opener) return barrier() ? 'challenge' : authenticated() ? 'logged_in' : 'login_form_missing';
-        let form = null;
-        for (let i = 0; i < 3 && !form; i++) {
+        let password_ = null;
+        for (let i = 0; i < 3 && !password_ && Date.now() < deadline; i++) {
             if (barrier()) return 'challenge';
             opener.click();
-            form = await waitFor(() => exact('h1,h2,h3,[role=heading]', '이메일로 로그인') && document.querySelector('input[type="password"]'), 2000);
+            password_ = await waitFor(() => exact('h1,h2,h3,[role=heading]', '이메일로 로그인') && document.querySelector('input[type="password"]'), 2000, deadline);
         }
-        if (!form) return barrier() ? 'challenge' : 'login_form_missing';
-        const scope = form.form || form.closest('[role=dialog]') || document;
-        const id = scope.querySelector('input[type="email"], input[autocomplete="email"], input[type="text"]');
+        if (!password_) return barrier() ? 'challenge' : 'login_form_missing';
+        // 대화상자 → 폼 순으로 범위를 잡는다. 문서 전체에서 찾으면 검색창·헤더 버튼을 잘못 잡을 수 있다.
+        const scopes = [password_.closest('[role=dialog]'), password_.form].filter(Boolean);
+        const scope = scopes.find(s => s.querySelector('input[type="email"], input[autocomplete="email"], input[type="text"]') && exact('button', '로그인', s));
+        if (!scope) return 'login_form_missing';
+        const id = scope.querySelector('input[type="email"]') || scope.querySelector('input[autocomplete="email"]') || scope.querySelector('input[type="text"]');
         const submit = exact('button', '로그인', scope);
-        if (!id || !submit) return 'login_form_missing';
-        fill(id, email); fill(form, password);
+        fill(id, email); fill(password_, password);
         await pause();
-        if (submit.disabled) return 'login_failed';
+        // 제출 전 마지막 확인: 마감·보안 확인·비활성 버튼이면 서버에 보내지 않았으므로 비밀번호 오류로 세지 않는다.
+        if (Date.now() >= deadline || submit.disabled) return 'login_form_missing';
+        if (barrier()) return 'challenge';
         submit.click();
-        if (await waitFor(authenticated, 20000)) return 'logged_in';
+        if (await waitFor(authenticated, 20000, deadline + 5000)) return 'logged_in';
         return barrier() ? 'challenge' : 'login_failed';
     }
     chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -107,7 +121,10 @@
             (async () => {
                 if (!/^[a-f0-9]{32}$/.test(message.token || '') || !await live(message.token)) return { error: 'api_stopped' };
                 if (typeof message.email !== 'string' || typeof message.password !== 'string' || !message.email || !message.password || message.email.length > 320 || message.password.length > 1024) return { error: 'invalid_message' };
-                return { result: await login(message.email, message.password) };
+                if (loginBusy) return { result: 'busy' };
+                loginBusy = true;
+                try { return { result: await login(message.email, message.password) }; }
+                finally { loginBusy = false; }
             })().then(reply).catch(() => reply({ result: 'login_form_missing' }));
             return true;
         }

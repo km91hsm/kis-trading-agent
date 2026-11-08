@@ -20,7 +20,7 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
     if (!(Number.isFinite(old.pendingAt) && old.pendingAt <= now && Number.isInteger(old.tabId))) { old.pendingAt = null; old.tabId = null; }
     if (old.reason === 'recovered' && old.pendingAt === null) {
         const since = state.apiHealthySince, last = state.lastApiHealthyAt;
-        if (Number.isFinite(since) && Number.isFinite(last) && since > 0 && since >= old.completedAt && last - since >= HEALTHY_RESET) { old.failures = 0; old.nextAt = null; }
+        if (Number.isFinite(since) && Number.isFinite(last) && since > 0 && since >= old.completedAt && last - since >= HEALTHY_RESET) { old.failures = 0; old.loginFailures = 0; old.nextAt = null; }
     }
     const report_ = async reason => { if (!active()) return; try { await report({ category: 'recheck', reason, reload_count: old.reloadCount }); } catch { /* 진단 실패는 복구를 막지 않는다. */ } };
     const halt = async reason => {
@@ -40,7 +40,8 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
     };
     const recovered = async () => {
         if (!active()) return true;
-        await store({ recheckRecovery: { ...old, pendingAt: null, tabId: null, reason: 'recovered', completedAt: clock() }, connection: '재확인 복구 완료 · 수집 재개' });
+        // 어떤 방식이든 복구되면 비밀번호 오류 횟수도 '연속'이 끊긴다.
+        await store({ recheckRecovery: { ...old, pendingAt: null, tabId: null, loginFailures: 0, reason: 'recovered', completedAt: clock() }, connection: '재확인 복구 완료 · 수집 재개' });
         if (active()) await resume();
         return true;
     };
@@ -49,14 +50,17 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
         if (!active()) return true;
         if (account === undefined) return wait('content_unavailable');
         if (!account || typeof account.email !== 'string' || typeof account.password !== 'string' || !account.email || !account.password) return halt('credentials_missing');
-        await store({ connection: '로그아웃 감지 · 이메일 로그인 중' });
+        // 새로고침 예약을 먼저 지운다(로그인 중 워커가 재시작돼도 같은 시도에서 로그인을 되풀이하지 않는다).
+        old = { ...old, pendingAt: null, tabId: null };
+        await store({ recheckRecovery: old, connection: '로그아웃 감지 · 이메일 로그인 중' });
         let timer, result;
         try {
             result = await Promise.race([chrome.tabs.sendMessage(tab.id, { type: 'api_login', token, email: account.email, password: account.password }), new Promise(resolve => { timer = setTimeout(() => resolve(null), 40000); })]);
         } catch { result = null; } finally { clearTimeout(timer); }
         if (!active()) return true;
         if (result?.result === 'logged_in') { old.loginFailures = 0; return recovered(); }
-        if (result?.result === 'login_failed') {
+        // 시간 초과는 제출 여부를 알 수 없으므로 비밀번호 오류로 센다(계정 잠금 방지가 우선).
+        if (result?.result === 'login_failed' || result === null) {
             old.loginFailures += 1;
             if (old.loginFailures >= LOGIN_FAILURE_LIMIT) return halt('login_failed');
             return wait('login_failed');

@@ -61,3 +61,24 @@ test('stopped collection, wrong token or foreign sender cannot log in', async ()
     assert.equal(await p.send({ type: 'api_login', token: TOKEN, email: 'u@x.com', password: 'pw' }, { id: 'other' }), null);
     assert.equal(p.d.querySelector('[role=dialog]'), null);
 });
+
+test('overlapping login is refused while one is running', async () => {
+    const p = page({ password: 'other' });
+    const [a, b] = await Promise.all([p.login(), p.login()]);
+    assert.deepEqual([a.result, b.result].sort(), ['busy', 'login_failed']);
+});
+
+test('fields outside a dialog/form or a disabled submit are not counted as wrong password', async () => {
+    const loose = '<body><input type="text" id="search"><input type="password"><h2>이메일로 로그인</h2><button>로그인</button><button id="open">이메일로 로그인</button></body>';
+    assert.deepEqual(await page({ html: loose }).login(), { result: 'login_form_missing' });
+    const p = page();
+    p.d.getElementById('open').addEventListener('click', () => { const b = p.d.querySelector('#submit'); if (b) b.disabled = true; });
+    assert.deepEqual(await p.login(), { result: 'login_form_missing' });
+});
+
+test('header login button that opens the email chooser is used when the email button is not shown yet', async () => {
+    const html = '<body><header><button id="hdr">로그인</button></header><main>뉴스</main></body>';
+    const p = page({ html });
+    p.d.getElementById('hdr').addEventListener('click', () => { const b = p.d.createElement('button'); b.id = 'open'; b.textContent = '이메일로 로그인'; p.d.body.append(b); b.addEventListener('click', () => { const dialog = p.d.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.innerHTML = '<h2>이메일로 로그인</h2><form><input type="email"><input type="password"><button type="button" id="submit">로그인</button></form>'; p.d.body.append(dialog); dialog.querySelector('#submit').addEventListener('click', () => { const m = p.d.createElement('button'); m.setAttribute('aria-label', '프로필 메뉴'); p.d.body.append(m); }); }); });
+    assert.deepEqual(await p.login(), { result: 'logged_in' });
+});

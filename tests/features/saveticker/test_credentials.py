@@ -76,3 +76,18 @@ def test_native_accepts_persistent_recovery_diagnostic_reasons(tmp_path):
             }
         )
         assert reply["ok"] is True, reason
+
+
+def test_password_with_interpolation_and_edge_spaces_round_trips(project):
+    for pw in ("x${HOME}y", " lead", "trail ", "a'b\"c${X:-d}"):
+        credentials.save("user@example.com", pw)
+        assert credentials.load() == ("user@example.com", pw), pw
+
+
+def test_control_characters_are_rejected(project):
+    import pytest
+
+    for pw in ("a\rb", "a\x0bb", "a\x0cb", "a\u2028b", "a\x00b"):
+        with pytest.raises(ValueError):
+            credentials.save("user@example.com", pw)
+    assert credentials.load() is None

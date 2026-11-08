@@ -95,3 +95,27 @@ test('busy, cooldown and inactive make no navigation in persist mode', async () 
         const f = fixture(); change(f); f.at(NOW); await f.run(); assert.equal(count(f, 'reload'), 0); assert.equal(count(f, 'stop'), 0);
     }
 });
+
+test('login timeout counts as a wrong-password attempt so lockout protection still works', async () => {
+    const f = fixture({ probe: OUT, login: null }); let t = NOW;
+    f.d.chrome.tabs.sendMessage = async (_id, m) => m.type === 'api_login' ? (f.calls.push('login'), null) : f.probe;
+    for (let i = 0; i < 3; i++) { f.at(t); await f.run(); t = f.state.recheckRecovery.nextAt ?? t; }
+    assert.equal(count(f, 'stop'), 1); assert.ok(f.calls.includes('report:login_failed'));
+});
+
+test('login failure count is consecutive: any recovery resets it', async () => {
+    const f = fixture({ probe: OUT, login: { result: 'login_failed' } }); let t = NOW;
+    for (let i = 0; i < 2; i++) { f.at(t); await f.run(); t = f.state.recheckRecovery.nextAt; }
+    f.probe = RECHECK; f.at(t); await f.run(); f.probe = NORMAL; f.at(t + 3000); await f.run();
+    assert.equal(f.state.recheckRecovery.reason, 'recovered'); assert.equal(f.state.recheckRecovery.loginFailures, 0);
+    t = f.state.recheckRecovery.nextAt; f.probe = OUT; f.at(t); await f.run();
+    assert.equal(count(f, 'stop'), 0);
+});
+
+test('login after reload clears the pending reload reservation first', async () => {
+    const f = fixture(); f.at(NOW); await f.run();
+    let pendingDuringLogin;
+    f.d.chrome.tabs.sendMessage = async (_id, m) => { if (m.type === 'api_login') { pendingDuringLogin = f.state.recheckRecovery.pendingAt; return { result: 'login_failed' }; } return OUT; };
+    f.at(NOW + 4000); await f.run();
+    assert.equal(pendingDuringLogin, null);
+});
