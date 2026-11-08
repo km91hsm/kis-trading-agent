@@ -116,6 +116,7 @@ llm:
     fo_resume: 600
     reflect: 600
     market: 600          # 시장 세션(거시·토론·전략가)
+  cross_debate_extra_s: null   # 4인 교차 토론 연구마다 더할 초(0~3600). 비우면 (라운드+1)×(codex_debate.timeout_s+120) 자동
   daily_session_cap: 80  # 하루 세션 수 고정 상한 (종목 analyze + 시장 세션 + 장중 발굴·재분석). Phase 24 에 40→80 — 2~4주 통계 뒤 다시 정한다
   usage_throttle:        # 구독 사용률 감속: 세션 rate_limit_event·상태줄 파일의 최신 관측 기준
     enabled: true

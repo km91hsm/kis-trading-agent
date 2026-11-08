@@ -93,6 +93,9 @@ class LlmSettings(BaseModel):
             "market": 600,
         }
     )  # fmt: skip
+    # 4인 교차 토론 연구마다 세션 제한 시간에 더할 초. None 이면 연구마다
+    # (라운드+1) × (고정 정책의 codex_debate.timeout_s + 120) 을 자동으로 더한다
+    cross_debate_extra_s: int | None = Field(None, ge=0, le=3600)
     # 같은 운영일 같은 종목이 타임아웃으로 이만큼 실패하면 그날은 다시 띄우지 않는다
     timeout_retry_max: int = Field(default=2, ge=1, le=10)
     # 종목 analyze + 시장 세션 + 장중 발굴·재분석 합계

@@ -192,6 +192,32 @@ def is_cross(policy: dict) -> bool:
     return policy.get("version") == 2 and bool(policy["enabled"]) and len(lanes(policy)) == 2
 
 
+def session_version(conn, targets: list[tuple[Path, ResearchSpec]]) -> int:
+    """세션의 정책 버전. 저장된 v1(Codex 켜짐) 미완료 연구가 하나라도 있으면 그 세션은
+    레거시 2인 모드(1)로 돌고 새 연구도 v1 로 시작한다. 아니면 교차 토론 모드(2)."""
+    for d, scope in targets:
+        old = _stored(conn, d, scope)
+        if (
+            old
+            and int(old.get("version") or 1) == 1
+            and old.get("enabled")
+            and scope.completed_stage not in list_checkpoints(d)
+        ):
+            return 1
+    return 2
+
+
+def cross_extra_s(settings, policy: dict) -> int:
+    """교차 토론 연구 하나가 세션 제한 시간에 더할 초. 교차가 아니면 0, 설정값이 있으면 그 값,
+    없으면 (라운드+1) × (고정 정책의 Codex timeout_s + 120)."""
+    if not is_cross(policy):
+        return 0
+    override = getattr(getattr(settings, "llm", None), "cross_debate_extra_s", None)
+    if override is not None:
+        return int(override)
+    return (int(policy["rounds"]) + 1) * (int(policy["config"]["timeout_s"]) + 120)
+
+
 def key(d: Path, scope: ResearchSpec) -> str:
     return scope.scope + ":" + str(d.resolve())
 

@@ -328,6 +328,86 @@ def _finish(
     runs.finish(conn, run_id, status, error=error)
 
 
+_LEGACY_LEAD = (
+    "bull은 선언된 Claude 에이전트, bear는 Codex 전용 도구다. Claude bear를 쓰지 않는다. "
+)
+_CODEX_HEADER = "\n# 고정된 Codex 토론 정책 (기존 흐름보다 우선)\n"
+# 쟁점·반박·거시 규칙 문단(레거시·교차 공통). 레거시 절은 업데이트 전과 바이트 단위로 같아야 한다
+_DEBATE_RULES = (
+    "r0은 양측 독립 의견. r1부터 고정 debate_rounds까지 양측"
+    "이 상대의 이전 라운드를 반박해야 한다. 각 반박 턴 rebuttals는"
+    " 비우지 않는다. "
+    "각 공급자는 자기 issues 1~5개(issue_id는 bull:/be"
+    "ar: 고유ID, topic,claim,evidence=[리포트 sour"
+    "ce_id])를 제시한다. r0 responses/replies는 빈 목"
+    "록. "
+    "r1+는 자신의 쟁점ID를 유지하고 상대 직전 issues의 모든 ID에"
+    " responses(issue_id,response,evidence)로 "
+    "반론한다. r2+는 상대 직전 responses가 지적한 자신의 쟁점 전"
+    "부에 replies로 재답변한다. "
+    "WTI/DXY/미국10년금리 변화가 언제나 주가악재라는 고정규칙은 금지한"
+    "다. 성장/인플레/공급원인, 기대반영, 업종별 상반효과와 반례를 검토한다"
+    ". "
+    "애널리스트 합의라도 토론을 생략하지 않는다. Codex 오류/상한/미완료"
+    "면 중단하고 오류를 보고한다. 재개 세션의 기존 결정은 원래 정책을 유지"
+    "한다.\n"
+)
+
+
+def codex_section(research: list[tuple[Path, Any, dict]], *, cross: bool) -> str:
+    """오케스트레이터 프롬프트에 붙이는 고정 Codex 토론 정책 절. `cross=False` 는 레거시(v1:
+    Claude 강세 vs Codex 약세 한 판), `cross=True` 는 4인 교차 토론(판 두 개)."""
+    tool = bundle.tool_command()
+    if not cross:
+        descriptors = {scope.scope: scope for _, scope, policy in research if policy["enabled"]}
+        text = _CODEX_HEADER
+        text += _LEGACY_LEAD
+        text += _DEBATE_RULES
+        for descriptor in descriptors.values():
+            text += f"- {descriptor.scope} bull: {descriptor.bull_agent}; "
+            text += f"bear: {tool} {descriptor.cli_template}\n"
+        text += (
+            "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한"
+            "다. 각 라운드의 bull과 bear 완료 후 다음 라운드, 마지막에 s"
+            "ummarize를 실행한다.\n"
+        )
+        return text
+    crossed = [(scope, policy) for _, scope, policy in research if research_policy.is_cross(policy)]
+    descriptors = {scope.scope: scope for scope, _ in crossed}
+    codex_timeout = max(int(policy["config"]["timeout_s"]) for _, policy in crossed)
+    text = _CODEX_HEADER
+    text += (
+        "4인 교차 토론: 판 두 개를 같은 라운드 수로 진행한다. "
+        "1판은 Claude 강세 vs Codex 약세, 2판은 Codex 강세 vs Claude 약세다. "
+        "쟁점·반박은 판 안에서만 주고받는다(1판 턴은 1판 상대, 2판 턴은 2판 상대). "
+    )
+    text += _DEBATE_RULES
+    for d in descriptors.values():
+        cmd = f"{tool} {d.cli_template}"
+        text += (
+            f"- {d.scope} 1판: 강세 = {d.bull_agent}(Claude), 약세 = {cmd} --side bear. "
+            f"2판: 강세 = {cmd} --side bull, 약세 = {d.bear_agent}(Claude). "
+            "2판 Claude 턴의 입력 묶음은 각 흐름의 researcher 묶음 명령에 --lane b 를 붙여 받고, "
+            f"저장은 판 B 단계 이름 {d.cross_turn_prefix}<n>_<side> 로 한다.\n"
+        )
+    text += (
+        "라운드마다 4턴(1판 강세·약세, 2판 강세·약세)이다. 같은 라운드의 4턴은 직전 라운드만 "
+        "보므로 Claude 두 턴(1판 강세·2판 약세)은 병렬로 띄우고, Codex 두 턴(1판 약세·2판 강세)은 "
+        f"Bash 로 하나씩 실행한다(각 최대 {codex_timeout}초). "
+        "네 턴이 모두 끝나야 다음 라운드로 가고, 마지막에 summarize를 실행한다. "
+        "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한다. "
+        "목록에 없는 흐름은 기존 흐름(Claude 강세·약세)대로 진행한다.\n"
+    )
+    return text
+
+
+def bash_timeout_ms(settings: Any, policies: list[dict]) -> int:
+    """세션 Bash 도구 제한(ms): 켜진 정책들과 설정의 Codex timeout_s 중 최댓값 + 60초."""
+    candidates = [int(p["config"]["timeout_s"]) for p in policies if p.get("enabled")]
+    candidates.append(int(settings.llm.codex_debate.timeout_s))
+    return (max(candidates) + 60) * 1000
+
+
 def run_session(
     spec: SessionSpec,
     kind: SessionKind,
@@ -366,10 +446,17 @@ def run_session(
         )
     research = []
     if not fake and kind.research_targets is not None:
-        for directory, scope in kind.research_targets(ctx, spec):
-            policy = research_policy.start(conn, settings, directory, scope, now=now(), version=1)
+        targets = list(kind.research_targets(ctx, spec))
+        # v1(Codex 약세) 미완료 연구가 있는 세션은 통째로 레거시 2인 모드, 아니면 교차 토론
+        version = research_policy.session_version(conn, targets)
+        for directory, scope in targets:
+            policy = research_policy.start(
+                conn, settings, directory, scope, now=now(), version=version
+            )
             research.append((directory, scope, policy))
     codex_required = any(p["enabled"] for _, _, p in research)
+    cross = any(research_policy.is_cross(p) for _, _, p in research)
+    # 레거시(v1)만 Claude bear 를 뺀다. 교차 토론은 2판 약세가 Claude bear 라 둘 다 남긴다
     effective_kind = (
         replace(
             kind,
@@ -379,7 +466,7 @@ def run_session(
                 if a not in {r.bear_agent for _, r, p in research if p["enabled"]}
             ),
         )
-        if codex_required
+        if codex_required and not cross
         else kind
     )
     run_id = runs.start(conn, kind.runs_kind, spec.market)
@@ -439,51 +526,12 @@ def run_session(
             checkpoint_names=checkpoint_names,
         )
         if codex_required:
-            descriptors = {scope.scope: scope for _, scope, policy in research if policy["enabled"]}
-            prompt += "\n# 고정된 Codex 토론 정책 (기존 흐름보다 우선)\n"
-            prompt += (
-                "bull은 선언된 Claude 에이전트, bear는 Codex 전용 도구다. "
-                "Claude bear를 쓰지 않는다. "
-            )
-            prompt += (
-                "r0은 양측 독립 의견. r1부터 고정 debate_rounds까지 양측"
-                "이 상대의 이전 라운드를 반박해야 한다. 각 반박 턴 rebuttals는"
-                " 비우지 않는다. "
-            )
-            prompt += (
-                "각 공급자는 자기 issues 1~5개(issue_id는 bull:/be"
-                "ar: 고유ID, topic,claim,evidence=[리포트 sour"
-                "ce_id])를 제시한다. r0 responses/replies는 빈 목"
-                "록. "
-            )
-            prompt += (
-                "r1+는 자신의 쟁점ID를 유지하고 상대 직전 issues의 모든 ID에"
-                " responses(issue_id,response,evidence)로 "
-                "반론한다. r2+는 상대 직전 responses가 지적한 자신의 쟁점 전"
-                "부에 replies로 재답변한다. "
-            )
-            prompt += (
-                "WTI/DXY/미국10년금리 변화가 언제나 주가악재라는 고정규칙은 금지한"
-                "다. 성장/인플레/공급원인, 기대반영, 업종별 상반효과와 반례를 검토한다"
-                ". "
-            )
-            prompt += (
-                "애널리스트 합의라도 토론을 생략하지 않는다. Codex 오류/상한/미완료"
-                "면 중단하고 오류를 보고한다. 재개 세션의 기존 결정은 원래 정책을 유지"
-                "한다.\n"
-            )
-            for descriptor in descriptors.values():
-                prompt += f"- {descriptor.scope} bull: {descriptor.bull_agent}; "
-                prompt += f"bear: {bundle.tool_command()} {descriptor.cli_template}\n"
-            prompt += (
-                "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한"
-                "다. 각 라운드의 bull과 bear 완료 후 다음 라운드, 마지막에 s"
-                "ummarize를 실행한다.\n"
-            )
+            prompt += codex_section(research, cross=cross)
         session_id = str(uuid.uuid4())
         cmd = build_command(
             spec, kind, settings, bin_path, agents_file, session_id=session_id, prompt=prompt
         )
+        bash_ms = bash_timeout_ms(settings, [p for _, _, p in research])
         # 도구 명령(`python -m trader tool`·번들 `trader tool`)이 풀리도록 그 디렉터리를 PATH 앞에
         env = {
             **os.environ,
@@ -492,6 +540,9 @@ def run_session(
             "TRADER_DRY_RUN": "1" if spec.dry_run else "0",
             "TRADER_HOME": str(paths.project_root()),
             "PATH": str(bundle.tool_bin_dir()) + os.pathsep + claude_bin_mod.child_path(bin_path),
+            # Codex 턴(Bash 도구)이 Claude Code 기본 Bash 제한(2분)에 잘리지 않게
+            "BASH_DEFAULT_TIMEOUT_MS": str(bash_ms),
+            "BASH_MAX_TIMEOUT_MS": str(bash_ms),
         }
         model = settings.models.get("orchestrator", "sonnet")
         call_id = calls.start_call(
@@ -524,7 +575,10 @@ def run_session(
         )  # fmt: skip
         return SessionResult(ok=False, session_id=session_id, error=err, duration_ms=elapsed_ms())
 
-    timeout = settings.llm.timeout_for(kind.timeout_key)
+    # 교차 토론 연구마다 Codex 두 턴씩 라운드 수만큼 더 걸린다 — 연구별 연장을 더한다
+    timeout = settings.llm.timeout_for(kind.timeout_key) + sum(
+        research_policy.cross_extra_s(settings, p) for _, _, p in research
+    )
     try:
         proc = (runner or run_claude)(
             cmd,

@@ -849,3 +849,38 @@ def test_fake_get_and_public_policy_and_status_expose_lanes(conn, tmp_path, monk
     st = rp.status(conn, settings(), now=NOW)
     assert st["lanes"] == rp.lanes(rp.current(conn, settings()))
     assert len(st["lanes"]) == 2 and st["roles"] == {"bull": "claude", "bear": "codex"}
+
+
+def test_session_version_picks_legacy_only_for_unfinished_v1_codex(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    v1_on, v1_off, fresh = tmp_path / "on", tmp_path / "off", tmp_path / "fresh"
+    for d in (v1_on, v1_off, fresh):
+        d.mkdir()
+    p.start(conn, settings(), v1_on, SPOT_RESEARCH, now=NOW, version=1)
+    p.start(conn, settings(enabled=False), v1_off, SPOT_RESEARCH, now=NOW, version=1)
+    assert p.session_version(conn, [(fresh, SPOT_RESEARCH), (v1_on, SPOT_RESEARCH)]) == 1
+    assert p.session_version(conn, [(v1_off, SPOT_RESEARCH)]) == 2
+    assert p.session_version(conn, [(fresh, SPOT_RESEARCH)]) == 2
+    assert p.session_version(conn, []) == 2
+    write_checkpoint(v1_on, "30_decision", checkpoint_payload({"action": "HOLD"}))
+    assert p.session_version(conn, [(v1_on, SPOT_RESEARCH)]) == 2
+
+
+def test_cross_extra_s_formula_override_and_non_cross(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s = SimpleNamespace(llm=LlmSettings(codex_debate={"enabled": True}), debate_rounds=2)
+    cross = p.current(conn, s)
+    assert p.is_cross(cross) and cross["rounds"] == 2
+    assert p.cross_extra_s(s, cross) == 3 * (180 + 120)
+    frozen = {**cross, "config": {**cross["config"], "timeout_s": 300}}
+    assert p.cross_extra_s(s, frozen) == 3 * (300 + 120)
+    s.llm.cross_debate_extra_s = 300
+    assert p.cross_extra_s(s, cross) == 300
+    s.llm.cross_debate_extra_s = 0
+    assert p.cross_extra_s(s, cross) == 0
+    s.llm.cross_debate_extra_s = None
+    assert p.cross_extra_s(s, p.current(conn, s, version=1)) == 0
+    off = SimpleNamespace(llm=LlmSettings(), debate_rounds=2)
+    assert p.cross_extra_s(off, p.current(conn, off)) == 0
