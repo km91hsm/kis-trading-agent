@@ -2,7 +2,10 @@
 import 한다.
 
 - macOS 는 메뉴바, Windows 는 작업표시줄 알림 영역. 메뉴: 웹 UI 열기 / 일시정지·재개 /
-  로그 폴더 열기 / 데이터 폴더 열기 / 로그인 시 자동 시작(체크) / 종료.
+  로그 폴더 열기 / 데이터 폴더 열기 / 로그인 시 자동 시작(체크) / 종료. 일시정지·재개는 누를 때
+  원장 값을 다시 읽어 반대 값을 **명시적으로** 쓴다(뒤집기 아님 — 캐시가 낡아도 엉뚱한 쪽으로
+  가지 않는다). 일시정지를 켜기 직전엔 OS 확인창(confirm_dialog)을 띄운다 — 취소·무응답이면
+  그대로, 못 띄우면 막지 않고 진행, 재개는 묻지 않는다. 창이 떠 있는 동안 다시 누르면 무시한다.
 - pystray 의 Icon.run() 은 **메인 스레드**에서 돌아야 한다(macOS AppKit). 데몬은
   트레이 진입점이 백그라운드 스레드에 둔다.
 - 일시정지는 원장 control 의 `paused` 플래그다. 커널은 기능을 모르므로 기본은 플래그를 직접
@@ -21,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from trader.kernel.ledger.control import get_flag, set_flag
+from trader.kernel.platform.confirm_dialog import ask_yes_no
 
 logger = logging.getLogger("trader.platform")
 
@@ -105,19 +109,18 @@ def read_state(
     )
 
 
-def toggle_pause(
+def set_pause(
     conn_factory: Callable[[], sqlite3.Connection],
+    value: bool,
     *,
     set_fn: Callable[[sqlite3.Connection, bool], None] | None = None,
     close: bool = True,
-) -> bool:
-    """paused 플래그를 뒤집고 새 값을 돌려준다 (웹·텔레그램·CLI 와 같은 플래그).
-    `set_fn(conn, new)` 가 주어지면 기본 `set_flag` 대신 그것으로 쓴다."""
+) -> None:
+    """paused 플래그에 `value` 를 쓴다 (웹·텔레그램·CLI 와 같은 플래그). 뒤집지 않는다.
+    `set_fn(conn, value)` 가 주어지면 기본 `set_flag` 대신 그것으로 쓴다."""
     conn = conn_factory()
     try:
-        new = not _default_paused(conn)
-        (set_fn or _default_set_paused)(conn, new)
-        return new
+        (set_fn or _default_set_paused)(conn, value)
     finally:
         if close:
             conn.close()
@@ -208,14 +211,17 @@ class TrayController:
         self,
         *,
         state_fn: Callable[[], TrayState],
-        on_toggle_pause: Callable[[], None],
+        on_set_pause: Callable[[bool], None],
         on_quit: Callable[[], None],
         initial: TrayState,
         run_on_main: Callable[[Callable[[], None]], None] = on_main,
         on_toggle_autostart: Callable[[], None] | None = None,
+        confirm_pause: Callable[[], bool | None] | None = None,
     ) -> None:
+        self._confirm_pause = confirm_pause
         self._state_fn = state_fn
-        self._on_toggle_pause = on_toggle_pause
+        self._on_set_pause = on_set_pause
+        self._pause_busy = threading.Lock()  # 확인창이 떠 있는 동안 두 번째 클릭은 무시
         self._on_toggle_autostart = on_toggle_autostart
         self._on_quit = on_quit
         self._run_on_main = run_on_main
@@ -282,12 +288,23 @@ class TrayController:
         threading.Thread(target=work, name="trader-tray-quit", daemon=True).start()
 
     def pause_action(self, icon: Any = None, _item: Any = None) -> None:
+        if not self._pause_busy.acquire(blocking=False):
+            return  # 앞선 클릭(확인창)이 아직 끝나지 않았다
+
         def work() -> None:
             try:
-                self._on_toggle_pause()
+                # 캐시(최대 poll_s 낡음)가 아니라 지금 원장 값으로 정한다
+                target = not self._state_fn().paused
+                if target and self._confirm_pause is not None:
+                    # 켜기 직전만 확인. 취소·무응답(False)이면 그대로, 못 띄우면(None) 진행.
+                    if self._confirm_pause() is False:
+                        return
+                self._on_set_pause(target)
                 self.refresh_state()
             except Exception:  # noqa: BLE001 - 원장 잠금 등
-                logger.exception("일시정지 토글 실패")
+                logger.exception("일시정지 전환 실패")
+            finally:
+                self._pause_busy.release()
 
         threading.Thread(target=work, name="trader-tray-pause", daemon=True).start()
 
@@ -310,6 +327,10 @@ class TrayController:
         threading.Thread(target=work, name="trader-tray-autostart", daemon=True).start()
 
 
+PAUSE_CONFIRM_MESSAGE = (
+    "자동매매를 전체 일시정지할까요? 새 주문·승인이 멈춥니다(계좌 모드는 그대로). "
+    "앱을 끄려면 「종료」를 누르세요."
+)
 QUITTING_TITLE = "trader · 종료 중"
 STOPPED_TITLE = "trader · 데몬 중단"
 
@@ -317,7 +338,7 @@ STOPPED_TITLE = "trader · 데몬 중단"
 def run_tray(
     *,
     state_fn: Callable[[], TrayState],
-    on_toggle_pause: Callable[[], None],
+    on_set_pause: Callable[[bool], None],
     on_open_web: Callable[[], None],
     on_open_logs: Callable[[], None],
     on_quit: Callable[[], None],
@@ -339,10 +360,11 @@ def run_tray(
 
     ctl = TrayController(
         state_fn=state_fn,
-        on_toggle_pause=on_toggle_pause,
+        on_set_pause=on_set_pause,
         on_quit=on_quit,
         initial=state_fn(),
         on_toggle_autostart=on_toggle_autostart,
+        confirm_pause=lambda: ask_yes_no("trader", PAUSE_CONFIRM_MESSAGE),
     )
 
     def label(key: str):
@@ -353,6 +375,7 @@ def run_tray(
         pystray.MenuItem(
             label("toggle_pause"), ctl.pause_action, checked=lambda _it: ctl.checked("toggle_pause")
         ),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem(label("open_logs"), lambda icon, it: on_open_logs()),
     ]
     if on_open_data is not None:

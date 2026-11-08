@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Today } from "../today/Today.tsx";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
+import { kstDate } from "../../lib/format";
 import { setEventsClient, type EventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { flush, render } from "../../test/render";
@@ -75,6 +76,36 @@ const patches = () => ff!.calls.filter((c) => c.init?.method === "PATCH");
 const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
 
 describe("오늘 화면", () => {
+  test("일시정지 배너: paused 면 문구·경로·재개 링크, 아니면 없음, at 없으면 경로 생략", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "telegram" } }));
+    const b = document.querySelector(".pause-banner") as HTMLElement;
+    expect(b.textContent).toContain("자동매매 전체 일시정지 중 · ");
+    expect(b.textContent).toContain("텔레그램");
+    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 새 주문만 멈춤");
+    expect(b.querySelector("a")?.getAttribute("href")).toBe("/accounts");
+  });
+
+  test("일시정지 배너: paused=false 면 없음", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: false, at: null, by: null } }));
+    expect(document.querySelector(".pause-banner")).toBeNull();
+  });
+
+  test("일시정지 배너: at 이 없으면 시각·경로 생략", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: null, by: null } }));
+    const b = document.querySelector(".pause-banner") as HTMLElement;
+    expect(b.textContent).toContain("전체 일시정지 중");
+    expect(b.textContent).not.toContain("▲ 메뉴");
+    expect(b.textContent).not.toContain(" · ");
+  });
+
+  test("레인 카드 paused 배지에 「계좌 모드와 별개」 설명", async () => {
+    await mount(routes({ "GET /api/accounts": [fixtureAccount({ paused: true })] }));
+    const lane = section("spot-lane");
+    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    expect(lane.querySelector("[title]")).toBeNull(); // 보이는 줄만 — title 중복 없음
+  });
+
   test("섹션 컨테이너는 데이터 전에 있고, 계좌 없는 레인은 hidden", async () => {
     ff = installFakeFetch(routes());
     render(
@@ -325,7 +356,7 @@ describe("배치", () => {
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(["orders-timeline", "next-jobs", "notices"]);
     expect(container.querySelector("h1")?.textContent).toBe("오늘 · 기록");
     expect(container.querySelector('input[type="date"]')).not.toBeNull();
-    expect(ff!.calls.map((c) => c.url)).not.toContain("/api/decisions?date=" + new Date().toISOString().slice(0, 10));
+    expect(ff!.calls.map((c) => c.url)).not.toContain("/api/decisions?date=" + kstDate(new Date()));
   });
 
   test("알림도 고른 날짜로 부른다(/system/notices?date=) — 「오늘 요약」 알림 수가 그날 건수가 되게", async () => {
@@ -407,7 +438,7 @@ describe("배치", () => {
     expect(cells).toEqual([["005930 삼성전자", "리스크 게이트", "5"], ["000660", "애널리스트", "2"]]);
     const us = sec.querySelector('[data-market="US"]') as HTMLElement;
     expect(us.textContent).toContain("기록 없음");
-    expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=" + new Date().toISOString().slice(0, 10));
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=" + kstDate(new Date()));
   });
 
   test("리스크 게이트: 0건이면 hidden, 있으면 표(시각·계좌·종목·결과 칩·수량 조정·사유) + 결정 링크", async () => {
@@ -442,6 +473,6 @@ describe("배치", () => {
     expect(fo.textContent).toContain("재평가 1회");
     const chips = Array.from(fo.querySelectorAll(".lane-extra .chip")).map((c) => c.textContent);
     expect(chips).toEqual(["paper-fo 손실 한도", "paper-fo 진입 대기"]);
-    expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=" + new Date().toISOString().slice(0, 10));
+    expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=" + kstDate(new Date()));
   });
 });

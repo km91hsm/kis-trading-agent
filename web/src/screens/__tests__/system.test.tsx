@@ -205,6 +205,54 @@ describe("시스템 화면", () => {
     expect(Array.from(h.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("상태");
   });
 
+  test("헬스 머리: 운영 점검 한 줄 + 자동매매 동작 중", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: false, at: null, by: null } }));
+    const h = section("health");
+    expect(h.textContent).toContain("운영 점검: ");
+    expect(h.textContent).toContain("3개 영역");
+    expect(h.textContent).toContain("자동매매: 동작 중");
+    expect(Array.from(h.querySelectorAll("a")).some((a) => a.textContent === "재개")).toBe(false);
+  });
+
+  test("헬스 머리: 전체 주의인데 주의 영역이 없으면(사유만) 「문제없음」 대신 사유 건수", async () => {
+    await mount(
+      routes({
+        "GET /api/system/health": fixtureHealth({
+          level: "warn",
+          areas: { jobs: "ok", llm: "ok" },
+          reasons: [{ area: "daemon", level: "warn", text: "하트비트 늦음", key: "daemon.stale", link: null }],
+        }),
+      }),
+    );
+    const h = section("health");
+    expect(h.querySelector(".sys-head .chip")?.textContent).toBe("운영 점검: 주의");
+    expect(h.textContent).not.toContain("문제없음");
+    expect(h.textContent).toContain("2개 영역 점검 · 사유 1건");
+  });
+
+  test("헬스 머리: /system/pause 실패면 「동작 중」 단정 없이 「확인하지 못함」", async () => {
+    await mount(routes({ "GET /api/system/pause": () => new Response(JSON.stringify({ detail: "boom" }), { status: 500 }) }));
+    const h = section("health");
+    expect(h.textContent).not.toContain("동작 중");
+    expect(h.textContent).toContain("자동매매: 확인하지 못함");
+  });
+
+  test("헬스 머리: /system/pause 응답 전에는 「확인 중」", async () => {
+    await mount(routes({ "GET /api/system/pause": () => new Promise<Response>(() => {}) }));
+    const h = section("health");
+    expect(h.textContent).toContain("자동매매: 확인 중");
+    expect(h.textContent).not.toContain("동작 중");
+    expect(h.textContent).not.toContain("확인하지 못함");
+  });
+
+  test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
+    const h = section("health");
+    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음");
+    expect(h.textContent).toContain("▲ 메뉴");
+    expect(Array.from(h.querySelectorAll("a")).find((a) => a.textContent === "재개")?.getAttribute("href")).toBe("/accounts");
+  });
+
   test("헬스 「지금 점검」 → GET /system/health?live=1 로 다시 그린다", async () => {
     await mount(routes());
     const h = section("health");
@@ -246,7 +294,7 @@ describe("시스템 화면", () => {
     const st = section("settings");
     expect(st.textContent).toContain("Tailscale 호스트");
     // 설정은 세 묶음(AI 사용 한도 · 거래 리스크 · 접속 환경), 역할별 모델은 details 안 표(역할은 한글, role.* 원문 없음)
-    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "AI 사용 한도", "거래 리스크", "접속 환경"]);
+    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "단타", "AI 사용 한도", "거래 리스크", "접속 환경"]);
     expect(st.querySelector("details summary")?.textContent).toContain("역할별 모델 2");
     const models = st.querySelectorAll("details table tbody tr");
     expect(models).toHaveLength(2);

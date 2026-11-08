@@ -3,7 +3,7 @@
 ## 책임
 
 - 분 단위 단타 레인(tier=lane): 1분봉 신호는 파이썬 순수 함수가 감지·집행하고, 에이전트는 후보와 허용 여부(strategist `scalp_ok`)·진입 판정(`scalp-judge`)·보유 조언만 낸다.
-- **모의 전용(paper only)·기본 끔**: `settings.yaml scalp.enabled: false`. 실전 계좌는 설정이 켜져 있어도 주문·기록 없이 건너뛴다.
+- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py`).
 - 설정: `settings.yaml scalp`(`ScalpCfg`, 17필드). 판정자는 `judge: false` 가 기본.
 - 레인이라 다른 기능을 import 하지 않는다. 필요한 것은 포트(deps 주입)로 받는다.
 
@@ -22,7 +22,7 @@
 
 - `trader scalp backtest --ticker … [--market KR|US --exchange NAS|NYS|AMS --days 1..5]` — 당일 1분봉 400개(`accounts` 포트의 시세 클라이언트, 실전 시세 키 필요)로 진입·청산 규칙을 재현해 JSON 1줄 `{ticker, market, bars, today, config, report}`. 설정 불변·주문 없음. `--days` 는 상태 파일이 있는 과거 운영일의 `report` 를 더한다.
 - `trader scalp report [--market KR|US --days 1..60 --live]` — 상태 파일로 승률·사유별 집계 + 판정자 GO vs NO_GO 사후 비교(`judge`)와 `enabled`·`judge_enabled`. `--live` 면 오늘 NO_GO 의 가상 수익을 당일 분봉으로 잰다. 마감 기준은 `<시장>.monitor.end`(schedule.yaml 이 깨졌으면 정규장 마감).
-- `/status` 「단타(모의 전용)」 절(`status.py`): 꺼짐 → `- 끔 (scalp.enabled=false)`, 켜짐 → 시장마다 `- {m}: 보유 {n}·청산 {k}[, 중단: …]`. 조회 예외는 절 안에서 한 줄(`- 단타 조회 실패: …`)로 바꾼다.
+- `/status` 「단타」 절(`status.py`): 켜진 계좌 없음 → `- 끔 (켜진 계좌 없음)`, 있으면 `- 켬: <계좌들>`(스위치는 켰지만 실효가 아니면 `<id>(실효 아님: 사유)`) + 시장마다 `- {m}: 보유 {n}·청산 {k}[, 중단: …]`. 조회 예외는 절 안에서 한 줄(`- 단타 조회 실패: …`)로 바꾼다.
 
 
 ## 데몬 잡
@@ -35,9 +35,9 @@
 
 ## 웹 (M11, `routes.py`)
 
-- `RESOURCES`: `/accounts/{id}/positions` 단타 조각 — 모의 현물 계좌이면서 오늘 상태 파일 다리에 든 계좌만. stop/target = 체결 평단(없으면 신호가) × (1 ∓ `stop_pct`/`take_profit_pct`, `engine.pos_cfg` 덮어쓰기 반영), 출처 "단타 규칙". 설정에 단타 계좌 목록은 없다(모의 계좌 전체가 대상).
+- `RESOURCES`: `/accounts/{id}/positions` 단타 조각 — 오늘 상태 파일 다리에 든 계좌만(모의·실전 무관 — 다리는 계좌별 스위치가 켜진 계좌에만 생긴다). stop/target = 체결 평단(없으면 신호가) × (1 ∓ `stop_pct`/`take_profit_pct`, `engine.pos_cfg` 덮어쓰기 반영), 출처 "단타 규칙". 설정에 단타 계좌 목록은 없다(대상은 계좌별 스위치 `scalp_enabled:<id>`).
 - SSE `scalp`: 시장별 오늘 상태 파일 mtime + 보유 수. nav `today/scalp-lane`.
-- 웹 알려진 차이: 단타가 든 종목은 같은 계좌에 현물 행(브로커 스냅샷)과 단타 행(lane `scalp`)으로 두 번 나온다(T7-R1) — M11b 는 단타 행을 「단타」 절에 따로 그리고 보유 표 합계에 더하지 않는다. `settings.scalp.accounts` 는 없다(대상 = 오늘 상태 파일에 다리가 있는 모의 현물 계좌, T7-R2).
+- 웹 알려진 차이: 단타가 든 종목은 같은 계좌에 현물 행(브로커 스냅샷)과 단타 행(lane `scalp`)으로 두 번 나온다(T7-R1) — M11b 는 단타 행을 「단타」 절에 따로 그리고 보유 표 합계에 더하지 않는다. `settings.scalp.accounts` 는 없다(대상 = 오늘 상태 파일에 다리가 있는 계좌, T7-R2 — 다리는 계좌별 스위치가 켜진 계좌에만 생긴다).
 - `GET /system/scalp?market=`(옛 `system.scalp_status`): 설정(enabled·judge·max_weight_pct·max_positions) + 시장별 오늘 open/closed/halted/pending·판정자 사후 비교(`judge_summary`, 분봉 조회 없음). 운영하지 않는 시장은 400.
 
 ## 알려진 차이 (옛 저장소 대비)
@@ -80,7 +80,7 @@
 - `hedge.enabled` 가 꺼져 있으면 bear 국면 게이트·전략가 제안 게이트가 함께 무력하다.
 - 마감 청산은 익절·손절 평가 뒤에 본다.
 - `adopt_entry_orders` 는 계좌로 필터하지 않는다(origin 만 필터 — 위 F3).
-- `scalp.enabled=false` 로 끄면 `scalp_body` 가 tick 전에 돌아가 열린 포지션의 청산·이월이 멈추고, 다음 날부터 `open_tickers` 에도 보이지 않아 리밸런스 제외에서 빠진다(옛 `_scalp_body` 동일). 끄기 전에 포지션을 비워야 한다.
+- 계좌별 스위치를 끄면 그 계좌의 신규 진입·판정 회수 진입만 멈춘다(`skip_accounts`). 열린 다리의 청산(손절 포함)·이월은 계속된다(`exit_skip_accounts` 는 시장만 본다). 스위치가 모두 꺼져도 오늘 파일의 열린 다리·판정 대기나 이월 창(`engine.CARRY_DAYS`) 안 옛 파일의 열린 다리가 있으면 `scalp_body` 는 틱을 돌리고(`jobs.has_scalp_state`, 신규 진입은 `allowed` 가 「켜진 계좌 없음」으로 막는다), 그런 상태도 없을 때만 「단타 켜진 계좌 없음」으로 건너뛴다(옛 `_scalp_body` 는 `scalp.enabled=false` 면 청산·이월까지 멈췄다).
 - `approve` 모드 모의 계좌: `skip_accounts` 는 env·시장만 보고 모드는 보지 않으므로 단타 진입이 승인 요청으로 쌓이고, 사람이 승인하면 scalp 가 추적하지 않는 매수가 생긴다(옛 동일). 수정 후보 `skip_accounts` 에 `policy != "auto"` → M10 이연.
 - `adopt_entry_orders`·`adopt_exit_orders` 는 `origin='scalp'` 로 거르지 않아 같은 계좌·종목의 결정 없는 다른 주문(rebalance·stop·hedge)을 흡수할 수 있다(플랜 "옛 SQL 그대로"). 원장 `origin` 열로 한 줄 필터 가능 → M10 이연.
 - `trade_block`·`judge_context` 는 예외를 삼킨다(`trade_block` 은 차단 없음, `judge_context` 는 호가·국면·시장 판단 중 실패한 입력을 None 으로 두고 진행).

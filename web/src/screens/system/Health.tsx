@@ -1,8 +1,9 @@
 // 헬스 — GET /system/health: 머리(단계 칩·점검 시각·버전·「지금 점검」= ?live=1), 영역 격자(Stats, 영역마다 단계 칩 + 첫 사유),
-// 사유 표(영역·내용·건·바로가기), 켜진 기능·제어 플래그는 details. /system/status 는 paused·flags 만 쓴다(원문 덤프 없음).
+// 사유 표(영역·내용·건·바로가기), 켜진 기능·제어 플래그는 details. /system/status 는 flags 만, 일시정지는 /system/pause(시각·경로)를 쓴다(원문 덤프 없음).
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Chip, Chips } from "../../components/Chip";
+import { pauseWhen, usePause } from "../../components/PauseNotice";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, getJson } from "../../lib/api";
@@ -61,17 +62,26 @@ export function Health() {
   };
 
   const flags = status.data?.flags ?? [];
-  const paused = status.data?.paused ?? null;
+  const pause = usePause();
 
   return body({ ...health, data: live ?? health.data }, "헬스", (h) => {
     const level = healthDot(h.level);
     const areas = Object.entries(h.areas ?? {});
+    const attention = areas.filter(([, lv]) => lv === "warn" || lv === "fail").length;
+    // 전체가 주의·장애인데 주의 영역이 없으면(사유만) 「문제없음」이라 쓰지 않는다
+    const areaSummary = attention
+      ? ` 중 ${attention}개 주의`
+      : level === "ok"
+        ? " 문제없음"
+        : ` 점검 · 사유 ${h.reasons.length}건`;
     const firstReason = (area: string) => h.reasons.find((r) => r.area === area)?.text.split("\n")[0];
     return (
       <>
         <div className="sys-head">
-          <Chip tone={level}>{LEVEL_TEXT[level]}</Chip>
-          {paused ? <Chip tone="warn">일시정지</Chip> : null}
+          <Chip tone={level}>운영 점검: {LEVEL_TEXT[level]}</Chip>
+          <span>
+            데몬·잡·주문·수집 등 {areas.length}개 영역{areaSummary}
+          </span>
           <span className="data-muted">
             {fmtWhen(h.checked_at)} 점검{h.version ? ` · 버전 ${h.version}` : ""}
           </span>
@@ -79,6 +89,18 @@ export function Health() {
             {busy ? "점검 중…" : "지금 점검"}
           </button>
         </div>
+        <p className="sys-trade">
+          {!pause.known ? (
+            <Chip tone="muted">{pause.loading ? "자동매매: 확인 중" : "자동매매: 확인하지 못함"}</Chip>
+          ) : pause.paused ? (
+            <>
+              <Chip tone="warn">자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음</Chip>{" "}
+              {pauseWhen(pause) ? <span className="data-muted">{pauseWhen(pause)}</span> : null} <Link to="/accounts">재개</Link>
+            </>
+          ) : (
+            <Chip tone="ok">자동매매: 동작 중</Chip>
+          )}
+        </p>
         {error ? (
           <p className="data-error" role="alert">
             {error}

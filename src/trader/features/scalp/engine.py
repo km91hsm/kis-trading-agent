@@ -1,11 +1,11 @@
-"""분 단위 단타 집행 — **모의 계좌 전용**, 기본 끔.
+"""분 단위 단타 집행 — **계좌별 스위치**(실전은 확인·자동·LIVE 필요), 모의 기본은 yaml.
 
 틱(60초)마다: ⓪ 열린 단타의 청산 점검(`exits` — 허용 판정과 무관, bear·금지·한도는 신규 진입만
-막는다) → ① 허용 판정(설정·모의 계좌·paused·일일 손실 한도·bear 국면·전략가 RISK_OFF/
+막는다) → ① 허용 판정(paused·켜진 계좌·일일 손실 한도·bear 국면·전략가 RISK_OFF/
 scalp_ok=false) → ② 판정 회수(지난 틱에 제출한 판정자 결과) → ③ 후보(오늘 `_scan` picks
 + 새 뉴스 재분석 종목 + 관심종목 − 보유·헤지·오늘 이미 거래) ≤ `max_universe` → ④ 1분봉 진입 규칙
 (`signals.py`) → ⑤ 포트 `stock_exec.execute(scalp_leg=...)` 로 계좌 모드·dry_run·게이트를 그대로
-지키며 주문(실전 계좌는 `skip_accounts`). 포지션은 **계좌별 다리**(진입·청산 주문 id)로 들고,
+지키며 주문(꺼진 계좌는 `skip_accounts`). 포지션은 **계좌별 다리**(진입·청산 주문 id)로 들고,
 상태는 `state/scalp/<date>/<market>.json`, 사건은 같은 폴더 `events.jsonl`.
 결정 행(`decisions`)은 만들지 않는다 — 오늘 LLM 결정과 같은 (date, market, ticker) 키를 덮기 때문.
 레인이라 어떤 기능도 import 하지 않고 포트(`accounts`·`regime`·`scan`·`stock_exec`)만 쓴다.
@@ -23,7 +23,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from trader.features.scalp import exits, messages, signals
+from trader.features.scalp import exits, messages, signals, switch
 from trader.features.scalp.judge import (
     ScalpJudge,
     bars_json,
@@ -99,13 +99,15 @@ def label(ctx: ScalpContext, market: str, ticker: str) -> str:
 def allowed(ctx: ScalpContext, market: str, today: date, st: dict) -> str | None:
     """단타 신규 진입을 하지 않을 이유(문자열) 또는 None. 킬스위치는 게이트(stock_exec 안)가
     본다."""
-    cfg = ctx.settings.scalp
-    if not cfg.enabled:
-        return "scalp.enabled=false"
-    if not any(a.env == "paper" and market in a.markets for a in accounts(ctx)):
-        return "모의 계좌 없음 (단타는 모의 전용)"
     if ctx.ports["accounts"].paused(ctx.conn):
         return "일시정지"
+    port = ctx.ports["accounts"]
+    if not any(
+        switch.account_enabled(ctx.conn, ctx.settings, a, port)[0]
+        for a in accounts(ctx)
+        if market in a.markets
+    ):
+        return "켜진 계좌 없음"
     if st.get("halted"):
         return f"일일 손실 한도: {st['halted']}"
     regime = ctx.ports["regime"]
@@ -220,8 +222,20 @@ def trade_block(ctx: ScalpContext, market: str, ticker: str) -> str | None:
 
 
 def skip_accounts(ctx: ScalpContext, market: str) -> frozenset[str]:
-    """단타는 모의 전용: 실전 계좌·그 시장이 아닌 계좌는 매 주문에서 건너뛴다(A8)."""
-    return frozenset(a.id for a in accounts(ctx) if a.env != "paper" or market not in a.markets)
+    """계좌별 스위치: 꺼졌거나 실효가 아닌(실전은 자동+LIVE 필요) 계좌·그 시장이 아닌 계좌는
+    매 주문에서 건너뛴다(A8)."""
+    port = ctx.ports["accounts"]
+    return frozenset(
+        a.id
+        for a in accounts(ctx)
+        if market not in a.markets or not switch.account_enabled(ctx.conn, ctx.settings, a, port)[0]
+    )
+
+
+def exit_skip_accounts(ctx: ScalpContext, market: str) -> frozenset[str]:
+    """청산용: 그 시장이 아닌 계좌만 건너뛴다. 스위치·일시정지는 보지 않는다 — 열린 다리의 청산
+    (손절 포함)이 영영 못 나가는 일을 막는다. 모드에 따른 대기는 기존 `can_trade`(A8)가 맡는다."""
+    return frozenset(a.id for a in accounts(ctx) if market not in a.markets)
 
 
 def decision(
@@ -583,11 +597,12 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
     cfg = ctx.settings.scalp
     st = load_state(ctx.state, today, market)
     exits.carry_over(ctx, market, today, st)
-    skip = skip_accounts(ctx, market)
+    entry_skip = skip_accounts(ctx, market)  # 진입·판정 회수: 스위치·실효 반영
+    exit_skip = exit_skip_accounts(ctx, market)  # 청산: 시장만 — 스위치를 끈 뒤에도 청산은 나간다
     out: dict[str, Any] = {"entries": [], "exits": [], "candidates": 0, "errors": []}
     had_state = bool(st.get("open") or st.get("pending"))
     if st.get("open"):
-        exits.check_exits(ctx, market=market, today=today, st=st, skip=skip, out=out)
+        exits.check_exits(ctx, market=market, today=today, st=st, skip=exit_skip, out=out)
     # 일일 손실 한도: 청산된 거래의 (수익률 × 비중) 합
     realized = sum(
         float(c.get("ret") or 0) * float(c.get("weight") or cfg.max_weight_pct)
@@ -615,7 +630,7 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
     judge_on = cfg.judge and ctx.judge is not None
     # --- 판정 회수 (지난 틱 제출분) ---
     if st.get("pending"):
-        for pos in settle_pending(ctx, market=market, today=today, st=st, skip=skip):
+        for pos in settle_pending(ctx, market=market, today=today, st=st, skip=entry_skip):
             out["entries"].append(
                 {"ticker": pos["ticker"], "price": pos["entry_price"], "qty": pos["qty"]}
             )
@@ -643,7 +658,7 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
                     price=e.price,
                     time_hms=e.time,
                     reason=e.reason(),
-                    skip=skip,
+                    skip=entry_skip,
                 )
             except Exception as err:  # noqa: BLE001 - 종목 하나의 실패가 틱을 멈추지 않는다
                 logger.warning("단타 후보 처리 실패 %s: %s", c["ticker"], err)

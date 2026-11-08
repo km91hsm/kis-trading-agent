@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from tests.features.scalp.conftest import D
 from tests.features.scalp.test_routes import _pos, client  # noqa: F401 — 픽스처 재사용
 from trader.features.scalp.state import save_state
@@ -25,3 +27,15 @@ def test_system_scalp_status(project, client):  # noqa: F811
     assert kr["KR"]["open"][0]["ticker"] == "005930" and kr["KR"]["halted"] == "일일 손실"
     assert kr["KR"]["pending"] == ["000660", "035420"]
     assert client.get("/api/system/scalp", params={"market": "XX"}).status_code == 400
+
+
+def test_system_scalp_enabled_follows_any_switch(client):  # noqa: F811
+    from tests.features.conftest import AUTH
+
+    deps = client.app.state.deps
+    off = deps.settings.scalp.model_copy(update={"enabled": False})
+    client.app.state.deps = replace(deps, settings=deps.settings.model_copy(update={"scalp": off}))
+    assert client.get("/api/system/scalp").json()["enabled"] is False  # yaml 꺼짐·플래그 없음
+    r = client.patch("/api/settings/scalp/paper-two", headers=AUTH, json={"enabled": True})
+    assert r.status_code == 200
+    assert client.get("/api/system/scalp").json()["enabled"] is True  # 플래그 하나로 켜짐

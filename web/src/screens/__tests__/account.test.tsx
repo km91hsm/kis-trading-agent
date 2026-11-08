@@ -98,6 +98,16 @@ const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement;
 const head = () => document.querySelector(".account-head") as HTMLElement;
 
 describe("계좌별 화면", () => {
+  test("paused 면 모드 옆 「(전체 일시정지로 주문 멈춤)」", async () => {
+    await mount(routes({ "GET /api/accounts": fixtureAccounts().map((a) => ({ ...a, paused: true })) }), "paper-1");
+    expect(document.body.textContent).toContain("(전체 일시정지로 주문 멈춤)");
+  });
+
+  test("paused 아니면 「(전체 일시정지로 주문 멈춤)」 없음", async () => {
+    await mount(routes(), "paper-1");
+    expect(document.body.textContent).not.toContain("전체 일시정지로 주문 멈춤");
+  });
+
   test("실전 계좌 auto 전환은 계좌 id 재입력 뒤 PATCH /accounts/real-1 {mode:'auto', confirm:'real-1'}", async () => {
     let gets = 0;
     const accounts = fixtureAccounts().map((a) => (a.id === "real-1" ? { ...a, mode: "approve" } : a));

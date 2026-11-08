@@ -43,6 +43,7 @@ const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
     render: (c) => (
       <>
         {c.mode}
+        {c.paused ? <span className="account-mode-note"> (전체 일시정지로 주문 멈춤)</span> : null}
         {c.modeNote ? <span className="account-mode-note"> · {c.modeNote}</span> : null}
       </>
     ),
@@ -149,6 +150,7 @@ function FoAccountCard({ account: a, status }: { account: Account; status?: FoSt
     >
       <p className="account-mode">
         모드 {MODE_LABEL[a.mode] ?? a.mode}
+        {a.paused ? <span className="account-mode-note"> (전체 일시정지로 주문 멈춤)</span> : null}
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
       <Stats cols={2} items={items} />

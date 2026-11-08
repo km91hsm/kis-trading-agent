@@ -8,10 +8,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
-from trader.features.scalp import engine
+from trader.features.scalp import engine, switch
 from trader.features.scalp.judge import judge_for, shutdown_judge
+from trader.features.scalp.state import load_state, state_dir
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec
 from trader.kernel.session.run_store import run_date_for
@@ -19,12 +22,30 @@ from trader.kernel.session.run_store import run_date_for
 logger = logging.getLogger("trader.scalp")
 
 
+def has_scalp_state(state: Path | None, market: str, today: date) -> bool:
+    """틱이 관리해야 할 단타 상태가 있는가 — 오늘 파일의 열린 다리·판정 대기, 또는
+    `exits.carry_over` 가 보는 창(지난 `engine.CARRY_DAYS` 일) 안 옛 파일의 열린 다리.
+    파일을 못 읽으면(깨진 JSON 등) 열린 다리가 있을 수 있으니 True(틱을 돌린다 — fail-safe)."""
+    try:
+        st = load_state(state, today, market)
+        if st.get("open") or st.get("pending"):
+            return True
+        for i in range(1, engine.CARRY_DAYS + 1):
+            d = today - timedelta(days=i)
+            if (state_dir(state, d) / f"{market}.json").exists() and load_state(
+                state, d, market
+            ).get("open"):
+                return True
+    except Exception:  # noqa: BLE001 - 읽기 실패는 틱으로 넘긴다(청산·이월을 놓치지 않게)
+        logger.warning("단타 상태 읽기 실패 %s — 틱을 돌린다", market, exc_info=True)
+        return True
+    return False
+
+
 def scalp_body(ctx: Any, job: Any) -> dict:
-    """1틱. 꺼짐·창 밖·휴장·일시정지·시세 클라이언트 없음이면 skipped(잡 표에는 보인다)."""
+    """1틱. 켜진 계좌 없음·창 밖·휴장·일시정지·시세 클라이언트 없음이면 skipped(잡 표에 보임)."""
     market = job.market or "KR"
     settings = ctx.settings
-    if not settings.scalp.enabled:
-        return {"skipped": "scalp.enabled=false"}
     acc = (ctx.ports or {}).get("accounts")
     if acc is None:
         return {"error": "accounts 포트 없음"}
@@ -38,6 +59,12 @@ def scalp_body(ctx: Any, job: Any) -> dict:
     try:
         if acc.paused(conn):
             return {"skipped": "일시정지"}
+        today = run_date_for(market, ctx.now())
+        # 스위치가 모두 꺼져도 열린 다리의 청산·이월은 틱이 맡는다(신규 진입은 allowed 가 막는다)
+        if not switch.any_enabled(conn, settings, acc, market) and not has_scalp_state(
+            ctx.state, market, today
+        ):
+            return {"skipped": "단타 켜진 계좌 없음"}
         market_client = acc.market_client()
         if market_client is None:
             return {"skipped": "시세 클라이언트 없음"}
@@ -56,7 +83,7 @@ def scalp_body(ctx: Any, job: Any) -> dict:
             exchanges={},  # 유니버스는 scan 소유 — engine.candidates 가 거래소를 찾는다
             judge=judge_for(ctx) if settings.scalp.judge else None,
         )
-        return engine.tick(sctx, market=market, today=run_date_for(market, ctx.now()))
+        return engine.tick(sctx, market=market, today=today)
     finally:
         conn.close()
 

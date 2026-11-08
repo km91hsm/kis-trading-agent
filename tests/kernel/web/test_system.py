@@ -143,6 +143,7 @@ def test_health_live_reports_kernel_areas(project):
 
 def test_health_ledger_failure_has_empty_areas(project):
     """원장을 못 읽어도 응답 모양(`areas`)은 같다."""
+
     def boom():
         raise sqlite3.OperationalError("locked")
 
@@ -259,9 +260,7 @@ def test_usage_ensure_fresh_enqueues_probe_only_when_stale(project, monkeypatch)
     conn = deps.conn_factory()
     kinds = [x[0] for x in conn.execute("SELECT kind FROM job_requests").fetchall()]
     assert kinds == ["usage_probe"]
-    assert client.post("/api/system/usage/ensure-fresh", headers=SAME).json() == {
-        "throttled": True
-    }
+    assert client.post("/api/system/usage/ensure-fresh", headers=SAME).json() == {"throttled": True}
     sysr._USAGE_ENSURE_LAST[0] = 0.0
     assert client.post("/api/system/usage/ensure-fresh", headers=SAME).json()["already"] is True
     conn.execute(
@@ -425,3 +424,72 @@ def test_notices_date_filter_is_kst_day(project):
     assert [r["text"] for r in both] == ["c"]
     assert c.get("/api/system/notices", params={"date": "2026-13-40"}).status_code == 422
     assert len(c.get("/api/system/notices").json()) == 4
+
+
+def test_pause_view_reports_latest_log(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    at = _iso(NOW)
+    log_change(conn, channel="tray", actor=None, key="paused", old=False, new=True, at=at)
+    conn.close()
+    r = make_client(deps).get("/api/system/pause").json()
+    assert r == {"paused": True, "at": at, "by": "tray"}
+
+
+def test_pause_view_without_log(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    conn.close()
+    r = make_client(deps).get("/api/system/pause").json()
+    assert r == {"paused": True, "at": None, "by": None}
+
+
+def test_pause_view_stale_log_ignored(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    log_change(conn, channel="web", actor=None, key="paused", old=True, new=False, at=_iso(NOW))
+    conn.close()
+    r = make_client(deps).get("/api/system/pause").json()
+    assert r == {"paused": True, "at": None, "by": None}
+
+
+def test_pause_view_malformed_log_is_unknown(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    conn.execute(
+        "INSERT INTO control_log (at, channel, actor, key, old, new) "
+        "VALUES (?, 'web', NULL, 'paused', NULL, '{not json')",
+        (_iso(NOW),),
+    )
+    conn.commit()
+    conn.close()
+    r = make_client(deps).get("/api/system/pause")
+    assert r.status_code == 200
+    assert r.json() == {"paused": True, "at": None, "by": None}
+
+
+def test_pause_view_same_at_tie_breaks_on_later_id(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    at = _iso(NOW)
+    log_change(conn, channel="web", actor=None, key="paused", old=False, new=True, at=at)
+    log_change(conn, channel="tray", actor=None, key="paused", old=False, new=True, at=at)
+    conn.close()
+    r = make_client(deps).get("/api/system/pause").json()
+    assert r == {"paused": True, "at": at, "by": "tray"}
+
+
+def test_status_includes_paused_at(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    at = _iso(NOW)
+    log_change(conn, channel="telegram", actor="x", key="paused", old=False, new=True, at=at)
+    conn.close()
+    r = make_client(deps).get("/api/system/status").json()
+    assert r["paused_at"] == at and r["paused_by"] == "telegram"

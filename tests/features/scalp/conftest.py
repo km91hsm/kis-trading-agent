@@ -1,7 +1,8 @@
 """scalp 테스트 공용 픽스처·헬퍼(Task 5~7 공유). `project` 는 루트 conftest.
 
-계좌: `paper-main`(모의 auto KR·US) · `paper-two`(모의 auto KR) · `real-1`(실전 auto KR — 단타는
-모의 전용이라 어떤 다리도 만들면 안 된다). 시각은 NOW(2026-11-04 수요일 10:30 KST)."""
+계좌: `paper-main`(모의 auto KR·US) · `paper-two`(모의 auto KR) · `real-1`(실전 auto KR).
+계좌별 규칙: 실전은 스위치를 켜고 모드 auto + LIVE 확인이 있을 때만 다리를 만든다.
+시각은 NOW(2026-11-04 수요일 10:30 KST)."""
 
 from datetime import UTC, date, datetime
 from decimal import Decimal

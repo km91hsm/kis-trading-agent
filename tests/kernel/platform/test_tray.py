@@ -85,17 +85,19 @@ def test_read_state_from_ledger(conn):
     assert st.web_url == "http://127.0.0.1:8787"
 
 
-def test_toggle_pause_uses_injected_setter(conn):
-    """기본은 control 플래그를 직접 뒤집지만, 주입된 setter 가 있으면 그것만 부른다
+def test_set_pause_writes_explicit_value_with_injected_setter(conn):
+    """명시적 값을 쓴다(뒤집지 않는다). 주입된 setter 가 있으면 그것만 부른다
     (accounts 포트의 set_paused(channel="tray") 가 control_log 를 남기도록)."""
     calls: list = []
-    new = tray.toggle_pause(lambda: conn, set_fn=lambda c, v: calls.append((c, v)), close=False)
-    assert new is True and calls == [(conn, True)]
+    tray.set_pause(lambda: conn, True, set_fn=lambda c, v: calls.append((c, v)), close=False)
+    assert calls == [(conn, True)]
     assert get_flag(conn, "paused", False) is False  # 기본 setter 는 쓰이지 않았다
 
-    assert tray.toggle_pause(lambda: conn, close=False) is True  # 기본: set_flag
+    tray.set_pause(lambda: conn, True, close=False)  # 기본: set_flag
     assert get_flag(conn, "paused", False) is True
-    assert tray.toggle_pause(lambda: conn, close=False) is False
+    tray.set_pause(lambda: conn, True, close=False)  # 같은 값을 다시 써도 뒤집히지 않는다
+    assert get_flag(conn, "paused", False) is True
+    tray.set_pause(lambda: conn, False, close=False)
     assert get_flag(conn, "paused", False) is False
 
 
@@ -150,15 +152,18 @@ class _FakeIcon:
         self.updated_evt.set()
 
 
-def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None, on_autostart=None):
+def _controller(
+    state_fn, *, on_set=lambda v: None, on_quit=lambda: None, on_autostart=None, confirm=None
+):
     icon = _FakeIcon()
     ctl = tray.TrayController(
         state_fn=state_fn,
-        on_toggle_pause=on_toggle,
+        on_set_pause=on_set,
         on_quit=on_quit,
         initial=state_fn(),
         run_on_main=lambda fn: fn(),
         on_toggle_autostart=on_autostart,
+        confirm_pause=confirm,
     )
     ctl.icon = icon
     return ctl, icon
@@ -204,17 +209,101 @@ def test_quit_action_returns_immediately_and_stops_icon_after_shutdown():
     assert icon.stopped is True
 
 
-def test_pause_action_toggles_on_worker_and_refreshes_title():
+def test_pause_action_sets_on_worker_and_refreshes_title():
     flag = {"paused": False}
 
-    def toggle():
-        flag["paused"] = not flag["paused"]
+    def set_pause(v):
+        flag["paused"] = v
 
-    ctl, icon = _controller(lambda: _state(paused=flag["paused"]), on_toggle=toggle)
+    ctl, icon = _controller(lambda: _state(paused=flag["paused"]), on_set=set_pause)
     ctl.pause_action(icon, None)
     assert icon.updated_evt.wait(5)  # 제목을 바꾼 뒤 메뉴를 갱신한다
     assert icon.title == "trader · 일시정지" and ctl.checked("toggle_pause") is True
     assert icon.menu_updates >= 1
+
+
+def _join_pause_workers():
+    for t in threading.enumerate():
+        if t.name == "trader-tray-pause":
+            t.join(5)
+
+
+def test_pause_confirm_cancel_skips_write():
+    calls = []
+    ctl, icon = _controller(lambda: _state(), on_set=calls.append, confirm=lambda: False)
+    ctl.pause_action(icon, None)
+    _join_pause_workers()
+    assert calls == []
+
+
+def test_pause_confirm_true_or_none_writes_true():
+    for answer in (True, None):
+        calls = []
+        ctl, icon = _controller(lambda: _state(), on_set=calls.append, confirm=lambda a=answer: a)
+        ctl.pause_action(icon, None)
+        _join_pause_workers()
+        assert calls == [True]  # 뒤집기가 아니라 명시적 True
+
+
+def test_resume_never_asks():
+    asked, calls = [], []
+    ctl, icon = _controller(
+        lambda: _state(paused=True),
+        on_set=calls.append,
+        confirm=lambda: asked.append(1) or False,
+    )
+    ctl.pause_action(icon, None)
+    _join_pause_workers()
+    assert asked == [] and calls == [False]
+
+
+def test_stale_cache_rereads_ledger_before_asking():
+    """캐시는 「실행 중」인데 원장은 이미 일시정지(웹·텔레그램에서 바꿈) → 묻지 않고 재개(False)를
+    명시적으로 쓴다. 캐시로 판단하면 「일시정지할까요?」를 물은 뒤 재개해 버린다."""
+    ledger = {"paused": False}
+    asked, calls = [], []
+    ctl, icon = _controller(
+        lambda: _state(paused=ledger["paused"]),
+        on_set=calls.append,
+        confirm=lambda: asked.append(1) or True,
+    )
+    ledger["paused"] = True  # 캐시(ctl.state)는 아직 False
+    assert ctl.state.paused is False
+    ctl.pause_action(icon, None)
+    _join_pause_workers()
+    assert asked == [] and calls == [False]
+
+
+def test_second_click_ignored_while_confirm_open():
+    """확인창이 떠 있는 동안 두 번째 클릭은 무시한다 — 두 창을 모두 확인해 일시정지 뒤 재개되는
+    일을 막는다."""
+    opened, release = threading.Event(), threading.Event()
+    asked, calls = [], []
+
+    def confirm():
+        asked.append(1)
+        opened.set()
+        release.wait(5)
+        return True
+
+    ledger = {"paused": False}
+
+    def set_pause(v):
+        calls.append(v)
+        ledger["paused"] = v
+
+    ctl, icon = _controller(
+        lambda: _state(paused=ledger["paused"]), on_set=set_pause, confirm=confirm
+    )
+    ctl.pause_action(icon, None)
+    assert opened.wait(5)
+    ctl.pause_action(icon, None)  # 첫 창이 떠 있는 동안
+    release.set()
+    _join_pause_workers()
+    assert asked == [1] and calls == [True]
+    ctl.pause_action(icon, None)  # 끝난 뒤 다시 누르면 받는다(재개 — 묻지 않음)
+    _join_pause_workers()
+    assert calls == [True, False]
 
 
 def test_on_main_falls_back_to_direct_call_without_appkit(monkeypatch):

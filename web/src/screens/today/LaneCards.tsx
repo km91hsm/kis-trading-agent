@@ -14,6 +14,8 @@ const STATE: Record<LaneCard["state"], { tone: Tone; text: string }> = {
   paused: { tone: "fail", text: "일시정지" },
 };
 
+const PAUSED_HELP = "전체 자동매매 일시정지 — 계좌 모드와 별개";
+
 /** 결정·주문 조회가 끝나지 않았거나(loading) 실패하면(error) 집계 대신 그 상태만 보인다(빈 목록을 「완료」로 오인하지 않게). */
 export type LaneFetch = "ready" | "loading" | "error";
 const FETCH: Record<Exclude<LaneFetch, "ready">, { tone: Tone; text: string }> = {
@@ -44,7 +46,13 @@ export function LaneCardView({
   const s = STATE[card.state];
   const { buy, sell, hold } = card.decisions;
   return (
-    <Card title={LANE_LABEL[card.lane]} right={<Badge tone={s.tone}>{s.text}</Badge>}>
+    <Card
+      title={LANE_LABEL[card.lane]}
+      right={
+        <Badge tone={s.tone}>{s.text}</Badge>
+      }
+    >
+      {card.state === "paused" ? <p className="lane-note">{PAUSED_HELP}</p> : null}
       <Stats
         cols={3}
         items={[

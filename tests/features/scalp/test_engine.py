@@ -10,7 +10,7 @@ from trader.features.accounts import api as accounts_api
 from trader.features.accounts import modes
 from trader.features.regime import regime as regime_mod
 from trader.features.regime import tools as regime_tools
-from trader.features.scalp import engine
+from trader.features.scalp import engine, switch
 from trader.features.scalp.state import load_state
 from trader.features.scan import watchlist
 from trader.kernel.broker.models import Fill, Position
@@ -65,7 +65,7 @@ def test_allowed_blocks_disabled_paused_bear_and_strategist(
 ):
     off = settings.scalp.model_copy(update={"enabled": False})
     ctx = scalp_ctx(settings=settings.model_copy(update={"scalp": off}))
-    assert engine.allowed(ctx, "KR", D, {}) == "scalp.enabled=false"
+    assert "켜진 계좌 없음" in engine.allowed(ctx, "KR", D, {})  # 모든 계좌 꺼짐
     ctx = scalp_ctx()
     modes.set_paused(conn, True)
     assert engine.allowed(ctx, "KR", D, {}) == "일시정지"
@@ -85,7 +85,7 @@ def test_allowed_blocks_disabled_paused_bear_and_strategist(
     assert engine.allowed(ctx, "KR", D, {"open": [{"ticker": "a"}, {"ticker": "b"}]}) is None
     # 모의 계좌가 없으면 금지
     ports["accounts"].accounts = lambda: [a for a in accounts if a.env == "real"]
-    assert "모의" in engine.allowed(ctx, "KR", D, {})
+    assert "켜진 계좌 없음" in engine.allowed(ctx, "KR", D, {})  # 실전은 기본 꺼짐
 
 
 def test_candidates_exclude_held_hedge_and_include_news_watch(
@@ -244,7 +244,7 @@ def test_minute_fetch_failure_isolated_per_ticker(scalp_ctx, market, project, mo
 
 
 def test_real_account_never_gets_scalp_legs(scalp_ctx, market, conn, project, accounts):
-    """Review Focus 3: 실전 계좌는 LIVE 확인된 auto 여도 단타 다리·주문·체크포인트가 없다."""
+    """스위치 기본 꺼짐: 실전 계좌는 LIVE 확인된 auto 여도 스위치를 켜기 전엔 다리·주문이 없다."""
     real = next(a for a in accounts if a.id == "real-1")
     modes.set_account_mode(conn, real, "auto", confirm=accounts_api.LIVE_CONFIRM)
     assert accounts_api.effective_mode(conn, real)[0] == "auto"  # 모드가 막는 게 아니다
@@ -259,6 +259,33 @@ def test_real_account_never_gets_scalp_legs(scalp_ctx, market, conn, project, ac
     assert read_checkpoint(d, "57_order_scalp_entry_real-1") is None
     pos = load_state(project / "state", D, "KR")["open"][0]
     assert "real-1" not in pos["legs"]
+
+
+def test_real_account_gets_legs_when_switched_on_auto_live(
+    scalp_ctx, market, conn, project, accounts
+):
+    real = next(a for a in accounts if a.id == "real-1")
+    modes.set_account_mode(conn, real, "auto", confirm=accounts_api.LIVE_CONFIRM)
+    set_flag(conn, switch.flag_key("real-1"), True)
+    scan_checkpoint(project, "KR", ["005930"])
+    market.minutes["005930"] = bars(burst=True)
+    out = engine.tick(scalp_ctx(), market="KR", today=D)
+    assert "real-1" in out["entries"][0]["qty"]
+    d = run_dir(D, "KR", "005930", project / "state")
+    assert read_checkpoint(d, "47_scalp_entry_real-1") is not None
+    pos = load_state(project / "state", D, "KR")["open"][0]
+    assert "real-1" in pos["legs"]
+
+
+def test_paper_switch_off_skips_that_account(scalp_ctx, market, conn, project):
+    set_flag(conn, switch.flag_key("paper-two"), False)
+    scan_checkpoint(project, "KR", ["005930"])
+    market.minutes["005930"] = bars(burst=True)
+    engine.tick(scalp_ctx(), market="KR", today=D)
+    ids = {r["account_id"] for r in conn.execute("SELECT account_id FROM orders")}
+    assert ids == {"paper-main"}
+    pos = load_state(project / "state", D, "KR")["open"][0]
+    assert "paper-two" not in pos["legs"] and "paper-main" in pos["legs"]
 
 
 def test_full_slots_block_entry_in_loop_not_allowed(scalp_ctx, settings, market, project):

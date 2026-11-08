@@ -130,6 +130,66 @@ def test_stop_exit_runs_after_bear_switch_and_ret_uses_fill_prices(
     assert st["open"] == [] and st["closed"][0]["exit_price"] == "9850"
 
 
+@pytest.mark.parametrize(
+    "accounts",
+    [
+        [
+            make_account("paper-main", "paper", "auto", ["KR"]),
+            make_account("real-1", "real", "auto", ["KR"]),
+        ]
+    ],
+)
+def test_exit_sent_after_switch_turned_off(scalp_ctx, market, brokers, accounts, conn, project):
+    """스위치는 신규 진입만 막는다 — 다리가 있는 계좌의 스위치를 끈 뒤에도 청산(손절)은 나간다."""
+    from trader.features.accounts import api as accounts_api
+    from trader.features.scalp import switch
+
+    real = next(a for a in accounts if a.id == "real-1")
+    modes.set_account_mode(conn, real, "auto", confirm=accounts_api.LIVE_CONFIRM)
+    set_flag(conn, switch.flag_key("real-1"), True)
+    ctx = _ctx(scalp_ctx, market)
+    pos = _enter(ctx, project)
+    assert set(pos["legs"]) == {"paper-main", "real-1"}
+    for acc in ("paper-main", "real-1"):
+        no = conn.execute(
+            "SELECT order_no FROM orders WHERE side='BUY' AND account_id=?", (acc,)
+        ).fetchone()["order_no"]
+        brokers[acc].fills[("KR", D)] = [_fill(no, "BUY", 49, "10000")]
+        brokers[acc].positions = [_pos(49)]
+    set_flag(conn, switch.flag_key("paper-main"), False)
+    set_flag(conn, switch.flag_key("real-1"), False)
+    assert engine.skip_accounts(ctx, "KR") >= {"paper-main", "real-1"}  # 진입 skip 에는 들어간다
+    market.prices[T] = Decimal("9800")  # 손절 −1% 아래
+    _advance(ctx, 3)
+    engine.tick(ctx, market="KR", today=D)
+    assert [r["qty"] for r in _sells(conn, "paper-main")] == [49]
+    assert [r["qty"] for r in _sells(conn, "real-1")] == [49]
+
+
+@pytest.mark.parametrize("accounts", [TWO_PAPER])
+def test_settle_pending_skips_switched_off_account(scalp_ctx, settings, market, conn, project):
+    """판정 회수 진입은 진입용 skip(스위치 반영) — 판정 대기 중 스위치를 끈 계좌엔 다리가 없다."""
+    from tests.features.scalp.conftest import SyncJudge
+    from trader.features.scalp import switch
+    from trader.features.scalp.schemas import ScalpVerdict
+    from trader.features.scalp.settings import ScalpCfg
+
+    go = ScalpVerdict(
+        go=True, size="half", take_profit_pct=0.02, stop_pct=0.02, max_hold_min=120,
+        reason="돌파 확인", confidence=0.7,
+    )  # fmt: skip
+    cfg = ScalpCfg(enabled=True, judge=True)
+    ctx = _ctx(scalp_ctx, market, settings=settings.model_copy(update={"scalp": cfg}))
+    ctx.judge = SyncJudge(go)
+    scan_checkpoint(project, "KR", [T])
+    assert engine.tick(ctx, market="KR", today=D)["entries"] == []  # 제출만
+    assert T in _st(project)["pending"]
+    set_flag(conn, switch.flag_key("paper-two"), False)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert [e["ticker"] for e in out["entries"]] == [T]
+    assert set(_st(project)["open"][0]["legs"]) == {"paper-main"}
+
+
 @pytest.mark.parametrize("accounts", [TWO_PAPER])
 def test_exit_skips_accounts_that_did_not_enter(scalp_ctx, market, brokers, conn, project):
     ctx = _ctx(scalp_ctx, market)
@@ -354,9 +414,7 @@ def test_failed_fill_query_keeps_recheck(scalp_ctx, market, brokers, project):
     assert _st(project)["open"] == []
 
 
-def test_carry_over_is_idempotent_and_syncs_original_day(
-    scalp_ctx, market, brokers, conn, project
-):
+def test_carry_over_is_idempotent_and_syncs_original_day(scalp_ctx, market, brokers, conn, project):
     """이월이 끊겨 옛 파일에 남아 있어도 중복 승계하지 않고, 전일 주문일로 체결을 다시 읽는다."""
     ctx = _ctx(scalp_ctx, market)
     _enter(ctx, project)
@@ -520,3 +578,33 @@ def test_finished_position_leaves_open_before_next_persist(
     assert out["exits"][0]["ticker"] == T
     assert any("000660" in o for o, _ in seen)  # B 의 중간 저장이 있었고
     assert all(not (set(o) & set(c)) for o, c in seen)  # A 는 양쪽에 동시에 없다
+
+
+def test_all_switches_off_drops_pending_but_exits_still_run(
+    scalp_ctx, market, brokers, conn, project
+):
+    """켜진 계좌가 없으면 판정 대기는 버려지고(그날 종목 끝) 주문이 없다. 청산은 나간다."""
+    from trader.features.scalp import switch
+
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10000")]
+    b.positions = [_pos(49)]
+    st = _st(project)
+    st["pending"] = {
+        "000660": {"signal_price": "10050", "signal_time": "102900", "reason": "r",
+                   "exchange": None, "submitted_at": NOW.isoformat()}
+    }  # fmt: skip
+    save_state(project / "state", D, "KR", st)
+    buys = conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0]
+    for acc in ("paper-main", "paper-two"):
+        set_flag(conn, switch.flag_key(acc), False)
+    market.prices[T] = Decimal("9800")  # 손절 −1% 아래
+    _advance(ctx, 3)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert "켜진 계좌 없음" in out["skipped"]
+    after = _st(project)
+    assert after["pending"] == {} and "000660" in after["done"]
+    assert conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0] == buys
+    assert [r["qty"] for r in _sells(conn)] == [49]  # 청산은 스위치와 무관하게 나간다
