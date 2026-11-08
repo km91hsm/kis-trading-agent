@@ -354,6 +354,18 @@ export type SavetickerResp = {
   streams?: SavetickerStream[];
   summary?: { state: CollectionState; recorded: number; active_recorded?: number; historical?: number; unconfirmed?: number; note: string | null } & Record<CollectionState, number>;
   recovery?: { state: string; text: string };
+  /** 확장 설치 상태 — 경로는 이 PC 에서 직접 연 화면에서만(아니면 null) */
+  install?: SavetickerInstallState;
+  /** 첫 안내 「안 씀」 여부 */
+  onboarding?: { dismissed: boolean };
+};
+export type SavetickerInstallState = {
+  registered: boolean;
+  installed_version: string | null;
+  bundled_version: string | null;
+  update_needed: boolean;
+  package: string | null;
+  extension_dir: string | null;
 };
 export type ScalpResp = { enabled: boolean; judge: boolean; max_weight_pct: number; max_positions: number; markets: Record<string, { open: unknown[]; closed: unknown[]; halted: boolean }> };
 export type FoAccount = { id: string; env: string; mode: string; paused: boolean; state: string | null; enabled: boolean; triggers: unknown[] };
