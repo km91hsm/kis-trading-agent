@@ -43,7 +43,7 @@ const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
     render: (c) => (
       <>
         {c.mode}
-        {c.paused ? <span className="account-mode-note"> (전체 일시정지로 주문 멈춤)</span> : null}
+        {c.paused ? <span className="account-mode-note"> (전체 일시정지로 새 매수 멈춤)</span> : null}
         {c.modeNote ? <span className="account-mode-note"> · {c.modeNote}</span> : null}
       </>
     ),
@@ -150,7 +150,7 @@ function FoAccountCard({ account: a, status }: { account: Account; status?: FoSt
     >
       <p className="account-mode">
         모드 {MODE_LABEL[a.mode] ?? a.mode}
-        {a.paused ? <span className="account-mode-note"> (전체 일시정지로 주문 멈춤)</span> : null}
+        {a.paused ? <span className="account-mode-note"> (전체 일시정지로 새 매수 멈춤)</span> : null}
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
       <Stats cols={2} items={items} />
@@ -216,7 +216,7 @@ function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; c
       <Confirm
         open={open}
         title={paused ? "전체 재개" : "전체 일시정지"}
-        body={paused ? "모든 계좌의 자동 매매를 다시 켭니다." : "모든 계좌의 새 주문을 멈춥니다."}
+        body={paused ? "모든 계좌의 자동 매매를 다시 켭니다." : "모든 계좌의 새 매수·진입과 승인을 멈춥니다(손절·청산은 계속)."}
         live={paused && confirmId ? { accountId: confirmId } : undefined}
         onConfirm={(confirm) => void submit(confirm)}
         onClose={() => setOpen(false)}

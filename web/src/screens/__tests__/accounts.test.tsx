@@ -59,14 +59,14 @@ const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
 const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement;
 
 describe("계좌·보유 통합 화면", () => {
-  test("paused 면 모드 옆 「(전체 일시정지로 주문 멈춤)」, 아니면 없음", async () => {
+  test("paused 면 모드 옆 「(전체 일시정지로 새 매수 멈춤)」, 아니면 없음", async () => {
     await mount(routes({ "GET /api/accounts": fixtureAccounts().map((a) => ({ ...a, paused: true })) }));
-    expect(document.body.textContent).toContain("(전체 일시정지로 주문 멈춤)");
+    expect(document.body.textContent).toContain("(전체 일시정지로 새 매수 멈춤)");
   });
 
-  test("paused 아니면 「(전체 일시정지로 주문 멈춤)」 없음", async () => {
+  test("paused 아니면 「(전체 일시정지로 새 매수 멈춤)」 없음", async () => {
     await mount(routes());
-    expect(document.body.textContent).not.toContain("전체 일시정지로 주문 멈춤");
+    expect(document.body.textContent).not.toContain("전체 일시정지로 새 매수 멈춤");
   });
 
   test("섹션 컨테이너는 데이터 전에 있고, 합계·환율 줄을 그린다", async () => {

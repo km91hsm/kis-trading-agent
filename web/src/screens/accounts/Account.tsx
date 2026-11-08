@@ -246,7 +246,7 @@ function Header({ account: a, at, now, onDone }: { account: AccountRow; at: numb
             { id: "cash", label: "현금", value: fmtMoney(a.cash ?? null, c), sub: `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
           ]}
         />
-        {a.paused ? <p className="mode-note">(전체 일시정지로 주문 멈춤)</p> : null}
+        {a.paused ? <p className="mode-note">(전체 일시정지로 새 매수 멈춤)</p> : null}
         <ModeSwitch key={`${a.id}:${a.mode}`} id={a.id} env={a.env} mode={a.mode} modeNote={a.mode_note} onDone={onDone} />
       </Card>
     </div>

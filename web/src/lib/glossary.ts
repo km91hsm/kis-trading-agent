@@ -27,7 +27,7 @@ export const GLOSSARY: Record<string, TermEntry> = {
   "gate.reject": { label: "거부", help: "리스크 게이트가 한도·규칙으로 주문을 막았다. 사유는 전부 적힌다." },
   trigger: { label: "트리거", help: "익절선·±7%·무효화 조건에 닿아 재평가 세션을 띄운 신호." },
   sycophantic: { label: "토론 붕괴", help: "강세·약세가 한쪽으로 쏠려 라운드 0 의견을 우선한 경우." },
-  paused: { label: "일시정지", help: "거래 중단. 판정만 기록하고 주문·승인을 내지 않는다." },
+  paused: { label: "일시정지", help: "새 매수·진입과 승인을 멈춘다. 손절·청산은 계속된다." },
   regime: { label: "국면", help: "지수 proxy(KODEX 200·SPY)의 200일선·20일 수익률·변동성 3지표로 판정한 시장 상태. 하락(bear)이면 신규 매수를 막고 인버스 ETF 로 헤지한다." },
   sector_weight: { label: "업종 비중", help: "같은 업종(반도체·바이오/제약·산업재/건설 …) 보유 평가금액의 NAV 대비 합. 상한(기본 40%)을 넘기면 그 업종의 신규 매수를 게이트가 거부한다." },
   job_queue: { label: "작업 대기열", help: "웹·데몬이 넣은 요청(스캔·분석·백필·학습)을 데몬이 한 번에 하나씩 순서대로 실행한다. 데몬이 꺼져 있으면 쌓이지 않는다." },

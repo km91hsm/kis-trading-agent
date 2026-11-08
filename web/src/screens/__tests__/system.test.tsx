@@ -248,7 +248,7 @@ describe("시스템 화면", () => {
   test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
     await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
     const h = section("health");
-    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음");
+    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 매수·진입과 승인을 멈춤 · 손절·청산은 계속");
     expect(h.textContent).toContain("▲ 메뉴");
     expect(Array.from(h.querySelectorAll("a")).find((a) => a.textContent === "재개")?.getAttribute("href")).toBe("/accounts");
   });

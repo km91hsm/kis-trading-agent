@@ -30,7 +30,7 @@ export function PauseBanner({ pause }: { pause?: Pause }) {
   const when = pauseWhen(p);
   return (
     <p className="pause-banner" role="status">
-      자동매매 전체 일시정지 중{when ? ` · ${when}` : ""} — 계좌 모드(자동/승인)는 그대로, 새 주문만 멈춤{" "}
+      자동매매 전체 일시정지 중{when ? ` · ${when}` : ""} — 계좌 모드(자동/승인)는 그대로, 새 매수·진입만 멈춤(손절·청산은 계속){" "}
       <Link to="/accounts">재개</Link>
     </p>
   );

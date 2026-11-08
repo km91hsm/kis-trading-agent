@@ -60,7 +60,7 @@ CLI(`uv run trader spot --help` 로 확인):
 ## 규약
 
 - 레인은 `trader.kernel.*` 만 import 한다. 계좌·수집·국면 같은 서비스 기능은 `Boot.ports`(`accounts`·`inputs`·`regime`·`scan`·`scalp`)로 주입받는다. `ExecContext.ports`·`ToolContext.ports` 에 `regime` 이 없으면 국면 bull·기울기 0·킬스위치/블랙아웃 없음, `scan` 이 없으면 테마 규칙 생략으로 본다(`registry.import_violations`). 지연 import 로 다른 기능에 닿지 않고 전부 포트·커널을 경유한다.
-- 모든 주문·승인은 `kernel/execution` 코어를 지난다. 계좌 모드·일시정지는 `ExecContext.policy`·`paused` 콜백(accounts 포트)으로 받는다. 알림·로그에는 계좌 id 만 쓴다. `dry_run` 은 인자가 아니라 env `TRADER_DRY_RUN` 하나로 하위 프로세스(LLM 세션)까지 전달한다.
+- 모든 주문·승인은 `kernel/execution` 코어를 지난다. 계좌 모드·일시정지는 `ExecContext.policy`·`paused` 콜백(accounts 포트)으로 받는다(일시정지는 새 매수·판단 매도·승인 실행만 막고 위험 청산 `risk_exit` 은 전송). 알림·로그에는 계좌 id 만 쓴다. `dry_run` 은 인자가 아니라 env `TRADER_DRY_RUN` 하나로 하위 프로세스(LLM 세션)까지 전달한다.
 - 스키마 모델은 `extra="forbid"`. 가격은 양수만, `target_weight` 는 0~0.25. 쓰기 허용·전제조건은 `WRITE_RULES`(glob) + 스키마·파일명↔페이로드 일치·`debate_rounds` 상한이 강제한다.
 - 원장 쓰기는 호출마다 commit 하고 행 단위로 멱등이다(같은 단계 재적재 = 덮어쓰기, 행 id 유지). 로거는 `trader.spot`.
 - `settings.yaml` 키를 더하면 `templates/config/settings.yaml` 도 같이 바꾼다.

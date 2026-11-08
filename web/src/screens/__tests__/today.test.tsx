@@ -80,7 +80,7 @@ describe("오늘 화면", () => {
     const b = document.querySelector(".pause-banner") as HTMLElement;
     expect(b.textContent).toContain("자동매매 전체 일시정지 중 · ");
     expect(b.textContent).toContain("텔레그램");
-    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 새 주문만 멈춤");
+    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 새 매수·진입만 멈춤(손절·청산은 계속)");
     expect(b.querySelector("a")?.getAttribute("href")).toBe("/accounts");
   });
 
@@ -100,8 +100,8 @@ describe("오늘 화면", () => {
   test("레인 카드 paused 배지에 「계좌 모드와 별개」 설명", async () => {
     await mount(routes({ "GET /api/accounts": [fixtureAccount({ paused: true })] }));
     const lane = section("spot-lane");
-    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 계좌 모드와 별개");
-    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 새 매수만 멈춤, 계좌 모드와 별개");
+    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 새 매수만 멈춤, 계좌 모드와 별개");
     expect(lane.querySelector("[title]")).toBeNull(); // 보이는 줄만 — title 중복 없음
   });
 

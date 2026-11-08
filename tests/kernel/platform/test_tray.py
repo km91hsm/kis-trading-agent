@@ -335,3 +335,9 @@ def test_autostart_action_noop_when_unavailable():
     assert ctl.enabled("autostart") is False
     ctl.autostart_action(icon, None)
     assert called == [] and icon.menu_updates == 0
+
+
+def test_pause_confirm_message_says_risk_exits_continue():
+    msg = tray.PAUSE_CONFIRM_MESSAGE
+    assert "새 매수·진입과 승인이 멈춥니다" in msg
+    assert "손절·청산은 계속" in msg and "「종료」" in msg
