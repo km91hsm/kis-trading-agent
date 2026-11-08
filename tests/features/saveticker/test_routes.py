@@ -63,3 +63,100 @@ def test_saveticker_status_and_restart_api(project, client):
 def test_feature_declares_restart_namespace_and_nav():
     assert FLAG in FEATURE.control_namespaces
     assert NavItem("system", "saveticker", "데이터 수집", 40) in FEATURE.nav
+
+
+# --- 웹 설치·첫 안내 (2026-11-08) -------------------------------------------------
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from trader.features.saveticker import bridge_install  # noqa: E402
+
+LOCAL_AUTH = {"Authorization": "Bearer t", "Origin": "http://127.0.0.1"}
+ONBOARDING = "saveticker.onboarding_dismissed"
+
+
+def _local(client):
+    return TestClient(client.app, client=("127.0.0.1", 50000), base_url="http://127.0.0.1")
+
+
+@pytest.fixture
+def fake_install(monkeypatch, tmp_path):
+    calls = []
+    pkg = tmp_path / "pkg"
+
+    def status(**_):
+        return {
+            "registered": bool(calls),
+            "registration": "/r.json",
+            "host_path": "/h",
+            "package": str(pkg),
+            "installed_version": "1.5.0" if calls else None,
+            "bundled_version": "1.5.0",
+            "update_needed": False,
+        }
+
+    def install(**_):
+        calls.append(1)
+        return {
+            "ok": True,
+            "extension": str(pkg / "extension"),
+            "next_steps": ["a"],
+            "replaced": False,
+        }
+
+    monkeypatch.setattr(bridge_install, "install_status", status)
+    monkeypatch.setattr(bridge_install, "install", install)
+    return calls
+
+
+def test_status_includes_install_and_onboarding(client, fake_install):
+    r = _local(client).get("/api/system/saveticker").json()
+    assert r["install"]["registered"] is False
+    assert r["install"]["extension_dir"].replace("\\", "/").endswith("/pkg/extension")
+    assert r["onboarding"] == {"dismissed": False}
+    remote = client.get("/api/system/saveticker").json()["install"]
+    assert remote["package"] is None and remote["extension_dir"] is None
+    assert "registration" not in remote and "host_path" not in remote
+
+
+def test_install_requires_local_token_origin(client, fake_install):
+    local = _local(client)
+    assert local.post("/api/system/saveticker/install").status_code == 401
+    bad = {**LOCAL_AUTH, "Origin": "http://evil.example"}
+    assert local.post("/api/system/saveticker/install", headers=bad).status_code == 403
+    proxied = {**LOCAL_AUTH, "X-Forwarded-For": "10.0.0.2"}
+    assert local.post("/api/system/saveticker/install", headers=proxied).status_code == 403
+    assert client.post("/api/system/saveticker/install", headers=AUTH).status_code == 403
+    assert fake_install == []
+    r = local.post("/api/system/saveticker/install", headers=LOCAL_AUTH)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["next_steps"] == ["a"] and body["replaced"] is False
+    assert body["extension"].replace("\\", "/").endswith("/pkg/extension")
+    assert fake_install == [1]
+
+
+def test_install_error_is_korean_400(client, monkeypatch):
+    def boom(**_):
+        raise bridge_install.InstallError("registration_exists")
+
+    monkeypatch.setattr(bridge_install, "install", boom)
+    r = _local(client).post("/api/system/saveticker/install", headers=LOCAL_AUTH)
+    assert r.status_code == 400
+    assert "다른 프로그램" in r.json()["detail"] and "registration_exists" not in r.json()["detail"]
+
+
+def test_onboarding_dismiss_persists_and_logs(project, client, fake_install):
+    assert (
+        client.post("/api/system/saveticker/onboarding", json={"dismissed": True}).status_code
+        == 401
+    )
+    r = client.post("/api/system/saveticker/onboarding", headers=AUTH, json={"dismissed": True})
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert client.get("/api/system/saveticker").json()["onboarding"] == {"dismissed": True}
+    conn = _ledger(project)
+    try:
+        keys = [x["key"] for x in conn.execute("SELECT key FROM control_log").fetchall()]
+    finally:
+        conn.close()
+    assert keys == [ONBOARDING]
