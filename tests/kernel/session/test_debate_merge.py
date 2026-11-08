@@ -169,3 +169,18 @@ def test_merged_stance_change_none_when_merged_stance_unchanged():
     out = merge_lanes(_two_lane(r0, final))
     assert out["round0"]["bull"]["stance"] == out["final"]["bull"]["stance"] == "BULLISH"
     assert out["final"]["bull"]["stance_change"] is None
+
+
+def test_merged_stance_change_none_when_primary_stance_differs_from_merged_final():
+    """중립 평균이라 주 턴(판 a, BULLISH)의 stance 가 합친 final(NEUTRAL)과 다르면 주 턴의 전환
+    근거(→BULLISH)는 합친 턴의 전환을 설명하지 못한다 — None."""
+    r0 = {"a": turn("bull", "BEARISH", 0.5), "b": turn("bull", "BEARISH", 0.5)}
+    final = {
+        "a": turn("bull", "BULLISH", 0.3, round=1, stance_change=_sc("BEARISH", "a 이유")),
+        "b": turn("bull", "BEARISH", 0.3, round=1),
+    }
+    out = merge_lanes(_two_lane(r0, final))
+    assert out["round0"]["bull"]["stance"] == "BEARISH"
+    assert out["final"]["bull"]["stance"] == "NEUTRAL"
+    assert out["final"]["bull"]["stance_change"] is None
+    DebateTurn.model_validate(out["final"]["bull"])

@@ -113,6 +113,23 @@ def _interleave(lists: list[list[str]]) -> list[str]:
     return out
 
 
+def _merge_basis(turns: list[DebateTurn]) -> tuple[str, float, DebateTurn]:
+    """합칠 턴들의 (대표 stance, 부호 확신 평균, 주 턴) — 주 턴은 평균 부호 쪽으로 부호 확신이
+    가장 큰 판(엄격히 클 때만 바꾼다 → 동률·중립이면 판 a)."""
+    mean = sum(signed_conviction(t) for t in turns) / len(turns)
+    if mean > STANCE_THRESHOLD:
+        stance, sign = "BULLISH", 1.0
+    elif mean < -STANCE_THRESHOLD:
+        stance, sign = "BEARISH", -1.0
+    else:
+        stance, sign = "NEUTRAL", 0.0
+    primary = turns[0]
+    for t in turns[1:]:
+        if sign * signed_conviction(t) > sign * signed_conviction(primary):
+            primary = t
+    return stance, mean, primary
+
+
 def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
     """같은 측·같은 라운드의 판별 턴(판 a 먼저)을 한 턴으로 합친다(스펙 §5).
 
@@ -127,17 +144,7 @@ def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
     first = turns[0]
     if any(t.side != first.side or t.round != first.round for t in turns):
         raise ValueError("같은 측·같은 라운드의 턴만 합칠 수 있습니다")
-    mean = sum(signed_conviction(t) for t in turns) / len(turns)
-    if mean > STANCE_THRESHOLD:
-        stance, sign = "BULLISH", 1.0
-    elif mean < -STANCE_THRESHOLD:
-        stance, sign = "BEARISH", -1.0
-    else:
-        stance, sign = "NEUTRAL", 0.0
-    primary = first
-    for t in turns[1:]:  # 엄격히 클 때만 바꾼다 → 동률·중립이면 판 a
-        if sign * signed_conviction(t) > sign * signed_conviction(primary):
-            primary = t
+    stance, mean, primary = _merge_basis(turns)
     return DebateTurn(
         side=first.side,
         round=first.round,
@@ -152,12 +159,15 @@ def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
     )
 
 
-def _rebase_stance_change(round0: DebateTurn, final: DebateTurn) -> DebateTurn:
+def _rebase_stance_change(
+    round0: DebateTurn, final: DebateTurn, primary_stance: str
+) -> DebateTurn:
     """합친 final 턴의 `stance_change` 를 합친 round0 대표 stance 기준으로 맞춘다: 대표 stance 가
     그대로면 None, 바뀌었으면 주 턴의 이유·근거에 from_stance = 합친 round0 stance(주 턴에
-    전환 근거가 없으면 None)."""
+    전환 근거가 없으면 None). 주 턴의 stance(`primary_stance`)가 합친 final 대표 stance 와
+    다르면 주 턴의 전환 근거가 합친 전환을 설명하지 못하므로 None."""
     sc = final.stance_change
-    if sc is None or round0.stance == final.stance:
+    if sc is None or round0.stance == final.stance or primary_stance != final.stance:
         return final.model_copy(update={"stance_change": None})
     return final.model_copy(
         update={"stance_change": sc.model_copy(update={"from_stance": round0.stance})}
@@ -200,7 +210,14 @@ def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = N
         }
 
     round0, final = merged("round0"), merged("final")
-    final = {side: _rebase_stance_change(round0[side], t) for side, t in final.items()}
+    final = {
+        side: _rebase_stance_change(
+            round0[side],
+            t,
+            _merge_basis([DebateTurn.model_validate(s["final"][side]) for s in lanes])[2].stance,
+        )
+        for side, t in final.items()
+    }
     out = research_summary(round0, final, lanes[0]["rounds"], evidence_ids=evidence_ids)
     out["convergence_by_lane"] = {k: summaries[k].get("convergence") for k in LANES}
     out["convergence"] = _worst_convergence(list(out["convergence_by_lane"].values()))

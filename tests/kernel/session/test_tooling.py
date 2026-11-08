@@ -636,6 +636,21 @@ def test_shrink_never_cuts_summary_lanes_list():
     assert out["research_summary"]["lanes"] == ["a", "b"]
 
 
+
+def test_shrink_compacts_nested_lanes_like_other_lists():
+    """보호는 요약 최상위 `lanes` 뿐 — 다른 곳에 중첩된 `lanes` 는 일반 규칙대로 축약된다."""
+    lanes = [f"판{i}" * 40 for i in range(50)]
+    obj = {
+        "research_summary": {"lanes": ["a", "b"], "by_lane": {"a": {"lanes": lanes}}},
+        "news": [{"title": "나" * 500, "lanes": lanes} for _ in range(200)],
+    }
+    limit = 3000
+    out = shrink(obj, limit)
+    assert _size(out) <= limit
+    assert out["research_summary"]["lanes"] == ["a", "b"]
+    assert out["research_summary"]["by_lane"]["a"]["lanes"] != lanes
+    assert out["news"][0]["lanes"] != lanes
+
 def test_trader_summary_one_lane_round0_briefs_merged_final():
     """한 판만 preferred=="round0" 인 합친 요약: 합친 preferred 가 round0 이라 `final` 은 핵심만."""
     from trader.kernel.session.debate import merge_lanes, research_summary
