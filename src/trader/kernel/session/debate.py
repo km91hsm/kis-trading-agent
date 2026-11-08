@@ -96,6 +96,93 @@ def research_summary(
     }
 
 
+STANCE_THRESHOLD = 0.1  # 합친 턴 대표 stance 경계(부호 확신 평균 기준)
+MERGE_LIMIT = 5  # 합친 턴의 arguments·rebuttals·what_would_change_my_mind 상한
+LANES = ("a", "b")
+
+
+def _interleave(lists: list[list[str]]) -> list[str]:
+    """판 a, b 순서로 번갈아 고르며 중복을 빼고 `MERGE_LIMIT` 개까지."""
+    out: list[str] = []
+    for i in range(max((len(x) for x in lists), default=0)):
+        for items in lists:
+            if i < len(items) and items[i] not in out:
+                out.append(items[i])
+                if len(out) == MERGE_LIMIT:
+                    return out
+    return out
+
+
+def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
+    """같은 측·같은 라운드의 판별 턴(판 a 먼저)을 한 턴으로 합친다(스펙 §5).
+
+    - 부호 확신 평균 > 0.1 이면 BULLISH, < −0.1 이면 BEARISH, 그 밖 NEUTRAL. conviction = |평균|.
+    - `valuation_view`·`timing`·`stance_change` 는 주 턴(평균 부호 쪽으로 부호 확신이 가장 큰
+      판, 동률·중립이면 판 a)에서 가져온다.
+    - `arguments`·`rebuttals`·`what_would_change_my_mind` 는 판을 번갈아 중복 없이 5개까지.
+    - `issues`·`responses`·`replies` 는 비운다(판 간 쟁점 ID 충돌 회피, 원본은 `by_lane`).
+    """
+    if not turns:
+        raise ValueError("합칠 턴이 없습니다")
+    first = turns[0]
+    if any(t.side != first.side or t.round != first.round for t in turns):
+        raise ValueError("같은 측·같은 라운드의 턴만 합칠 수 있습니다")
+    mean = sum(signed_conviction(t) for t in turns) / len(turns)
+    if mean > STANCE_THRESHOLD:
+        stance, sign = "BULLISH", 1.0
+    elif mean < -STANCE_THRESHOLD:
+        stance, sign = "BEARISH", -1.0
+    else:
+        stance, sign = "NEUTRAL", 0.0
+    primary = first
+    for t in turns[1:]:  # 엄격히 클 때만 바꾼다 → 동률·중립이면 판 a
+        if sign * signed_conviction(t) > sign * signed_conviction(primary):
+            primary = t
+    return DebateTurn(
+        side=first.side,
+        round=first.round,
+        stance=stance,
+        valuation_view=primary.valuation_view,
+        arguments=_interleave([t.arguments for t in turns]),
+        rebuttals=_interleave([t.rebuttals for t in turns]),
+        timing=primary.timing,
+        conviction=round(abs(mean), 4),
+        what_would_change_my_mind=_interleave([t.what_would_change_my_mind for t in turns]),
+        stance_change=primary.stance_change,
+    )
+
+
+def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = None) -> dict:
+    """판별 `research_summary` → 하나의 요약(스펙 §5). 판 a 뿐이면 그 요약을 그대로 돌려준다.
+
+    두 판이면 `round0`·`final` 의 같은 측을 `merge_turns` 로 합쳐 차이·수렴·시점 일치를 다시
+    계산하고, 경고(`sycophantic`·`convergence_review`)는 판별 결과의 OR, `preferred` 는 한 판이라도
+    round0 이면 round0. 판별 원본은 `by_lane`(턴 밖)에 둔다."""
+    if set(summaries) == {"a"}:
+        return summaries["a"]
+    if set(summaries) != set(LANES):
+        raise ValueError(f"알 수 없는 판 구성입니다: {sorted(summaries)}")
+    lanes = [summaries[k] for k in LANES]
+    if len({s["rounds"] for s in lanes}) != 1:
+        raise ValueError("두 판의 마지막 라운드가 다릅니다")
+
+    def merged(part: str) -> dict[str, DebateTurn]:
+        return {
+            side: merge_turns([DebateTurn.model_validate(s[part][side]) for s in lanes])
+            for side in ("bull", "bear")
+        }
+
+    out = research_summary(
+        merged("round0"), merged("final"), lanes[0]["rounds"], evidence_ids=evidence_ids
+    )
+    out["sycophantic"] = any(s.get("sycophantic") for s in lanes)
+    out["convergence_review"] = any(s.get("convergence_review") for s in lanes)
+    out["preferred"] = "round0" if any(s.get("preferred") == "round0" for s in lanes) else "final"
+    out["lanes"] = list(LANES)
+    out["by_lane"] = summaries
+    return out
+
+
 def analyst_consensus(reports: list[AnalystReport], min_conviction: float) -> dict | None:
     """네 역할 리포트가 모두 같은 방향이고 확신이 전부 기준 이상이면 합의 정보, 아니면 None.
 

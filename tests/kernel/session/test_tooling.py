@@ -522,3 +522,82 @@ def test_compact_context_preserves_five_blogs_when_rank_lists_need_further_reduc
     assert all(out["market_activity"]["rankings"][k] for k in ("turnover", "gain", "loss"))
     assert out["source_coverage"]["naver_blog/ranto28"]["status"] == "present"
     assert _size(out) <= 8000
+
+
+def _summ(long: list[str]) -> dict:
+    from trader.kernel.session.debate import research_summary
+    from trader.kernel.session.schemas import DebateTurn
+
+    def t(side, rnd):
+        return DebateTurn.model_validate(
+            {**_turn(side, rnd), "arguments": long, "rebuttals": long,
+             "what_would_change_my_mind": long}
+        )  # fmt: skip
+
+    r0 = {"bull": t("bull", 0), "bear": t("bear", 0)}
+    return research_summary(r0, {"bull": t("bull", 1), "bear": t("bear", 1)}, 1)
+
+
+BRIEF_KEYS = {"side", "round", "stance", "valuation_view", "timing", "conviction"}
+
+
+def test_trader_summary_briefs_by_lane_turns():
+    from trader.kernel.session.debate import merge_lanes
+
+    long = ["가" * 600] * 5
+    merged = merge_lanes({"a": _summ(long), "b": _summ(long)})
+    out = tooling.trader_summary(merged)
+    for lane in ("a", "b"):
+        assert "issues" not in out["by_lane"][lane]
+        for part in ("round0", "final"):
+            for t in out["by_lane"][lane][part].values():
+                assert set(t) <= BRIEF_KEYS
+    assert len(json.dumps(out, ensure_ascii=False).encode()) < 24_000
+    assert merged["by_lane"]["a"]["final"]["bull"]["arguments"] == long  # 원본은 건드리지 않는다
+
+
+def _write_turn(d, stage, side, rnd):
+    write_checkpoint(d, stage, checkpoint_payload(_turn(side, rnd)))
+
+
+def test_summarize_turns_rejects_lane_b_without_r0(tmp_path):
+    _write_turn(tmp_path, "20_debate_r0_bull", "bull", 0)
+    _write_turn(tmp_path, "20_debate_r0_bear", "bear", 0)
+    _write_turn(tmp_path, "20_debatex_r0_bull", "bull", 0)
+    out = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
+    assert out["ok"] is False and "2판" in out["error"]
+    assert "라운드 0 의 bull·bear 턴이 모두 필요합니다" in out["error"]
+
+
+def test_summarize_turns_rejects_missing_lane_a(tmp_path):
+    _write_turn(tmp_path, "20_debatex_r0_bull", "bull", 0)
+    _write_turn(tmp_path, "20_debatex_r0_bear", "bear", 0)
+    out = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
+    assert out == {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
+
+
+def test_summarize_turns_single_and_two_lanes(tmp_path):
+    from trader.kernel.session.run_store import read_checkpoint
+
+    for side in ("bull", "bear"):
+        _write_turn(tmp_path, f"20_debate_r0_{side}", side, 0)
+    one = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
+    assert one["ok"] is True and one["lanes"] == ["a"] and one["rounds"] == 0
+    assert "by_lane" not in read_checkpoint(tmp_path, "25_research_summary")["data"]
+    for side in ("bull", "bear"):
+        _write_turn(tmp_path, f"20_debatex_r0_{side}", side, 0)
+    two = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
+    assert two["ok"] is True and two["lanes"] == ["a", "b"]
+    data = read_checkpoint(tmp_path, "25_research_summary")["data"]
+    assert set(data["by_lane"]) == {"a", "b"} and data["lanes"] == ["a", "b"]
+
+
+def test_summarize_turns_rejects_lanes_with_different_last_round(tmp_path):
+    for stage, side, rnd in (
+        ("20_debate_r0_bull", "bull", 0), ("20_debate_r0_bear", "bear", 0),
+        ("20_debate_r1_bull", "bull", 1), ("20_debate_r1_bear", "bear", 1),
+        ("20_debatex_r0_bull", "bull", 0), ("20_debatex_r0_bear", "bear", 0),
+    ):  # fmt: skip
+        _write_turn(tmp_path, stage, side, rnd)
+    out = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
+    assert out == {"ok": False, "error": "두 판의 마지막 라운드가 다릅니다"}

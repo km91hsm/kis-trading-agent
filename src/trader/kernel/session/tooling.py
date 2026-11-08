@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from trader.kernel.session.debate import research_summary, signal_direction
+from trader.kernel.session.debate import merge_lanes, research_summary, signal_direction
 from trader.kernel.session.run_store import (
     checkpoint_payload,
     list_checkpoints,
@@ -129,20 +129,44 @@ def validate_payload(model: type, payload: dict) -> tuple[Any, dict | None]:
         return None, schema_error(model, e)
 
 
+_R0_REQUIRED = "라운드 0 의 bull·bear 턴이 모두 필요합니다"
+
+
+def summarize_lanes(
+    lanes: dict[str, dict[int, dict[str, DebateTurn]]],
+    *,
+    evidence_ids: set[str] | None = None,
+) -> dict:
+    """판별 토론 턴 → 판마다 `research_summary`(양측이 있는 마지막 라운드) → `merge_lanes`.
+
+    판 a 가 없거나 어느 판이든 라운드 0 양측이 없으면 `ValueError`(판 b 는 앞에 「2판: 」)."""
+    if "a" not in lanes:
+        raise ValueError(_R0_REQUIRED)
+    summaries: dict[str, dict] = {}
+    for lane in sorted(lanes):
+        turns = lanes[lane]
+        if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
+            raise ValueError(_R0_REQUIRED if lane == "a" else f"2판: {_R0_REQUIRED}")
+        final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
+        summaries[lane] = research_summary(
+            turns[0], turns[final_round], rounds=final_round, evidence_ids=evidence_ids
+        )
+    return merge_lanes(summaries, evidence_ids=evidence_ids)
+
+
 def summarize_turns(d: Path, out_stage: str, pattern: re.Pattern[str]) -> dict:
-    """토론 턴 → 연구 요약(수렴 감시 포함) 체크포인트(시장·파생 세션 공용, 패턴만 다르다)."""
-    turns = load_turns(d, pattern)
-    if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
-        return {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
-    final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
+    """토론 턴 → 연구 요약(수렴 감시 포함) 체크포인트(시장·파생 세션 공용, 패턴만 다르다).
+    두 판이면 같은 편을 합친 요약에 판별 원본 `by_lane` 이 붙는다."""
+    lanes = load_lanes(d, pattern)
     try:
-        summ = research_summary(turns[0], turns[final_round], rounds=final_round)
+        summ = summarize_lanes(lanes)
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     path = write_checkpoint(d, out_stage, checkpoint_payload(summ, None))
     return {
-        "ok": True, "path": str(path), "rounds": final_round,
+        "ok": True, "path": str(path), "rounds": summ["rounds"],
         "sycophantic": summ["sycophantic"], "preferred": summ["preferred"],
+        "lanes": sorted(lanes),
     }  # fmt: skip
 
 
@@ -577,6 +601,15 @@ def brief_turn(t: dict) -> dict:
     }
 
 
+def _brief_lane(s: dict) -> dict:
+    """판별 요약 → round0·final 턴은 `brief_turn`, issues 는 뺀 사본."""
+    out = {k: v for k, v in s.items() if k != "issues"}
+    for part in ("round0", "final"):
+        if isinstance(s.get(part), dict):
+            out[part] = {side: brief_turn(t) for side, t in s[part].items() if isinstance(t, dict)}
+    return out
+
+
 def trader_summary(summ: dict) -> dict:
     """preferred 쪽 턴은 전문, 반대쪽은 핵심만 (트레이더 md 가 preferred 를 우선한다)."""
     if summ.get("skipped_debate"):
@@ -588,4 +621,10 @@ def trader_summary(summ: dict) -> dict:
     # issues 는 final 양측 rebuttals 의 복제라 트레이더 묶음에선 뺀다
     out.pop("issues", None)
     out["note"] = f"{other} 턴은 핵심만, issues 는 final.rebuttals 와 같아 생략"
+    if isinstance(summ.get("by_lane"), dict):
+        # 판별 원본은 대조용 — 턴은 핵심만, issues 는 뺀다(24KB 묶음 안에 들도록)
+        out["by_lane"] = {
+            lane: _brief_lane(s) for lane, s in summ["by_lane"].items() if isinstance(s, dict)
+        }
+        out["note"] += "; by_lane 의 판별 턴도 핵심만"
     return out
