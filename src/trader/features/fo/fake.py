@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader.features.fo.research import RESEARCH
+from trader.kernel.session import research_policy
 from trader.kernel.session.fake import ensure_ok, fake_call, fake_report, fake_turn
 from trader.kernel.session.run_store import market_dir, read_checkpoint
 
@@ -44,13 +46,17 @@ def run_fake_fo(lane_ctx: Any, spec: Any) -> list[str]:
             agent=agent, call_meta=fake_call(agent),
         ))  # fmt: skip
         written.append(stage)
-    for side in ("bull", "bear"):
-        stage = f"_fo_debate_r0_{side}"
-        ensure_ok(tools.fo_write(
-            ctx, date=date, stage=stage, payload=fake_turn(side, 0),
-            agent=f"researcher-{side}", call_meta=fake_call(f"researcher-{side}"),
-        ))  # fmt: skip
-        written.append(stage)
+    # 판 목록은 고정 정책(FAKE 는 `configured()` 가 켜짐이면 두 판)에서 — Codex 칸도 FAKE 턴으로
+    # 채우고 실제 Codex 는 부르지 않는다(FAKE 정책은 enabled=False). 라운드는 지금처럼 r0 만
+    policy = research_policy.get(ctx.conn, ctx.settings, d, RESEARCH)
+    for item in research_policy.lanes(policy):
+        for side in ("bull", "bear"):
+            stage = RESEARCH.turn_stage(item["lane"], 0, side)
+            ensure_ok(tools.fo_write(
+                ctx, date=date, stage=stage, payload=fake_turn(side, 0),
+                agent=f"researcher-{side}", call_meta=fake_call(f"researcher-{side}"),
+            ))  # fmt: skip
+            written.append(stage)
     ensure_ok(tools.fo_summarize(ctx, date=date))
     written.append(tools.FO_SUMMARY)
     decision = {

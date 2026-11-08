@@ -1439,8 +1439,14 @@ def _write_both_lanes(d, rounds=(0,), big=False):
                 _save_turn(d, f"{prefix}{rnd}_{side}", ok_turn(side, rnd, **over), lane)
 
 
+def _two_lane_fake(ctx, monkeypatch):
+    """두 판 정책(FAKE·Codex 켜짐 설정 — 증명 검사 없음): 판 b 파일을 요약할 수 있는 정책."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    ctx.settings.llm.codex_debate.enabled = True
+
+
 def test_summarize_merges_two_lanes(ctx, project, monkeypatch):
-    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _two_lane_fake(ctx, monkeypatch)
     d = _two_reports(ctx, project)
     _write_both_lanes(d)
     out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
@@ -1462,7 +1468,7 @@ def test_summarize_single_lane_reports_lanes(ctx, project, monkeypatch):
 
 
 def test_summarize_lane_b_missing_side_is_error(ctx, project, monkeypatch):
-    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _two_lane_fake(ctx, monkeypatch)
     d = _two_reports(ctx, project)
     for side in ("bull", "bear"):
         _save_turn(d, f"20_debate_r0_{side}", ok_turn(side, 0), "claude")
@@ -1473,7 +1479,7 @@ def test_summarize_lane_b_missing_side_is_error(ctx, project, monkeypatch):
 
 def test_trader_bundle_two_lanes_near_limit_fits(ctx, project, monkeypatch):
     """두 판 요약(by_lane)이 붙은 트레이더 묶음도 BUNDLE_LIMIT_BYTES 안에 든다(중복 없는 문자열)."""
-    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _two_lane_fake(ctx, monkeypatch)
     _realistic_reports_and_turns(ctx, project)
     d = run_dir(D, "KR", "005930")
     _write_both_lanes(d, rounds=(0, 1), big=True)
@@ -1486,3 +1492,27 @@ def test_trader_bundle_two_lanes_near_limit_fits(ctx, project, monkeypatch):
     b = r["data"]
     assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < tools.BUNDLE_LIMIT_BYTES
     assert set(b["research_summary"]["by_lane"]) == {"a", "b"}
+
+
+def test_summarize_rejects_lane_b_without_lane_b_policy(ctx, project, monkeypatch):
+    """심층 방어: 판 b 가 없는 정책(Codex 꺼짐)인데 판 b 파일이 있으면 요약하지 않는다."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _two_reports(ctx, project)
+    _write_both_lanes(d)
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+    assert read_checkpoint(d, "25_research_summary") is None
+
+
+def test_summarize_cross_policy_incomplete_lane_b_rejected(ctx, project, monkeypatch):
+    """교차 정책에서 판 b 가 비어 있으면 요약을 거부한다(판 a 만으로 요약하지 않는다)."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    for rnd in (0, 1):
+        for side in ("bull", "bear"):
+            _save_turn(d, f"20_debate_r{rnd}_{side}", ok_turn(side, rnd), "claude")
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out["ok"] is False
+    assert out["error"] == "Codex 필수 토론 미완료: 2판 r0_bull"
+    assert out["debate_required"] is True
+    assert read_checkpoint(d, "25_research_summary") is None

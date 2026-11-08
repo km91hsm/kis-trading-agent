@@ -494,6 +494,14 @@ def lane_error(conn, settings, d, scope, lane: str) -> str | None:
         return str(exc)
 
 
+def summary_lane_error(conn, settings, d, scope) -> str | None:
+    """요약 전 심층 방어: 판 b 토론 턴 파일이 있는데 고정 정책에 판 b 가 없으면 오류
+    (쓰기 검사를 거치지 않은 판 b 파일이 요약·판단에 섞이지 않게)."""
+    if not any(s.startswith(scope.cross_turn_prefix) for s in list_checkpoints(d)):
+        return None
+    return lane_error(conn, settings, d, scope, "b")
+
+
 def write_error(conn, settings, d, scope, *, round_no, side, lane="a") -> str | None:
     """Claude 가 토론 턴을 쓰기 전 검사. 판·공급자 칸·라운드 상한·입력 고정·같은 판 직전 라운드."""
     try:

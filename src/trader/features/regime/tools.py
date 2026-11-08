@@ -30,7 +30,11 @@ BUNDLE_LIMIT_BYTES = 24_000  # Claude Code Bash 출력 한도(30KB, UTF-8 바이
 MARKET_PROXY_LABEL = {"KR": "KOSPI200", "US": "SPX"}
 MARKET_VIEW_FLAG = "market_view:"
 _MARKET_DEBATE_RE = tooling.debate_re(RESEARCH.turn_prefix, RESEARCH.cross_turn_prefix)
-_MARKET_WRITABLE = ("_market_analyst", "_market_debate_r<n>_<bull|bear>")
+_MARKET_WRITABLE = (
+    "_market_analyst",
+    "_market_debate_r<n>_<bull|bear>",
+    "_market_debatex_r<n>_<bull|bear>",
+)
 
 
 @dataclass
@@ -52,10 +56,6 @@ def _bad_market(market: str) -> dict | None:
     if market not in ("KR", "US"):
         return {"ok": False, "error": f"market 은 KR 또는 US: {market!r}"}
     return None
-
-
-def _market_turns(d: Path) -> dict[int, dict[str, DebateTurn]]:
-    return tooling.load_turns(d, _MARKET_DEBATE_RE)
 
 
 def _market_report(d: Path) -> dict | None:
@@ -83,9 +83,12 @@ def market_bundle(
     kind: str,
     round: int | None = None,
     side: str | None = None,
+    lane: str = "a",
 ) -> dict:
     """시장 세션 서브에이전트 입력 묶음. kind=analyst(`_market_inputs`) |
-    researcher(round, side) | strategist(리포트 + 요약 + 국면·헤지·섹터 컨텍스트)."""
+    researcher(round, side, lane) | strategist(리포트 + 요약 + 국면·헤지·섹터 컨텍스트).
+
+    `lane` 은 교차 토론의 판(a|b) — 직전 턴은 같은 판에서만 읽는다(`tooling.previous_turns`)."""
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
@@ -111,20 +114,21 @@ def market_bundle(
                 "ok": False,
                 "error": "researcher 묶음은 --round 와 --side(bull|bear) 가 필요합니다",
             }
-        turns = _market_turns(d)
-        own = opp = None
-        if round > 0:
-            prev = turns.get(round - 1, {})
-            own = prev.get(side)
-            opp = prev.get("bear" if side == "bull" else "bull")
-            if own is None or opp is None:
-                return {"ok": False, "error": f"라운드 {round - 1} 의 양측 턴이 모두 필요합니다"}
+        if err := research_policy.lane_error(ctx.conn, ctx.settings, d, RESEARCH, lane):
+            return {"ok": False, "error": err}
+        try:
+            own, opp = tooling.previous_turns(
+                d, _MARKET_DEBATE_RE, lane=lane, round_no=round, side=side
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         data = {
             **base,
             "proxy": inputs.get("proxy"),
             "research_policy": research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH),
             "round": round,
             "side": side,
+            "lane": lane,
             "reports": [report],
             "regime": inputs.get("regime"),
             "own_previous": own.model_dump() if own else None,
@@ -161,14 +165,16 @@ def market_write(
     call_meta: dict | None = None,
 ) -> dict:
     """LLM 쓰기 가능 시장 단계: `_market_analyst`(AnalystReport),
-    `_market_debate_r<n>_<side>`(DebateTurn)."""
+    `_market_debate_r<n>_<side>`·판 b `_market_debatex_r<n>_<side>`(DebateTurn)."""
     if err := _bad_market(market):
         return err
     m = tooling.parse_debate_stage(_MARKET_DEBATE_RE, stage)
     d = market_dir(date, market, ctx.state, create=True)
+    lane = "a"
     if m:
+        lane = m[0]
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=m[1], side=m[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=m[1], side=m[2], lane=lane
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
@@ -202,7 +208,9 @@ def market_write(
     if read_checkpoint(d, "_market_inputs") is None:
         return {"ok": False, "error": "_market_inputs 없음 (시장 세션 밖에서는 쓸 수 없다)"}
     if isinstance(v, DebateTurn):
-        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
+        if err := research_policy.turn_error(
+            ctx.conn, ctx.settings, d, RESEARCH, v.model_dump(), lane=lane
+        ):
             return {"ok": False, "error": err}
     if isinstance(v, DebateTurn):
         research_policy.invalidate_summary(d, RESEARCH)
@@ -211,11 +219,14 @@ def market_write(
 
 
 def market_summarize(ctx: MarketToolContext, *, market: str, date: date) -> dict:
-    """`_market_debate_*` 를 모아 `_market_summary`(수렴 감시 포함)를 만든다."""
+    """`_market_debate_*`(판 b 는 `_market_debatex_*`) 를 모아 `_market_summary`(수렴 감시
+    포함)를 만든다. 두 판이면 같은 편을 합친 요약에 판별 원본 `by_lane` 이 붙는다."""
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
     if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
+    if err := research_policy.summary_lane_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err}
     return tooling.summarize_turns(d, "_market_summary", _MARKET_DEBATE_RE)
 
@@ -274,10 +285,16 @@ def market_view_today(conn: sqlite3.Connection | None, market: str, today: date)
     return v
 
 
-def codex_turn(ctx: MarketToolContext, *, market: str, date: date, round: int) -> dict:
+def codex_turn(
+    ctx: MarketToolContext, *, market: str, date: date, round: int, side: str = "bear"
+) -> dict:
+    """고정 정책의 Codex `side` 턴(그 편이 Codex 인 판에 저장). 실제 호출 여부는 정책의
+    `enabled` 가 정한다(`generate_turn`) — 기본 bear 는 옛 `cli_template` 호환."""
+    if side not in ("bull", "bear"):
+        return {"ok": False, "error": "--side 는 bull|bear 입니다"}
     if err := _bad_market(market):
         return err
     d = market_dir(date, market, ctx.state)
     if _market_report(d) is None:
         return {"ok": False, "error": "Codex 토론 전 _market_analyst 필요"}
-    return research_policy.generate_turn(ctx, d, RESEARCH, round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round, side=side)

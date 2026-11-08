@@ -314,6 +314,26 @@ def test_lane_error_checks_format_and_policy_lanes(conn, tmp_path, monkeypatch):
     assert p.lane_error(conn, off, tmp_path / "off", SPOT_RESEARCH, "a") is None
 
 
+@pytest.mark.parametrize("scope", ["spot", "market", "fo"])
+def test_summary_lane_error_rejects_lane_b_files_without_lane_b(conn, tmp_path, monkeypatch, scope):
+    """요약 심층 방어: 판 b 파일은 정책에 판 b 가 있을 때만 요약에 들어간다."""
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    r = RESEARCHES[scope]
+    (tmp_path / "on").mkdir()
+    (tmp_path / "off").mkdir()
+    s, d, _, _ = _cross_setup(conn, tmp_path / "on", scope)
+    _write_claude(d, r, "b", 0, "bear")
+    assert p.summary_lane_error(conn, s, d, r) is None
+    off = settings(enabled=False)
+    p.start(conn, off, tmp_path / "off", r, now=NOW)
+    _write_claude(tmp_path / "off", r, "a", 0, "bull")
+    assert p.summary_lane_error(conn, off, tmp_path / "off", r) is None  # 판 b 파일 없음
+    _write_claude(tmp_path / "off", r, "b", 0, "bull")
+    assert p.summary_lane_error(conn, off, tmp_path / "off", r) == "이 연구에는 2판이 없습니다"
+
+
 def test_cross_codex_bull_proof_with_bear_prompt_hash_fails(conn, tmp_path, monkeypatch):
     """판 b Codex 강세 증명의 prompt_hash 가 약세 PROMPT 해시면(행·체크포인트 모두) 증명 실패."""
     from trader.kernel.session import codex

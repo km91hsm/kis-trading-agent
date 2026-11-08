@@ -675,6 +675,8 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
     d = _dir(ctx, ticker, market, date)
     if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err, "debate_required": True}
+    if err := research_policy.summary_lane_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
     lanes = tooling.load_lanes(d, _DEBATE_RE)
     if not lanes:
         return _summarize_without_debate(ctx, d)

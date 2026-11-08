@@ -40,6 +40,7 @@ CHECKPOINTS = (
     "_fo_inputs",
     "_fo_analyst_<technical|sentiment|news_macro>",
     "_fo_debate_r<n>_<bull|bear>",
+    "_fo_debatex_r<n>_<bull|bear>",
     "_fo_summary",
     "_fo_decision",
     "_fo_decision_r<n>_<account>",

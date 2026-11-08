@@ -49,9 +49,12 @@ def bundle_cmd(
     kind: str = typer.Option(..., "--kind", help="analyst | researcher | strategist"),
     round: int | None = typer.Option(None, "--round"),
     side: str | None = typer.Option(None, "--side"),
+    lane: str = typer.Option("a", "--lane", help="교차 토론 판 a | b"),
 ) -> None:
     """시장 세션 서브에이전트 입력 묶음을 JSON 으로."""
-    _run(tools.market_bundle, market=market, date=date, kind=kind, round=round, side=side)
+    _run(
+        tools.market_bundle, market=market, date=date, kind=kind, round=round, side=side, lane=lane
+    )
 
 
 @market_app.command("write")
@@ -62,7 +65,7 @@ def write_cmd(
     agent: str | None = typer.Option(None, "--agent"),
     json_text: str | None = typer.Option(None, "--json", help="페이로드 JSON (없으면 stdin)"),
 ) -> None:
-    """`_market_analyst`·`_market_debate_r<n>_<side>` 저장(스키마·라운드 검증)."""
+    """`_market_analyst`·`_market_debate(x)_r<n>_<side>` 저장(스키마·라운드 검증)."""
 
     def go(ctx: tools.MarketToolContext, **kw) -> dict:
         return tools.market_write(ctx, payload=_payload(json_text), **kw)
@@ -75,8 +78,10 @@ def codex_turn_cmd(
     market: str = typer.Option(..., "--market"),
     date: str = typer.Option(..., "--date"),
     round: int = typer.Option(..., "--round"),
+    side: str = typer.Option("bear", "--side", help="Codex 편 bull | bear (기본 bear)"),
 ) -> None:
-    _run(tools.codex_turn, market=market, date=date, round=round)
+    """고정 정책의 Codex 턴(bull|bear) 호출·검증·증명 기록."""
+    _run(tools.codex_turn, market=market, date=date, round=round, side=side)
 
 
 @market_app.command("summarize")

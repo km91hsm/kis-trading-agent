@@ -79,3 +79,34 @@ def test_fake_without_fo_context_is_error_result(project, conn, monkeypatch):
     spec = SessionSpec(market="KR", date=D, tickers=[], dry_run=False, kind="fo")
     res = run_session(spec, FO, lane, agents=agents_for_runner())
     assert res.ok is False and "파생 실행 컨텍스트" in (res.error or "")
+
+
+def test_fo_fake_cross_debate_writes_both_lanes(project, conn, monkeypatch):
+    """Codex 켜짐 설정 + FAKE: r0 두 판 4턴과 by_lane 요약(실제 Codex 는 띄우지 않는다)."""
+    import pytest
+
+    from trader.kernel.session import codex
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    monkeypatch.setattr(codex, "run_turn", lambda *a, **kw: pytest.fail("FAKE launched Codex"))
+    fo, inp = _fo(conn)
+    fo.settings.llm.codex_debate.enabled = True
+    spec = SessionSpec(market="KR", date=D, tickers=[], dry_run=False, asof=NOW, kind="fo")
+    written = run_fake_fo(_lane(fo), spec)
+    assert written == [
+        *MORNING[:3], "_fo_debate_r0_bull", "_fo_debate_r0_bear",
+        "_fo_debatex_r0_bull", "_fo_debatex_r0_bear", "_fo_summary", "_fo_decision",
+    ]  # fmt: skip
+    d = market_dir(D, "KR")
+    assert read_checkpoint(d, "_fo_debatex_r0_bull")["call"]["agent"] == "researcher-bull"
+    summ = read_checkpoint(d, "_fo_summary")["data"]
+    assert set(summ["by_lane"]) == {"a", "b"} and summ["lanes"] == ["a", "b"]
+
+
+def test_fo_fake_without_codex_writes_single_lane(project, conn, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    fo, inp = _fo(conn)
+    fo.settings.llm.codex_debate.enabled = False
+    spec = SessionSpec(market="KR", date=D, tickers=[], dry_run=False, asof=NOW, kind="fo")
+    assert run_fake_fo(_lane(fo), spec) == MORNING
+    assert "by_lane" not in read_checkpoint(market_dir(D, "KR"), "_fo_summary")["data"]
