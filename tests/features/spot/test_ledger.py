@@ -1,6 +1,9 @@
 import json
+import sqlite3
 from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from tests.features.spot.conftest import D
 from tests.features.spot.helpers import ok_decision, ok_report, ok_turn
@@ -210,11 +213,20 @@ def test_lane_migration_backfills_a(tmp_path):
     conn = connect(tmp_path / "t.db")
     init_schema(conn, [m for m in migs if m.version < 19])
     conn.execute(
-        "INSERT INTO debate_turns(decision_date,market,ticker,round,side,stance,conviction,"
-        "data_json,created_at) VALUES('2026-11-08','KR','005930',0,'bull','BULLISH',0.7,'{}','t')"
+        "INSERT INTO debate_turns(id,decision_date,market,ticker,round,side,stance,conviction,"
+        "data_json,created_at) VALUES(42,'2026-11-08','KR','005930',0,'bull','BULLISH',0.7,'{}',"
+        "'t')"
     )
     init_schema(conn, migs)
-    assert conn.execute("SELECT lane FROM debate_turns").fetchone()[0] == "a"
+    row = conn.execute("SELECT id, lane, conviction FROM debate_turns").fetchone()
+    assert (row["id"], row["lane"], row["conviction"]) == (42, "a", 0.7)
+    # 같은 (date, market, ticker, 'a', round, side) 중복은 UNIQUE 가 막는다
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO debate_turns(decision_date,market,ticker,lane,round,side,stance,"
+            "conviction,data_json,created_at) "
+            "VALUES('2026-11-08','KR','005930','a',0,'bull','BEARISH',0.1,'{}','t')"
+        )
 
 
 def test_ingest_lane_b_keeps_both_rows(conn):

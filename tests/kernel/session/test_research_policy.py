@@ -1,6 +1,7 @@
 """Frozen policy cannot be bypassed by missing turns, changed inputs or forged provenance."""
 
-from datetime import UTC, date, datetime
+import json
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -278,7 +279,7 @@ def test_cross_rounds_complete_with_two_codex_sides(conn, tmp_path, monkeypatch,
     ]
     assert all("lane" not in x for x in seen)
     stages = {
-        __import__("json").loads(f.read_text(encoding="utf-8"))["stage"]
+        json.loads(f.read_text(encoding="utf-8"))["stage"]
         for f in (d / "input_receipts").glob("*.json")
     }
     assert f"{r.scope}:researcher:r1:bear" in stages
@@ -607,7 +608,7 @@ def test_second_rebuttal_round_rejects_missing_or_duplicate_replies(conn, tmp_pa
 
 
 def _limits(five=None, seven=None, *, reset_in_h=3):
-    resets = (NOW.replace(hour=0) + __import__("datetime").timedelta(hours=reset_in_h)).isoformat()
+    resets = (NOW.replace(hour=0) + timedelta(hours=reset_in_h)).isoformat()
     win = lambda p: None if p is None else {"used_pct": p, "resets_at": resets}  # noqa: E731
     return {"five_hour": win(five), "seven_day": win(seven), "status": "ready"}
 

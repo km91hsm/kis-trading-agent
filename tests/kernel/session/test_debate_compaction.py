@@ -139,7 +139,7 @@ def test_large_reports_complete_both_provider_rounds_with_immutable_policy(
         if scope != "market" and data["round"]:
             assert data["truncation"]["truncated"]
         Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
-            json.dumps(turn("bear", data["round"]))
+            json.dumps(turn("bear", data["round"])), encoding="utf-8"
         )
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
