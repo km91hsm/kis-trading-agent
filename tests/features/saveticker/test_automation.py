@@ -149,3 +149,20 @@ def test_collector_alive_matches_native_host_only(monkeypatch):
     out = "/usr/bin/python -m trader saveticker run --headed"
     assert automation.collector_alive(123) is False
     assert automation.collector_alive(0) is False and len(calls) == 2
+
+
+def test_status_marks_non_terminal_recheck_diagnostic_as_retry_wait(tmp_path):
+    from trader.features.saveticker.store import atomic_json
+
+    runtime = tmp_path / "runtime"
+    assert automation.status(tmp_path)["diagnostic"] is None
+    row = {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+           "recorded_at": "2026-11-08T00:00:00+00:00"}
+    atomic_json(runtime / "extension-diagnostics.json", {**row, "terminal": False})
+    waiting = automation.status(tmp_path)["diagnostic"]
+    assert waiting["terminal"] is False and waiting["text"].startswith("복구 재시도 대기")
+    # 옛 기록(키 없음)은 중지로 본다
+    atomic_json(runtime / "extension-diagnostics.json", row)
+    stopped = automation.status(tmp_path)["diagnostic"]
+    assert stopped["terminal"] is True and "복구 재시도 대기" not in stopped["text"]
+    assert stopped["reason"] == "page_unverified"

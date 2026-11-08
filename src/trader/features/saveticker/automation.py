@@ -182,6 +182,32 @@ REASON_TEXT = {
 }
 
 
+DIAGNOSTIC_CATEGORIES = {"recheck", "html_trial"}
+
+
+def diagnostic(runtime, reader=None) -> dict | None:
+    """확장의 마지막 진단(`runtime/extension-diagnostics.json`, Native host 가 허용 목록으로 검증해
+    저장). `terminal` 이 False 면 계속 복구가 재시도를 기다리는 중이라 「복구 재시도 대기」로
+    보인다. 키가 없는 옛 기록은 중지(True)로 본다."""
+    row = (reader or read)(runtime / "extension-diagnostics.json")
+    if not isinstance(row, dict):
+        return None
+    category, reason = row.get("category"), row.get("reason")
+    if category not in DIAGNOSTIC_CATEGORIES or not isinstance(reason, str) or len(reason) > 40:
+        return None
+    terminal = row.get("terminal", True) is not False
+    at = row.get("recorded_at")
+    return {
+        "category": category,
+        "reason": reason,
+        "terminal": terminal,
+        "recorded_at": at if isinstance(at, str) and len(at) <= 40 else None,
+        "text": "자동 중지 · 직접 확인 필요"
+        if terminal
+        else "복구 재시도 대기 · 확장이 간격을 두고 다시 시도합니다",
+    }
+
+
 def status(home):
     """웹·운영 점검용 요약: 확장 등록 여부·Native host 연결 상태·멈춘 이유·작업별 상태·마지막
     수집 시각. Native host 가 2분 안에 기록하지 않았거나 잠금을 쥐지 않으면 `waiting_chrome`."""
@@ -231,4 +257,5 @@ def status(home):
         "lanes": lanes,
         "last_success_at": max((v for v in stamps if isinstance(v, str)), default=None),
         "health": "blocked" if blocked else "healthy" if alive else "waiting_chrome",
+        "diagnostic": diagnostic(runtime),
     }

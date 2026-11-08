@@ -350,3 +350,18 @@ def test_current_lane_error_is_visible_even_without_a_saved_stream(project, clie
         },
     )
     assert get(client)["summary"]["state"] == "partial"
+
+
+def test_blocked_extension_with_retrying_recovery_is_not_shown_as_stopped(
+    project, client, monkeypatch
+):
+    connect_bridge(monkeypatch, state="waiting_verification", reason="verification_required")
+    path = home() / "runtime/extension-diagnostics.json"
+    row = {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+           "recorded_at": FIRST}
+    atomic_json(path, {**row, "terminal": False})
+    data = get(client)
+    assert data["recovery"]["state"] == "retrying"
+    assert data["recovery"]["text"].startswith("복구 재시도 대기")
+    atomic_json(path, row)
+    assert get(client)["recovery"]["state"] == "manual"

@@ -107,3 +107,43 @@ def test_settings_screen_values_are_read_by_credentials(project):
     assert credentials.load() == ("u@x.com", "a#b\\c")
     secrets_io.update(env, [], clear=["SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"])
     assert credentials.load() is None
+
+
+def test_native_credentials_unreadable_env_is_distinct_from_missing(project, tmp_path):
+    env = paths.secrets_path()
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_bytes(b"SAVETICKER_EMAIL=\xff\xfe\nSAVETICKER_PASSWORD=" + TRICKY.encode() + b"\n")
+    reply = NativeSession(tmp_path / "st").handle({"id": 3, "type": "credentials"})
+    assert reply == {
+        "id": 3,
+        "type": "credentials",
+        "ok": True,
+        "available": False,
+        "unreadable": True,
+    }
+    assert TRICKY not in json.dumps(reply)
+
+
+def test_native_credentials_unreadable_when_config_error(project, tmp_path, monkeypatch):
+    from trader.kernel.config.errors import ConfigError
+
+    def broken():
+        raise ConfigError("데이터 루트 없음")
+
+    monkeypatch.setattr(credentials, "load", broken)
+    reply = NativeSession(tmp_path / "st").handle({"id": 4, "type": "credentials"})
+    assert reply["ok"] is True and reply["available"] is False and reply["unreadable"] is True
+
+
+def test_native_accepts_credentials_unreadable_diagnostic(tmp_path):
+    reply = NativeSession(tmp_path).handle(
+        {
+            "id": 1,
+            "type": "diagnostics",
+            "category": "recheck",
+            "reason": "credentials_unreadable",
+            "reload_count": 0,
+        }
+    )
+    assert reply["ok"] is True
+

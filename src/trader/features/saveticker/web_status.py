@@ -207,9 +207,12 @@ def _lane(name: str) -> str:
     )
 
 
-def _recovery(state: dict) -> dict:
+def _recovery(state: dict, root: Path) -> dict:
     service = state["service"]["state"]
     if state["blocked"]:
+        last = automation.diagnostic(root / "runtime", reader=lambda p: _read(p)[0])
+        if last and last["category"] == "recheck" and not last["terminal"]:
+            return {"state": "retrying", "text": last["text"]}
         return {"state": "manual", "text": state["reason_text"]}
     if service == "waiting_chrome":
         return {"state": "waiting", "text": "Chrome에서 로그인과 확장 연결을 확인하세요"}
@@ -260,7 +263,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
         for name in names
     }
     changes, responses, history_bad = _history(root, cutoffs, now)
-    recovery = _recovery(state)
+    recovery = _recovery(state, root)
     streams = []
     for name in names:
         row = raw[name] if isinstance(raw[name], dict) else {}

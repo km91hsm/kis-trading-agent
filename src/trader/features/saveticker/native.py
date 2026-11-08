@@ -22,6 +22,7 @@ from trader.features.saveticker.reports import save_pdf
 from trader.features.saveticker.store import Store, atomic_json
 from trader.features.saveticker.views import View, build_views, lane_for
 from trader.kernel.config import KST
+from trader.kernel.config.errors import ConfigError
 from trader.kernel.daemon.lock import Lock
 
 EXTENSION_ID = "gfchfnjghmjiidifohjglpodaakdphho"
@@ -60,6 +61,7 @@ DIAGNOSTIC_REASONS = {
         "content_unavailable",
         "reload_failed",
         "credentials_missing",
+        "credentials_unreadable",
         "login_failed",
         "login_form_missing",
     },
@@ -341,7 +343,11 @@ class NativeSession:
             # 확장의 자동 로그인 직전에만 요청된다. 값은 응답으로만 보내고 기록하지 않는다.
             from trader.features.saveticker import credentials
 
-            account = credentials.load()
+            try:
+                account = credentials.load()
+            except (ConfigError, UnicodeDecodeError, OSError):
+                # 「저장 안 함」과 구분한다. 예외 문구에는 파일 내용이 섞일 수 있어 돌려주지 않는다.
+                return {"type": "credentials", "available": False, "unreadable": True}
             if account is None:
                 return {"type": "credentials", "available": False}
             return {
@@ -356,8 +362,11 @@ class NativeSession:
         if kind == "diagnostics":
             category, reason = message.get("category"), message.get("reason")
             reload_count = message.get("reload_count")
+            # 옛 확장은 `terminal` 을 보내지 않는다 — 그때는 모두 중지 진단이었다.
+            terminal = message.get("terminal", True)
             if (
-                not isinstance(category, str)
+                type(terminal) is not bool
+                or not isinstance(category, str)
                 or category not in DIAGNOSTIC_REASONS
                 or not isinstance(reason, str)
                 or reason not in DIAGNOSTIC_REASONS[category]
@@ -372,6 +381,7 @@ class NativeSession:
                     "category": category,
                     "reason": reason,
                     "reload_count": reload_count,
+                    "terminal": terminal,
                     "recorded_at": _now().isoformat(),
                 },
             )
