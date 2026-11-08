@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from trader.features.spot import approvals
+from trader.features.spot.research import RESEARCH
 from trader.features.spot.tools import validate_ids
 from trader.kernel.config import KST
 from trader.kernel.execution import ledger as xledger
@@ -112,14 +113,16 @@ def _data(rd: Path, stage: str) -> dict:
 
 def _debate_row(rd: Path, row: sqlite3.Row) -> dict:
     data = _loads(row["data_json"], {})
-    cp = run_store.read_checkpoint(rd, f"20_debate_r{row['round']}_{row['side']}") or {}
+    cp = run_store.read_checkpoint(
+        rd, RESEARCH.turn_stage(row["lane"], row["round"], row["side"])
+    ) or {}
     call = cp.get("call") if cp.get("data") == data else None
     call = call if isinstance(call, dict) else {}
     provider = call.get("provider")
     if provider not in {"claude", "codex"}:
         provider = None
     return {
-        "round": row["round"], "side": row["side"], "stance": row["stance"],
+        "lane": row["lane"], "round": row["round"], "side": row["side"], "stance": row["stance"],
         "conviction": row["conviction"], "timing": data.get("timing"),
         "provider": provider, "model": call.get("model") if provider else None,
         "issues": data.get("issues", []), "responses": data.get("responses", []),
@@ -387,7 +390,7 @@ def trace(conn: sqlite3.Connection, decision_id: int, state: Path | None) -> dic
         _debate_row(rd, r)
         for r in conn.execute(
             "SELECT * FROM debate_turns WHERE decision_date=? AND market=? AND ticker=? "
-            "ORDER BY round, side",
+            "ORDER BY lane, round, side",
             (dec["date"], dec["market"], dec["ticker"]),
         )
     ]  # fmt: skip

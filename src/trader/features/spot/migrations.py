@@ -1,4 +1,4 @@
-"""spot 원장 마이그레이션 (전역 버전 6·9)."""
+"""spot 원장 마이그레이션 (전역 버전 6·9·19)."""
 
 from trader.kernel.ledger.migrations import Migration
 
@@ -101,6 +101,33 @@ MIGRATIONS = (
                 session_id TEXT
             )""",
             "CREATE INDEX ix_triggers_open ON triggers(market, ticker, handled_at)",
+        ),
+        owner="spot",
+    ),
+    Migration(
+        19,
+        "spot-debate-lane",
+        (
+            """CREATE TABLE debate_turns_v19 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_date TEXT NOT NULL,
+                market TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                round INTEGER NOT NULL,
+                side TEXT NOT NULL,
+                stance TEXT,
+                conviction REAL,
+                data_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                lane TEXT NOT NULL DEFAULT 'a',
+                UNIQUE(decision_date, market, ticker, lane, round, side)
+            )""",
+            "INSERT INTO debate_turns_v19(id, decision_date, market, ticker, lane, round, side, "
+            "stance, conviction, data_json, created_at) SELECT id, decision_date, market, "
+            "ticker, 'a', round, side, stance, conviction, data_json, created_at "
+            "FROM debate_turns",
+            "DROP TABLE debate_turns",
+            "ALTER TABLE debate_turns_v19 RENAME TO debate_turns",
         ),
         owner="spot",
     ),

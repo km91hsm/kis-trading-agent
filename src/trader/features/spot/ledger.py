@@ -84,17 +84,16 @@ def ingest_checkpoint(
         )
     elif parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
         lane, rnd, side = parsed
-        if lane != "a":
-            return  # 판 B 는 lane 열이 생기기 전까지 저장하지 않는다(판 A 행 덮어쓰기 방지)
         conn.execute(
-            "INSERT INTO debate_turns(decision_date, market, ticker, round, side, stance, "
-            "conviction, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(decision_date, market, ticker, round, side) DO UPDATE SET "
+            "INSERT INTO debate_turns(decision_date, market, ticker, lane, round, side, stance, "
+            "conviction, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(decision_date, market, ticker, lane, round, side) DO UPDATE SET "
             "stance=excluded.stance, conviction=excluded.conviction, data_json=excluded.data_json",
             (
                 day,
                 market,
                 ticker,
+                lane,
                 rnd,
                 side,
                 data.get("stance"),

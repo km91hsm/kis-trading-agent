@@ -233,6 +233,19 @@ def test_trace_provider_only_from_matching_saved_turn(client, ledger, project):
     assert all(t["provider"] is None and t["model"] is None for t in turns)
 
 
+def test_trace_debate_rows_carry_lane_and_provider(client, ledger, project):
+    did = _decide(ledger)
+    rd = run_store.run_dir(D, "KR", "005930", project / "state")
+    data = ok_turn("bull")
+    ingest_checkpoint(ledger, D, "KR", "005930", "20_debatex_r0_bull", {"data": data})
+    run_store.write_checkpoint(
+        rd, "20_debatex_r0_bull",
+        {"data": data, "call": {"provider": "codex", "model": "fixture-model"}},
+    )  # fmt: skip
+    (turn,) = client.get(f"/api/decisions/spot/{did}/trace").json()["debate"]
+    assert (turn["lane"], turn["side"], turn["provider"]) == ("b", "bull", "codex")
+
+
 def test_news_refs_from_analyst_evidence(client, ledger):
     """evidence `source_id` 가 `news:<id>` 인 것만 센다(`market_notes` 등은 무시)."""
     did = _decide(ledger)

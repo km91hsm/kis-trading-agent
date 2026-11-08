@@ -7,7 +7,7 @@ import pytest
 
 from tests.features.ml.helpers import trading_days
 from tests.features.spot.helpers import ok_decision
-from trader.features.evaluation import performance, shadow
+from trader.features.evaluation import metrics, performance, shadow
 from trader.features.ml import api as feat
 from trader.features.spot.ledger import ingest_checkpoint
 from trader.kernel.execution import ledger as repo
@@ -114,6 +114,7 @@ def test_report_account_filter_and_empty(conn, project):
     assert r["metrics"]["return"] == pytest.approx(0.10) and "decision_distribution" in r
     assert r["account_id"] == "paper-main" and r["benchmarks"]["one_over_n"]["return"] is not None
     assert "cost_sensitivity" in r and "turnover" in r and r["convergence_rate"] is None
+    assert r["convergence_definition"] == metrics.CONVERGENCE_DEFINITION
 
 
 def test_one_over_n_is_universe_and_bh_is_held(project):
