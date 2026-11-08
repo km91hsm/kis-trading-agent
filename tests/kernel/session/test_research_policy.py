@@ -486,7 +486,11 @@ def test_v1_current_is_byte_identical_to_legacy(conn):
     assert v1["version"] == 1 and (v1["bull"], v1["bear"]) == ("claude", "codex")
     assert v1["rounds"] == 1 and v1["prompt_hash"] == codex.digest(codex.PROMPT)
     v2 = rp.current(conn, s)
-    assert {k: v for k, v in v2.items() if k not in ("version", "lanes")} == {
+    assert v2["prompt_hashes"] == {
+        "bull": codex.digest(codex.BULL_PROMPT),
+        "bear": codex.digest(codex.PROMPT),
+    }
+    assert {k: v for k, v in v2.items() if k not in ("version", "lanes", "prompt_hashes")} == {
         k: v for k, v in v1.items() if k != "version"
     }
     assert v2["version"] == 2

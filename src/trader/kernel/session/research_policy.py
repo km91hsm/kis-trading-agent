@@ -145,6 +145,10 @@ def current(conn, settings, *, version: int = 2) -> dict:
         return policy
     policy["version"] = 2
     policy["lanes"] = _v2_lanes(enabled)
+    policy["prompt_hashes"] = {
+        "bull": codex.digest(codex.BULL_PROMPT),
+        "bear": codex.digest(codex.PROMPT),
+    }
     return policy
 
 
