@@ -135,7 +135,7 @@ def patch_scalp_switch(request: Request, account_id: str, body: ScalpSwitchBody)
         else:
             set_flag(conn, key, body.enabled)
         new = switch.stored(conn, deps.settings, acct)
-        if old != new:  # (값, 출처) 가 바뀐 경우만
+        if old[0] != new[0]:  # 실효 저장값이 바뀐 경우만(출처만 바뀌면 기록 없음)
             log_change(
                 conn, channel="web", actor=actor, key=key, old=old[0], new=new[0], at=now,
             )  # fmt: skip

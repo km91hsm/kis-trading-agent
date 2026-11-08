@@ -456,6 +456,34 @@ def test_pause_view_stale_log_ignored(project):
     assert r == {"paused": True, "at": None, "by": None}
 
 
+def test_pause_view_malformed_log_is_unknown(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    conn.execute(
+        "INSERT INTO control_log (at, channel, actor, key, old, new) "
+        "VALUES (?, 'web', NULL, 'paused', NULL, '{not json')",
+        (_iso(NOW),),
+    )
+    conn.commit()
+    conn.close()
+    r = make_client(deps).get("/api/system/pause")
+    assert r.status_code == 200
+    assert r.json() == {"paused": True, "at": None, "by": None}
+
+
+def test_pause_view_same_at_tie_breaks_on_later_id(project):
+    deps = ledger_deps(project)
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    at = _iso(NOW)
+    log_change(conn, channel="web", actor=None, key="paused", old=False, new=True, at=at)
+    log_change(conn, channel="tray", actor=None, key="paused", old=False, new=True, at=at)
+    conn.close()
+    r = make_client(deps).get("/api/system/pause").json()
+    assert r == {"paused": True, "at": at, "by": "tray"}
+
+
 def test_status_includes_paused_at(project):
     deps = ledger_deps(project)
     conn = deps.conn_factory()

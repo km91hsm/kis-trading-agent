@@ -86,7 +86,11 @@ def _pause_info(conn: Any) -> dict:
         "SELECT at, channel, new FROM control_log WHERE key = 'paused' "
         "ORDER BY at DESC, id DESC LIMIT 1"
     ).fetchone()
-    if row is not None and bool(_json(row["new"])) == paused:
+    try:
+        logged = bool(_json(row["new"])) if row is not None else None
+    except ValueError:  # 깨진 기록은 모르는 값으로 본다
+        logged = None
+    if row is not None and logged == paused:
         return {"paused": paused, "at": row["at"], "by": row["channel"]}
     return {"paused": paused, "at": None, "by": None}
 

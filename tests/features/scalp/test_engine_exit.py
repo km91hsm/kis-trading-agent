@@ -578,3 +578,33 @@ def test_finished_position_leaves_open_before_next_persist(
     assert out["exits"][0]["ticker"] == T
     assert any("000660" in o for o, _ in seen)  # B 의 중간 저장이 있었고
     assert all(not (set(o) & set(c)) for o, c in seen)  # A 는 양쪽에 동시에 없다
+
+
+def test_all_switches_off_drops_pending_but_exits_still_run(
+    scalp_ctx, market, brokers, conn, project
+):
+    """켜진 계좌가 없으면 판정 대기는 버려지고(그날 종목 끝) 주문이 없다. 청산은 나간다."""
+    from trader.features.scalp import switch
+
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10000")]
+    b.positions = [_pos(49)]
+    st = _st(project)
+    st["pending"] = {
+        "000660": {"signal_price": "10050", "signal_time": "102900", "reason": "r",
+                   "exchange": None, "submitted_at": NOW.isoformat()}
+    }  # fmt: skip
+    save_state(project / "state", D, "KR", st)
+    buys = conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0]
+    for acc in ("paper-main", "paper-two"):
+        set_flag(conn, switch.flag_key(acc), False)
+    market.prices[T] = Decimal("9800")  # 손절 −1% 아래
+    _advance(ctx, 3)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert "켜진 계좌 없음" in out["skipped"]
+    after = _st(project)
+    assert after["pending"] == {} and "000660" in after["done"]
+    assert conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0] == buys
+    assert [r["qty"] for r in _sells(conn)] == [49]  # 청산은 스위치와 무관하게 나간다

@@ -26,7 +26,7 @@ def stored(conn: sqlite3.Connection, settings: Any, account: Any) -> tuple[bool,
     if raw is not None:
         if isinstance(raw, dict):
             raw = raw.get("enabled")
-        return bool(raw), "control"
+        return raw is True, "control"  # "false"·1 같은 비불리언 값이 우연히 켜지지 않게
     if account.env == "paper":
         return bool(settings.scalp.enabled), "yaml"
     return False, "default"

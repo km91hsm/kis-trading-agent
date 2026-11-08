@@ -23,6 +23,15 @@ def test_stored_control_overrides_and_dict_value(conn, settings, accounts):
     assert switch.stored(conn, settings, _acc(accounts, "paper-main")) == (False, "control")
 
 
+def test_stored_non_bool_values_are_not_truthy_by_accident(conn, settings, accounts):
+    paper = _acc(accounts, "paper-main")
+    for bad in ("false", 1, "true", 0, {"enabled": "yes"}, {"enabled": 1}, {}):
+        set_flag(conn, switch.flag_key("paper-main"), bad)
+        assert switch.stored(conn, settings, paper) == (False, "control"), bad
+    set_flag(conn, switch.flag_key("paper-main"), {"enabled": True})
+    assert switch.stored(conn, settings, paper) == (True, "control")
+
+
 def test_real_enabled_requires_auto_and_live(conn, settings, accounts, accounts_port):
     real = _acc(accounts, "real-1")
     assert switch.account_enabled(conn, settings, real, accounts_port) == (False, "꺼짐")

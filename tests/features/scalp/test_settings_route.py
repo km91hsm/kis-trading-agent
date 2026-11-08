@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from tests.features.conftest import AUTH
 from tests.features.scalp.test_routes import client  # noqa: F401
 from trader.kernel.ledger.control import get_flag
@@ -16,6 +18,10 @@ def _rows(c):
 def _log(c):
     with c.app.state.deps.conn_factory() as conn:
         return conn.execute("SELECT * FROM control_log ORDER BY id").fetchall()
+
+
+def _patch(c, id_, enabled):
+    return c.patch(f"{URL}/{id_}", headers=AUTH, json={"enabled": enabled}).status_code
 
 
 def test_get_lists_accounts_with_source_and_effective(client):  # noqa: F811
@@ -82,3 +88,26 @@ def test_patch_unknown_account_404(client):  # noqa: F811
 def test_patch_rejects_extra_and_non_bool(client):  # noqa: F811
     for bad in ({"enabled": "yes"}, {"enabled": True, "x": 1}):
         assert client.patch(f"{URL}/paper-main", headers=AUTH, json=bad).status_code == 422
+
+
+def test_patch_logs_only_when_effective_value_changes(client):  # noqa: F811
+    deps = client.app.state.deps
+    off = deps.settings.scalp.model_copy(update={"enabled": False})
+    client.app.state.deps = replace(deps, settings=deps.settings.model_copy(update={"scalp": off}))
+    # 모의, yaml False: false 를 쓰면 출처만 바뀌고 값은 그대로 — 이력 없음
+    assert _patch(client, "paper-main", False) == 200
+    assert _log(client) == []
+    # 값이 그대로인 기본값 복귀 — 이력 없음
+    assert _patch(client, "paper-main", None) == 200
+    assert _log(client) == []
+    # 실제 켜기 — 한 줄
+    assert _patch(client, "paper-main", True) == 200
+    assert len(_log(client)) == 1
+
+
+def test_patch_real_on_with_other_account_confirm_rejected(client):  # noqa: F811
+    body = {"enabled": True, "confirm": "paper-main"}
+    assert client.patch(f"{URL}/real-1", headers=AUTH, json=body).status_code == 400
+    with client.app.state.deps.conn_factory() as conn:
+        assert get_flag(conn, "scalp_enabled:real-1") is None
+    assert _log(client) == []
