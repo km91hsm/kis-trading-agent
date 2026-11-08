@@ -26,9 +26,10 @@ from trader.kernel.execution.ledger import (  # noqa: F401 — 재export
 )
 from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.ledger.db import now_iso
+from trader.kernel.session import tooling
 
 _ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
-_DEBATE_RE = re.compile(r"^20_debate_r(\d+)_(bull|bear)$")
+_DEBATE_RE = tooling.DEBATE_RE
 _DECISION_RE = re.compile(r"^30_decision$")
 _ROUND_RE = re.compile(r"^31_decision_r(\d+)$")  # 재평가 라운드 (M5)
 
@@ -81,18 +82,20 @@ def ingest_checkpoint(
                 now,
             ),
         )
-    elif m := _DEBATE_RE.match(stage):
+    elif parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
+        lane, rnd, side = parsed
         conn.execute(
-            "INSERT INTO debate_turns(decision_date, market, ticker, round, side, stance, "
-            "conviction, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(decision_date, market, ticker, round, side) DO UPDATE SET "
+            "INSERT INTO debate_turns(decision_date, market, ticker, lane, round, side, stance, "
+            "conviction, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(decision_date, market, ticker, lane, round, side) DO UPDATE SET "
             "stance=excluded.stance, conviction=excluded.conviction, data_json=excluded.data_json",
             (
                 day,
                 market,
                 ticker,
-                int(m.group(1)),
-                m.group(2),
+                lane,
+                rnd,
+                side,
                 data.get("stance"),
                 data.get("conviction"),
                 js,

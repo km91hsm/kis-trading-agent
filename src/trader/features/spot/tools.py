@@ -66,16 +66,12 @@ EVIDENCE_ROLES = tooling.EVIDENCE_ROLES
 EVIDENCE_DEFINITION = tooling.EVIDENCE_DEFINITION
 
 
-def _load_turns(d: Path) -> dict[int, dict[str, schemas.DebateTurn]]:
-    """`20_debate_r<n>_<side>` 토론 턴을 {round: {side: DebateTurn}} 로."""
-    return tooling.load_turns(d, _DEBATE_RE)
-
-
 # LLM 이 checkpoint write 로 쓸 수 있는 단계와 전제조건. 패턴은 fnmatch glob 이라 역할·방향의
 # 유효성은 `schemas.schema_for` 와 파일명↔페이로드 일치 검사가 맞춘다. 30_decision 은 submit 전용.
 WRITE_RULES = (
     StageRule("10_analyst_*", requires=("00_inputs",)),
     StageRule("20_debate_r*_*", requires=("00_inputs",), min_counts=(("10_analyst_*", 2),)),
+    StageRule("20_debatex_r*_*", requires=("00_inputs",), min_counts=(("10_analyst_*", 2),)),
 )
 SUBMIT_RULE = StageRule(
     "30_decision",
@@ -596,9 +592,11 @@ def checkpoint_write(
     """LLM 이 쓸 수 있는 단계(`WRITE_RULES`)만 받는다: 스키마·파일명↔페이로드 일치·라운드 상한
     검증 뒤 전제조건(선행 단계)을 본다."""
     d = _dir(ctx, ticker, market, date)
-    if match := _DEBATE_RE.match(stage):
+    lane = "a"
+    if parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
+        lane = parsed[0]
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(match[1]), side=match[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=parsed[1], side=parsed[2], lane=lane
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
@@ -632,7 +630,7 @@ def checkpoint_write(
         return {"ok": False, "error": f"전제조건 미충족({stage}): {'; '.join(missing)}"}
     if isinstance(validated, schemas.DebateTurn):
         if err := research_policy.turn_error(
-            ctx.conn, ctx.settings, d, RESEARCH, validated.model_dump()
+            ctx.conn, ctx.settings, d, RESEARCH, validated.model_dump(), lane=lane
         ):
             return {"ok": False, "error": err}
     if isinstance(validated, schemas.DebateTurn):
@@ -654,9 +652,8 @@ def _name_payload_mismatch(
         if v.ticker != ticker:
             return f"ticker 불일치: {v.ticker} ≠ {ticker}"
         return None
-    m = _DEBATE_RE.match(stage)
-    if m:
-        rnd, side = int(m.group(1)), m.group(2)
+    if parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
+        _, rnd, side = parsed
         if v.side != side or v.round != rnd:
             return f"파일명 r{rnd}_{side} 와 페이로드 round={v.round} side={v.side} 불일치"
         if rnd > (ctx.settings.debate_rounds if rounds is None else rounds):
@@ -669,7 +666,8 @@ def _name_payload_mismatch(
 
 @_guarded
 def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: date) -> dict:
-    """20_debate_* 를 모아 25_research_summary 를 만든다 (파이썬이 수렴 감시).
+    """20_debate_*(판 b 는 20_debatex_*) 를 모아 25_research_summary 를 만든다 (파이썬이 수렴
+    감시). 두 판이면 같은 편을 합친 요약에 판별 원본 `by_lane` 이 붙는다(`tooling.summarize_lanes`).
 
     토론 턴이 하나도 없으면 애널리스트 합의(`summary.analyst_consensus`)를 보고, 합의면 토론 없이
     `skipped_debate: true` 요약을, 아니면 `debate_required: true` 오류를 돌려준다.
@@ -677,12 +675,11 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
     d = _dir(ctx, ticker, market, date)
     if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err, "debate_required": True}
-    turns = _load_turns(d)
-    if not turns:
+    if err := research_policy.summary_lane_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
+    lanes = tooling.load_lanes(d, _DEBATE_RE)
+    if not lanes:
         return _summarize_without_debate(ctx, d)
-    if 0 not in turns or set(turns[0]) != {"bull", "bear"}:
-        return {"ok": False, "error": "라운드 0 의 bull·bear 턴이 모두 필요합니다"}
-    final_round = max(r for r, sides in turns.items() if set(sides) == {"bull", "bear"})
     evidence_ids = {
         str(e.get("source_id"))
         for r in _reports(d)
@@ -690,9 +687,7 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
         if isinstance(e, dict) and e.get("source_id")
     }
     try:
-        summ = summary_mod.research_summary(
-            turns[0], turns[final_round], rounds=final_round, evidence_ids=evidence_ids
-        )
+        summ = tooling.summarize_lanes(lanes, evidence_ids=evidence_ids)
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     path = write_checkpoint(d, "25_research_summary", _wrap(summ, None))
@@ -701,6 +696,7 @@ def checkpoint_summarize(ctx: ToolContext, *, ticker: str, market: str, date: da
         "path": str(path),
         "sycophantic": summ["sycophantic"],
         "preferred": summ["preferred"],
+        "lanes": sorted(lanes),
     }
 
 
@@ -743,8 +739,11 @@ def checkpoint_bundle(
     kind: str,
     round: int | None = None,
     side: str | None = None,
+    lane: str = "a",
 ) -> dict:
-    """kind=researcher(round, side) | trader. 서브에이전트 프롬프트에 그대로 붙일 입력 묶음."""
+    """kind=researcher(round, side, lane) | trader. 서브에이전트 프롬프트에 그대로 붙일 입력 묶음.
+
+    `lane` 은 교차 토론의 판(a|b) — 직전 턴은 같은 판에서만 읽는다(`tooling.previous_turns`)."""
     d = _dir(ctx, ticker, market, date)
     reports = _reports(d)
     if len(reports) < MIN_REPORTS:
@@ -755,14 +754,14 @@ def checkpoint_bundle(
                 "ok": False,
                 "error": "researcher 묶음은 --round 와 --side(bull|bear) 가 필요합니다",
             }
-        turns = _load_turns(d)
-        own = opp = None
-        if round > 0:
-            prev = turns.get(round - 1, {})
-            own = prev.get(side)
-            opp = prev.get("bear" if side == "bull" else "bull")
-            if own is None or opp is None:
-                return {"ok": False, "error": f"라운드 {round - 1} 의 양측 턴이 모두 필요합니다"}
+        if err := research_policy.lane_error(ctx.conn, ctx.settings, d, RESEARCH, lane):
+            return {"ok": False, "error": err}
+        try:
+            own, opp = tooling.previous_turns(
+                d, _DEBATE_RE, lane=lane, round_no=round, side=side
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         data = {
             "ticker": ticker,
             "scope": "spot",
@@ -773,6 +772,7 @@ def checkpoint_bundle(
             "input_context": tooling.compact_context(read_checkpoint(d, "00_inputs") or {}),
             "round": round,
             "side": side,
+            "lane": lane,
             "reports": reports,
             "own_previous": own.model_dump() if own else None,
             "opponent_previous": opp.model_dump() if opp else None,
@@ -782,7 +782,7 @@ def checkpoint_bundle(
             input_receipts.record(
                 d,
                 result["data"]["input_context"],
-                stage=f"researcher:r{round}:{side}",
+                stage=f"researcher:r{round}:{side}" + ("" if lane == "a" else f":{lane}"),
                 provider=None,
                 recorded_at=ctx.now().isoformat(),
             )
@@ -1214,7 +1214,8 @@ def status(ctx: ToolContext, *, market: str, date: date) -> dict:
     tickers: dict[str, list[str]] = {}
     if mdir.exists():
         for p in sorted(mdir.iterdir()):
-            if p.is_dir():
+            # `_codex_failed_*` 등 `_` 로 시작하는 폴더는 종목이 아니다(시장 단위 연구의 보관 폴더)
+            if p.is_dir() and not p.name.startswith("_"):
                 tickers[p.name] = list_checkpoints(p)
     return {
         "ok": True,
@@ -1227,8 +1228,14 @@ def status(ctx: ToolContext, *, market: str, date: date) -> dict:
 
 
 @_guarded
-def codex_turn(ctx: ToolContext, *, ticker: str, market: str, date: date, round: int) -> dict:
+def codex_turn(
+    ctx: ToolContext, *, ticker: str, market: str, date: date, round: int, side: str = "bear"
+) -> dict:
+    """고정 정책의 Codex `side` 턴(그 편이 Codex 인 판에 저장). 실제 호출 여부는 정책의
+    `enabled` 가 정한다(`generate_turn`) — 기본 bear 는 옛 `cli_template` 호환."""
+    if side not in ("bull", "bear"):
+        return {"ok": False, "error": "--side 는 bull|bear 입니다"}
     d = _dir(ctx, ticker, market, date)
     if len(_reports(d)) < MIN_REPORTS:
         return {"ok": False, "error": "Codex 토론 전 애널리스트 2개 이상 필요"}
-    return research_policy.generate_turn(ctx, d, RESEARCH, round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round, side=side)

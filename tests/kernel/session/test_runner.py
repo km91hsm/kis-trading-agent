@@ -605,7 +605,15 @@ def test_codex_policy_missing_turns_fail_even_when_claude_exits_success(project,
     from trader.features.spot.session_kinds import ANALYZE
 
     monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    from trader.features.spot.research import RESEARCH
+    from trader.kernel.session import research_policy
+    from trader.kernel.session.run_store import run_dir
+
     ctx = make_ctx(project, conn, llm=LlmSettings(codex_debate={"enabled": True}))
+    # 업데이트 전에 시작된 v1(Codex 약세) 연구 — 세션은 레거시 2인 모드로 돈다
+    research_policy.start(
+        conn, ctx.settings, run_dir(D, "KR", "005930", ctx.state), RESEARCH, now=T0, version=1
+    )
     captured = {}
 
     def fake(cmd, **kw):
@@ -627,6 +635,162 @@ def test_codex_policy_missing_turns_fail_even_when_claude_exits_success(project,
     assert "codex-turn" in captured["prompt"]
     assert "researcher-bear" not in captured["agents"]
     assert conn.execute("SELECT status FROM runs ORDER BY id DESC LIMIT 1").fetchone()[0] == "error"
+
+
+# v1(레거시) 런타임 절 — 업데이트 전과 바이트 단위로 같아야 한다(판정 F4)
+LEGACY_SECTION = (
+    "\n# 고정된 Codex 토론 정책 (기존 흐름보다 우선)\n"
+    "bull은 선언된 Claude 에이전트, bear는 Codex 전용 도구다. Claude bear를 쓰지 않는다. "
+    "r0은 양측 독립 의견. r1부터 고정 debate_rounds까지 양측이 상대의 이전 라운드를 반박해야 "
+    "한다. 각 반박 턴 rebuttals는 비우지 않는다. 각 공급자는 자기 issues 1~5개(issue_id는 "
+    "bull:/bear: 고유ID, topic,claim,evidence=[리포트 source_id])를 제시한다. r0 "
+    "responses/replies는 빈 목록. r1+는 자신의 쟁점ID를 유지하고 상대 직전 issues의 모든 ID에 "
+    "responses(issue_id,response,evidence)로 반론한다. r2+는 상대 직전 responses가 지적한 "
+    "자신의 쟁점 전부에 replies로 재답변한다. WTI/DXY/미국10년금리 변화가 언제나 주가악재라는 "
+    "고정규칙은 금지한다. 성장/인플레/공급원인, 기대반영, 업종별 상반효과와 반례를 검토한다. "
+    "애널리스트 합의라도 토론을 생략하지 않는다. Codex 오류/상한/미완료면 중단하고 오류를 "
+    "보고한다. 재개 세션의 기존 결정은 원래 정책을 유지한다.\n"
+    f"- spot bull: researcher-bull; bear: {bundle.tool_command()} checkpoint codex-turn "
+    "--ticker <ticker> --market <market> --date <date> --round <n>\n"
+    "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한다. 각 라운드의 bull과 "
+    "bear 완료 후 다음 라운드, 마지막에 summarize를 실행한다.\n"
+)
+
+
+def _capture_session(project, conn, *, llm, kind=None, agents=None, rounds=1, before=None):
+    """실제 claude 없이 run_session 을 돌려 프롬프트·에이전트·제한 시간·env 를 잡는다."""
+    from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
+    from trader.features.spot.session_kinds import ANALYZE
+
+    ctx = make_ctx(project, conn, llm=llm)
+    ctx.settings.debate_rounds = rounds
+    if before is not None:
+        before(ctx)
+    captured = {}
+
+    def fake(cmd, **kw):
+        captured["prompt"] = cmd[cmd.index("--append-system-prompt") + 1]
+        captured["agents"] = json.loads(
+            Path(cmd[cmd.index("--agents") + 1]).read_text(encoding="utf-8")
+        )
+        captured["timeout"] = kw["timeout"]
+        captured["env"] = kw["env"]
+        return _ok_result()
+
+    result = run_session(
+        spec(),
+        kind or ANALYZE,
+        ctx,
+        agents=agents or ag.by_name(SPOT_AGENTS),
+        runner=fake,
+        claude_bin=Path("/fake/claude"),
+    )
+    return result, captured
+
+
+def _codex_on(**over):
+    return LlmSettings(codex_debate={"enabled": True}, usage_file=None, **over)
+
+
+def test_cross_session_keeps_bear_agent_and_extends_timeout(project, conn):
+    result, captured = _capture_session(project, conn, llm=_codex_on())
+    assert "researcher-bear" in captured["agents"]
+    assert "researcher-bull" in captured["agents"]
+    for s in ("1판", "2판", "--lane b", "--side bull", "--side bear", "codex-turn", "20_debatex_r"):
+        assert s in captured["prompt"], s
+    assert "Claude bear를 쓰지 않는다" not in captured["prompt"]
+    assert "Codex 오류/상한/미완료면 중단하고 오류를 보고한다" in captured["prompt"]
+    # 기본 연장 = (라운드 1 + 1) × (Codex 180 + 120) = 600
+    assert captured["timeout"] == 900 + 600
+    assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
+    # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
+    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
+    assert not result.ok and "Codex" in result.error
+
+
+def test_market_cross_timeout_is_1200(project, conn):
+    from trader.features.regime.session_kinds import MARKET, agents_for_runner
+
+    result, captured = _capture_session(
+        project, conn, llm=_codex_on(), kind=MARKET, agents=agents_for_runner()
+    )
+    assert captured["timeout"] == 600 + 600
+    assert "market-researcher-bear" in captured["agents"]
+    assert "_market_debatex_r" in captured["prompt"]
+    assert not result.ok and "Codex" in result.error
+
+
+def test_cross_extra_override(project, conn):
+    _, captured = _capture_session(project, conn, llm=_codex_on(cross_debate_extra_s=300))
+    assert captured["timeout"] == 900 + 300
+
+
+def test_cross_extra_rounds_two(project, conn):
+    _, captured = _capture_session(project, conn, llm=_codex_on(), rounds=2)
+    assert captured["timeout"] == 900 + 900
+
+
+def test_cross_bash_timeout_follows_codex_timeout(project, conn):
+    llm = LlmSettings(codex_debate={"enabled": True, "timeout_s": 600}, usage_file=None)
+    _, captured = _capture_session(project, conn, llm=llm)
+    assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "660000"
+    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "660000"
+    assert captured["timeout"] == 900 + 2 * (600 + 120)
+
+
+def test_disabled_codex_session_has_no_extra(project, conn):
+    _, captured = _capture_session(project, conn, llm=LlmSettings(usage_file=None))
+    assert captured["timeout"] == 900
+    assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
+    # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
+    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
+    assert "researcher-bear" in captured["agents"]
+    assert "codex-turn" not in captured["prompt"]
+
+
+def test_session_with_v1_codex_research_runs_legacy_mode(project, conn):
+    from trader.features.spot.research import RESEARCH
+    from trader.kernel.session import research_policy
+    from trader.kernel.session.run_store import run_dir
+
+    def before(ctx):
+        research_policy.start(
+            conn, ctx.settings, run_dir(D, "KR", "005930", ctx.state), RESEARCH, now=T0, version=1
+        )
+
+    result, captured = _capture_session(project, conn, llm=_codex_on(), before=before)
+    assert "researcher-bear" not in captured["agents"]
+    assert "Claude bear를 쓰지 않는다" in captured["prompt"]
+    # md 의 조건부 안내(「교차 토론이면」)는 남지만 런타임 절의 2판 지시는 붙지 않는다
+    assert "2판 Claude 턴" not in captured["prompt"]
+    assert captured["timeout"] == 900
+    assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
+    assert not result.ok and "Codex" in result.error
+
+
+def test_legacy_section_text_is_unchanged():
+    from trader.features.spot.research import RESEARCH
+
+    text = runner.codex_section([(Path("x"), RESEARCH, {"enabled": True})], cross=False)
+    assert text == LEGACY_SECTION
+
+
+def test_mixed_session_cross_section_follows_each_research_lanes():
+    """교차 연구와 1판 연구가 섞인 세션: 연구마다 research_policy.lanes 를 따르라는 문장."""
+    from trader.features.spot.research import RESEARCH
+
+    lane_a = {"lane": "a", "bull": "claude", "bear": "codex"}
+    lane_b = {"lane": "b", "bull": "codex", "bear": "claude"}
+    cfg = {"timeout_s": 180}
+    cross_p = {"version": 2, "enabled": True, "lanes": [lane_a, lane_b], "config": cfg}
+    single_p = {"version": 2, "enabled": False, "lanes": [lane_a], "config": cfg}
+    text = runner.codex_section(
+        [(Path("x"), RESEARCH, cross_p), (Path("y"), RESEARCH, single_p)], cross=True
+    )
+    assert (
+        "연구마다 researcher 묶음의 `research_policy.lanes` 를 따른다. 판이 하나뿐인 연구는 "
+        "1판(정책대로)만 진행하고, 그 연구의 2판 거부는 오류로 보고하되 세션을 중단하지 않는다."
+    ) in text
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX 부모 SIGTERM 전파")

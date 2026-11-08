@@ -93,12 +93,21 @@ class ResearchSpec:
     input_stage: str
     report_prefix: str
     turn_prefix: str
+    cross_turn_prefix: str
     completed_stage: str
     summary_stage: str
     cli_template: str
     bull_agent: str
     bear_agent: str
     metadata: Callable[[Path, dict], dict[str, str]]
+
+    def turn_stage(self, lane: str, round_no: int, side: str) -> str:
+        """토론 턴 단계 이름. 판 "a" = `turn_prefix`, 판 "b"(교차 토론) = `cross_turn_prefix`."""
+        if lane == "a":
+            return f"{self.turn_prefix}{round_no}_{side}"
+        if lane == "b":
+            return f"{self.cross_turn_prefix}{round_no}_{side}"
+        raise ValueError(f"알 수 없는 판: {lane!r} (허용: a, b)")
 
 
 @dataclass(frozen=True)

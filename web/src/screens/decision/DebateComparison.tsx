@@ -1,29 +1,31 @@
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Table, type Column } from "../../components/Table";
-import type { TraceDebate } from "../../lib/trace";
+import { laneLabel, type TraceDebate } from "../../lib/trace";
 import { EvidenceLinks, type InputItem, type InputGroup } from "./InputEvidence";
 
 type Entry = { turn: TraceDebate; text: string; evidence: string[] };
-type Issue = { id: string; topic: string; claims: Entry[]; responses: Entry[]; replies: Entry[] };
+type Issue = { id: string; issueId: string; topic: string; claims: Entry[]; responses: Entry[]; replies: Entry[] };
 const sideLabel = (side: string | null) => side === "bull" ? "강세 측" : side === "bear" ? "약세 측" : "역할 미기록";
-const participant = (turn: TraceDebate) => `${turn.provider === "claude" ? "Claude" : turn.provider === "codex" ? "Codex" : "공급자 미기록"} (${sideLabel(turn.side)})`;
+const laneOf = (turn: TraceDebate) => turn.lane === "b" ? "b" : "a";
+const participant = (turn: TraceDebate) => `${laneLabel(turn.lane)} ${turn.provider === "claude" ? "Claude" : turn.provider === "codex" ? "Codex" : "공급자 미기록"} (${sideLabel(turn.side)})`;
 
 function issueRows(turns: TraceDebate[]): Issue[] {
   const issues = new Map<string, Issue>();
-  const get = (id: string) => {
-    if (!issues.has(id)) issues.set(id, { id, topic: "원 주장 미기록", claims: [], responses: [], replies: [] });
-    return issues.get(id)!;
+  const get = (id: string, lane: string) => {
+    const key = `${lane}:${id}`;
+    if (!issues.has(key)) issues.set(key, { id: key, issueId: id, topic: "원 주장 미기록", claims: [], responses: [], replies: [] });
+    return issues.get(key)!;
   };
   const ordered = [...turns].sort((a, b) => (a.round ?? -1) - (b.round ?? -1));
   for (const turn of ordered) {
     for (const claim of turn.issues ?? []) {
-      const issue = get(claim.issue_id);
+      const issue = get(claim.issue_id, laneOf(turn));
       issue.topic = claim.topic;
       issue.claims.push({ turn, text: claim.claim, evidence: claim.evidence });
     }
-    for (const response of turn.responses ?? []) get(response.issue_id).responses.push({ turn, text: response.response, evidence: response.evidence });
-    for (const reply of turn.replies ?? []) get(reply.issue_id).replies.push({ turn, text: reply.response, evidence: reply.evidence });
+    for (const response of turn.responses ?? []) get(response.issue_id, laneOf(turn)).responses.push({ turn, text: response.response, evidence: response.evidence });
+    for (const reply of turn.replies ?? []) get(reply.issue_id, laneOf(turn)).replies.push({ turn, text: reply.response, evidence: reply.evidence });
   }
   return [...issues.values()];
 }
@@ -32,7 +34,7 @@ type Confidence = { key: string; participant: string; change: string; rounds: st
 function confidenceRows(turns: TraceDebate[]): Confidence[] {
   const rows = new Map<string, TraceDebate[]>();
   for (const turn of [...turns].sort((a, b) => (a.round ?? -1) - (b.round ?? -1))) {
-    const key = `${turn.side}:${turn.provider ?? "unknown"}:${turn.model ?? "unknown"}`;
+    const key = `${laneOf(turn)}:${turn.side}:${turn.provider ?? "unknown"}:${turn.model ?? "unknown"}`;
     rows.set(key, [...(rows.get(key) ?? []), turn]);
   }
   return [...rows].map(([key, all]) => {
@@ -65,7 +67,7 @@ export function DebateComparison({ turns, items, groups = [] }: { turns: TraceDe
     <p className="data-muted evidence-note">확신은 발언 전체의 값입니다. 쟁점별 확신·명시적 수락/거부는 저장되지 않아 의견의 유사성만으로 합의를 판단하지 않습니다.</p>
     {issues.length ? <div className="issue-comparison">{issues.map(issue => <article key={issue.id} data-issue-id={issue.id}>
       <div className="issue-heading"><h3>{issue.topic}</h3><Chip tone="muted">합의 미기록</Chip></div>
-      <p className="data-muted">쟁점 ID: {issue.id}</p>
+      <p className="data-muted">쟁점 ID: {issue.issueId}</p>
       <div className="issue-columns">
         <Entries title="주장" entries={issue.claims} items={items} groups={groups} />
         <Entries title="상대 반론" entries={issue.responses} items={items} groups={groups} />

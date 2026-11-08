@@ -68,20 +68,26 @@ FO_INPUTS = "_fo_inputs"
 FO_SUMMARY = "_fo_summary"
 FO_MIN_ROLES = 2
 _FO_ANALYST_RE = re.compile(r"^_fo_analyst_(technical|sentiment|news_macro)$")
-_FO_DEBATE_RE = re.compile(r"^_fo_debate_r(\d+)_(bull|bear)$")
+_FO_DEBATE_RE = tooling.debate_re(RESEARCH.turn_prefix, RESEARCH.cross_turn_prefix)
 _FO_DECISION_RE = re.compile(r"^_fo_decision_r(\d+)_([A-Za-z0-9_-]+)$")
 _FO_REEVAL_RE = re.compile(r"^_fo_reeval_r(\d+)_([A-Za-z0-9_-]+)$")
-_FO_WRITABLE = ("_fo_analyst_<technical|sentiment|news_macro>", "_fo_debate_r<n>_<bull|bear>")
+_FO_WRITABLE = (
+    "_fo_analyst_<technical|sentiment|news_macro>",
+    "_fo_debate_r<n>_<bull|bear>",
+    "_fo_debatex_r<n>_<bull|bear>",
+)
 FO_PENDING_FLAG = "fo_pending_entry:"
 FO_STALE_NOTE = "입력 노후 — 실행 안 함"
 FO_INPUT_DATE_NOTE = "입력 날짜 불일치 — 실행 안 함"
 FO_SUBMIT_STALE_NOTE = "제출·재개 시점 입력 노후 — 실행 안 함"
 
 # 전제조건 표(`StageRule`) — `fo write` 는 입력이 있어야 하고, 제출은 서로 다른 애널리스트 역할 ≥ 2
-# (단계 이름 = 역할이라 개수 = 역할 수) + r0 양측 + 요약. 핸들러는 옛 문구 그대로 같은 조건을 본다
+# (단계 이름 = 역할이라 개수 = 역할 수) + 판 a r0 양측 + 요약. 핸들러는 옛 문구 그대로 같은 조건을
+# 본다. 교차 토론(판 b `_fo_debatex_*`)의 완료는 `research_policy.completion_error` 가 강제한다
 FO_WRITE_RULES = (
     StageRule("_fo_analyst_*", requires=(FO_INPUTS,)),
     StageRule("_fo_debate_r*_*", requires=(FO_INPUTS,)),
+    StageRule("_fo_debatex_r*_*", requires=(FO_INPUTS,)),
 )
 FO_SUBMIT_RULE = StageRule(
     "_fo_decision*",
@@ -172,10 +178,6 @@ def _fo_reports(d: Path) -> list[dict]:
             if isinstance(data.get("data"), dict):
                 out.append(data["data"])
     return out
-
-
-def _fo_turns(d: Path) -> dict[int, dict[str, DebateTurn]]:
-    return tooling.load_turns(d, _FO_DEBATE_RE)
 
 
 def _fo_live_request(d: Path, account_id: str, position_id: int) -> tuple[int, dict] | None:
@@ -269,8 +271,10 @@ def fo_bundle(
     side: str | None = None,
     position_id: int | None = None,
     account: str | None = None,
+    lane: str = "a",
 ) -> dict:
-    """파생 세션 서브에이전트 입력 묶음. kind=analyst(role) | researcher(round, side) |
+    """파생 세션 서브에이전트 입력 묶음. kind=analyst(role) | researcher(round, side, lane — 직전
+    턴은 같은 판에서만 읽는다) |
     trader(재평가면 position_id·account → `_fo_reeval_r<n>_<계좌>` 요청의 트리거·request_id;
     `round` 를 주면 그 라운드의 요청만 읽고 없으면 오류 — stdin `position.round` 와 묶음이 어긋나지
     않게(S3 P1))."""
@@ -300,18 +304,20 @@ def fo_bundle(
                 "ok": False,
                 "error": "researcher 묶음은 --round 와 --side(bull|bear) 가 필요합니다",
             }
-        own = opp = None
-        if round > 0:
-            prev = _fo_turns(d).get(round - 1, {})
-            own = prev.get(side)
-            opp = prev.get("bear" if side == "bull" else "bull")
-            if own is None or opp is None:
-                return {"ok": False, "error": f"라운드 {round - 1} 의 양측 턴이 모두 필요합니다"}
+        if err := research_policy.lane_error(ctx.conn, ctx.settings, d, RESEARCH, lane):
+            return {"ok": False, "error": err}
+        try:
+            own, opp = tooling.previous_turns(
+                d, _FO_DEBATE_RE, lane=lane, round_no=round, side=side
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         data = fo_inputs.bundle(
             inputs, kind="researcher", round=round, side=side, reports=reports,
             previous=(own.model_dump() if own else None, opp.model_dump() if opp else None),
         )  # fmt: skip
         data["input_context"] = tooling.compact_context(inputs)
+        data["lane"] = lane
         data["research_policy"] = research_policy.public_policy(ctx.conn, ctx.settings, d, RESEARCH)
         return tooling.debate_bundle(data, BUNDLE_LIMIT_BYTES)
     if kind == "trader":
@@ -369,28 +375,31 @@ def fo_write(
     call_meta: dict | None = None,
 ) -> dict:
     """LLM 쓰기 가능 파생 단계: `_fo_analyst_<role>`(AnalystReport, role 일치),
-    `_fo_debate_r<n>_<side>`(DebateTurn, round·side 일치, n ≤ debate_rounds). 토론 턴을 새로 쓰면
+    `_fo_debate_r<n>_<side>`·판 b `_fo_debatex_r<n>_<side>`(DebateTurn, round·side 일치,
+    n ≤ debate_rounds). 토론 턴을 새로 쓰면
     `_fo_summary` 를 지운다(요약은 턴의 함수)."""
     d = _fo_dir(ctx, date)
-    md = _FO_DEBATE_RE.match(stage)
+    md = tooling.parse_debate_stage(_FO_DEBATE_RE, stage)
+    lane = "a"
     if md:
+        lane = md[0]
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(md[1]), side=md[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=md[1], side=md[2], lane=lane
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
     rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     ma = _FO_ANALYST_RE.match(stage)
-    md = _FO_DEBATE_RE.match(stage)
+    md = tooling.parse_debate_stage(_FO_DEBATE_RE, stage)
     if ma:
         model: type = AnalystReport
     elif md:
         model = DebateTurn
-        if int(md.group(1)) > rounds:
+        if md[1] > rounds:
             return {
                 "ok": False,
                 "error": (
-                    f"라운드 {md.group(1)} 는 설정(debate_rounds="
+                    f"라운드 {md[1]} 는 설정(debate_rounds="
                     f"{ctx.settings.debate_rounds})을 넘습니다"
                 ),
             }
@@ -416,17 +425,19 @@ def fo_write(
             "ok": False,
             "error": f"리포트 ticker 는 입력의 proxy({proxy})여야 합니다: {v.ticker!r}",
         }
-    if md and (v.round != int(md.group(1)) or v.side != md.group(2)):
+    if md and (v.round != md[1] or v.side != md[2]):
         return {
             "ok": False,
             "error": (
-                f"파일명 r{md.group(1)}_{md.group(2)} 와 페이로드 "
+                f"파일명 r{md[1]}_{md[2]} 와 페이로드 "
                 f"round={v.round} side={v.side} 불일치"
             ),
         }
     d = _fo_dir(ctx, date, create=True)
     if isinstance(v, DebateTurn):
-        if err := research_policy.turn_error(ctx.conn, ctx.settings, d, RESEARCH, v.model_dump()):
+        if err := research_policy.turn_error(
+            ctx.conn, ctx.settings, d, RESEARCH, v.model_dump(), lane=lane
+        ):
             return {"ok": False, "error": err}
     invalidated = research_policy.invalidate_summary(d, RESEARCH) if md else False
     path = write_checkpoint(d, stage, _wrap(v.model_dump(), tooling.call_meta(agent, call_meta)))
@@ -434,9 +445,12 @@ def fo_write(
 
 
 def fo_summarize(ctx: FoToolContext, *, date: date) -> dict:
-    """`_fo_debate_*` 를 모아 `_fo_summary`(수렴 감시 포함)를 만든다."""
+    """`_fo_debate_*`(판 b 는 `_fo_debatex_*`) 를 모아 `_fo_summary`(수렴 감시 포함)를 만든다.
+    두 판이면 같은 편을 합친 요약에 판별 원본 `by_lane` 이 붙는다."""
     d = _fo_dir(ctx, date)
     if err := research_policy.completion_error(ctx.conn, ctx.settings, d, RESEARCH):
+        return {"ok": False, "error": err}
+    if err := research_policy.summary_lane_error(ctx.conn, ctx.settings, d, RESEARCH):
         return {"ok": False, "error": err}
     return tooling.summarize_turns(d, FO_SUMMARY, _FO_DEBATE_RE)
 
@@ -903,11 +917,12 @@ def bundle_cmd(
     side: str | None = typer.Option(None, "--side"),
     position_id: int | None = typer.Option(None, "--position-id", help="재평가 포지션 id"),
     account: str | None = typer.Option(None, "--account", help="재평가 계좌 id"),
+    lane: str = typer.Option("a", "--lane", help="교차 토론 판 a | b"),
 ) -> None:
     """파생 서브에이전트 입력 묶음을 JSON 으로."""
     _fo_tool_run(
         fo_bundle, market=market, date=date, kind=kind, role=role, round=round, side=side,
-        position_id=position_id, account=account,
+        position_id=position_id, account=account, lane=lane,
     )  # fmt: skip
 
 
@@ -915,21 +930,29 @@ def bundle_cmd(
 def write_cmd(
     market: str = typer.Option("KR", "--market"),
     date: str = typer.Option(..., "--date"),
-    stage: str = typer.Option(..., "--stage", help="_fo_analyst_<role> | _fo_debate_r<n>_<side>"),
+    stage: str = typer.Option(
+        ..., "--stage", help="_fo_analyst_<role> | _fo_debate_r<n>_<side> | _fo_debatex_r<n>_<side>"
+    ),
     agent: str | None = typer.Option(None, "--agent"),
     json_text: str | None = typer.Option(None, "--json", help="JSON (없으면 stdin)"),
 ) -> None:
-    """`_fo_analyst_<role>`·`_fo_debate_r<n>_<side>` 저장(스키마·라운드 검증)."""
+    """`_fo_analyst_<role>`·`_fo_debate_r<n>_<side>`·`_fo_debatex_r<n>_<side>`(2판) 저장.
+
+    스키마·라운드를 검증한다."""
     _fo_tool_run(
         fo_write, market=market, date=date, stage=stage, payload_text=json_text, agent=agent
     )
 
 
-def codex_turn(ctx: FoToolContext, *, date: date, round: int) -> dict:
+def codex_turn(ctx: FoToolContext, *, date: date, round: int, side: str = "bear") -> dict:
+    """고정 정책의 Codex `side` 턴(그 편이 Codex 인 판에 저장). 실제 호출 여부는 정책의
+    `enabled` 가 정한다(`generate_turn`) — 기본 bear 는 옛 `cli_template` 호환."""
+    if side not in ("bull", "bear"):
+        return {"ok": False, "error": "--side 는 bull|bear 입니다"}
     d = _fo_dir(ctx, date)
     if len(_fo_reports(d)) < FO_MIN_ROLES:
         return {"ok": False, "error": "Codex 토론 전 서로 다른 애널리스트 2개 이상 필요"}
-    return research_policy.generate_turn(ctx, d, RESEARCH, round)
+    return research_policy.generate_turn(ctx, d, RESEARCH, round, side=side)
 
 
 @fo_tool_app.command("codex-turn")
@@ -937,8 +960,10 @@ def codex_turn_cmd(
     market: str = typer.Option("KR", "--market"),
     date: str = typer.Option(..., "--date"),
     round: int = typer.Option(..., "--round"),
+    side: str = typer.Option("bear", "--side", help="Codex 편 bull | bear (기본 bear)"),
 ) -> None:
-    _fo_tool_run(codex_turn, market=market, date=date, round=round)
+    """고정 정책의 Codex 턴(bull|bear) 호출·검증·증명 기록."""
+    _fo_tool_run(codex_turn, market=market, date=date, round=round, side=side)
 
 
 @fo_tool_app.command("summarize")

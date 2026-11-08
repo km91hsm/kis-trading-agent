@@ -10,6 +10,8 @@ from datetime import date
 from typing import Any
 
 from trader.features.regime import tools
+from trader.features.regime.research import RESEARCH
+from trader.kernel.session import research_policy
 from trader.kernel.session.fake import ensure_ok, fake_call, fake_turn
 from trader.kernel.session.run_store import market_dir, read_checkpoint
 
@@ -52,21 +54,26 @@ def write_fake_market(
         )
     )
     written.append("_market_analyst")
+    # 판 목록은 고정 정책(FAKE 는 `configured()` 가 켜짐이면 두 판)에서 — Codex 칸도 FAKE 턴으로
+    # 채우고 실제 Codex 는 부르지 않는다(FAKE 정책은 enabled=False)
+    policy = research_policy.get(ctx.conn, ctx.settings, d, RESEARCH)
     for rnd in range(0, min(debate_rounds, 1) + 1):
-        for side in ("bull", "bear"):
-            agent = f"market-researcher-{side}"
-            ensure_ok(
-                tools.market_write(
-                    ctx,
-                    market=market,
-                    date=date,
-                    stage=f"_market_debate_r{rnd}_{side}",
-                    payload=fake_turn(side, rnd),
-                    agent=agent,
-                    call_meta=fake_call(agent),
+        for item in research_policy.lanes(policy):
+            for side in ("bull", "bear"):
+                agent = f"market-researcher-{side}"
+                stage = RESEARCH.turn_stage(item["lane"], rnd, side)
+                ensure_ok(
+                    tools.market_write(
+                        ctx,
+                        market=market,
+                        date=date,
+                        stage=stage,
+                        payload=fake_turn(side, rnd),
+                        agent=agent,
+                        call_meta=fake_call(agent),
+                    )
                 )
-            )
-            written.append(f"_market_debate_r{rnd}_{side}")
+                written.append(stage)
     ensure_ok(tools.market_summarize(ctx, market=market, date=date))
     written.append("_market_summary")
     bear = (inputs.get("regime") or {}).get("state") == "bear"

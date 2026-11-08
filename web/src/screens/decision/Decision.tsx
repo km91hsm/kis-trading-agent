@@ -12,7 +12,7 @@ import { ApiError, getJson } from "../../lib/api";
 import { fmtInt, fmtMoney } from "../../lib/format";
 import { GLOSSARY, sideLabel, termLabel } from "../../lib/glossary";
 import { useResource, type Resource } from "../../lib/hooks";
-import { normalizeTrace, SIGNAL, type FoCheck, type TraceDebate, type TraceGate, type TraceOrder, type TraceResp } from "../../lib/trace";
+import { laneLabel, normalizeTrace, SIGNAL, type FoCheck, type TraceDebate, type TraceGate, type TraceOrder, type TraceResp } from "../../lib/trace";
 import { actionLabel, decisionHeader, roundRows, timingLabel, type FoDetail, type RoundRow, type SpotDetail } from "./decision.ts";
 import { InputEvidence, type DecisionInputs } from "./InputEvidence";
 import { DebateComparison } from "./DebateComparison";
@@ -60,10 +60,13 @@ const roundColumns = (market: string | null | undefined): Column<RoundRow>[] => 
   { key: "at", label: "시각", width: "24%", render: (r) => r.at },
 ];
 type DebateRow = TraceDebate & { key: number };
+const providerName = (p: string | null | undefined) => (p === "codex" ? "Codex" : p === "claude" ? "Claude" : p ? p : "미기록");
+const debateOrder = (rows: TraceDebate[]) => [...rows].sort((a, b) => (a.lane === "b" ? 1 : 0) - (b.lane === "b" ? 1 : 0) || (a.round ?? 0) - (b.round ?? 0) || (a.side === "bull" ? 0 : 1) - (b.side === "bull" ? 0 : 1));
 const DEBATE_COLUMNS: Column<DebateRow>[] = [
+  { key: "lane", label: termLabel("debate.lane"), width: "7%", render: (r) => laneLabel(r.lane) },
   { key: "round", label: "라운드", width: "9%", render: (r) => `r${r.round ?? 0}` },
-  { key: "side", label: "측", width: "13%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{r.side === "bull" ? "강세 측" : "약세 측"}</Chip> },
-  { key: "provider", label: "참여 모델", width: "21%", render: (r) => r.provider ? `${r.provider === "codex" ? "Codex" : r.provider === "claude" ? "Claude" : r.provider}${r.model ? ` / ${r.model}` : " / 모델 미기록"}` : "미기록" },
+  { key: "side", label: "측", width: "17%", align: "chip", render: (r) => <Chip tone={r.side === "bull" ? "ok" : "fail"}>{`${r.side === "bull" ? "강세" : "약세"} · ${providerName(r.provider)}`}</Chip> },
+  { key: "provider", label: "참여 모델", width: "17%", render: (r) => r.model ?? "모델 미기록" },
   { key: "stance", label: "판단", width: "12%", align: "chip", render: (r) => signalChip(r.stance) },
   { key: "conviction", label: "확신", width: "10%", align: "num", render: (r) => pct(r.conviction) },
   { key: "timing", label: "타이밍", width: "10%", render: (r) => timingLabel(r.timing) },
@@ -266,7 +269,7 @@ function DecisionContent() {
           {t ? (
             <details className="debate">
               <summary>토론 턴 {t.debate.length}개</summary>
-              <Table columns={DEBATE_COLUMNS} rows={t.debate.map((x, i) => ({ ...x, key: i }))} rowKey={(r) => r.key} expand={(r) => <DebateDetail turn={r} />} />
+              <Table columns={DEBATE_COLUMNS} rows={debateOrder(t.debate).map((x, i) => ({ ...x, key: i }))} rowKey={(r) => r.key} expand={(r) => <DebateDetail turn={r} />} />
             </details>
           ) : (
             <Pending res={rawTrace} what="추적" />

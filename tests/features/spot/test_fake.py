@@ -238,3 +238,38 @@ def test_fake_session_with_codex_enabled_never_claims_or_launches_codex(lane_ctx
     res = _run(lane_ctx)
     assert res.ok and res.fake
     assert lane_ctx.conn.execute("SELECT COUNT(*) FROM research_calls").fetchone()[0] == 0
+
+
+def test_fake_cross_debate_writes_both_lanes(lane_ctx, monkeypatch):
+    """Codex 켜짐 설정 + FAKE: 라운드마다 두 판 4턴과 by_lane 요약(실제 Codex 는 띄우지 않는다)."""
+    from trader.kernel.session import codex
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    lane_ctx.settings.llm.codex_debate.enabled = True
+    lane_ctx.settings.debate_rounds = 1
+    monkeypatch.setattr(codex, "run_turn", lambda *a, **kw: pytest.fail("FAKE launched Codex"))
+    d = _inputs()
+    res = _run(lane_ctx)
+    assert res.ok and res.fake
+    stages = set(list_checkpoints(d))
+    for n in (0, 1):
+        for s in ("bull", "bear"):
+            assert f"20_debate_r{n}_{s}" in stages
+            assert f"20_debatex_r{n}_{s}" in stages
+            assert f"20_debatex_r{n}_{s}" in res.stages_written
+    assert read_checkpoint(d, "20_debatex_r0_bull")["call"]["agent"] == "researcher-bull"
+    summ = read_checkpoint(d, "25_research_summary")["data"]
+    assert set(summ["by_lane"]) == {"a", "b"} and summ["lanes"] == ["a", "b"]
+    assert "30_decision" in stages
+
+
+def test_fake_without_codex_writes_single_lane(lane_ctx, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    lane_ctx.settings.llm.codex_debate.enabled = False
+    d = _inputs()
+    res = _run(lane_ctx)
+    assert res.ok
+    stages = list_checkpoints(d)
+    assert "20_debate_r0_bull" in stages
+    assert not any(s.startswith("20_debatex_") for s in stages)
+    assert "by_lane" not in read_checkpoint(d, "25_research_summary")["data"]

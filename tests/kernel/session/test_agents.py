@@ -168,3 +168,15 @@ def test_agents_use_current_schema_when_markdown_contains_obsolete_schema():
     out = ag.with_schema(original, DebateTurn)
     schema = json.loads(out.split("스키마: ", 1)[1].splitlines()[0])
     assert "issues" in schema["properties"] and "obsolete" not in schema["properties"]
+
+
+def test_trader_prompts_mention_by_lane():
+    root = Path(__file__).resolve().parents[3] / "src" / "trader" / "features"
+    for rel in ("spot/agents/trader.md", "regime/agents/strategist.md", "fo/agents/fo-trader.md"):
+        assert "by_lane" in (root / rel).read_text(encoding="utf-8"), rel
+    for rel in (
+        "spot/agents/orchestrator.md",
+        "regime/agents/market-orchestrator.md",
+        "fo/agents/fo-orchestrator.md",
+    ):
+        assert "--lane b" in (root / rel).read_text(encoding="utf-8"), rel

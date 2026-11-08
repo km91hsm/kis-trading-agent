@@ -66,6 +66,9 @@ PROMPT = (
     "a_gaps를 존중하세요. 도구를 호출하지 말고 DebateTurn "
     "JSON만 출력하세요."
 )
+# 강세 측 프롬프트: 약세 PROMPT 와 첫 역할어만 다르다(약세 PROMPT 해시는 저장된 정책·증명에 있다).
+BULL_PROMPT = PROMPT.replace("독립적인 bear 연구자", "독립적인 bull 연구자", 1)
+PROMPTS: dict[str, str] = {"bear": PROMPT, "bull": BULL_PROMPT}
 _ALLOWED = {
     "scope",
     "market",
@@ -220,14 +223,16 @@ def run_turn(
     cfg = CodexDebateSettings.model_validate(config) if config else settings.llm.codex_debate
     clean = sanitize(data)
     required = {"scope", "market", "asof", "ticker", "currency", "round", "side"}
-    if not required <= clean.keys() or clean["side"] != "bear":
+    if not required <= clean.keys() or clean["side"] not in PROMPTS:
         raise CodexError("Codex 입력 scope/market/asof/ticker/currency/round/side가 필요합니다")
     if len(canonical(clean).encode("utf-8")) > 24_000:
         raise CodexError(
             "Codex 정제 입력이 24,000 UTF-8 bytes 상한을 넘습니다. 자료를 축약해 재분석하세요"
         )
+    side = clean["side"]
+    prompt = PROMPTS[side]
     schema = output_schema()
-    input_hash, prompt_hash, schema_hash = digest(clean), digest(PROMPT), digest(schema)
+    input_hash, prompt_hash, schema_hash = digest(clean), digest(prompt), digest(schema)
     lo, hi = day_bounds(now.astimezone(KST).date(), "KR")
     # Reserve under one writer lock; quota rejections remain visible without consuming calls.
     with conn:
@@ -275,7 +280,7 @@ def run_turn(
             cmd = command(binary, schema_file, output, cfg)
             proc = (runner or run_claude)(
                 cmd,
-                input=PROMPT + "\n" + canonical(clean),
+                input=prompt + "\n" + canonical(clean),
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
@@ -291,7 +296,7 @@ def run_turn(
             if not output.is_file():
                 raise CodexError("Codex 최종 JSON 출력이 없습니다")
             turn = DebateTurn.model_validate_json(output.read_text(encoding="utf-8"))
-            if turn.side != "bear" or turn.round != clean["round"]:
+            if turn.side != side or turn.round != clean["round"]:
                 raise CodexError("Codex 턴 side/round 불일치")
             result = turn.model_dump()
             if validate is not None:
@@ -311,7 +316,7 @@ def run_turn(
         return {
             "data": result,
             "call": {
-                "agent": "researcher-bear",
+                "agent": f"researcher-{side}",
                 "provider": "codex",
                 "model": cfg.model,
                 "call_id": call_id,

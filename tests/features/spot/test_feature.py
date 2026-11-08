@@ -11,18 +11,19 @@ def test_boot_ports_has_accounts_and_inputs(project):
         b.conn.close()
 
 
-def test_spot_owns_v6_v9_and_kernel_extends_through_v17():
+def test_spot_owns_v6_v9_and_kernel_extends_through_v19():
     from trader.features.spot.feature import FEATURE
 
-    assert FEATURE.tier == "lane" and [m.version for m in FEATURE.migrations] == [6, 9]
+    assert FEATURE.tier == "lane" and [m.version for m in FEATURE.migrations] == [6, 9, 19]
     assert [m.owner for m in FEATURE.migrations] == [
+        "spot",
         "spot",
         "spot",
     ]  # accounts 와 같은 기능 이름 규약
     assert [k.retry_guard for k in FEATURE.session_kinds] == [True, False]  # analyze 만 차단
-    # 마지막 spot 소유는 9, 뒤의 커널 모듈(session=17)이 전체 끝
-    assert [m.version for m in FEATURE.migrations][-1] == 9
-    assert [m.version for m in all_migrations([FEATURE])][-1] == 17
+    # 마지막 spot 소유는 19(판 열), 커널 모듈(session=18)보다 뒤
+    assert [m.version for m in FEATURE.migrations][-1] == 19
+    assert [m.version for m in all_migrations([FEATURE])][-1] == 19
 
 
 def test_spot_declares_scan_analyze_job_queue_kinds_and_schedule():

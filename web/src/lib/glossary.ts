@@ -82,6 +82,7 @@ export const GLOSSARY: Record<string, TermEntry> = {
   // 역할별 모델(settings.models 키)
   "role.orchestrator": { label: "총괄", help: "세션을 이끄는 오케스트레이터." },
   "role.analyst": { label: "애널리스트", help: "차트·회사가치·뉴스·수급 분석." },
+  "debate.lane": { label: "판", help: "1판 = Claude 강세 ↔ Codex 약세, 2판 = Codex 강세 ↔ Claude 약세" },
   "role.researcher_bull": { label: "강세 리서처", help: "오른다는 쪽의 근거를 모은다." },
   "role.researcher_bear": { label: "약세 리서처", help: "내린다는 쪽의 근거를 모은다." },
   "role.market_researcher_bull": { label: "시장 강세 리서처", help: "시장 세션의 강세 측." },

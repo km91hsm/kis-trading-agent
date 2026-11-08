@@ -34,19 +34,20 @@ def decision_distribution(
     return {r["action"]: int(r["n"]) for r in rows}
 
 
-def convergence_rate(
-    conn: sqlite3.Connection, *, days: int, now: datetime | None
-) -> float | None:
-    """최종 라운드에서 양측 부호 확신 차이가 CONVERGENCE_GAP 이하인 종목 비율 (토론 없으면 None)."""
+CONVERGENCE_DEFINITION = "판(강세·약세 한 쌍) 단위 — 4인 교차 토론 결정은 표본 2개"
+
+
+def convergence_rate(conn: sqlite3.Connection, *, days: int, now: datetime | None) -> float | None:
+    """최종 라운드에서 양측 부호 확신 차이가 CONVERGENCE_GAP 이하인 판 비율 (토론 없으면 None)."""
     rows = conn.execute(
-        "SELECT decision_date, market, ticker, side, round, stance, conviction FROM debate_turns "
-        "WHERE decision_date >= ?",
+        "SELECT decision_date, market, ticker, lane, side, round, stance, conviction "
+        "FROM debate_turns WHERE decision_date >= ?",
         (_since(days, now),),
     ).fetchall()
     by_key: dict[tuple, dict[int, dict[str, float]]] = {}
     for r in rows:
         signed = float(r["conviction"] or 0.0) * _SIGN.get(r["stance"] or "", 0.0)
-        by_key.setdefault((r["decision_date"], r["market"], r["ticker"]), {}).setdefault(
+        by_key.setdefault((r["decision_date"], r["market"], r["ticker"], r["lane"]), {}).setdefault(
             int(r["round"]), {}
         )[r["side"]] = signed
     total = converged = 0

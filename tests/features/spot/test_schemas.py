@@ -80,3 +80,8 @@ def test_decision_prices_must_be_positive():
             with pytest.raises(ValidationError):
                 Decision(**ok_decision(**{field: bad}))
     assert Decision(**ok_decision(stop_loss=None, take_profit=None)).stop_loss is None
+
+
+def test_schema_for_cross_lane_turn():
+    assert schema_for("20_debatex_r1_bear") is DebateTurn
+    assert schema_for("20_debatey_r1_bear") is None

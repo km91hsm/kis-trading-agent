@@ -238,3 +238,113 @@ def test_codex_rejects_oversized_sanitized_input_without_launch(conn, monkeypatc
             runner=forbidden,
             bin_path=Path("/fake/codex"),
         )
+
+
+def _side_data(side: str) -> dict:
+    return {
+        "scope": "spot",
+        "market": "KR",
+        "ticker": "005930",
+        "currency": "KRW",
+        "asof": NOW.isoformat(),
+        "round": 0,
+        "side": side,
+        "reports": [],
+    }
+
+
+def _runner_emitting(captured: dict, side: str):
+    def fake(cmd, **kw):
+        captured.update(cmd=cmd, **kw)
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(json.dumps(ok_turn(side, 0)))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return fake
+
+
+def test_bear_prompt_bytes_unchanged():
+    from trader.kernel.session import codex
+
+    assert (
+        codex.digest(codex.PROMPT)
+        == "262b395d3c0e7b5efa63b8b13ca9c6c5e623397fe2e6fb57ad8617387d707319"
+    )
+    assert codex.PROMPTS["bear"] is codex.PROMPT
+    assert codex.PROMPTS["bull"] is codex.BULL_PROMPT
+    assert codex.BULL_PROMPT.startswith("당신은 독립적인 bull 연구자입니다.")
+    assert codex.BULL_PROMPT.replace("bull 연구자", "bear 연구자", 1) == codex.PROMPT
+
+
+def test_codex_bull_turn_uses_bull_prompt(conn, monkeypatch):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    captured: dict = {}
+    result = codex.run_turn(
+        conn,
+        settings=enabled_settings(),
+        policy_hash="p",
+        data=_side_data("bull"),
+        now=NOW,
+        runner=_runner_emitting(captured, "bull"),
+        bin_path=Path("/fake/codex"),
+    )
+    assert captured["input"].startswith(codex.BULL_PROMPT + "\n")
+    assert result["data"]["side"] == "bull"
+    assert result["call"]["prompt_hash"] == codex.digest(codex.BULL_PROMPT)
+    assert result["call"]["agent"] == "researcher-bull"
+    row = conn.execute("SELECT prompt_hash, status FROM research_calls ORDER BY id DESC").fetchone()
+    assert row["prompt_hash"] == codex.digest(codex.BULL_PROMPT) and row["status"] == "ok"
+
+
+def test_codex_bear_turn_keeps_bear_prompt_and_agent(conn, monkeypatch):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    captured: dict = {}
+    result = codex.run_turn(
+        conn,
+        settings=enabled_settings(),
+        policy_hash="p",
+        data=_side_data("bear"),
+        now=NOW,
+        runner=_runner_emitting(captured, "bear"),
+        bin_path=Path("/fake/codex"),
+    )
+    assert captured["input"].startswith(codex.PROMPT + "\n")
+    assert result["call"]["prompt_hash"] == codex.digest(codex.PROMPT)
+    assert result["call"]["agent"] == "researcher-bear"
+
+
+def test_codex_rejects_side_mismatch(conn, monkeypatch):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    with pytest.raises(codex.CodexError, match="Codex 턴 side/round 불일치"):
+        codex.run_turn(
+            conn,
+            settings=enabled_settings(),
+            policy_hash="p",
+            data=_side_data("bull"),
+            now=NOW,
+            runner=_runner_emitting({}, "bear"),
+            bin_path=Path("/fake/codex"),
+        )
+    row = conn.execute("SELECT status FROM research_calls ORDER BY id DESC").fetchone()
+    assert row["status"] == "error"
+
+
+def test_codex_rejects_unknown_side(conn, monkeypatch):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    with pytest.raises(codex.CodexError, match="scope/market/asof/ticker/currency/round/side"):
+        codex.run_turn(
+            conn,
+            settings=enabled_settings(),
+            policy_hash="p",
+            data=_side_data("trader"),
+            now=NOW,
+            runner=_runner_emitting({}, "bear"),
+            bin_path=Path("/fake/codex"),
+        )

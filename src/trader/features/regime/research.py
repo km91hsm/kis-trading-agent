@@ -20,6 +20,7 @@ RESEARCH = ResearchSpec(
     input_stage="_market_inputs",
     report_prefix="_market_analyst",
     turn_prefix="_market_debate_r",
+    cross_turn_prefix="_market_debatex_r",
     completed_stage="_market_view",
     summary_stage="_market_summary",
     cli_template="market codex-turn --market <market> --date <date> --round <n>",

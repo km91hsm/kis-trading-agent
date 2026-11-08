@@ -306,3 +306,198 @@ def test_cli_tool_fo_commands_emit_json(project, conn, monkeypatch):
     sub, subout = _invoke(app, ["submit-fo-decision", "--market", "KR", "--date", D.isoformat(),
                                 "--json", payload])  # fmt: skip
     assert sub.exit_code == 1 and "역할" in subout["error"]
+
+
+# --- 교차 토론(2판) ---------------------------------------------------------------
+
+
+def _fo_issue_turn(side, rnd=0, **over):
+    """쟁점 토론 검사를 통과하는 턴(쟁점 `<side>:case`, 근거는 ok_report 의 source_id)."""
+    return ok_turn(
+        side,
+        rnd,
+        issues=[
+            {
+                "issue_id": f"{side}:case",
+                "topic": "쟁점",
+                "claim": "근거 주장",
+                "evidence": ["technical.indicators"],
+            }
+        ],
+        **over,
+    )
+
+
+def _fo_cross(ctx):
+    """v2 교차 정책(Codex 켜짐)을 고정한 뒤 애널리스트 2역할."""
+    from trader.features.fo.research import RESEARCH
+    from trader.kernel.session import research_policy
+
+    ctx.settings.llm.codex_debate.enabled = True
+    policy = research_policy.start(ctx.conn, ctx.settings, market_dir(D, "KR"), RESEARCH, now=NOW)
+    assert research_policy.is_cross(policy)
+    _reports(ctx)
+    return market_dir(D, "KR")
+
+
+def _fo_save_turn(d, stage, payload, provider):
+    from trader.kernel.session.run_store import checkpoint_payload, write_checkpoint
+
+    write_checkpoint(d, stage, checkpoint_payload(payload, {"agent": "x", "provider": provider}))
+
+
+def _fo_both_lanes(d):
+    for prefix in ("_fo_debate_r", "_fo_debatex_r"):
+        for side in ("bull", "bear"):
+            _fo_save_turn(d, f"{prefix}0_{side}", ok_turn(side, 0), "claude")
+
+
+def test_fo_write_rule_covers_lane_b_stage():
+    for stage in ("_fo_debatex_r0_bull", "_fo_debatex_r1_bear"):
+        rule = first_rule(tools.FO_WRITE_RULES, stage)
+        assert rule is not None and rule.requires == (tools.FO_INPUTS,), stage
+    # 제출 규칙은 판 a r0 를 그대로 이름으로 요구한다(교차 정책 완료는 completion_error 가 강제)
+    assert tools.FO_SUBMIT_RULE.requires == (
+        tools.FO_INPUTS, "_fo_debate_r0_bull", "_fo_debate_r0_bear", tools.FO_SUMMARY,
+    )  # fmt: skip
+
+
+def test_fo_bundle_lane_b_uses_lane_b_previous(ctx, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _fo_cross(ctx)
+    for stage, side, text, provider in (
+        ("_fo_debate_r0_bull", "bull", "판A 강세", "claude"),
+        ("_fo_debate_r0_bear", "bear", "판A 약세", "codex"),
+        ("_fo_debatex_r0_bull", "bull", "판B 강세", "codex"),
+        ("_fo_debatex_r0_bear", "bear", "판B 약세", "claude"),
+    ):
+        _fo_save_turn(d, stage, _fo_issue_turn(side, arguments=[text]), provider)
+    out = tools.fo_bundle(ctx, date=D, kind="researcher", round=1, side="bear", lane="b")
+    assert out["ok"] is True, out
+    assert out["data"]["lane"] == "b"
+    assert out["data"]["opponent_previous"]["arguments"] == ["판B 강세"]
+    assert out["data"]["own_previous"]["arguments"] == ["판B 약세"]
+    a = tools.fo_bundle(ctx, date=D, kind="researcher", round=1, side="bull")
+    assert a["data"]["lane"] == "a"
+    assert a["data"]["opponent_previous"]["arguments"] == ["판A 약세"]
+
+
+def test_fo_bundle_lane_b_rejected_without_cross_policy(ctx, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _reports(ctx)
+    out = tools.fo_bundle(ctx, date=D, kind="researcher", round=0, side="bull", lane="b")
+    assert out == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+    bad = tools.fo_bundle(ctx, date=D, kind="researcher", round=0, side="bull", lane="c")
+    assert bad == {"ok": False, "error": "--lane 은 a|b 입니다"}
+
+
+def test_fo_write_rejects_claude_in_codex_slot_lane_b(ctx, monkeypatch):
+    """v2 위조 회귀: 판 b Codex 강세 칸을 Claude 체크포인트로 쓰면 쓰기 단계에서 거부."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _fo_cross(ctx)
+    out = tools.fo_write(ctx, date=D, stage="_fo_debatex_r0_bull", payload=_fo_issue_turn("bull"))
+    assert out["ok"] is False
+    assert out["error"].startswith("Codex bull는 전용 도구로만 기록할 수 있습니다")
+    assert read_checkpoint(d, "_fo_debatex_r0_bull") is None
+
+
+def test_fo_write_accepts_claude_lane_b_bear(ctx, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _fo_cross(ctx)
+    out = tools.fo_write(
+        ctx, date=D, stage="_fo_debatex_r0_bear", payload=_fo_issue_turn("bear"),
+        agent="researcher-bear",
+    )  # fmt: skip
+    assert out == {
+        "ok": True,
+        "path": str(d / "_fo_debatex_r0_bear.json"),
+        "stage": "_fo_debatex_r0_bear",
+        "summary_invalidated": False,
+    }
+    saved = read_checkpoint(d, "_fo_debatex_r0_bear")
+    assert saved["call"]["provider"] == "claude" and saved["data"]["side"] == "bear"
+
+
+def test_fo_write_lane_b_rejected_without_cross_policy(ctx, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _reports(ctx)
+    out = tools.fo_write(ctx, date=D, stage="_fo_debatex_r0_bear", payload=ok_turn("bear", 0))
+    assert out == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+    assert read_checkpoint(market_dir(D, "KR"), "_fo_debatex_r0_bear") is None
+
+
+def test_fo_codex_turn_side_passthrough(ctx, monkeypatch):
+    from trader.kernel.session import research_policy
+
+    _reports(ctx)
+    seen = {}
+
+    def fake_generate(ctx_, d, scope, round_no, *, side="bear", **kw):
+        seen.update(round=round_no, side=side, scope=scope.scope)
+        return {"ok": True, "side": side}
+
+    monkeypatch.setattr(research_policy, "generate_turn", fake_generate)
+    assert tools.codex_turn(ctx, date=D, round=0, side="bull") == {"ok": True, "side": "bull"}
+    assert seen == {"round": 0, "side": "bull", "scope": "fo"}
+    tools.codex_turn(ctx, date=D, round=1)
+    assert seen == {"round": 1, "side": "bear", "scope": "fo"}
+    bad = tools.codex_turn(ctx, date=D, round=0, side="x")
+    assert bad == {"ok": False, "error": "--side 는 bull|bear 입니다"}
+
+
+def test_fo_cli_lane_and_side_options(monkeypatch):
+    seen = {}
+
+    def fake_run(fn, **kw):
+        seen[fn.__name__] = kw
+
+    monkeypatch.setattr(tools, "_fo_tool_run", fake_run)
+    runner = CliRunner()
+    base = ["--market", "KR", "--date", D.isoformat()]
+    args = ["bundle", *base, "--kind", "researcher", "--round", "0", "--side", "bull"]
+    assert runner.invoke(tools.fo_tool_app, args).exit_code == 0
+    assert seen["fo_bundle"]["lane"] == "a"
+    assert runner.invoke(tools.fo_tool_app, [*args, "--lane", "b"]).exit_code == 0
+    assert seen["fo_bundle"]["lane"] == "b"
+    assert runner.invoke(tools.fo_tool_app, ["codex-turn", *base, "--round", "0"]).exit_code == 0
+    assert seen["codex_turn"]["side"] == "bear"
+    side_args = ["codex-turn", *base, "--round", "0", "--side", "bull"]
+    res = runner.invoke(tools.fo_tool_app, side_args)
+    assert res.exit_code == 0
+    assert seen["codex_turn"]["side"] == "bull"
+
+
+def test_fo_summarize_merges_two_lanes(ctx, monkeypatch):
+    """두 판 정책(FAKE·Codex 켜짐 설정 — 증명 검사 없음)에서 요약이 두 판을 합친다."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    ctx.settings.llm.codex_debate.enabled = True
+    _reports(ctx)
+    d = market_dir(D, "KR")
+    _fo_both_lanes(d)
+    out = tools.fo_summarize(ctx, date=D)
+    assert out["ok"] is True, out
+    assert out["lanes"] == ["a", "b"]
+    data = read_checkpoint(d, "_fo_summary")["data"]
+    assert data["lanes"] == ["a", "b"]
+    assert set(data["by_lane"]) == {"a", "b"}
+
+
+def test_fo_summarize_rejects_lane_b_without_lane_b_policy(ctx, monkeypatch):
+    """심층 방어: 판 b 가 없는 정책인데 판 b 파일이 있으면 요약하지 않는다."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _reports(ctx)
+    d = market_dir(D, "KR")
+    _fo_both_lanes(d)
+    assert tools.fo_summarize(ctx, date=D) == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+    assert read_checkpoint(d, "_fo_summary") is None
+
+
+def test_fo_summarize_cross_policy_incomplete_lane_b_rejected(ctx, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _fo_cross(ctx)
+    for rnd in (0, 1):
+        for side in ("bull", "bear"):
+            _fo_save_turn(d, f"_fo_debate_r{rnd}_{side}", ok_turn(side, rnd), "claude")
+    out = tools.fo_summarize(ctx, date=D)
+    assert out == {"ok": False, "error": "Codex 필수 토론 미완료: 2판 r0_bull"}
+    assert read_checkpoint(d, "_fo_summary") is None

@@ -199,3 +199,29 @@ def test_decision_source_follows_last_writer(conn):
     ledger.insert_hedge_decision(conn, D, "KR", "005930", ok_decision())
     assert source("005930") == "hedge"
     assert conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 2
+
+
+def test_lane_migration_backfills_a(tmp_path):
+    from trader.kernel import registry
+    from trader.kernel.ledger.db import connect, init_schema
+    from trader.kernel.registry import contracts
+
+    migs = contracts.all_migrations(registry.discover())
+    conn = connect(tmp_path / "t.db")
+    init_schema(conn, [m for m in migs if m.version < 19])
+    conn.execute(
+        "INSERT INTO debate_turns(decision_date,market,ticker,round,side,stance,conviction,"
+        "data_json,created_at) VALUES('2026-11-08','KR','005930',0,'bull','BULLISH',0.7,'{}','t')"
+    )
+    init_schema(conn, migs)
+    assert conn.execute("SELECT lane FROM debate_turns").fetchone()[0] == "a"
+
+
+def test_ingest_lane_b_keeps_both_rows(conn):
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "20_debate_r0_bull", cp(ok_turn("bull")))
+    ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "20_debatex_r0_bull", cp(ok_turn("bull", conviction=0.4))
+    )
+    rows = conn.execute("SELECT lane, conviction FROM debate_turns ORDER BY lane").fetchall()
+    assert [(r[0], r[1]) for r in rows] == [("a", 0.7), ("b", 0.4)]
+    assert conn.in_transaction is False

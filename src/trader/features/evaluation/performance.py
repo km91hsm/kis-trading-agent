@@ -327,4 +327,5 @@ def report(
             conn, days=days, now=now, market=market
         ),
         "convergence_rate": metrics.convergence_rate(conn, days=days, now=now),
+        "convergence_definition": metrics.CONVERGENCE_DEFINITION,
     }

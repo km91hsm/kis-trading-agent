@@ -473,6 +473,17 @@ def test_status_lists_tickers_and_sessions(ctx, project):
     assert r["sessions_today"] == 0 and r["cap"] == ctx.settings.llm.daily_session_cap
 
 
+def test_market_dir_listing_skips_underscore_dirs(ctx, project):
+    """시장 폴더의 `_codex_failed_*` 보관 폴더(market·fo 연구 폴더 안)는 종목이 아니다."""
+    _inputs(project)
+    mdir = run_store.market_dir(D, "KR", project / "state")
+    archive = mdir / "_codex_failed_20261108_010203"
+    archive.mkdir()
+    run_store.write_checkpoint(archive, "20_debate_r0_bull", {"x": 1})
+    r = tools.status(ctx, market="KR", date=D)
+    assert r["ok"] and list(r["tickers"]) == ["005930"]
+
+
 def test_cli_tool_outputs_json_only(project, monkeypatch):
     from typer.testing import CliRunner
 
@@ -1178,3 +1189,330 @@ def test_trader_context_includes_quant_or_none(ctx, project, ml_port):
     tools.ensure_quant(ctx, ticker="005930", market="KR", date=D)
     got = tools.trader_context(ctx, "KR", D, "005930", {})["quant"]
     assert got["role"] == "quant" and got["signal"] == "BUY"
+
+
+# --- 교차 토론(2판) ---------------------------------------------------------------
+
+
+def _issue_turn(side, rnd=0, **over):
+    """쟁점 토론 검사를 통과하는 r0 턴(쟁점 `<side>:case`, 근거는 ok_report 의 source_id)."""
+    return ok_turn(
+        side,
+        rnd,
+        issues=[
+            {
+                "issue_id": f"{side}:case",
+                "topic": "쟁점",
+                "claim": "근거 주장",
+                "evidence": ["technical.indicators"],
+            }
+        ],
+        **over,
+    )
+
+
+def _two_reports(ctx, project, before_reports=None):
+    d = _inputs(project)
+    if before_reports is not None:
+        before_reports(d)
+    for role in ("technical", "sentiment"):
+        run_store.write_checkpoint(
+            d,
+            f"10_analyst_{role}",
+            run_store.checkpoint_payload(ok_report(role=role)),
+        )
+    return d
+
+
+def _cross_ctx(ctx, project):
+    """v2 교차 정책(Codex 켜짐)을 고정한 연구 폴더."""
+    from trader.features.spot.research import RESEARCH
+    from trader.kernel.session import research_policy
+
+    ctx.settings.llm.codex_debate.enabled = True
+    started = {}
+
+    def start(d):
+        started["policy"] = research_policy.start(ctx.conn, ctx.settings, d, RESEARCH, now=T0)
+
+    d = _two_reports(ctx, project, before_reports=start)
+    assert research_policy.is_cross(started["policy"])
+    return d
+
+
+def _save_turn(d, stage, payload, provider):
+    run_store.write_checkpoint(
+        d, stage, run_store.checkpoint_payload(payload, {"agent": "x", "provider": provider})
+    )
+
+
+def test_write_rule_covers_lane_b_stage():
+    from trader.kernel.session.stages import first_rule
+
+    assert first_rule(tools.WRITE_RULES, "20_debatex_r0_bull") is not None
+    assert first_rule(tools.WRITE_RULES, "20_debatex_r1_bear") is not None
+
+
+def test_write_rejects_claude_in_codex_slot_lane_b(ctx, project, monkeypatch):
+    """v2 위조 회귀: 판 b Codex 강세 칸을 Claude 체크포인트로 쓰면 쓰기 단계에서 거부."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    out = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="20_debatex_r0_bull",
+        payload=_issue_turn("bull", 0),
+    )
+    assert out["ok"] is False
+    assert out["error"].startswith("Codex bull는 전용 도구로만 기록할 수 있습니다")
+    assert read_checkpoint(d, "20_debatex_r0_bull") is None
+
+
+def test_write_accepts_claude_lane_b_bear(ctx, project, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    out = tools.checkpoint_write(
+        ctx,
+        ticker="005930",
+        market="KR",
+        date=D,
+        stage="20_debatex_r0_bear",
+        payload=_issue_turn("bear", 0),
+        agent="researcher-bear",
+    )
+    assert out["ok"] is True, out
+    saved = read_checkpoint(d, "20_debatex_r0_bear")
+    assert saved["call"]["provider"] == "claude" and saved["data"]["side"] == "bear"
+
+
+def test_write_lane_b_turn_error_uses_lane_b_previous(ctx, project, monkeypatch):
+    """판 b r1 쓰기의 쟁점 검사는 판 b 직전 턴을 본다(판 a 의 다른 쟁점 ID 는 무관)."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    _save_turn(d, "20_debate_r0_bull", _issue_turn("bull", 0), "claude")
+    _save_turn(d, "20_debate_r0_bear", _issue_turn("bear", 0), "codex")
+    lane_b_bull = _issue_turn("bull", 0)
+    lane_b_bull["issues"][0]["issue_id"] = "bull:other"
+    _save_turn(d, "20_debatex_r0_bull", lane_b_bull, "codex")
+    _save_turn(d, "20_debatex_r0_bear", _issue_turn("bear", 0), "claude")
+    r1 = _issue_turn(
+        "bear",
+        1,
+        rebuttals=["반박"],
+        responses=[
+            {"issue_id": "bull:other", "response": "반론", "evidence": ["technical.indicators"]}
+        ],
+    )
+    out = tools.checkpoint_write(
+        ctx, ticker="005930", market="KR", date=D, stage="20_debatex_r1_bear", payload=r1
+    )
+    assert out["ok"] is True, out
+
+
+def test_bundle_lane_b_uses_lane_b_previous(ctx, project, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    _save_turn(d, "20_debate_r0_bull", _issue_turn("bull", 0, arguments=["판A 강세"]), "claude")
+    _save_turn(d, "20_debate_r0_bear", _issue_turn("bear", 0, arguments=["판A 약세"]), "codex")
+    _save_turn(d, "20_debatex_r0_bull", _issue_turn("bull", 0, arguments=["판B 강세"]), "codex")
+    _save_turn(d, "20_debatex_r0_bear", _issue_turn("bear", 0, arguments=["판B 약세"]), "claude")
+    out = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=1, side="bear", lane="b"
+    )
+    assert out["ok"] is True, out
+    assert out["data"]["lane"] == "b"
+    assert out["data"]["opponent_previous"]["arguments"] == ["판B 강세"]
+    assert out["data"]["own_previous"]["arguments"] == ["판B 약세"]
+    stages = {
+        json.loads(p.read_text(encoding="utf-8"))["stage"]
+        for p in (d / "input_receipts").glob("*.json")
+    }
+    assert "researcher:r1:bear:b" in stages
+    a = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=1, side="bull"
+    )
+    assert a["data"]["lane"] == "a"
+    assert a["data"]["opponent_previous"]["arguments"] == ["판A 약세"]
+
+
+def test_bundle_lane_b_rejected_without_cross_policy(ctx, project, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    _two_reports(ctx, project)
+    out = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=0, side="bull", lane="b"
+    )
+    assert out == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+
+
+def test_bundle_rejects_unknown_lane(ctx, project):
+    _two_reports(ctx, project)
+    out = tools.checkpoint_bundle(
+        ctx, ticker="005930", market="KR", date=D, kind="researcher", round=0, side="bull", lane="c"
+    )
+    assert out == {"ok": False, "error": "--lane 은 a|b 입니다"}
+
+
+def test_codex_turn_side_passthrough(ctx, project, monkeypatch):
+    from trader.kernel.session import research_policy
+
+    _two_reports(ctx, project)
+    seen = {}
+
+    def fake_generate(ctx_, d, scope, round_no, *, side="bear", **kw):
+        seen.update(round=round_no, side=side)
+        return {"ok": True, "side": side}
+
+    monkeypatch.setattr(research_policy, "generate_turn", fake_generate)
+    out = tools.codex_turn(ctx, ticker="005930", market="KR", date=D, round=0, side="bull")
+    assert out == {"ok": True, "side": "bull"}
+    assert seen == {"round": 0, "side": "bull"}
+    tools.codex_turn(ctx, ticker="005930", market="KR", date=D, round=1)
+    assert seen == {"round": 1, "side": "bear"}  # 기본값은 bear(옛 cli_template 호환)
+
+
+def test_codex_turn_cli_side_option(project, monkeypatch):
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    seen = {}
+
+    def fake(ctx_, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(tools, "codex_turn", fake)
+    runner = CliRunner()
+    base = ["tool", "checkpoint", "codex-turn", "--ticker", "005930", "--market", "KR"]
+    res = runner.invoke(app, [*base, "--date", D.isoformat(), "--round", "0"])
+    assert res.exit_code == 0, res.output
+    assert seen["side"] == "bear"
+    res = runner.invoke(
+        app, [*base, "--date", D.isoformat(), "--round", "0", "--side", "bull"]
+    )
+    assert res.exit_code == 0, res.output
+    assert seen["side"] == "bull"
+
+
+def test_bundle_cli_lane_option(project, monkeypatch):
+    from typer.testing import CliRunner
+
+    from trader.kernel.cli.main import app
+
+    seen = {}
+
+    def fake(ctx_, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(tools, "checkpoint_bundle", fake)
+    runner = CliRunner()
+    base = ["tool", "checkpoint", "bundle", "--ticker", "005930", "--market", "KR", "--date"]
+    args = [*base, D.isoformat(), "--kind", "researcher", "--round", "0", "--side", "bull"]
+    res = runner.invoke(app, args)
+    assert res.exit_code == 0, res.output
+    assert seen["lane"] == "a"
+    res = runner.invoke(app, [*args, "--lane", "b"])
+    assert res.exit_code == 0, res.output
+    assert seen["lane"] == "b"
+
+
+def _write_both_lanes(d, rounds=(0,), big=False):
+    """검증을 우회해 두 판의 턴을 직접 쓴다(v2 꺼짐 요약 합치기용)."""
+    n = 0
+    for lane, prefix in (("a", "20_debate_r"), ("b", "20_debatex_r")):
+        for rnd in rounds:
+            for side in ("bull", "bear"):
+                over = {}
+                if big:
+                    over = {
+                        "arguments": [f"{(n := n + 1)}" + "가" * 300 for _ in range(5)],
+                        "rebuttals": [f"{(n := n + 1)}" + "나" * 300 for _ in range(5)]
+                        if rnd
+                        else [],
+                        "what_would_change_my_mind": [
+                            f"{(n := n + 1)}" + "다" * 200 for _ in range(3)
+                        ],
+                    }
+                _save_turn(d, f"{prefix}{rnd}_{side}", ok_turn(side, rnd, **over), lane)
+
+
+def _two_lane_fake(ctx, monkeypatch):
+    """두 판 정책(FAKE·Codex 켜짐 설정 — 증명 검사 없음): 판 b 파일을 요약할 수 있는 정책."""
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    ctx.settings.llm.codex_debate.enabled = True
+
+
+def test_summarize_merges_two_lanes(ctx, project, monkeypatch):
+    _two_lane_fake(ctx, monkeypatch)
+    d = _two_reports(ctx, project)
+    _write_both_lanes(d)
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out["ok"] is True, out
+    assert out["lanes"] == ["a", "b"]
+    data = read_checkpoint(d, "25_research_summary")["data"]
+    assert data["lanes"] == ["a", "b"]
+    assert set(data["by_lane"]) == {"a", "b"}
+
+
+def test_summarize_single_lane_reports_lanes(ctx, project, monkeypatch):
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _two_reports(ctx, project)
+    for side in ("bull", "bear"):
+        _save_turn(d, f"20_debate_r0_{side}", ok_turn(side, 0), "claude")
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out["ok"] is True and out["lanes"] == ["a"]
+    assert "by_lane" not in read_checkpoint(d, "25_research_summary")["data"]
+
+
+def test_summarize_lane_b_missing_side_is_error(ctx, project, monkeypatch):
+    _two_lane_fake(ctx, monkeypatch)
+    d = _two_reports(ctx, project)
+    for side in ("bull", "bear"):
+        _save_turn(d, f"20_debate_r0_{side}", ok_turn(side, 0), "claude")
+    _save_turn(d, "20_debatex_r0_bull", ok_turn("bull", 0), "claude")
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out == {"ok": False, "error": "2판: 라운드 0 의 bull·bear 턴이 모두 필요합니다"}
+
+
+def test_trader_bundle_two_lanes_near_limit_fits(ctx, project, monkeypatch):
+    """두 판 요약(by_lane)이 붙은 트레이더 묶음도 BUNDLE_LIMIT_BYTES 안에 든다(중복 없는 문자열)."""
+    _two_lane_fake(ctx, monkeypatch)
+    _realistic_reports_and_turns(ctx, project)
+    d = run_dir(D, "KR", "005930")
+    _write_both_lanes(d, rounds=(0, 1), big=True)
+    assert tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)["ok"]
+    summ = read_checkpoint(d, "25_research_summary")
+    raw = len(json.dumps(summ["data"], ensure_ascii=False).encode("utf-8"))
+    assert raw > tools.BUNDLE_LIMIT_BYTES  # 요약 원본만으로도 한도를 넘는다
+    r = tools.checkpoint_bundle(ctx, ticker="005930", market="KR", date=D, kind="trader")
+    assert r["ok"] is True
+    b = r["data"]
+    assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < tools.BUNDLE_LIMIT_BYTES
+    assert set(b["research_summary"]["by_lane"]) == {"a", "b"}
+
+
+def test_summarize_rejects_lane_b_without_lane_b_policy(ctx, project, monkeypatch):
+    """심층 방어: 판 b 가 없는 정책(Codex 꺼짐)인데 판 b 파일이 있으면 요약하지 않는다."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _two_reports(ctx, project)
+    _write_both_lanes(d)
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out == {"ok": False, "error": "이 연구에는 2판이 없습니다"}
+    assert read_checkpoint(d, "25_research_summary") is None
+
+
+def test_summarize_cross_policy_incomplete_lane_b_rejected(ctx, project, monkeypatch):
+    """교차 정책에서 판 b 가 비어 있으면 요약을 거부한다(판 a 만으로 요약하지 않는다)."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _cross_ctx(ctx, project)
+    for rnd in (0, 1):
+        for side in ("bull", "bear"):
+            _save_turn(d, f"20_debate_r{rnd}_{side}", ok_turn(side, rnd), "claude")
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out["ok"] is False
+    assert out["error"] == "Codex 필수 토론 미완료: 2판 r0_bull"
+    assert out["debate_required"] is True
+    assert read_checkpoint(d, "25_research_summary") is None

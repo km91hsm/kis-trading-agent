@@ -40,3 +40,20 @@ def test_convergence_rate_none_without_debates(conn):
             {"data": ok_turn(side, round=0, stance=stance, conviction=0.7)},
         )  # fmt: skip
     assert metrics.convergence_rate(conn, days=30, now=NOW) == 0.5
+
+
+def test_convergence_counts_each_lane(conn):
+    # 한 결정: 판 a 최종 gap 0.1(수렴), 판 b 최종 gap 0.9(비수렴) → 표본 2개 중 1개
+    for stage, bull, bear in (("20_debate", 0.6, 0.5), ("20_debatex", 0.9, 0.0)):
+        for side, conv in (("bull", bull), ("bear", bear)):
+            ingest_checkpoint(
+                conn, D, "KR", "005930", f"{stage}_r0_{side}",
+                {"data": ok_turn(side, stance="BULLISH", conviction=conv)},
+            )  # fmt: skip
+    assert metrics.convergence_rate(conn, days=30, now=NOW) == 0.5
+
+
+def test_convergence_definition_text():
+    assert metrics.CONVERGENCE_DEFINITION == (
+        "판(강세·약세 한 쌍) 단위 — 4인 교차 토론 결정은 표본 2개"
+    )
