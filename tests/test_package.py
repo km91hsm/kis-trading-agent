@@ -1,7 +1,7 @@
 def test_version():
     import trader
 
-    assert trader.__version__ == "0.3.4"
+    assert trader.__version__ == "0.3.5"
 
 
 def test_project_fixture_sets_home(project, monkeypatch):
