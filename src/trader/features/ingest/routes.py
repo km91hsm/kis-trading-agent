@@ -49,12 +49,17 @@ def list_news(
     hours: int = Query(48, ge=1, le=24 * 30),
     limit: int = Query(100, ge=1, le=500),
     ticker: str | None = None,
+    source: Literal["saveticker", "naver", "google_rss", "disclosure"] | None = None,
 ) -> dict:
+    """최근 뉴스. `source` 는 출처 묶음(세이브티커·네이버·구글·공시) — 수가 많은 출처에 다른
+    출처가 최신 limit 건에서 밀리지 않게 따로 본다."""
     m = _market(market)
     deps = request.app.state.deps
     now = deps.now()
     with closing(deps.conn_factory()) as conn:
-        items = news_store.recent(conn, m, asof=now, hours=hours, limit=limit, ticker=ticker)
+        items = news_store.recent(
+            conn, m, asof=now, hours=hours, limit=limit, ticker=ticker, source=source
+        )
         total = news_store.count(conn, m)
     return {"market": m, "hours": hours, "total": total, "asof": now.isoformat(), "items": items}
 

@@ -135,3 +135,28 @@ def test_nav_item():
 def test_manual_text_length_capped(project):
     body = {"market": "KR", "text": "가" * 4001}
     assert _client(project).post("/api/news/manual", json=body, headers=AUTH).status_code == 422
+
+
+def test_api_news_filters_by_source_group(project):
+    """출처 필터: 많은 네이버·구글 기사에 세이브티커가 밀려도 따로 최신순으로 볼 수 있다."""
+    c = _client(project)
+    _seed(project)
+    conn = db.connect(project / "state" / "trader.db")
+    try:
+        news_store.insert_items(
+            conn,
+            [{"title": "합성 세이브티커 기사", "url": "https://example.test/s1",
+              "published_at": (NOW - timedelta(hours=3)).isoformat(),
+              "received_at": (NOW - timedelta(hours=3)).isoformat()}],
+            market="KR", source="saveticker:로이터", query="news_all", lang="ko", names={},
+        )  # fmt: skip
+    finally:
+        conn.close()
+    titles = lambda q: [i["title"] for i in c.get(f"/api/news?market=KR{q}").json()["items"]]  # noqa: E731
+    assert titles("&source=saveticker") == ["합성 세이브티커 기사"]
+    assert titles("&source=google_rss") == ["가나전자 합성 기사 1"]
+    assert titles("&source=disclosure") == ["합성 공시 제목"]
+    assert titles("&source=naver") == []
+    assert titles("&source=saveticker&limit=1&ticker=005930") == []
+    assert len(titles("")) == 3
+    assert c.get("/api/news?market=KR&source=evil").status_code == 422
