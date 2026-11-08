@@ -2,7 +2,8 @@
 `_fo_monitor_job` 은 없다 — fo 가 `JobSpec` 3개·`QueueKind` 3개를 선언하고(A5) 본문이 계좌·주말·
 휴장·일시정지·파생 시계를 직접 거른다. 텔레그램 `/fo`·STATUS 줄 건(옛 4건)은 Task 8.
 
-Review Focus 3(`test_paused_engine_consumes_nothing`)·4(`test_pending_entry_runs_once_in_window`)·
+Review Focus 3(`test_dry_run_engine_consumes_nothing`·
+`test_paused_engine_holds_entries_but_runs_risk`)·4(`test_pending_entry_runs_once_in_window`)·
 5(`test_settle_requires_fills_ok_and_not_dry_run`)도 여기 둔다."""
 
 from __future__ import annotations
@@ -138,9 +139,14 @@ def test_monitor_job_skips_without_accounts_or_outside_window(conn, monkeypatch)
     assert seen["accounts"] == [ACCT]
     assert out == {"accounts": {ACCT: {"exits": 1, "maintain": 0, "triggers": 0, "entries": 0,
                                        "recalled": 0, "halted": False}}}  # fmt: skip
+    # 일시정지는 틱을 건너뛰지 않는다(손절·만기·축소는 계속 — 진입·재평가는 엔진·실행기가 막는다)
     control.set_flag(conn, "paused", True)
-    assert jobs.monitor_job(daemon_deps(at(10, 0)), _job("kr_fo_monitor")) == {
-        "skipped": "일시정지"}
+    seen.clear()
+    out = jobs.monitor_job(daemon_deps(at(10, 0)), _job("kr_fo_monitor"))
+    assert seen["accounts"] == [ACCT] and "skipped" not in out
+    # 휴장은 일시정지 중에도 그대로 건너뛴다
+    assert jobs.monitor_job(daemon_deps(at(10, 0), holidays={TODAY}),
+                            _job("kr_fo_monitor")) == {"skipped": "휴장일"}  # fmt: skip
 
 
 def test_monitor_job_reports_account_errors(conn, monkeypatch):
@@ -240,12 +246,11 @@ def test_close_request_rechecks_state(conn):
                               lambda s: None) == {"skipped": "파생 계좌 nope 없음"}  # fmt: skip
     assert jobs.close_request(deps, {"account_id": ACCT, "position_id": 999},
                               lambda s: None) == {"skipped": "포지션 999 없음"}  # fmt: skip
+    # 사람의 수동 청산은 위험 축소 — 일시정지 중에도 낸다(off·dry_run 만 기록만)
     control.set_flag(conn, "paused", True)
     out = jobs.close_request(deps, p, lambda s: None)
-    assert out["status"] == "recorded" and ctx.brokers[ACCT].orders == []
-    control.set_flag(conn, "paused", False)
-    out = jobs.close_request(deps, p, lambda s: None)
     assert out["status"] == "accepted" and ctx.brokers[ACCT].orders[0].side == "SELL"
+    control.set_flag(conn, "paused", False)
     with store.tx(conn):
         pid = store.insert_position(conn, account_id=ACCT, code="105W11", kind="FUTURES",
                                     contract_side="LONG", direction="LONG", vehicle="FUTURES",
@@ -297,9 +302,9 @@ def _tick(ctx, calls=None):
     return engine.tick(ctx, request_reeval=lambda c, p: sink.append(p))
 
 
-def test_paused_engine_consumes_nothing(conn):
-    """일시정지 중 엔진은 상태를 소비·변경하지 않는다: 보류 진입·REPLACE 플래그 유지, 트리거 없음,
-    유지 축소는 기록만, 정산 전이 없음, halted 플래그 없음, 주문·취소 없음."""
+def test_paused_engine_holds_entries_but_runs_risk(conn):
+    """일시정지 중 엔진: 진입·재평가 쪽은 소비하지 않는다(보류 진입·REPLACE 플래그 유지, 트리거
+    없음). 위험 쪽은 그대로 — 유지 축소는 목표를 낮춰 주문을 내고, 정산 전이도 진행한다."""
     now = at(9, 5)
     ctx = make_ctx(conn, now=now, market=_market(now), max_contracts=20,
                    reeval={"periodic_max_per_day": 4})  # fmt: skip
@@ -314,9 +319,7 @@ def test_paused_engine_consumes_nothing(conn):
     rkey = reeval.replace_key(ACCT, big.id)
     control.set_flag(conn, rkey, {"date": TODAY.isoformat(), "round": 1,
                                   "envelope": env(decision()).model_dump(mode="json")})
-    b = balance([holding(qty=12)])  # 정산 대상 콜은 잔고에 없음
-    ctx.brokers[ACCT].balance = b.model_copy(
-        update={"cash": b.cash.model_copy(update={"realized_today": Decimal("-9000000")})})
+    ctx.brokers[ACCT].balance = balance([holding(qty=12)])  # 정산 대상 콜은 잔고에 없음
     control.set_flag(conn, "paused", True)
     calls: list = []
     out = _tick(ctx, calls)
@@ -325,6 +328,44 @@ def test_paused_engine_consumes_nothing(conn):
     assert control.get_flag(conn, f"{tools.FO_PENDING_FLAG}{ACCT}") is not None
     assert control.get_flag(conn, rkey) is not None
     assert calls == [] and conn.execute("SELECT COUNT(*) FROM triggers").fetchone()[0] == 0
+    assert acc["maintain"] and acc["maintain"][0]["status"] == "accepted"
+    assert store.get_position(conn, big.id).qty_target < 12
+    assert [o.side for o in ctx.brokers[ACCT].orders] == ["SELL"]
+    assert store.get_position(conn, sid).status == "settled"
+
+
+def test_paused_daily_loss_sets_halted(conn):
+    """일일 손실 한도는 위험 상태 — 일시정지 중에도 halted 플래그를 쓴다(dry_run 은 안 씀)."""
+    now = at(10, 30)
+    ctx = make_ctx(conn, now=now, market=_market(now), reeval={"periodic_max_per_day": 0})
+    b = balance([])
+    ctx.brokers[ACCT].balance = b.model_copy(
+        update={"cash": b.cash.model_copy(update={"realized_today": Decimal("-9000000")})})
+    control.set_flag(conn, "paused", True)
+    out = _tick(ctx)
+    assert out["accounts"][ACCT]["halted"] is True
+    assert control.get_flag(conn, f"fo_halted:{ACCT}") == TODAY.isoformat()
+
+
+def test_dry_run_engine_consumes_nothing(conn):
+    """dry_run 은 옛 그대로: 유지 축소 기록만, 정산 전이·halted 없음, 주문·취소 없음."""
+    now = at(9, 5)
+    ctx = make_ctx(conn, now=now, market=_market(now), max_contracts=20, dry_run=True,
+                   reeval={"periodic_max_per_day": 4})  # fmt: skip
+    _pending_flag(conn)
+    big = _held_position(conn, ctx, qty=12, qty_target=12)
+    with store.tx(conn):
+        sid = store.insert_position(conn, account_id=ACCT, code="205W11350", kind="CALL",
+                                    contract_side="LONG", direction="LONG",
+                                    vehicle="OPTION_BUY", status="awaiting_settlement",
+                                    qty_held=1, qty_target=1,
+                                    last_trade_date="2026-10-26")  # fmt: skip
+    b = balance([holding(qty=12)])
+    ctx.brokers[ACCT].balance = b.model_copy(
+        update={"cash": b.cash.model_copy(update={"realized_today": Decimal("-9000000")})})
+    out = _tick(ctx)
+    acc = out["accounts"][ACCT]
+    assert acc["entries"] == [{"pending": "r1", "held": "dry_run"}]
     assert acc["maintain"] and all(m["status"] == "recorded" for m in acc["maintain"])
     assert store.get_position(conn, big.id).qty_target == 12
     assert store.get_position(conn, sid).status == "awaiting_settlement"

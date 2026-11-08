@@ -81,7 +81,7 @@ def lines(conn: sqlite3.Connection, now: datetime) -> list[str]:
     if unknown:
         out.append(f"- 사람 확인 필요: unknown·청산 실패 {unknown}건(`trader fo adopt|close`)")
     if control.get_flag(conn, "paused", False):
-        out.append("- 일시정지 중 — 주문 없이 기록만")
+        out.append("- 일시정지 중 — 새 진입·재평가는 기록만(손절·청산·축소는 계속)")
     return out
 
 

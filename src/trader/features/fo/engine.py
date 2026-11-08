@@ -15,7 +15,9 @@
 ⑦ NAV·보유 스냅샷(포지션이 없어도)
 
 주문은 전부 `fo/executor`(reduce·run_leg·recall_entries) 를 지나고, 여기는 **언제 무엇을** 낼지만
-정한다. paused·off·dry_run 은 executor 가 기록만으로 바꾼다.
+정한다. off·dry_run 은 executor 가 기록만으로 바꾼다. paused 는 ①~④(복구·보호선·유지 축소·
+일일 손실·진입 회수·정산 전이 — 위험 청산)를 막지 않고 ⑤ 트리거·재평가와 ⑥ 보류 진입·REPLACE
+(진입·판단)만 기록만으로 둔다(`hold` 와 `risk_hold`).
 
 M10: 틱 진입부에서 호출자가 남긴 암묵 트랜잭션을 commit 한다(브로커 조회가 쓰기 잠금 밖, Ruling 4).
 국면·킬스위치는 `ports["regime"]`, 휴장은 `ports["accounts"].holiday_fn`(`executor.holiday_fn_of`),
@@ -62,14 +64,15 @@ log = logging.getLogger("trader.fo.engine")
 FORCE_CLOSE_AT = time(9, 0)
 STRESS_CONFIRM_AT = time(15, 0)
 REDUCE_ORDER = ("OPTION_SELL", "FUTURES", "OPTION_BUY")  # 유지 조건 축소 순서
-ALERT_FLAG = "fo_alerts:"
+ALERT_FLAG = executor.ALERT_FLAG
 # 엔진이 넣는 재평가 요청의 출처. 커널 `AUTO_SOURCES` 밖이라 꺼낼 때 커널 `auto_gate`(시장 게이트)를
 # 거치지 않는다 — 시장 없는 fo 요청에서 그 게이트는 일시정지만 보고 트리거를 닫지 않아(그날 그
 # 계약의 새 트리거가 전부 막힘) `jobs.reevaluate_request` 가 일시정지·휴장·파생 장 밖을 직접 보고
 # 트리거를 '보류:' 로 닫는다(옛 `_auto_gate` + `_release_fo_trigger`)
 REEVAL_SOURCE = "fo_monitor"
-# 이 기록만 사유(`executor.record_only`)에서는 정산 전이·halted 플래그도 쓰지 않는다(Review
-# Focus 3 — 옛 코드는 dry_run 만 막아 일시정지 중에도 정산·halted 를 썼다). off·approve 는 옛 그대로
+# 이 기록만 사유에서는 정산 전이·halted 플래그도 쓰지 않는다(Review Focus 3). 위험 쪽 사유
+# (`risk_hold`)와 비교하므로 paused 는 여기 오지 않는다 — 일시정지 중에도 위험 청산이 나가므로
+# 정산 전이·halted 는 정상 진행(2026-11-09). off·approve 는 옛 그대로 상태를 기록한다
 NO_STATE_CHANGE = ("dry_run", "paused")
 
 RequestFn = Callable[[FoExecContext, dict[str, Any]], Any]
@@ -91,10 +94,12 @@ def _enqueue(ctx: FoExecContext, params: dict[str, Any]) -> Any:
         return False
 
 
-def _hold(ctx: FoExecContext, account: Any) -> str | None:
-    """이 계좌에서 주문이 나가지 않는 사유(paused·off·dry_run…, `executor.record_only`)."""
+def _hold(ctx: FoExecContext, account: Any, *, risk_exit: bool = False) -> str | None:
+    """이 계좌에서 주문이 나가지 않는 사유(paused·off·dry_run…, `executor.record_only`).
+    `risk_exit=True` 는 위험 청산 기준(paused 는 사유가 아니다)."""
     mode, _ = executor.fo_mode(ctx.conn, account, ctx.ports)
-    return executor.record_only(ctx, mode, bool(ctx.ports["accounts"].paused(ctx.conn)))
+    return executor.record_only(ctx, mode, bool(ctx.ports["accounts"].paused(ctx.conn)),
+                                risk_exit=risk_exit)  # fmt: skip
 
 
 def _holiday_fn(ctx: FoExecContext) -> Callable[[date], bool] | None:
@@ -103,13 +108,7 @@ def _holiday_fn(ctx: FoExecContext) -> Callable[[date], bool] | None:
 
 def _notify_once(ctx: FoExecContext, account_id: str, key: str, text: str, today: date) -> None:
     """같은 운영일·같은 키의 알림은 한 번만(기록만 모드에서 매 틱 같은 청산 알림이 쌓이지 않게)."""
-    flag_key = f"{ALERT_FLAG}{account_id}"
-    flag = control.get_flag(ctx.conn, flag_key) or {}
-    sent = list(flag.get("keys") or []) if flag.get("date") == today.isoformat() else []
-    if key in sent:
-        return
-    control.set_flag(ctx.conn, flag_key, {"date": today.isoformat(), "keys": [*sent, key][-200:]})
-    executor._notify(ctx, text)
+    executor.notify_once(ctx, account_id, key, text, today)
 
 
 # --- 보호선(순수) ------------------------------------------------------------------------
@@ -455,7 +454,9 @@ def _tick_account(
                            "halted": False, "recalled": [], "triggers": [], "entries": [],
                            "snapshot": False, "errors": []}  # fmt: skip
     broker = ctx.brokers.get(a.id)
-    hold = _hold(ctx, a)  # 주문이 나가지 않는 모드면 상태를 소비·변경하는 단계는 건너뛴다
+    # 진입·판단(⑤⑥)이 기록만인 사유와 위험 청산(①~④)이 기록만인 사유 — paused 는 앞쪽만
+    hold = _hold(ctx, a)
+    risk_hold = _hold(ctx, a, risk_exit=True)
     bal: FoBalance | None = None
     if broker is None:
         res["errors"].append("broker 없음")
@@ -490,7 +491,7 @@ def _tick_account(
             res["reduced"].append(executor.continue_reduce(ctx, a, pos))
         elif pos.status == "entering" and not store.live_legs(conn, position_id=pos.id):
             executor.finalize(ctx, pos)
-        elif pos.status == "awaiting_settlement" and hold not in NO_STATE_CHANGE:
+        elif pos.status == "awaiting_settlement" and risk_hold not in NO_STATE_CHANGE:
             s = _settle(ctx, a, pos, bal, today, fills_ok)
             if s:
                 res["reduced"].append(s)
@@ -509,7 +510,7 @@ def _tick_account(
         if hit is None:
             continue
         intent, why = hit
-        if hold is None:  # 기록만이면 청산이 안 나가므로 대기 재평가를 버리지 않는다
+        if risk_hold is None:  # 기록만이면 청산이 안 나가므로 대기 재평가를 버리지 않는다
             _discard_pending_triggers(ctx, pos, why, now)
         _notify_once(ctx, a.id, f"exit:{pos.id}:{intent}",
                      fo_exit(account=a.id, code=pos.code,
@@ -531,7 +532,7 @@ def _tick_account(
             _notify_once(ctx, a.id, "maintain-warning",
                          fo_maintain_warning(account=a.id, reasons=warns), today)
         for pos, target, why in acts:
-            res["maintain"].append(_risk_reduce(ctx, a, pos, target, why, today, now, hold))
+            res["maintain"].append(_risk_reduce(ctx, a, pos, target, why, today, now, risk_hold))
     # ④ 일일 손실·진입 회수
     halted_key = executor.halted_key(a.id)
     if bal is not None and bal.cash.nav:
@@ -541,7 +542,7 @@ def _tick_account(
         res["daily_pnl"] = str(pnl)
         if (
             pnl <= -limit
-            and hold not in NO_STATE_CHANGE
+            and risk_hold not in NO_STATE_CHANGE
             and control.get_flag(conn, halted_key) != today.isoformat()
         ):
             control.set_flag(conn, halted_key, today.isoformat())
@@ -691,7 +692,7 @@ def _pending_entries(ctx: FoExecContext, a: Any, *, now: datetime, today: date,
         return [{"discarded": blocked, "request_id": flag.get("request_id")}]
     if not rules.in_entry_window(now, cfg):
         return []  # 08:45~09:00 은 기다린다(cutoff 뒤는 blocked 로 이미 버렸다)
-    if hold is not None:  # dry_run·paused·off: 플래그를 소비하지 않는다(실제 데몬이 낸다)
+    if hold is not None:  # dry_run·paused·off: 플래그를 소비하지 않는다(진입 — 재개 뒤 낸다)
         return [{"pending": flag.get("request_id"), "held": hold}]
     control.set_flag(conn, key, None)
     try:

@@ -90,14 +90,16 @@ def _fo_accounts(deps: Any) -> list[Any]:
     return [a for a in acc.fo_accounts() if a.asset == "fo"] if acc is not None else []
 
 
-def _day_skip(deps: Any) -> str | None:
-    """옛 `market_job` 게이트: 일시정지·주말·휴장일(KR 운영일 기준) 사유 또는 None."""
+def _day_skip(deps: Any, *, ignore_paused: bool = False) -> str | None:
+    """옛 `market_job` 게이트: 일시정지·주말·휴장일(KR 운영일 기준) 사유 또는 None.
+    `ignore_paused` 면 일시정지는 사유가 아니다(모니터 — 위험 청산은 일시정지 중에도 돈다)."""
     acc = deps.ports["accounts"]
     holiday = acc.holiday_fn()
     conn = deps.conn_factory()
     try:
         return should_skip(
-            MARKET, run_date_for(MARKET, deps.now()), paused=lambda: bool(acc.paused(conn)),
+            MARKET, run_date_for(MARKET, deps.now()),
+            paused=(lambda: False) if ignore_paused else (lambda: bool(acc.paused(conn))),
             is_holiday=(lambda d: bool(holiday(MARKET, d))) if holiday else (lambda d: False),
         )  # fmt: skip
     finally:
@@ -185,12 +187,13 @@ def session_job(ctx: Any, job: Any) -> dict:
 
 
 def monitor_job(ctx: Any, job: Any) -> dict:
-    """파생 모니터(60초): 파생 정규장·모니터 창 안, 평일·비휴장·비일시정지일 때만 `engine.tick`."""
+    """파생 모니터(60초): 파생 정규장·모니터 창 안, 평일·비휴장일 때 `engine.tick`. 일시정지로는
+    건너뛰지 않는다 — 손절·만기·축소(위험 청산)는 계속하고 진입·재평가는 엔진·실행기가 막는다."""
     if not _fo_accounts(ctx):
         return {"skipped": NO_ACCOUNTS}
     if not _fo_window(ctx):
         return {"skipped": OUT_OF_WINDOW}
-    why = _day_skip(ctx)
+    why = _day_skip(ctx, ignore_paused=True)
     if why:
         return {"skipped": why}
     conn = ctx.conn_factory()
@@ -274,8 +277,9 @@ def reevaluate_request(deps: Any, params: dict, progress: Any) -> dict:
 
 
 def close_request(deps: Any, params: dict, progress: Any) -> dict:
-    """큐 `fo_close`(사람 요청): 실행 직전에 장 시간·계좌·포지션 상태를 다시 보고, 모드·
-    일시정지·dry_run 은 executor 가 기록만으로 바꾼다."""
+    """큐 `fo_close`(사람 요청): 실행 직전에 장 시간·계좌·포지션 상태를 다시 보고, 모드(off)·
+    dry_run 은 executor 가 기록만으로 바꾼다. 사람이 요청한 청산은 위험 축소라 일시정지 중에도
+    낸다(`executor.reduce` 기본 `risk_exit=True`)."""
     if not is_fo_open(deps.now()):
         return {"skipped": FO_CLOSED}
     conn = deps.conn_factory()

@@ -217,3 +217,15 @@ def fo_maintain_warning(*, account: str, reasons: list[str]) -> str:
         account,
         [*reasons[:4], "15:00 확정 검사에서도 넘으면 축소해요."],
     )
+
+
+def fo_exit_while_paused(*, account: str, code: str, name: str | None, intent: str) -> str:
+    """일시정지 중 위험 청산(손절·만기·마감·축소·수동 청산) 주문 접수 — 계좌별 하루 1회."""
+    return render(
+        "파생 청산 실행: 일시정지 중",
+        f"{account} · {fo_label(code, name)}",
+        [
+            f"{FO_INTENT.get(intent, intent)} 주문을 냈어요. "
+            "일시정지 중이지만 손절·청산·축소는 계속해요."
+        ],
+    )

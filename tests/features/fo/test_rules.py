@@ -314,9 +314,19 @@ def test_reduce_leg_ignores_enabled_vehicles_verified_freshness():
         "MARKET",
         None,
     )
-    # paused 는 기록만
+    # paused 는 축소 다리를 막지 않는다(위험 청산 — 판단 유래 기록만은 실행기가 정한다)
     p = rules.evaluate(replace(gi, paused=True))
-    assert not p.approved and any("일시정지" in r for r in p.reasons) and p.legs
+    assert p.approved and not any("일시정지" in r for r in p.reasons) and p.legs
+
+
+def test_paused_rejects_entry_but_not_resize_down():
+    """paused 는 진입 사유: OPEN 은 거부, RESIZE 감액 다리는 승인(진입 사유 무시)."""
+    v = rules.evaluate(gate(decision(), paused=True))
+    assert not v.approved and any("일시정지" in r for r in v.reasons) and not v.legs
+    pos = position(qty_held=3, qty_target=3, leverage_used=1.0)
+    d = decision(intent="RESIZE", target_leverage=0.2)
+    r = rules.evaluate(gate(d, position=pos, port=portfolio(positions=[pos]), paused=True))
+    assert r.approved and r.legs[0].intent == "RESIZE_DOWN" and r.legs[0].qty == 2
 
 
 def test_close_option_uses_best_quote_limit():

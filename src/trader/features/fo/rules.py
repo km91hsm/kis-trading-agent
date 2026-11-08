@@ -1,9 +1,11 @@
 """파생 게이트(Phase 26, 스펙 §4) — 순수 함수. 거부 사유는 전부 모은다(첫 사유에서 멈추지 않음).
 
-- 축소 다리(RESIZE↓·CLOSE·REPLACE 의 청산)는 `enabled`·수단·검증·대조·배수·입력 신선도와 무관하다.
-  막는 것은 `paused`(기록만)뿐이고 off·dry_run 은 executor 가 본다. RESIZE 는 사이징으로 목표를
-  구한 **뒤** 감액이면 §4.2 진입 거부 목록을 적용하지 않는다(단계 2 리뷰 S2-6) — 거부 사유를
-  '확정 사유'(paused·대상 포지션 상태·방향 불일치)와 '진입 사유' 로 나눠 모은다.
+- 축소 다리(RESIZE↓·CLOSE·REPLACE 의 청산)는 `enabled`·수단·검증·대조·배수·입력 신선도와 무관하고
+  `paused` 로도 막지 않는다(위험 청산). paused·off·dry_run 의 전송 여부는 executor 가 정한다 —
+  판단(아침·재평가 결정, `run_leg`) 유래 축소는 일시정지 중 기록만. RESIZE 는 사이징으로 목표를
+  구한 **뒤** 감액이면 §4.2 진입 거부 목록(paused 포함)을 적용하지 않는다(단계 2 리뷰 S2-6) — 거부
+  사유를 '확정 사유'(대상 포지션 상태·방향 불일치)와 '진입 사유' 로 나눠 모은다. HOLD 는 paused 면
+  거부(손절선 갱신도 판단).
 - 진입 다리(OPEN·RESIZE↑)는 §4.2 거부 목록 → 대조 계수(§4.3) → 배수(§4.4, 기존 포지션은 상승
   금지) → 손절 단조(유리한 쪽만, HOLD 포함) → `sizing.size`(§4.5~4.7). 저장 배수 `leverage_used`
   는 `min(허용 배수 L, 주문 뒤 실제 노출 ÷ NAV)` 라 가격 상승으로 커진 노출이 승인 배수를 올리지
@@ -219,11 +221,12 @@ def evaluate(gi: GateInput) -> FoVerdict:
     d, cfg, port, pos = gi.decision, gi.cfg, gi.port, gi.position
     reasons: list[str] = []
     notes: list[str] = []
-    if gi.paused:
-        reasons.append("일시정지(paused) — 기록만")
+    paused_reason = "일시정지(paused) — 기록만"
 
     # HOLD: 다리 없음, 손절 단조만(새 손절선은 기초지수의 올바른 쪽·최소 거리일 때만)
     if d.intent == "HOLD":
+        if gi.paused:
+            reasons.append(paused_reason)
         stop = monotone_stop(pos.stop_pt if pos else None, _dec(d.stop_pt) if d.stop_pt else None,
                              pos.direction if pos else d.direction)  # fmt: skip
         note = "관망"
@@ -257,7 +260,7 @@ def evaluate(gi: GateInput) -> FoVerdict:
 
     # OPEN·RESIZE — `reasons` 는 확정 사유(감액에도 적용), `entry` 는 진입 다리에만 적용
     assert d.intent in ENTRY_DECISIONS
-    entry: list[str] = []
+    entry: list[str] = [paused_reason] if gi.paused else []
     contract_side = pos.contract_side if pos else contract_side_of(d.direction, d.vehicle)
     kind = pos.kind if pos else kind_of(d.direction, d.vehicle)
     code = pos.code if pos else (gi.contract.code if gi.contract else None)

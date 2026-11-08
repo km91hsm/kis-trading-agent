@@ -57,7 +57,7 @@ def test_unknown_and_paused_lines(conn):
     control.set_flag(conn, "paused", True)
     out = status.lines(conn, at(10))
     assert "- 사람 확인 필요: unknown·청산 실패 1건(`trader fo adopt|close`)" in out
-    assert out[-1] == "- 일시정지 중 — 주문 없이 기록만"
+    assert out[-1] == "- 일시정지 중 — 새 진입·재평가는 기록만(손절·청산·축소는 계속)"
 
 
 def test_halted_flag_line(conn):
