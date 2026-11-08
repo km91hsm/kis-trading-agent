@@ -698,6 +698,23 @@ def test_status_reports_throttle_and_effective_cap(conn, monkeypatch):
     assert st["usage"]["daily_call_cap"] == 7 and st["usage"]["cap_source"] == "control"
 
 
+def test_status_throttle_uses_cross_need_like_next_start(conn, tmp_path, monkeypatch):
+    """교차 정책이면 status 의 조절 판정도 실제 시작과 같은 need(2×(rounds+1))로 본다."""
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.platform import codex_bin
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.setattr(codex_bin, "find_codex", lambda *_: "/bin/codex")
+    s = settings()  # 켜짐·debate_rounds 0 → rounds 1 → need 4
+    set_flag(conn, p.CODEX_CAP_FLAG, 3)
+    st = p.status(conn, s, now=NOW)
+    assert st["throttle"]["state"] == "over" and "4회 필요" in st["throttle"]["reason"]
+    started = p.start(conn, s, tmp_path / "a", SPOT_RESEARCH, now=NOW)
+    assert started["enabled"] is False  # 화면 판정과 실제 다음 분석이 일치
+    set_flag(conn, p.CODEX_CAP_FLAG, 4)
+    assert p.status(conn, s, now=NOW)["throttle"]["state"] == "ok"
+
+
 def test_throttle_settings_are_not_part_of_policy_hash(conn, tmp_path):
     """조절 설정(usage_throttle·hard_pct)은 시작 판단 입력일 뿐 — 바뀌어도(업데이트·yaml 수정)
     진행 중

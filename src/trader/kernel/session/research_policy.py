@@ -709,8 +709,13 @@ def status(conn, settings, *, now, limits: dict | None = None):
     enabled, source = configured(conn, settings)
     cap, cap_source = call_cap(conn, settings)
     t_enabled, t_source = throttle_enabled(conn, settings)
+    # 다음 새 연구가 교차면 시작 판정(`start`)과 같은 need(Codex 자리 × (rounds+1))로 본다
+    need = 1
+    if enabled:
+        rounds = max(1, getattr(settings, "debate_rounds", 0))
+        need = len(codex_slots({"lanes": _v2_lanes(True)})) * (rounds + 1)
     # 조회 화면은 codex 를 직접 실행하지 않는다 — 사용률은 호출한 쪽이 읽어 넘길 때만 본다
-    t_ok, t_reason = codex_allowance(conn, settings, now=now, limits=limits, probe=False)
+    t_ok, t_reason = codex_allowance(conn, settings, now=now, need=need, limits=limits, probe=False)
     cfg = getattr(settings.llm, "codex_debate", CodexDebateSettings())
     try:
         codex_bin.find_codex(cfg.bin)

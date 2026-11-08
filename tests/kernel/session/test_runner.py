@@ -703,7 +703,8 @@ def test_cross_session_keeps_bear_agent_and_extends_timeout(project, conn):
     # 기본 연장 = (라운드 1 + 1) × (Codex 180 + 120) = 600
     assert captured["timeout"] == 900 + 600
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
-    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "240000"
+    # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
+    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
     assert not result.ok and "Codex" in result.error
 
 
@@ -741,7 +742,8 @@ def test_disabled_codex_session_has_no_extra(project, conn):
     _, captured = _capture_session(project, conn, llm=LlmSettings(usage_file=None))
     assert captured["timeout"] == 900
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
-    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "240000"
+    # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
+    assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
     assert "researcher-bear" in captured["agents"]
     assert "codex-turn" not in captured["prompt"]
 
@@ -771,6 +773,24 @@ def test_legacy_section_text_is_unchanged():
 
     text = runner.codex_section([(Path("x"), RESEARCH, {"enabled": True})], cross=False)
     assert text == LEGACY_SECTION
+
+
+def test_mixed_session_cross_section_follows_each_research_lanes():
+    """교차 연구와 1판 연구가 섞인 세션: 연구마다 research_policy.lanes 를 따르라는 문장."""
+    from trader.features.spot.research import RESEARCH
+
+    lane_a = {"lane": "a", "bull": "claude", "bear": "codex"}
+    lane_b = {"lane": "b", "bull": "codex", "bear": "claude"}
+    cfg = {"timeout_s": 180}
+    cross_p = {"version": 2, "enabled": True, "lanes": [lane_a, lane_b], "config": cfg}
+    single_p = {"version": 2, "enabled": False, "lanes": [lane_a], "config": cfg}
+    text = runner.codex_section(
+        [(Path("x"), RESEARCH, cross_p), (Path("y"), RESEARCH, single_p)], cross=True
+    )
+    assert (
+        "연구마다 researcher 묶음의 `research_policy.lanes` 를 따른다. 판이 하나뿐인 연구는 "
+        "1판(정책대로)만 진행하고, 그 연구의 2판 거부는 오류로 보고하되 세션을 중단하지 않는다."
+    ) in text
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX 부모 SIGTERM 전파")

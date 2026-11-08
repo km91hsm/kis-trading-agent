@@ -396,7 +396,9 @@ def codex_section(research: list[tuple[Path, Any, dict]], *, cross: bool) -> str
         f"Bash 로 하나씩 실행한다(각 최대 {codex_timeout}초). "
         "네 턴이 모두 끝나야 다음 라운드로 가고, 마지막에 summarize를 실행한다. "
         "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한다. "
-        "목록에 없는 흐름은 기존 흐름(Claude 강세·약세)대로 진행한다.\n"
+        "목록에 없는 흐름은 기존 흐름(Claude 강세·약세)대로 진행한다. "
+        "연구마다 researcher 묶음의 `research_policy.lanes` 를 따른다. 판이 하나뿐인 연구는 "
+        "1판(정책대로)만 진행하고, 그 연구의 2판 거부는 오류로 보고하되 세션을 중단하지 않는다.\n"
     )
     return text
 
@@ -542,7 +544,8 @@ def run_session(
             "PATH": str(bundle.tool_bin_dir()) + os.pathsep + claude_bin_mod.child_path(bin_path),
             # Codex 턴(Bash 도구)이 Claude Code 기본 Bash 제한(2분)에 잘리지 않게
             "BASH_DEFAULT_TIMEOUT_MS": str(bash_ms),
-            "BASH_MAX_TIMEOUT_MS": str(bash_ms),
+            # 최대치는 Claude Code 기본 최대(10분) 아래로 낮추지 않는다
+            "BASH_MAX_TIMEOUT_MS": str(max(bash_ms, 600000)),
         }
         model = settings.models.get("orchestrator", "sonnet")
         call_id = calls.start_call(

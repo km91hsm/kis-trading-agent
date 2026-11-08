@@ -46,6 +46,8 @@ test("Codex participation can be enabled and disabled, persists server result, a
   expect(toggle().getAttribute("aria-checked")).toBe("true");
   expect(container.textContent).toContain("1판은 Claude 강세 · Codex 약세, 2판은 Codex 강세 · Claude 약세");
   expect(container.textContent).toContain("사용률 미제공");
+  expect(container.textContent).toContain("도중에 Codex 가 실패하면 그 분석은 실패로 끝나고, 같은 분석을 다시 할 때 Claude 2인 토론으로 진행합니다");
+  expect(container.textContent).not.toContain("새 결정을 보류");
   await act(async () => toggle().click());
   await flush();
   expect(toggle().getAttribute("aria-checked")).toBe("false");
@@ -61,6 +63,8 @@ test("shows both lanes when cross debate is on", async () => {
   await flush();
   expect(container.textContent).toContain("1판 Claude 강세 · Codex 약세");
   expect(container.textContent).toContain("2판 Codex 강세 · Claude 약세");
+  expect(container.textContent).toContain("도중에 Codex 가 실패하면 그 분석은 실패로 끝나고, 같은 분석을 다시 할 때 Claude 2인 토론으로 진행합니다");
+  expect(container.textContent).not.toContain("새 결정을 보류");
 });
 
 test("Codex failed save preserves disabled state and displays error without claiming success", async () => {

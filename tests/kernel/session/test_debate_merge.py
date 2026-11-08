@@ -77,7 +77,9 @@ def test_warning_flags_are_or_of_lanes():
     # 차이·시점 일치는 합친 턴으로 다시 계산한다(bear 최종 평균 -0.1 → NEUTRAL)
     assert out["final"]["bear"]["stance"] == "NEUTRAL"
     assert out["gap_round0"] == pytest.approx(1.45) and out["gap_final"] == pytest.approx(0.65)
-    assert out["convergence"] is None and out["convergence_review"] is False
+    # convergence 는 판별 값 중 가장 경고적인 값(판 b 의 unjustified) — sycophantic 과 일치
+    assert out["convergence"] == "unjustified" and out["convergence_review"] is False
+    assert out["convergence_by_lane"] == {"a": None, "b": "unjustified"}
     assert out["rounds"] == 1 and out["timing_agree"] is True
 
 
@@ -95,3 +97,33 @@ def test_merge_lanes_rejects_different_rounds():
     )
     with pytest.raises(ValueError, match="두 판의 마지막 라운드가 다릅니다"):
         merge_lanes({"a": one, "b": zero})
+
+
+def _lane(bull0, bear0, bull1, bear1) -> dict:
+    r0 = {"bull": turn("bull", "BULLISH", bull0), "bear": turn("bear", "BEARISH", bear0)}
+    final = {
+        "bull": turn("bull", "BULLISH", bull1, round=1),
+        "bear": turn("bear", "BEARISH", bear1, round=1),
+    }
+    return research_summary(r0, final, 1, evidence_ids=set())
+
+
+def test_merged_convergence_is_worst_lane_value_not_recomputed():
+    a = _lane(0.25, 0.3, 0.15, 0.15)  # 입장 변화 없음
+    b = _lane(0.15, 0.3, 0.05, 0.05)  # 확신 붕괴 → uncertainty
+    out = merge_lanes({"a": a, "b": b}, evidence_ids=set())
+    assert out["convergence_by_lane"] == {"a": a["convergence"], "b": b["convergence"]}
+    assert out["convergence"] == "uncertainty"
+    assert out["sycophantic"] is False and out["preferred"] == "final"
+    assert out["convergence"] != "unjustified"  # preferred=="final" 과 모순되지 않는다
+
+
+def test_merged_convergence_priority_order():
+    from trader.kernel.session import debate
+
+    worst = debate._worst_convergence
+    assert worst([None, "justified"]) == "justified"
+    assert worst(["justified", "uncertainty"]) == "uncertainty"
+    assert worst(["uncertainty", "unverified"]) == "unverified"
+    assert worst(["unverified", "unjustified"]) == "unjustified"
+    assert worst([None, None]) is None

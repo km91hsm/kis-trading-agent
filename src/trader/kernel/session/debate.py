@@ -152,12 +152,26 @@ def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
     )
 
 
+_CONVERGENCE_SEVERITY = ("unjustified", "unverified", "uncertainty", "justified")
+
+
+def _worst_convergence(values: list[str | None]) -> str | None:
+    """판별 `convergence` 중 가장 경고적인 값(unjustified > unverified > uncertainty >
+    justified > None)."""
+    for level in _CONVERGENCE_SEVERITY:
+        if level in values:
+            return level
+    return None
+
+
 def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = None) -> dict:
     """판별 `research_summary` → 하나의 요약(스펙 §5). 판 a 뿐이면 그 요약을 그대로 돌려준다.
 
     두 판이면 `round0`·`final` 의 같은 측을 `merge_turns` 로 합쳐 차이·수렴·시점 일치를 다시
     계산하고, 경고(`sycophantic`·`convergence_review`)는 판별 결과의 OR, `preferred` 는 한 판이라도
-    round0 이면 round0. 판별 원본은 `by_lane`(턴 밖)에 둔다."""
+    round0 이면 round0. `convergence` 는 합친 턴으로 다시 계산하지 않고 판별 값 중 가장 경고적인
+    값(경고 플래그와 모순되지 않게)이며 판별 값은 `convergence_by_lane` 에 둔다. 판별 원본은
+    `by_lane`(턴 밖)에 둔다."""
     if set(summaries) == {"a"}:
         return summaries["a"]
     if set(summaries) != set(LANES):
@@ -175,6 +189,8 @@ def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = N
     out = research_summary(
         merged("round0"), merged("final"), lanes[0]["rounds"], evidence_ids=evidence_ids
     )
+    out["convergence_by_lane"] = {k: summaries[k].get("convergence") for k in LANES}
+    out["convergence"] = _worst_convergence(list(out["convergence_by_lane"].values()))
     out["sycophantic"] = any(s.get("sycophantic") for s in lanes)
     out["convergence_review"] = any(s.get("convergence_review") for s in lanes)
     out["preferred"] = "round0" if any(s.get("preferred") == "round0" for s in lanes) else "final"
