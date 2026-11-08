@@ -1,5 +1,6 @@
 import json
 import stat
+import sys
 
 from typer.testing import CliRunner
 
@@ -17,7 +18,8 @@ def test_save_load_clear_round_trips_tricky_password_in_private_env(project):
     assert credentials.load() == ("user@example.com", TRICKY)
     assert credentials.stored() is True
     env = paths.secrets_path()
-    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    if sys.platform != "win32":  # POSIX 권한 비트
+        assert stat.S_IMODE(env.stat().st_mode) == 0o600
     credentials.clear()
     assert credentials.load() is None
     assert "SAVETICKER_" not in env.read_text(encoding="utf-8")
