@@ -214,6 +214,13 @@ describe("시스템 화면", () => {
     expect(Array.from(h.querySelectorAll("a")).some((a) => a.textContent === "재개")).toBe(false);
   });
 
+  test("헬스 머리: /system/pause 실패면 「동작 중」 단정 없이 「확인하지 못함」", async () => {
+    await mount(routes({ "GET /api/system/pause": () => new Response(JSON.stringify({ detail: "boom" }), { status: 500 }) }));
+    const h = section("health");
+    expect(h.textContent).not.toContain("동작 중");
+    expect(h.textContent).toContain("자동매매: 확인하지 못함");
+  });
+
   test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
     await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
     const h = section("health");

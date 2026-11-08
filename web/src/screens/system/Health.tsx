@@ -84,7 +84,9 @@ export function Health() {
           </button>
         </div>
         <p className="sys-trade">
-          {pause.paused ? (
+          {!pause.known ? (
+            <Chip tone="muted">{pause.loading ? "자동매매: 확인 중" : "자동매매: 확인하지 못함"}</Chip>
+          ) : pause.paused ? (
             <>
               <Chip tone="warn">자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음</Chip>{" "}
               {pauseWhen(pause) ? <span className="data-muted">{pauseWhen(pause)}</span> : null} <Link to="/accounts">재개</Link>
