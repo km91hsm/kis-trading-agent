@@ -103,7 +103,7 @@ def test_large_reports_complete_both_provider_rounds_with_immutable_policy(
         else market_dir(DAY, "KR", tmp_path, create=True)
     )
     spec = RESEARCHES[scope]
-    frozen = policy.start(conn, settings, d, spec, now=NOW)["policy_hash"]
+    frozen = policy.start(conn, settings, d, spec, now=NOW, version=1)["policy_hash"]
     inputs = {
         "meta": {"market": "KR", "ticker": "005930", "asof": NOW.isoformat()},
         "market": "KR",

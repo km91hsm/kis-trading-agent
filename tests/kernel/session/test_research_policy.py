@@ -65,7 +65,7 @@ def test_general_checkpoint_cannot_forge_codex_bear(conn, tmp_path):
     s = settings()
     d = tmp_path / "runs" / "2026-11-07" / "KR" / "005930"
     d.mkdir(parents=True)
-    p.start(conn, s, d, SPOT_RESEARCH, now=NOW)
+    p.start(conn, s, d, SPOT_RESEARCH, now=NOW, version=1)
     seed(d)
     ctx = tools.ToolContext(settings=s, accounts=[], conn=conn, state=tmp_path, now=lambda: NOW)
     out = tools.checkpoint_write(
@@ -93,12 +93,89 @@ def test_general_checkpoint_cannot_forge_codex_bear(conn, tmp_path):
     )["ok"]
 
 
+def _debate_turn(side, rnd):
+    """반박 coverage 를 갖춘 합성 토론 턴(쟁점 ID `<side>:case`)."""
+    other = "bull" if side == "bear" else "bear"
+    return ok_turn(
+        side,
+        rnd,
+        issues=[
+            {
+                "issue_id": f"{side}:case",
+                "topic": "독립 쟁점",
+                "claim": "근거 주장",
+                "evidence": ["technical.indicators"],
+            }
+        ],
+        responses=[
+            {
+                "issue_id": f"{other}:case",
+                "response": "상대 주제 반박",
+                "evidence": ["technical.indicators"],
+            }
+        ]
+        if rnd
+        else [],
+        rebuttals=["상호반박"] if rnd else [],
+    )
+
+
+def _codex_fake(d, seen=None):
+    """가짜 Codex 실행기: 입력의 side 로 응답 측을 고르고 그 측 PROMPT·수령 기록을 확인한다."""
+    import hashlib
+    import json
+    import subprocess
+    from pathlib import Path
+
+    from trader.kernel.session import codex
+
+    def fake(cmd, **kw):
+        data = json.loads(kw["input"].split("\n", 1)[1])
+        side = data["side"]
+        assert kw["input"].startswith(codex.PROMPTS[side])
+        digest = hashlib.sha256(
+            json.dumps(
+                data["input_context"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        receipts = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (d / "input_receipts").glob("*.json")
+        ]
+        assert any(row["context_hash"] == digest and row["provider"] == "codex" for row in receipts)
+        if data["round"] == 0:
+            assert data["opponent_previous"] is None and data["own_previous"] is None
+        else:
+            assert data["opponent_previous"]["side"] == ("bull" if side == "bear" else "bear")
+            assert data["own_previous"]["side"] == side
+        if seen is not None:
+            seen.append(data)
+        response = _debate_turn(side, data["round"])
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
+            json.dumps(response), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return fake
+
+
+def _seed_scope(d, scope):
+    r = RESEARCHES[scope]
+    write_checkpoint(
+        d,
+        r.input_stage,
+        checkpoint_payload({"market": "KR", "proxy": "005930", "asof": NOW.isoformat()}),
+    )
+    for role in ("technical", "sentiment"):
+        stage = r.report_prefix + role if scope != "market" else r.report_prefix
+        write_checkpoint(d, stage, checkpoint_payload(ok_report(role=role)))
+
+
 @pytest.mark.parametrize("scope", ["spot", "market", "fo"])
 def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
     conn, tmp_path, monkeypatch, scope
 ):
-    import json
-    import subprocess
+    """v1(약세만 Codex) 레거시 회귀: 판 a 하나, 옛 bear PROMPT 증명."""
     from pathlib import Path
 
     from trader.kernel.session import research_policy as p
@@ -106,66 +183,19 @@ def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
     monkeypatch.delenv("FAKE_CLAUDE", raising=False)
     s = settings()
     d = tmp_path
-    p.start(conn, s, d, RESEARCHES[scope], now=NOW)
+    p.start(conn, s, d, RESEARCHES[scope], now=NOW, version=1)
     r = RESEARCHES[scope]
-    input_stage, analyst_prefix, prefix = r.input_stage, r.report_prefix, r.turn_prefix
-    write_checkpoint(
-        d,
-        input_stage,
-        checkpoint_payload({"market": "KR", "proxy": "005930", "asof": NOW.isoformat()}),
-    )
-    for role in ("technical", "sentiment"):
-        stage = analyst_prefix + role if scope != "market" else analyst_prefix
-        write_checkpoint(d, stage, checkpoint_payload(ok_report(role=role)))
+    prefix = r.turn_prefix
+    _seed_scope(d, scope)
     ctx = SimpleNamespace(conn=conn, settings=s, now=lambda: NOW)
-
-    def turn(side, rnd):
-        return ok_turn(
-            side,
-            rnd,
-            issues=[
-                {
-                    "issue_id": f"{side}:case",
-                    "topic": "독립 쟁점",
-                    "claim": "근거 주장",
-                    "evidence": ["technical.indicators"],
-                }
-            ],
-            responses=[
-                {
-                    "issue_id": f"{'bull' if side == 'bear' else 'bear'}:case",
-                    "response": "상대 주제 반박",
-                    "evidence": ["technical.indicators"],
-                }
-            ]
-            if rnd
-            else [],
-            rebuttals=["상호반박"] if rnd else [],
-        )
-
-    def fake(cmd, **kw):
-        data = json.loads(kw["input"].split("\n", 1)[1])
-        import hashlib
-
-        digest = hashlib.sha256(
-            json.dumps(
-                data["input_context"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            ).encode()
-        ).hexdigest()
-        receipts = [json.loads(path.read_text()) for path in (d / "input_receipts").glob("*.json")]
-        assert any(row["context_hash"] == digest and row["provider"] == "codex" for row in receipts)
-        if data["round"] == 0:
-            assert data["opponent_previous"] is None and data["own_previous"] is None
-        else:
-            assert data["opponent_previous"]["side"] == "bull"
-        response = turn("bear", data["round"])
-        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(json.dumps(response))
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+    fake = _codex_fake(d)
 
     for rnd in (0, 1):
         assert p.write_error(conn, s, d, RESEARCHES[scope], round_no=rnd, side="bull") is None
         write_checkpoint(
-            d, f"{prefix}{rnd}_bull", checkpoint_payload(turn("bull", rnd), {"provider": "claude"})
+            d,
+            f"{prefix}{rnd}_bull",
+            checkpoint_payload(_debate_turn("bull", rnd), {"provider": "claude"}),
         )
         out = p.generate_turn(
             ctx, d, RESEARCHES[scope], rnd, runner=fake, bin_path=Path("/fake/codex")
@@ -175,9 +205,264 @@ def test_actual_bridge_rounds_complete_and_changed_turn_rejected(
     write_checkpoint(
         d,
         f"{prefix}0_bull",
-        checkpoint_payload({**turn("bull", 0), "arguments": ["changed"]}, {"provider": "claude"}),
+        checkpoint_payload(
+            {**_debate_turn("bull", 0), "arguments": ["changed"]}, {"provider": "claude"}
+        ),
     )
     assert "증명" in p.completion_error(conn, s, d, RESEARCHES[scope])
+
+
+def _cross_setup(conn, tmp_path, scope="spot"):
+    from trader.kernel.session import research_policy as p
+
+    s = settings()
+    d = tmp_path
+    p.start(conn, s, d, RESEARCHES[scope], now=NOW)
+    _seed_scope(d, scope)
+    return s, d, RESEARCHES[scope], SimpleNamespace(conn=conn, settings=s, now=lambda: NOW)
+
+
+def _write_claude(d, r, lane, rnd, side):
+    write_checkpoint(
+        d,
+        r.turn_stage(lane, rnd, side),
+        checkpoint_payload(_debate_turn(side, rnd), {"provider": "claude"}),
+    )
+
+
+def _run_cross(conn, s, d, r, ctx, fake, *, skip=()):
+    """라운드마다 Claude 두 칸을 쓰고 Codex 두 칸을 생성한다. 마지막 라운드 결과를 돌려준다."""
+    from pathlib import Path
+
+    from trader.kernel.session import research_policy as p
+
+    out_bear = out_bull = None
+    for rnd in (0, 1):
+        for lane, side in (("a", "bull"), ("b", "bear")):
+            assert p.write_error(conn, s, d, r, round_no=rnd, side=side, lane=lane) is None
+            if (lane, rnd, side) not in skip:
+                _write_claude(d, r, lane, rnd, side)
+        out_bear = p.generate_turn(
+            ctx, d, r, rnd, side="bear", runner=fake, bin_path=Path("/fake/codex")
+        )
+        assert out_bear["ok"], out_bear
+        if ("b", rnd, "bear") in skip:
+            continue
+        out_bull = p.generate_turn(
+            ctx, d, r, rnd, side="bull", runner=fake, bin_path=Path("/fake/codex")
+        )
+        assert out_bull["ok"], out_bull
+    return out_bear, out_bull
+
+
+@pytest.mark.parametrize("scope", ["spot", "market", "fo"])
+def test_cross_rounds_complete_with_two_codex_sides(conn, tmp_path, monkeypatch, scope):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r, ctx = _cross_setup(conn, tmp_path, scope)
+    seen = []
+    out_bear, out_bull = _run_cross(conn, s, d, r, ctx, _codex_fake(d, seen))
+    assert out_bear["ok"] and out_bear["lane"] == "a" and out_bear["side"] == "bear"
+    assert out_bull["ok"] and out_bull["lane"] == "b" and out_bull["side"] == "bull"
+    assert out_bull["provider"] == "codex" and out_bull["round"] == 1
+    assert out_bull["path"].endswith(r.turn_stage("b", 1, "bull") + ".json")
+    assert read_checkpoint(d, r.turn_stage("b", 1, "bull"))["call"]["agent"] == r.bull_agent
+    assert read_checkpoint(d, r.turn_stage("a", 1, "bear"))["call"]["agent"] == r.bear_agent
+    assert read_checkpoint(d, r.turn_stage("b", 0, "bull"))["call"]["provider"] == "codex"
+    assert [(x["round"], x["side"]) for x in seen] == [
+        (0, "bear"),
+        (0, "bull"),
+        (1, "bear"),
+        (1, "bull"),
+    ]
+    assert all("lane" not in x for x in seen)
+    stages = {
+        __import__("json").loads(f.read_text(encoding="utf-8"))["stage"]
+        for f in (d / "input_receipts").glob("*.json")
+    }
+    assert f"{r.scope}:researcher:r1:bear" in stages
+    assert f"{r.scope}:researcher:r1:bull:b" in stages
+    assert p.completion_error(conn, s, d, r) is None
+    # 판 b Codex 강세 턴 변조 → 증명 오류
+    write_checkpoint(
+        d,
+        r.turn_stage("b", 0, "bull"),
+        checkpoint_payload(
+            {**_debate_turn("bull", 0), "arguments": ["changed"]}, {"provider": "codex"}
+        ),
+    )
+    err = p.completion_error(conn, s, d, r)
+    assert "증명" in err and "2판" in err
+
+
+def test_cross_claude_slot_requires_claude_provider(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r, ctx = _cross_setup(conn, tmp_path)
+    _run_cross(conn, s, d, r, ctx, _codex_fake(d))
+    write_checkpoint(
+        d,
+        r.turn_stage("b", 1, "bear"),
+        checkpoint_payload(_debate_turn("bear", 1), {"provider": "codex"}),
+    )
+    assert p.completion_error(conn, s, d, r) == "Claude bear 공급자 증명 없음: 2판 r1"
+
+
+def test_cross_write_error_enforces_provider_slots(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s, d, r, _ = _cross_setup(conn, tmp_path)
+    assert p.write_error(conn, s, d, r, round_no=0, side="bull", lane="a") is None
+    assert p.write_error(conn, s, d, r, round_no=0, side="bear", lane="b") is None
+    assert p.write_error(conn, s, d, r, round_no=0, side="bear", lane="a") == (
+        f"Codex bear는 전용 도구로만 기록할 수 있습니다: {r.cli_template}"
+    )
+    assert p.write_error(conn, s, d, r, round_no=0, side="bull", lane="b") == (
+        f"Codex bull는 전용 도구로만 기록할 수 있습니다: {r.cli_template}"
+    )
+    # 판 b 반박 라운드는 판 b 직전 라운드 양측이 필요하다(판 a 와 무관)
+    _write_claude(d, r, "a", 0, "bull")
+    _write_claude(d, r, "a", 0, "bear")
+    assert "이전 라운드" in p.write_error(conn, s, d, r, round_no=1, side="bear", lane="b")
+    assert p.write_error(conn, s, d, r, round_no=1, side="bull", lane="a") is None
+    # 꺼진 v2 정책은 판 a 하나 — 판 b 쓰기 거부
+    off = settings(enabled=False)
+    p.start(conn, off, tmp_path / "off", SPOT_RESEARCH, now=NOW)
+    assert (
+        p.write_error(conn, off, tmp_path / "off", SPOT_RESEARCH, round_no=0, side="bear", lane="b")
+        == "이 연구에는 2판이 없습니다"
+    )
+    assert (
+        p.write_error(conn, off, tmp_path / "off", SPOT_RESEARCH, round_no=0, side="bear", lane="a")
+        is None
+    )
+
+
+def test_cross_write_error_lane_check_precedes_fake_enabled(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    on, off = settings(), settings(enabled=False)
+    assert (
+        p.write_error(conn, on, tmp_path, SPOT_RESEARCH, round_no=0, side="bull", lane="b") is None
+    )
+    assert (
+        p.write_error(conn, off, tmp_path, SPOT_RESEARCH, round_no=0, side="bull", lane="b")
+        == "이 연구에는 2판이 없습니다"
+    )
+
+
+def test_v1_policy_rejects_lane_b_and_bull_payload(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s = settings()
+    p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW, version=1)
+    seed(tmp_path)
+    assert (
+        p.write_error(conn, s, tmp_path, SPOT_RESEARCH, round_no=0, side="bear", lane="b")
+        == "이 연구에는 2판이 없습니다"
+    )
+    with pytest.raises(p.ResearchPolicyError, match="이 연구에서 Codex bull 턴은 없습니다"):
+        p.payload(conn, s, tmp_path, SPOT_RESEARCH, 0, side="bull")
+    data, _ = p.payload(conn, s, tmp_path, SPOT_RESEARCH, 0)
+    assert data["side"] == "bear" and "lane" not in data
+
+
+def test_cross_completion_reports_missing_lane_b(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r, ctx = _cross_setup(conn, tmp_path)
+    fake = _codex_fake(d)
+    from pathlib import Path
+
+    # 판 a 만 다 채운다
+    for rnd in (0, 1):
+        _write_claude(d, r, "a", rnd, "bull")
+        assert p.generate_turn(
+            ctx, d, r, rnd, side="bear", runner=fake, bin_path=Path("/fake/codex")
+        )["ok"]
+    assert p.completion_error(conn, s, d, r) == "Codex 필수 토론 미완료: 2판 r0_bull"
+    _write_claude(d, r, "b", 0, "bull")  # 강세 칸은 채웠지만 약세 Claude 누락
+    assert p.completion_error(conn, s, d, r) == "Codex 필수 토론 미완료: 2판 r0_bear"
+
+
+def _growth_turn(side, rnd, topic):
+    other = "bull" if side == "bear" else "bear"
+    return ok_turn(
+        side,
+        rnd,
+        issues=[
+            {
+                "issue_id": f"{side}:{topic}",
+                "topic": topic,
+                "claim": "합성 근거",
+                "evidence": ["technical.indicators"],
+            }
+        ],
+        responses=[
+            {
+                "issue_id": f"{other}:{'rates' if side == 'bull' else 'growth'}",
+                "response": "반박",
+                "evidence": ["technical.indicators"],
+            }
+        ]
+        if rnd
+        else [],
+        rebuttals=["반박"] if rnd else [],
+    )
+
+
+def test_lane_b_turn_error_ignores_lane_a_issues(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s, d, r, _ = _cross_setup(conn, tmp_path)
+    # 판 a 의 r0 쟁점은 다른 ID(bull:valuation·bear:cycle)
+    write_checkpoint(
+        d, r.turn_stage("a", 0, "bull"), checkpoint_payload(_growth_turn("bull", 0, "valuation"))
+    )
+    write_checkpoint(
+        d, r.turn_stage("a", 0, "bear"), checkpoint_payload(_growth_turn("bear", 0, "cycle"))
+    )
+    # 판 b r0: bull:growth / bear:rates
+    write_checkpoint(
+        d, r.turn_stage("b", 0, "bull"), checkpoint_payload(_growth_turn("bull", 0, "growth"))
+    )
+    write_checkpoint(
+        d, r.turn_stage("b", 0, "bear"), checkpoint_payload(_growth_turn("bear", 0, "rates"))
+    )
+    lane_b_r1_bear = _growth_turn("bear", 1, "rates")
+    assert p.turn_error(conn, s, d, r, lane_b_r1_bear, lane="b") is None
+    # 같은 턴을 판 a 로 검사하면 판 a 쟁점과 맞지 않는다
+    assert (
+        p.turn_error(conn, s, d, r, lane_b_r1_bear, lane="a")
+        == "자신의 이전 쟁점 ID를 유지해야 합니다"
+    )
+
+
+def test_payload_for_bull_reads_lane_b_previous(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s, d, r, _ = _cross_setup(conn, tmp_path)
+    with pytest.raises(p.ResearchPolicyError, match="이전 라운드"):
+        p.payload(conn, s, d, r, 1, side="bull")
+    for side in ("bull", "bear"):
+        _write_claude(d, r, "a", 0, side)
+    lane_b = {
+        "bull": _growth_turn("bull", 0, "growth"),
+        "bear": _growth_turn("bear", 0, "rates"),
+    }
+    for side, turn in lane_b.items():
+        write_checkpoint(d, r.turn_stage("b", 0, side), checkpoint_payload(turn))
+    data, _ = p.payload(conn, s, d, r, 1, side="bull")
+    assert data["side"] == "bull" and data["opponent_previous"]["side"] == "bear"
+    assert data["opponent_previous"]["issues"][0]["issue_id"] == "bear:rates"
+    assert data["own_previous"]["issues"][0]["issue_id"] == "bull:growth"
+    assert "lane" not in data
+    bear, _ = p.payload(conn, s, d, r, 1)  # 기본 side=bear → 판 a
+    assert bear["side"] == "bear" and bear["own_previous"]["issues"][0]["issue_id"] == "bear:case"
 
 
 def test_on_debate_requires_symmetric_issue_coverage(conn, tmp_path):
@@ -352,7 +637,6 @@ def test_status_reports_throttle_and_effective_cap(conn, monkeypatch):
     set_flag(conn, p.CODEX_CAP_FLAG, 7)
     st = p.status(conn, s, now=NOW)
     assert st["usage"]["daily_call_cap"] == 7 and st["usage"]["cap_source"] == "control"
-
 
 
 def test_throttle_settings_are_not_part_of_policy_hash(conn, tmp_path):

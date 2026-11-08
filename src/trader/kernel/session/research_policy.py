@@ -362,19 +362,28 @@ def _bind(conn, d, scope, policy):
         policy["context_hash"] = h
 
 
-def write_error(conn, settings, d, scope, *, round_no, side) -> str | None:
+def _lane_label(lane: str) -> str:
+    """사용자 문구의 판 표시: 판 a 는 비움(v1 문구 그대로), 판 b 는 「2판 」."""
+    return "" if lane == "a" else "2판 "
+
+
+def write_error(conn, settings, d, scope, *, round_no, side, lane="a") -> str | None:
+    """Claude 가 토론 턴을 쓰기 전 검사. 판·공급자 칸·라운드 상한·입력 고정·같은 판 직전 라운드."""
     try:
         policy = get(conn, settings, d, scope)
+        if lane not in {item["lane"] for item in lanes(policy)}:
+            # 2판이 없는 정책(v1·꺼짐·건너뜀)에서 판 b 쓰기를 막는다(같은 모델끼리 두 판 방지)
+            return f"이 연구에는 {'2' if lane == 'b' else '1'}판이 없습니다"
         if not policy["enabled"]:
             return None
-        if side == "bear":
-            return f"Codex bear는 전용 도구로만 기록할 수 있습니다: {scope.cli_template}"
+        if provider_for(policy, lane, side) == "codex":
+            return f"Codex {side}는 전용 도구로만 기록할 수 있습니다: {scope.cli_template}"
         if round_no > policy["rounds"]:
             return f"라운드 {round_no}는 고정 정책 라운드({policy['rounds']})를 넘습니다"
         _bind(conn, d, scope, policy)
         if round_no > 0:
             for prev_side in ("bull", "bear"):
-                if read_checkpoint(d, f"{scope.turn_prefix}{round_no - 1}_{prev_side}") is None:
+                if read_checkpoint(d, scope.turn_stage(lane, round_no - 1, prev_side)) is None:
                     return "반박 이전 라운드의 양측 턴이 필요합니다"
         return None
     except ResearchPolicyError as exc:
@@ -385,19 +394,29 @@ def rounds(conn, settings, d, scope) -> int:
     return int(get(conn, settings, d, scope)["rounds"])
 
 
-def payload(conn, settings, d, scope, round_no):
+def _codex_lane(policy: dict, side: str) -> str:
+    """그 편이 Codex 인 판. 없으면 ResearchPolicyError."""
+    for lane, slot_side in codex_slots(policy):
+        if slot_side == side:
+            return lane
+    raise ResearchPolicyError(f"이 연구에서 Codex {side} 턴은 없습니다")
+
+
+def payload(conn, settings, d, scope, round_no, *, side="bear"):
+    """Codex `side` 턴 입력(그 편이 Codex 인 판의 직전 턴). 입력에 판 이름은 넣지 않는다."""
     policy = get(conn, settings, d, scope)
+    lane = _codex_lane(policy, side)
+    other = "bull" if side == "bear" else "bear"
     inputs = read_checkpoint(d, scope.input_stage) or {}
     inputs = inputs.get("data", inputs)
     # Only the previous round is included, so round0 remains independent.
-    prefix = scope.turn_prefix
     previous = {}
     if round_no:
-        for side in ("bull", "bear"):
-            saved = read_checkpoint(d, f"{prefix}{round_no - 1}_{side}")
+        for prev_side in ("bull", "bear"):
+            saved = read_checkpoint(d, scope.turn_stage(lane, round_no - 1, prev_side))
             if saved is None:
                 raise ResearchPolicyError("반박 이전 라운드의 양측 턴이 필요합니다")
-            previous[side] = saved.get("data", {})
+            previous[prev_side] = saved.get("data", {})
     metadata = scope.metadata(d, inputs)
     required = {"market", "ticker", "currency", "asof"}
     if not required <= metadata.keys() or any(not metadata[k] for k in required):
@@ -408,10 +427,10 @@ def payload(conn, settings, d, scope, round_no):
         "scope": scope.scope,
         **metadata,
         "round": round_no,
-        "side": "bear",
+        "side": side,
         "reports": reports(d, scope),
-        "own_previous": previous.get("bear"),
-        "opponent_previous": previous.get("bull"),
+        "own_previous": previous.get(side),
+        "opponent_previous": previous.get(other),
         "input_context": tooling.compact_context(inputs),
     }
     try:
@@ -420,11 +439,15 @@ def payload(conn, settings, d, scope, round_no):
         raise ResearchPolicyError(str(exc)) from exc
 
 
-def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel=None):
+def generate_turn(
+    ctx, d, scope, round_no, *, side="bear", runner=None, bin_path=None, cancel=None
+) -> dict:
+    """Codex `side` 턴을 생성해 그 편이 Codex 인 판의 단계에 저장한다."""
     try:
-        data, policy = payload(ctx.conn, ctx.settings, d, scope, round_no)
-        if not policy["enabled"]:
+        if not get(ctx.conn, ctx.settings, d, scope)["enabled"]:
             return {"ok": False, "error": "Codex 토론 참여가 꺼진 연구입니다"}
+        data, policy = payload(ctx.conn, ctx.settings, d, scope, round_no, side=side)
+        lane = _codex_lane(policy, side)
         if not 0 <= round_no <= policy["rounds"]:
             return {"ok": False, "error": "고정 정책의 라운드 범위를 벗어났습니다"}
         _bind(ctx.conn, d, scope, policy)
@@ -432,7 +455,8 @@ def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel
             input_receipts.record(
                 d,
                 data["input_context"],
-                stage=f"{scope.scope}:researcher:r{round_no}:bear",
+                stage=f"{scope.scope}:researcher:r{round_no}:{side}"
+                + ("" if lane == "a" else f":{lane}"),
                 provider="codex",
                 recorded_at=ctx.now().isoformat(),
             )
@@ -446,68 +470,95 @@ def generate_turn(ctx, d, scope, round_no, *, runner=None, bin_path=None, cancel
             runner=runner,
             bin_path=bin_path,
             cancel=cancel,
-            validate=lambda turn: turn_error(ctx.conn, ctx.settings, d, scope, turn),
+            validate=lambda turn: turn_error(ctx.conn, ctx.settings, d, scope, turn, lane=lane),
         )
-        stage = f"{scope.turn_prefix}{round_no}_bear"
-        result["call"]["agent"] = scope.bear_agent
+        stage = scope.turn_stage(lane, round_no, side)
+        result["call"]["agent"] = scope.bull_agent if side == "bull" else scope.bear_agent
         invalidate_summary(d, scope)
         path = write_checkpoint(d, stage, checkpoint_payload(result["data"], result["call"]))
-        return {"ok": True, "path": str(path), "provider": "codex", "round": round_no}
+        return {
+            "ok": True,
+            "path": str(path),
+            "provider": "codex",
+            "round": round_no,
+            "side": side,
+            "lane": lane,
+        }
     except (ResearchPolicyError, codex.CodexError) as exc:
         return {"ok": False, "error": str(exc)}
 
 
 def completion_error(conn, settings, d, scope) -> str | None:
+    """판마다 0..rounds × 양측 턴·입력 고정·쟁점 반박·공급자 칸 증명을 확인한다.
+    v1 정책은 판 a 하나라 예전과 같은 결과다."""
     try:
         policy = get(conn, settings, d, scope)
         if not policy["enabled"]:
             return None
-        prefix = scope.turn_prefix
+        plan = lanes(policy)
         # Check presence before fingerprint, yielding the useful missing-turn error first.
-        for rnd in range(policy["rounds"] + 1):
-            for side in ("bull", "bear"):
-                cp = read_checkpoint(d, f"{prefix}{rnd}_{side}")
-                if cp is None:
-                    return f"Codex 필수 토론 미완료: r{rnd}_{side}"
+        for item in plan:
+            label = _lane_label(item["lane"])
+            for rnd in range(policy["rounds"] + 1):
+                for side in ("bull", "bear"):
+                    if read_checkpoint(d, scope.turn_stage(item["lane"], rnd, side)) is None:
+                        return f"Codex 필수 토론 미완료: {label}r{rnd}_{side}"
         if policy.get("context_hash") != _context_hash(d, scope):
             return "Codex 입력/리포트 증명 불일치: 새 연구로 재분석하세요"
-        for rnd in range(policy["rounds"] + 1):
-            for side in ("bull", "bear"):
-                candidate = read_checkpoint(d, f"{prefix}{rnd}_{side}") or {}
-                if err := turn_error(conn, settings, d, scope, candidate.get("data") or {}):
-                    return err
-            bull = read_checkpoint(d, f"{prefix}{rnd}_bull") or {}
-            if (bull.get("call") or {}).get("provider") != "claude":
-                return f"Claude bull 공급자 증명 없음: r{rnd}"
-            cp = read_checkpoint(d, f"{prefix}{rnd}_bear") or {}
-            turn = DebateTurn.model_validate(cp.get("data"))
-            call = cp.get("call") or {}
-            row = conn.execute(
-                ("SELECT * FROM research_calls WHERE id=? AND provider='codex' AND status='ok'"),
-                (call.get("call_id"),),
-            ).fetchone()
-            expected, _ = payload(conn, settings, d, scope, rnd)
-            if (
-                turn.side != "bear"
-                or turn.round != rnd
-                or row is None
-                or row["policy_hash"] != policy["policy_hash"]
-                or row["model"] != policy["config"]["model"]
-                or row["prompt_hash"] != codex.digest(codex.PROMPT)
-                or row["schema_hash"] != codex.digest(codex.output_schema())
-                or row["input_hash"] != codex.digest(expected)
-                or row["turn_hash"] != codex.digest(cp["data"])
-                or any(
-                    call.get(k) != row[k]
-                    for k in ("policy_hash", "input_hash", "prompt_hash", "schema_hash")
-                )
-            ):
-                return f"Codex 참여 증명 불일치: r{rnd}_bear, 새 연구로 재분석하세요"
+        for item in plan:
+            lane, label = item["lane"], _lane_label(item["lane"])
+            for rnd in range(policy["rounds"] + 1):
+                cps = {
+                    side: read_checkpoint(d, scope.turn_stage(lane, rnd, side)) or {}
+                    for side in ("bull", "bear")
+                }
+                for side in ("bull", "bear"):
+                    value = cps[side].get("data") or {}
+                    if err := turn_error(conn, settings, d, scope, value, lane=lane):
+                        return err
+                for side in ("bull", "bear"):
+                    if item[side] == "codex":
+                        if not _codex_proven(
+                            conn, settings, d, scope, policy, cps[side], rnd, side
+                        ):
+                            return (
+                                f"Codex 참여 증명 불일치: {label}r{rnd}_{side}, "
+                                "새 연구로 재분석하세요"
+                            )
+                    elif (cps[side].get("call") or {}).get("provider") != "claude":
+                        return f"Claude {side} 공급자 증명 없음: {label}r{rnd}"
         return None
     except ResearchPolicyError as exc:
         return f"Codex 참여 검증 실패: {exc}"
     except (ValueError, sqlite3.Error) as exc:
         return f"Codex 참여 검증 실패: {type(exc).__name__}"
+
+
+def _codex_proven(conn, settings, d, scope, policy, cp, rnd, side) -> bool:
+    """Codex 칸 턴이 `research_calls` 성공 행(정책·모델·그 편 PROMPT·스키마·입력·턴 해시)과
+    맞는가."""
+    turn = DebateTurn.model_validate(cp.get("data"))
+    call = cp.get("call") or {}
+    row = conn.execute(
+        ("SELECT * FROM research_calls WHERE id=? AND provider='codex' AND status='ok'"),
+        (call.get("call_id"),),
+    ).fetchone()
+    expected, _ = payload(conn, settings, d, scope, rnd, side=side)
+    return not (
+        turn.side != side
+        or turn.round != rnd
+        or row is None
+        or row["policy_hash"] != policy["policy_hash"]
+        or row["model"] != policy["config"]["model"]
+        or row["prompt_hash"] != codex.digest(codex.PROMPTS[side])
+        or row["schema_hash"] != codex.digest(codex.output_schema())
+        or row["input_hash"] != codex.digest(expected)
+        or row["turn_hash"] != codex.digest(cp["data"])
+        or any(
+            call.get(k) != row[k]
+            for k in ("policy_hash", "input_hash", "prompt_hash", "schema_hash")
+        )
+    )
 
 
 def status(conn, settings, *, now, limits: dict | None = None):
@@ -574,7 +625,8 @@ def status(conn, settings, *, now, limits: dict | None = None):
     }
 
 
-def turn_error(conn, settings, d, scope, value):
+def turn_error(conn, settings, d, scope, value, *, lane="a"):
+    """쟁점 토론 규칙 검사. 자기·상대 직전 턴은 그 판(`lane`)에서 읽는다."""
     try:
         policy = get(conn, settings, d, scope)
         if not policy["enabled"]:
@@ -604,14 +656,13 @@ def turn_error(conn, settings, d, scope, value):
             return None
         if not turn.rebuttals:
             return "상호 반박 라운드 rebuttals를 비울 수 없습니다"
-        prefix = scope.turn_prefix
-        own = (read_checkpoint(d, f"{prefix}{turn.round - 1}_{turn.side}") or {}).get("data") or {}
-        opponent = (
-            read_checkpoint(
-                d, f"{prefix}{turn.round - 1}_{'bear' if turn.side == 'bull' else 'bull'}"
-            )
-            or {}
-        ).get("data") or {}
+        other = "bear" if turn.side == "bull" else "bull"
+        own = (read_checkpoint(d, scope.turn_stage(lane, turn.round - 1, turn.side)) or {}).get(
+            "data"
+        ) or {}
+        opponent = (read_checkpoint(d, scope.turn_stage(lane, turn.round - 1, other)) or {}).get(
+            "data"
+        ) or {}
         if set(ids) != {item["issue_id"] for item in own.get("issues", [])}:
             return "자신의 이전 쟁점 ID를 유지해야 합니다"
         wanted = {item["issue_id"] for item in opponent.get("issues", [])}

@@ -71,7 +71,7 @@ def test_final_codex_regeneration_invalidates_summary_and_blocks_new_decision(
         if scope == "spot"
         else market_dir(DAY, "KR", tmp_path, create=True)
     )
-    p.start(conn, settings, d, RESEARCHES[scope], now=NOW)
+    p.start(conn, settings, d, RESEARCHES[scope], now=NOW, version=1)
     r = RESEARCHES[scope]
     input_stage, report_prefix, prefix = r.input_stage, r.report_prefix, r.turn_prefix
     inputs = {
