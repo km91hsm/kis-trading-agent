@@ -279,7 +279,7 @@ def reevaluate_request(deps: Any, params: dict, progress: Any) -> dict:
 def close_request(deps: Any, params: dict, progress: Any) -> dict:
     """큐 `fo_close`(사람 요청): 실행 직전에 장 시간·계좌·포지션 상태를 다시 보고, 모드(off)·
     dry_run 은 executor 가 기록만으로 바꾼다. 사람이 요청한 청산은 위험 축소라 일시정지 중에도
-    낸다(`executor.reduce` 기본 `risk_exit=True`)."""
+    낸다(`executor.reduce(risk_exit=True)`)."""
     if not is_fo_open(deps.now()):
         return {"skipped": FO_CLOSED}
     conn = deps.conn_factory()
@@ -294,7 +294,7 @@ def close_request(deps: Any, params: dict, progress: Any) -> dict:
         if pos.status in ("settled", "closed", "unknown", "awaiting_settlement"):
             return {"skipped": f"포지션 상태 {pos.status} — 자동 청산 대상 아님"}
         return executor.reduce(ctx, account, pos, intent="CLOSE", qty=None,
-                               reason="수동 청산(대기열)")  # fmt: skip
+                               reason="수동 청산(대기열)", risk_exit=True)  # fmt: skip
     finally:
         conn.close()
 

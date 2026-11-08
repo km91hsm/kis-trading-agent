@@ -190,3 +190,27 @@ def test_handled_marker_failure_prefix():
     bad = SimpleNamespace(ok=False, session_id=None, error="timeout")
     assert reeval.handled_marker(ok) == "s-1"
     assert reeval.handled_marker(bad) == "실패: timeout (-)"
+
+
+def test_paused_tick_does_not_send_replace_second_leg(conn):
+    """엔진 ⑥ 의 `hold` 가드: 청산(CLOSE) 체결로 보유 0 이 된 REPLACE 도 일시정지 중엔 두 번째
+    (진입) 다리를 내지 않고 플래그를 남긴다(재개 뒤 낸다)."""
+    from trader.features.fo import engine
+
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    out = reeval.apply(ctx, _env(pos, intent="REPLACE", direction="SHORT", stop_pt=355.0,
+                                 take_profit_pt=340.0, entry_price=350.5), round_n=1)  # fmt: skip
+    assert out["replace_pending"] is True
+    broker = ctx.brokers[ACCT]
+    leg = store.live_legs(conn, position_id=pos.id)[0]
+    with store.tx(conn):
+        store.record_fill_progress(conn, leg.id, 2)
+    executor.finalize(ctx, store.get_position(conn, pos.id))
+    broker.balance = broker.balance.model_copy(update={"positions": []})
+    assert store.get_position(conn, pos.id).qty_held == 0
+    control.set_flag(conn, "paused", True)
+    res = engine.tick(ctx, request_reeval=lambda c, p: None)
+    assert res["accounts"][ACCT]["entries"] == []
+    assert [o.side for o in broker.orders] == ["SELL"]  # 첫 다리(청산)만
+    assert control.get_flag(conn, reeval.replace_key(ACCT, pos.id)) is not None

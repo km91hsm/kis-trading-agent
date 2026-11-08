@@ -948,7 +948,7 @@ def run_leg(
             results.append(
                 reduce(
                     ctx, account, cur, intent="RESIZE_DOWN", qty=None, reason=source, round=round,
-                    stage=od_stage, request_id=env.request_id,
+                    stage=od_stage, request_id=env.request_id, risk_exit=False,  # 판단 감액
                 )  # fmt: skip
             )
     return results
@@ -1160,12 +1160,12 @@ def reduce(
     round: int = 0,
     stage: str | None = None,
     request_id: str | None = None,
-    risk_exit: bool = True,
+    risk_exit: bool = False,
 ) -> dict[str, Any]:
     """§5 청산·축소 절차: 진입 회수 → 잔고 재조회로 잔량 확정 → 축소 다리 1개(첫 시도 지정가,
     재시도는 시장가). 다음 틱은 `continue_reduce`. `qty=None` 은 전량(RESIZE_DOWN 은 목표
-    초과분). 기본은 위험 청산(일시정지 중에도 전송) — 판단(아침·재평가 결정) 유래는
-    `risk_exit=False` 로 불러 일시정지 중 기록만."""
+    초과분). 기본은 fail-closed(`risk_exit=False` — 일시정지 중 기록만). 위험 청산(엔진 보호선·
+    유지 축소·재시도·수동 청산)은 호출자가 `risk_exit=True` 를 명시한다."""
     conn, cfg = ctx.conn, ctx.settings.fo
     _, today = _today(ctx)
     stage = stage or f"_fo_order_{account.id}_{intent.lower()}_{pos.id}"
@@ -1326,11 +1326,11 @@ def _resume_reduce(
     if intent == "RESIZE_DOWN":
         if cur.status in ("resizing", "exit_failed") and cur.qty_held > cur.qty_target:
             return reduce(ctx, account, cur, intent="RESIZE_DOWN", qty=None,
-                          reason="재시도(다리 종료)", round=rnd)  # fmt: skip
+                          reason="재시도(다리 종료)", round=rnd, risk_exit=True)  # fmt: skip
         return finalize(ctx, cur)
     if cur.qty_held > 0 and cur.status in ("closing", "exit_failed"):
         return reduce(ctx, account, cur, intent=intent, qty=None, reason="재시도(다리 종료)",
-                      round=rnd)  # fmt: skip
+                      round=rnd, risk_exit=True)  # fmt: skip
     return finalize(ctx, cur)
 
 
@@ -1424,4 +1424,5 @@ def continue_reduce(
     assert cur is not None
     if cur.qty_held == 0 or (leg.intent == "RESIZE_DOWN" and cur.qty_held <= cur.qty_target):
         return finalize(ctx, cur)
-    return reduce(ctx, account, cur, intent=leg.intent, qty=None, reason="재시도", round=leg.round)
+    return reduce(ctx, account, cur, intent=leg.intent, qty=None, reason="재시도", round=leg.round,
+                  risk_exit=True)  # fmt: skip

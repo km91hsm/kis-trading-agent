@@ -545,7 +545,8 @@ def close_cmd(
         pos = store.get_position(b.conn, position)
         if acct is None or pos is None or pos.account_id != acct.id:
             raise ConfigError(f"계좌 {account} 의 포지션 {position} 이 없습니다")
-        out = executor.reduce(ctx, acct, pos, intent="CLOSE", qty=None, reason="수동 청산(CLI)")
+        out = executor.reduce(ctx, acct, pos, intent="CLOSE", qty=None, reason="수동 청산(CLI)",
+                              risk_exit=True)  # 사람의 수동 청산 = 위험 축소(일시정지 중에도)
     finally:
         b.conn.close()
     typer.echo(json.dumps(out, ensure_ascii=False, default=str))

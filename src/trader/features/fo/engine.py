@@ -516,7 +516,7 @@ def _tick_account(
                      fo_exit(account=a.id, code=pos.code,
                                       name=executor._name_of(ctx, pos.code), intent=intent,
                                       reason=why, qty=pos.qty_held), today)  # fmt: skip
-        r = executor.reduce(ctx, a, pos, intent=intent, qty=None, reason=why)
+        r = executor.reduce(ctx, a, pos, intent=intent, qty=None, reason=why, risk_exit=True)
         res["exits"].append({"position_id": pos.id, "intent": intent, "reason": why, **r})
     # ③ 유지 조건
     held = [p for p in store.open_positions(conn, a.id)
@@ -610,7 +610,8 @@ def _risk_reduce(ctx: FoExecContext, a: Any, pos: FoPositionRow, target: int, wh
                                          held=pos.qty_held, target=target), today)  # fmt: skip
     _discard_pending_triggers(ctx, pos, f"위험 축소: {why}", now)
     if target <= 0:
-        r = executor.reduce(ctx, a, pos, intent="RISK_REDUCE", qty=None, reason=why)
+        r = executor.reduce(ctx, a, pos, intent="RISK_REDUCE", qty=None, reason=why,
+                            risk_exit=True)  # fmt: skip
     else:
         with store.tx(ctx.conn):
             ok = store.transition(ctx.conn, pos.id, expected_version=pos.version,
@@ -619,7 +620,8 @@ def _risk_reduce(ctx: FoExecContext, a: Any, pos: FoPositionRow, target: int, wh
             return {"position_id": pos.id, "status": "skipped", "note": "버전 경합"}
         cur = store.get_position(ctx.conn, pos.id)
         assert cur is not None
-        r = executor.reduce(ctx, a, cur, intent="RESIZE_DOWN", qty=None, reason=why)
+        r = executor.reduce(ctx, a, cur, intent="RESIZE_DOWN", qty=None, reason=why,
+                            risk_exit=True)  # fmt: skip
     return {"position_id": pos.id, "target": target, "reason": why, **r}
 
 

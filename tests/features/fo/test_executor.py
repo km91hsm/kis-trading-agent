@@ -349,14 +349,37 @@ def test_paused_records_entry_but_transmits_risk_reduce(conn):
     broker.states["E1"] = state("E1", order_qty=2, filled=0, remaining=0, cancelled=2,
                                 terminal=True, st="cancelled")  # fmt: skip
     r = executor.reduce(ctx, account(), store.get_position(conn, pos.id), intent="STOP",
-                        qty=None, reason="손절")  # fmt: skip
+                        qty=None, reason="손절", risk_exit=True)  # fmt: skip
     assert broker.cancelled == [("E1", 0)] and store.get_leg(conn, leg_id).status == "cancelled"
     assert r["status"] == "accepted" and [o.side for o in broker.orders] == ["SELL"]
     assert sum("일시정지" in t for t in ctx.notifier.msgs) == 1
     # 같은 날 두 번째 위험 청산 접수는 다시 알리지 않는다(하루 1회)
     pos2 = _held_position(conn, ctx, qty=1, code="105W12")
-    executor.reduce(ctx, account(), pos2, intent="STOP", qty=None, reason="손절")
+    executor.reduce(ctx, account(), pos2, intent="STOP", qty=None, reason="손절", risk_exit=True)
     assert sum("일시정지" in t for t in ctx.notifier.msgs) == 1
+
+
+def test_paused_reduce_default_is_fail_closed(conn):
+    """`reduce` 의 기본(`risk_exit=False`)은 일시정지 중 기록만 — 위험 청산 호출자만 명시해 낸다."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    control.set_flag(conn, "paused", True)
+    r = executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")
+    assert (r["status"], r["record_only"]) == ("recorded", "paused")
+    assert ctx.brokers[ACCT].orders == [] and store.get_position(conn, pos.id).status == "held"
+
+
+def test_paused_decision_resize_down_is_record_only(conn):
+    """판단(재평가·아침 결정)의 RESIZE↓ 는 일시정지 중 기록만 — 목표도 그대로."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=3, qty_target=3, leverage_used=1.0)
+    control.set_flag(conn, "paused", True)
+    e = env(decision(intent="RESIZE", target_leverage=0.2), position_id=pos.id,
+            expected_version=pos.version)  # fmt: skip
+    out = executor.run_leg(ctx, account(), e, source="reeval")
+    assert out[0]["status"] == "recorded" and out[0]["record_only"] == "paused"
+    assert out[0]["intent"] == "RESIZE_DOWN"
+    assert ctx.brokers[ACCT].orders == [] and store.get_position(conn, pos.id).qty_target == 3
 
 
 def test_paused_decision_close_is_record_only(conn):
