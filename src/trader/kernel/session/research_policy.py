@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from trader.kernel.config import KST, CodexDebateSettings
@@ -239,6 +239,83 @@ def _stored(conn, d, scope):
     return {**json.loads(row[0]), "policy_hash": row[1], "context_hash": row[2]} if row else None
 
 
+def _failure(conn, d: Path, scope: ResearchSpec) -> tuple[str, str] | None:
+    """도중 Codex 실패 표시 (시각, 사유). 표시가 없거나 열이 없는 옛 원장이면 None."""
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT codex_failed_at, codex_failed_reason FROM research_policies "
+            "WHERE research_key=?",
+            (key(d, scope),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not row or not row[0]:
+        return None
+    return row[0], row[1] or ""
+
+
+def mark_codex_failed(conn, d: Path, scope: ResearchSpec, *, reason: str, now: datetime) -> None:
+    """교차 토론 도중 Codex 실패를 표시한다. 다음 `start` 가 토론을 보관하고
+    Claude 2인으로 바꾼다."""
+    with conn:
+        conn.execute(
+            "UPDATE research_policies SET codex_failed_at=?, codex_failed_reason=? "
+            "WHERE research_key=?",
+            (now.isoformat(), reason, key(d, scope)),
+        )
+
+
+def _archive_dir(d: Path, now: datetime) -> Path:
+    """토론 보관 폴더 `_codex_failed_<UTC YYYYMMDD_HHMMSS>`(이미 있으면 `_2`, `_3`…)를 만들어
+    돌려준다. 이름에 `:` 를 쓰지 않는다(Windows)."""
+    base = f"_codex_failed_{now.astimezone(UTC):%Y%m%d_%H%M%S}"
+    n = 1
+    while True:
+        path = d / (base if n == 1 else f"{base}_{n}")
+        try:
+            path.mkdir()
+            return path
+        except FileExistsError:
+            n += 1
+
+
+def _failover(conn, settings, d: Path, scope: ResearchSpec, old: dict, *, research, reason, now):
+    """도중 Codex 실패한 교차 연구를 다시 시작할 때: 두 판 토론·요약을 보관 폴더로 옮기고(삭제하지
+    않음, 애널리스트·입력은 그대로) 같은 행의 정책을 Claude 1판으로 바꾼다."""
+    archive = _archive_dir(d, now)
+    for stage in list_checkpoints(d):
+        if stage.startswith((scope.turn_prefix, scope.cross_turn_prefix)) or (
+            stage == scope.summary_stage
+        ):
+            (d / f"{stage}.json").replace(archive / f"{stage}.json")
+    skipped = f"Codex 도중 실패 — {reason} — 이번 분석은 Claude 강세·약세"
+    policy = {
+        **current(conn, settings, version=2),
+        "enabled": False,
+        "rounds": settings.debate_rounds,
+        "lanes": _v2_lanes(False),
+        "bear": "claude",
+        "codex_skipped": skipped,
+        "research": research,
+    }
+    policy_hash = codex.digest(policy)
+    with conn:
+        conn.execute(
+            "UPDATE research_policies SET policy_json=?, policy_hash=?, context_hash=NULL, "
+            "codex_failed_at=NULL, replaced_from_hash=?, replaced_reason=? WHERE research_key=?",
+            (
+                codex.canonical(policy),
+                policy_hash,
+                old["policy_hash"],
+                f"Codex 도중 실패 — {reason}",
+                key(d, scope),
+            ),
+        )
+    return {**policy, "policy_hash": policy_hash, "context_hash": None}
+
+
 def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime, version: int = 2) -> dict:
     old_stored = _stored(conn, d, scope)
     # 저장된 정책이 있으면 그 버전으로 비교한다(v1/v2 섞인 세션에서 「정책 변경」 오판 방지)
@@ -296,6 +373,11 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime, versio
             "legacy_completed": old is None,
             "resume_completed": True,
         }
+    if old and is_cross(old) and (failed := _failure(conn, d, scope)):
+        # 스펙 §5-1: 정책 변경 거부의 유일한 예외 — 도중 Codex 실패 뒤 재시작은 Claude 2인으로 교체
+        return _failover(
+            conn, settings, d, scope, old, research=wanted["research"], reason=failed[1], now=now
+        )
     if old:
         # A running session uses get(), never start(): toggles only affect subsequent starts.
         if int(old.get("version") or 1) == 1:
@@ -488,6 +570,7 @@ def generate_turn(
     ctx, d, scope, round_no, *, side="bear", runner=None, bin_path=None, cancel=None
 ) -> dict:
     """Codex `side` 턴을 생성해 그 편이 Codex 인 판의 단계에 저장한다."""
+    policy = None
     try:
         if not get(ctx.conn, ctx.settings, d, scope)["enabled"]:
             return {"ok": False, "error": "Codex 토론 참여가 꺼진 연구입니다"}
@@ -529,7 +612,13 @@ def generate_turn(
             "side": side,
             "lane": lane,
         }
-    except (ResearchPolicyError, codex.CodexError) as exc:
+    except codex.CodexError as exc:
+        # 교차 토론(v2·두 판)의 Codex 실행 실패만 표시한다
+        # — 입력 조립 실패(ResearchPolicyError)·v1 연구는 표시하지 않는다
+        if policy is not None and is_cross(policy):
+            mark_codex_failed(ctx.conn, d, scope, reason=str(exc), now=ctx.now())
+        return {"ok": False, "error": str(exc)}
+    except ResearchPolicyError as exc:
         return {"ok": False, "error": str(exc)}
 
 

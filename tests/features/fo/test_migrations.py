@@ -31,8 +31,8 @@ def test_tables_and_indexes(conn):
     assert "request_id" in cols
 
 
-def test_current_version_is_17(conn):
-    assert db.current_version(conn) == 17
+def test_current_version_is_18(conn):
+    assert db.current_version(conn) == 18
 
 
 def _leg(conn, **kw):

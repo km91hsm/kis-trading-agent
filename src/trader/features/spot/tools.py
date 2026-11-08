@@ -1212,7 +1212,8 @@ def status(ctx: ToolContext, *, market: str, date: date) -> dict:
     tickers: dict[str, list[str]] = {}
     if mdir.exists():
         for p in sorted(mdir.iterdir()):
-            if p.is_dir():
+            # `_codex_failed_*` 등 `_` 로 시작하는 폴더는 종목이 아니다(시장 단위 연구의 보관 폴더)
+            if p.is_dir() and not p.name.startswith("_"):
                 tickers[p.name] = list_checkpoints(p)
     return {
         "ok": True,

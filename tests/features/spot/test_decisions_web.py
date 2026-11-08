@@ -136,6 +136,17 @@ def test_today_hides_empty_dirs_and_read_does_not_create(client, ledger, project
     assert client.get("/api/markets/KR/today", params={"date": "nope"}).status_code == 400
 
 
+def test_today_skips_codex_failed_archive_dirs(client, ledger, project):
+    """`_codex_failed_*` 보관 폴더는 체크포인트가 있어도 종목 목록에 나오지 않는다."""
+    state = project / "state"
+    _write_run(state)
+    archive = run_store.market_dir(D, "KR", state) / "_codex_failed_20261108_010203"
+    archive.mkdir()
+    run_store.write_checkpoint(archive, "_market_debate_r0_bull", {"x": 1})
+    tickers = client.get("/api/markets/KR/today", params={"date": D.isoformat()}).json()["tickers"]
+    assert list(tickers) == ["005930"]
+
+
 def test_today_default_date_is_market_run_date(project, accounts):
     """US 는 KST 자정 뒤에도 전날 뉴욕 운영일 디렉터리에 실행이 있어 기본 날짜는 run_date_for."""
     c = _client(project, accounts, now=datetime(2026, 10, 9, 23, 0, tzinfo=UTC))

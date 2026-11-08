@@ -473,6 +473,17 @@ def test_status_lists_tickers_and_sessions(ctx, project):
     assert r["sessions_today"] == 0 and r["cap"] == ctx.settings.llm.daily_session_cap
 
 
+def test_market_dir_listing_skips_underscore_dirs(ctx, project):
+    """시장 폴더의 `_codex_failed_*` 보관 폴더(market·fo 연구 폴더 안)는 종목이 아니다."""
+    _inputs(project)
+    mdir = run_store.market_dir(D, "KR", project / "state")
+    archive = mdir / "_codex_failed_20261108_010203"
+    archive.mkdir()
+    run_store.write_checkpoint(archive, "20_debate_r0_bull", {"x": 1})
+    r = tools.status(ctx, market="KR", date=D)
+    assert r["ok"] and list(r["tickers"]) == ["005930"]
+
+
 def test_cli_tool_outputs_json_only(project, monkeypatch):
     from typer.testing import CliRunner
 

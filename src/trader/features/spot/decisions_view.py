@@ -502,8 +502,10 @@ def market_today(conn: sqlite3.Connection, market: str, d: date, state: Path | N
     tickers: dict[str, list[str]] = {}
     if mdir.is_dir():
         for p in sorted(mdir.iterdir()):
-            if p.is_dir() and (stages := run_store.list_checkpoints(p)):
-                tickers[p.name] = stages
+            # `_codex_failed_*` 등 `_` 로 시작하는 폴더는 종목이 아니다(시장 단위 연구의 보관 폴더)
+            if p.is_dir() and not p.name.startswith("_"):
+                if stages := run_store.list_checkpoints(p):
+                    tickers[p.name] = stages
     return {
         "date": d.isoformat(), "market": market, "tickers": tickers,
         "names": {t: names.resolve(conn, market, t) for t in tickers},

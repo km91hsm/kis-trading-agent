@@ -75,3 +75,17 @@ RESEARCH = Migration(
     ),
     owner="kernel/session",
 )
+
+
+# 도중 Codex 실패 표시(재시작 때 토론 보관 → Claude 2인 교체)와 교체 이력
+RESEARCH_FAILOVER = Migration(
+    18,
+    "research-failover",
+    statements=(
+        "ALTER TABLE research_policies ADD COLUMN codex_failed_at TEXT",
+        "ALTER TABLE research_policies ADD COLUMN codex_failed_reason TEXT",
+        "ALTER TABLE research_policies ADD COLUMN replaced_from_hash TEXT",
+        "ALTER TABLE research_policies ADD COLUMN replaced_reason TEXT",
+    ),
+    owner="kernel/session",
+)
