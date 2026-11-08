@@ -1,4 +1,5 @@
-"""`/status` 의 「단타」 절: 켠 계좌 목록(없으면 끔) + 시장별 오늘 보유·청산 수.
+"""`/status` 의 「단타」 절: 켠 계좌 목록(없으면 끔 — 스위치는 켰지만 실효가 아니면
+`<id>(실효 아님: 사유)`) + 시장별 오늘 보유·청산 수.
 
 옛 `status._scalp_lines` 이식."""
 
@@ -17,13 +18,17 @@ def render(ctx: Any) -> list[str]:
         settings = ctx.settings
         port = (getattr(ctx, "ports", None) or {}).get("accounts")
         on = (
-            [a.id for a in port.accounts() if switch.stored(ctx.conn, settings, a)[0]]
+            [a for a in port.accounts() if switch.stored(ctx.conn, settings, a)[0]]
             if port is not None
             else []
         )
         if not on:
             return ["- 끔 (켜진 계좌 없음)"]
-        out = [f"- 켬: {', '.join(on)}"]
+        labels = []
+        for a in on:
+            ok, why = switch.account_enabled(ctx.conn, settings, a, port)
+            labels.append(a.id if ok else f"{a.id}(실효 아님: {why})")
+        out = [f"- 켬: {', '.join(labels)}"]
         now = ctx.now()
         for m in settings.markets:
             st = load_state(getattr(ctx, "state", None), run_date_for(m, now), m)

@@ -68,13 +68,19 @@ export function Health() {
     const level = healthDot(h.level);
     const areas = Object.entries(h.areas ?? {});
     const attention = areas.filter(([, lv]) => lv === "warn" || lv === "fail").length;
+    // 전체가 주의·장애인데 주의 영역이 없으면(사유만) 「문제없음」이라 쓰지 않는다
+    const areaSummary = attention
+      ? ` 중 ${attention}개 주의`
+      : level === "ok"
+        ? " 문제없음"
+        : ` 점검 · 사유 ${h.reasons.length}건`;
     const firstReason = (area: string) => h.reasons.find((r) => r.area === area)?.text.split("\n")[0];
     return (
       <>
         <div className="sys-head">
           <Chip tone={level}>운영 점검: {LEVEL_TEXT[level]}</Chip>
           <span>
-            데몬·잡·주문·수집 등 {areas.length}개 영역{attention ? ` 중 ${attention}개 주의` : " 문제없음"}
+            데몬·잡·주문·수집 등 {areas.length}개 영역{areaSummary}
           </span>
           <span className="data-muted">
             {fmtWhen(h.checked_at)} 점검{h.version ? ` · 버전 ${h.version}` : ""}

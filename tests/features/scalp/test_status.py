@@ -1,7 +1,7 @@
 """scalp `/status` 「단타」 절 — 옛 `status._scalp_lines` 이식."""
 
 from tests.features.scalp.conftest import NOW
-from trader.features.scalp import status
+from trader.features.scalp import status, switch
 from trader.features.scalp.feature import FEATURE
 from trader.features.scalp.settings import ScalpCfg
 from trader.features.scalp.state import save_state
@@ -45,7 +45,16 @@ def test_on_line_lists_enabled_accounts(conn, settings):
         _ctx(conn, settings), [("paper-main", "paper", "auto"), ("real-1", "real", "auto")]
     )
     set_flag(conn, "scalp_enabled:real-1", True)
-    assert status.render(ctx)[0] == "- 켬: paper-main, real-1"
+    # 실전은 LIVE 확인 전이라 스위치만 켜져 있고 실효는 아니다 — 사유를 붙인다
+    _, why = switch.account_enabled(
+        conn, settings, ctx.ports["accounts"].accounts()[1], ctx.ports["accounts"]
+    )
+    assert why
+    assert status.render(ctx)[0] == f"- 켬: paper-main, real-1(실효 아님: {why})"
+    set_flag(conn, "paused", True)
+    assert status.render(ctx)[0] == (
+        "- 켬: paper-main(실효 아님: 전체 일시정지), real-1(실효 아님: 전체 일시정지)"
+    )
 
 
 def test_on_lines_per_market(conn, settings):

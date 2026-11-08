@@ -214,6 +214,22 @@ describe("시스템 화면", () => {
     expect(Array.from(h.querySelectorAll("a")).some((a) => a.textContent === "재개")).toBe(false);
   });
 
+  test("헬스 머리: 전체 주의인데 주의 영역이 없으면(사유만) 「문제없음」 대신 사유 건수", async () => {
+    await mount(
+      routes({
+        "GET /api/system/health": fixtureHealth({
+          level: "warn",
+          areas: { jobs: "ok", llm: "ok" },
+          reasons: [{ area: "daemon", level: "warn", text: "하트비트 늦음", key: "daemon.stale", link: null }],
+        }),
+      }),
+    );
+    const h = section("health");
+    expect(h.querySelector(".sys-head .chip")?.textContent).toBe("운영 점검: 주의");
+    expect(h.textContent).not.toContain("문제없음");
+    expect(h.textContent).toContain("2개 영역 점검 · 사유 1건");
+  });
+
   test("헬스 머리: /system/pause 실패면 「동작 중」 단정 없이 「확인하지 못함」", async () => {
     await mount(routes({ "GET /api/system/pause": () => new Response(JSON.stringify({ detail: "boom" }), { status: 500 }) }));
     const h = section("health");

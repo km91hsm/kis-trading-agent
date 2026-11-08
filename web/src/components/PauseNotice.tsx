@@ -11,7 +11,8 @@ const BY_LABEL: Record<string, string> = { tray: "▲ 메뉴", web: "웹", teleg
 /** control_log 채널 → 사람이 읽는 경로. 모르는 값은 원문. */
 export const pauseByLabel = (by: string | null | undefined): string => (by ? (BY_LABEL[by] ?? by) : "");
 
-/** 일시정지 여부·시각·경로. 조회 실패·로딩 중에는 paused=false(배너 없음). */
+/** 일시정지 여부·시각·경로. 조회 실패·로딩 중에는 paused=false(배너 없음)지만 known=false 이므로
+ *  「동작 중」으로 단정하지 말고 known·loading 을 먼저 본다(헬스 머리는 「확인하지 못함」). */
 export function usePause(): PauseState {
   const r = useResource<Pause>("/system/pause", undefined, ["control", "accounts"]);
   return { known: !!r.data, loading: !r.data && !r.error, paused: !!r.data?.paused, at: r.data?.at ?? null, by: r.data?.by ?? null };
