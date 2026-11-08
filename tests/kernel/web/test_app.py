@@ -72,6 +72,21 @@ def test_static_dist_with_spa_fallback(deps):
     assert c.get("/api/nope").status_code == 404
 
 
+def test_index_html_is_revalidated_but_assets_are_not(deps):
+    """앱 업데이트 뒤 브라우저가 옛 index.html(옛 자산 해시)을 휴리스틱 캐시로 쓰지 않게."""
+    (deps.dist / "assets").mkdir(parents=True)
+    (deps.dist / "index.html").write_text("<html>INDEX</html>", encoding="utf-8")
+    (deps.dist / "assets" / "index-AbC123xy.js").write_text("console.log(1)", encoding="utf-8")
+    c = make_client(deps)
+    for path in ("/", "/orders/deep/link", "/index.html"):
+        r = c.get(path)
+        assert "INDEX" in r.text
+        assert "no-cache" in r.headers.get("cache-control", ""), path
+        assert "no-store" not in r.headers.get("cache-control", "")
+    asset = c.get("/assets/index-AbC123xy.js")
+    assert "no-cache" not in asset.headers.get("cache-control", "")
+
+
 def test_gen_sse_keys_format():
     from tests.kernel.web.conftest import fixture_feature
 
