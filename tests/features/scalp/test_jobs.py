@@ -146,3 +146,54 @@ def test_judge_teardown_shuts_pool_and_stop_event_short_circuits(make_deps, monk
     scalp_jobs.judge_teardown(deps)
     assert judge._JUDGE is None
     assert j._pool._shutdown is True
+
+
+def test_scalp_body_exits_open_leg_after_all_switches_off(
+    make_deps, conn, project, market, brokers
+):
+    """최종 검토 C1: 스위치를 모두 꺼도 열린 단타 다리의 손절은 잡에서 나간다(틱은 돈다)."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from tests.features.scalp.conftest import bars, fill_all, scan_checkpoint
+
+    scan_checkpoint(project, "KR", ["005930"])
+    market.minutes["005930"] = bars(burst=True)
+    market.prices["005930"] = Decimal("10050")
+    deps = make_deps()
+    out = scalp_jobs.scalp_body(deps, _job(deps))
+    assert [e["ticker"] for e in out["entries"]] == ["005930"]
+    fill_all(conn, brokers, market)
+    for acc in ("paper-main", "paper-two", "real-1"):
+        set_flag(conn, switch.flag_key(acc), False)
+    assert not switch.any_enabled(conn, deps.settings, deps.ports["accounts"], "KR")
+    market.prices["005930"] = Decimal("9800")  # 손절 −1% 아래
+    deps = make_deps(now=NOW + timedelta(minutes=3))
+    out = scalp_jobs.scalp_body(deps, _job(deps))
+    assert out.get("skipped") == "켜진 계좌 없음"  # 신규 진입만 막힌다
+    sells = conn.execute("SELECT account_id FROM orders WHERE side='SELL'").fetchall()
+    assert {r["account_id"] for r in sells} == {"paper-main", "paper-two"}
+
+
+def test_scalp_body_skips_without_switches_or_state(make_deps, settings, conn, project):
+    """스위치가 모두 꺼졌고 관리할 단타 상태(오늘·이월 창 안의 열린 다리·판정 대기)도 없으면 틱을
+    돌리지 않는다. 옛 운영일에 열린 다리가 남아 있으면 이월하러 틱을 돌린다."""
+    from datetime import timedelta
+
+    from trader.features.scalp import engine
+
+    cfg = settings.scalp.model_copy(update={"enabled": False})
+    deps = make_deps(settings=settings.model_copy(update={"scalp": cfg}))
+    state = project / "state"
+    day = run_date_for("KR", NOW)
+    save_state(state, day, "KR", {"open": [], "closed": [], "done": ["000660"], "pending": {}})
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "단타 켜진 계좌 없음"}
+    old = day - timedelta(days=engine.CARRY_DAYS + 1)  # 이월 창 밖
+    save_state(state, old, "KR", {"open": [{"ticker": "005930", "entry_at": "x"}]})
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "단타 켜진 계좌 없음"}
+    save_state(state, day, "KR", {"open": [], "pending": {"000660": {}}})
+    assert scalp_jobs.has_scalp_state(state, "KR", day)
+    save_state(state, day, "KR", {"open": []})
+    prev = day - timedelta(days=engine.CARRY_DAYS)  # 이월 창 끝
+    save_state(state, prev, "KR", {"open": [{"ticker": "005930", "entry_at": "x"}]})
+    assert scalp_jobs.has_scalp_state(state, "KR", day)

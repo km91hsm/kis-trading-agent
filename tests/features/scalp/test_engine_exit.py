@@ -166,13 +166,28 @@ def test_exit_sent_after_switch_turned_off(scalp_ctx, market, brokers, accounts,
     assert [r["qty"] for r in _sells(conn, "real-1")] == [49]
 
 
-def test_settle_pending_uses_entry_skip(scalp_ctx, market, conn, project):
-    """판정 회수 진입은 스위치 기반 진입 skip — 꺼진 계좌는 다리가 생기지 않는다."""
-    import inspect
+@pytest.mark.parametrize("accounts", [TWO_PAPER])
+def test_settle_pending_skips_switched_off_account(scalp_ctx, settings, market, conn, project):
+    """판정 회수 진입은 진입용 skip(스위치 반영) — 판정 대기 중 스위치를 끈 계좌엔 다리가 없다."""
+    from tests.features.scalp.conftest import SyncJudge
+    from trader.features.scalp import switch
+    from trader.features.scalp.schemas import ScalpVerdict
+    from trader.features.scalp.settings import ScalpCfg
 
-    src = inspect.getsource(engine.tick)
-    assert "settle_pending(ctx, market=market, today=today, st=st, skip=entry_skip)" in src
-    assert "skip=exit_skip" in src
+    go = ScalpVerdict(
+        go=True, size="half", take_profit_pct=0.02, stop_pct=0.02, max_hold_min=120,
+        reason="돌파 확인", confidence=0.7,
+    )  # fmt: skip
+    cfg = ScalpCfg(enabled=True, judge=True)
+    ctx = _ctx(scalp_ctx, market, settings=settings.model_copy(update={"scalp": cfg}))
+    ctx.judge = SyncJudge(go)
+    scan_checkpoint(project, "KR", [T])
+    assert engine.tick(ctx, market="KR", today=D)["entries"] == []  # 제출만
+    assert T in _st(project)["pending"]
+    set_flag(conn, switch.flag_key("paper-two"), False)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert [e["ticker"] for e in out["entries"]] == [T]
+    assert set(_st(project)["open"][0]["legs"]) == {"paper-main"}
 
 
 @pytest.mark.parametrize("accounts", [TWO_PAPER])
