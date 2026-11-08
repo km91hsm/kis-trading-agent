@@ -975,7 +975,11 @@ def _execute_account(
     is_stop_loss = origin.origin == "stop"
     is_hedge = origin.origin in ("hedge", "park")
     mode, note = ctx.policy(ctx.conn, account)
-    policy = ExecPolicy(mode=mode, note=note, paused=bool(ctx.paused(ctx.conn)), dry_run=dry_run)
+    risk_exit = decision.action == "SELL" and origin.origin in ("stop", "scalp")
+    policy = ExecPolicy(
+        mode=mode, note=note, paused=bool(ctx.paused(ctx.conn)), dry_run=dry_run,
+        risk_exit=risk_exit,
+    )  # fmt: skip
     broker = ctx.brokers.get(account.id)
     st = stance.decide(xledger.realized_pnl_5d(ctx.conn, account.id, date, market=market))
     portfolio: rules.Portfolio | None = None
@@ -1097,7 +1101,7 @@ def _execute_account(
                 verdict,
                 *(race or ["다른 프로세스가 같은 주문을 실행 중이거나 이미 냄(실행 키 선점됨)"]),
             )
-    if policy.paused and verdict.approved:
+    if policy.paused and not policy.risk_exit and verdict.approved:
         note = (note + "; " if note else "") + "일시정지 중: 판정만 기록, 주문·승인 요청 없음"
     if gates.regime != "bull" and not is_hedge:
         note = (note + "; " if note else "") + f"국면 {gates.regime}"

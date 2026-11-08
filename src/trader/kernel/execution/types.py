@@ -77,11 +77,12 @@ class ExecPolicy:
     note: str | None
     paused: bool
     dry_run: bool
+    risk_exit: bool = False  # 위험 청산 — 일시정지여도 전송(off·dry_run 은 그대로 막는다)
 
     @property
     def transmits(self) -> bool:
         """브로커로 실제 전송하는가."""
-        return self.mode != "off" and not self.paused and not self.dry_run
+        return self.mode != "off" and not self.dry_run and (self.risk_exit or not self.paused)
 
 
 @dataclass

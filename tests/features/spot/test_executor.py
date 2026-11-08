@@ -399,6 +399,38 @@ def test_paused_blocks_orders_and_approval_requests(ectx):
     assert ectx.brokers["paper-main"].orders == [] and repo.pending_approvals(ectx.conn) == []
 
 
+def _paused_run(ectx, decision, **kw):
+    control.set_flag(ectx.conn, "paused", True)
+    ectx.brokers["paper-main"].positions = [_pos()]
+    dec = Decision(**decision)
+    _ingest(ectx.conn, dec)
+    return executor.execute(ectx, dec, date=D, market="KR", price=PRICE, dry_run=False, **kw)
+
+
+def test_paused_stop_loss_sell_transmits(ectx):
+    r = _paused_run(ectx, ok_decision(action="SELL", target_weight=0.0), is_stop_loss=True)
+    p = next(x for x in r if x["account_id"] == "paper-main")
+    assert p["order"] is not None and "일시정지" not in (p["note"] or "")
+    assert len(ectx.brokers["paper-main"].orders) == 1
+
+
+def test_paused_scalp_exit_sell_transmits(ectx):
+    _paused_run(ectx, ok_decision(action="SELL", target_weight=0.0), scalp_leg="exit")
+    assert len(ectx.brokers["paper-main"].orders) == 1
+
+
+def test_paused_scalp_buy_blocked(ectx):
+    _paused_run(ectx, ok_decision(), scalp_leg="entry")
+    assert ectx.brokers["paper-main"].orders == []
+
+
+def test_paused_analyze_sell_blocked(ectx):
+    r = _paused_run(ectx, ok_decision(action="SELL", target_weight=0.0))
+    p = next(x for x in r if x["account_id"] == "paper-main")
+    assert p["order"] is None and "일시정지" in (p["note"] or "")
+    assert ectx.brokers["paper-main"].orders == []
+
+
 def test_paused_blocks_approve(ectx):
     aid = _pending(ectx)
     control.set_flag(ectx.conn, "paused", True)
