@@ -11,6 +11,7 @@ from typing import Any
 import typer
 
 from trader.features.scalp import engine, signals
+from trader.features.scalp.switch import any_enabled
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.config import ConfigError
 from trader.kernel.config.loader import memo_load
@@ -22,7 +23,8 @@ from trader.kernel.session.run_store import run_date_for
 MINUTE_BARS = 400  # KIS 당일 분봉 최대 요청 수
 
 scalp_app = typer.Typer(
-    help="분 단위 단타(모의 전용·기본 끔): 1분봉 백테스트·실적 보고", no_args_is_help=True
+    help="분 단위 단타(계좌별 켜기 — 실전은 확인·자동·LIVE 필요): 1분봉 백테스트·실적 보고",
+    no_args_is_help=True,
 )
 
 
@@ -100,9 +102,11 @@ def report(
     """단타 상태 파일(state/scalp/<date>/<market>.json)로 승률·사유별 집계 + 판정자 GO vs NO_GO
     사후 비교를 JSON 으로."""
     _check_market(market)
-    b = boot(ports=live, settings=True, conn=True)
+    b = boot(ports=True, settings=True, conn=True)
     try:
         cfg = b.settings.scalp
+        port = b.ports.get("accounts")
+        enabled = port is not None and any_enabled(b.conn, b.settings, port, market)
         _open_hm, close_hm = _monitor(b, market)
         judge: dict[str, Any] = {"cfg": cfg, "close_hm": close_hm, "minutes_fn": None}
         if live:  # 오늘 NO_GO 신호의 가상 수익 — KIS 당일 분봉(실전 시세 키)
@@ -127,6 +131,6 @@ def report(
         )
     finally:
         b.conn.close()
-    out["enabled"] = cfg.enabled
+    out["enabled"] = enabled
     out["judge_enabled"] = cfg.judge
     typer.echo(json.dumps(out, ensure_ascii=False, default=str))

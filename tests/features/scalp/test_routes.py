@@ -46,7 +46,7 @@ def test_scalp_rows_use_exit_rules(project, client):
     체결 평단에 적용한 값. 출처는 '단타 규칙'. 다리가 없는 계좌엔 행이 없다."""
     st = project / "state"
     save_state(st, D, "KR", {"open": [
-        _pos("005930", {"paper-main": 3, "real-1": 1}),  # 실전 다리는 보이지 않는다
+        _pos("005930", {"paper-main": 3, "real-1": 1}),
         _pos("000660", {"paper-main": 1, "paper-two": 2}, stop_pct=0.02, entry_fill=None),
     ]})  # fmt: skip
     rows = _items(client, "paper-main")
@@ -60,8 +60,14 @@ def test_scalp_rows_use_exit_rules(project, client):
     assert b["qty"] == 1 and b["avg_price"] == "10000"  # 체결 평단이 없으면 신호가
     assert b["stop"] == {"level": "9800.00", "source": "단타 규칙"}
     assert _items(client, "paper-two")["000660"]["qty"] == 2
-    assert _items(client, "real-1") == {}
+    assert _items(client, "real-1")["005930"]["qty"] == 1  # 실전 계좌도 다리가 있으면 행
     assert _items(client, "nobody") == {}
+
+
+def test_system_scalp_has_accounts(client):
+    r = client.get("/api/system/scalp").json()
+    assert [a["id"] for a in r["accounts"]] == ["paper-main", "paper-two", "real-1"]
+    assert r["enabled"] is (client.app.state.deps.settings.scalp.enabled)
 
 
 def test_scalp_sse_key_changes_with_state(project, client):
@@ -76,4 +82,3 @@ def test_scalp_sse_key_changes_with_state(project, client):
 def test_scalp_nav_item():
     assert NavItem("today", "scalp-lane", "단타", 20) in FEATURE.nav
     assert NavItem("system", "scalp", "단타", 50) in FEATURE.nav  # 시스템 화면 「단타」 절
-

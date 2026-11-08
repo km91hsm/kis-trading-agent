@@ -3,7 +3,7 @@
 ## 책임
 
 - 분 단위 단타 레인(tier=lane): 1분봉 신호는 파이썬 순수 함수가 감지·집행하고, 에이전트는 후보와 허용 여부(strategist `scalp_ok`)·진입 판정(`scalp-judge`)·보유 조언만 낸다.
-- **모의 전용(paper only)·기본 끔**: `settings.yaml scalp.enabled: false`. 실전 계좌는 설정이 켜져 있어도 주문·기록 없이 건너뛴다.
+- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py`).
 - 설정: `settings.yaml scalp`(`ScalpCfg`, 17필드). 판정자는 `judge: false` 가 기본.
 - 레인이라 다른 기능을 import 하지 않는다. 필요한 것은 포트(deps 주입)로 받는다.
 
@@ -22,7 +22,7 @@
 
 - `trader scalp backtest --ticker … [--market KR|US --exchange NAS|NYS|AMS --days 1..5]` — 당일 1분봉 400개(`accounts` 포트의 시세 클라이언트, 실전 시세 키 필요)로 진입·청산 규칙을 재현해 JSON 1줄 `{ticker, market, bars, today, config, report}`. 설정 불변·주문 없음. `--days` 는 상태 파일이 있는 과거 운영일의 `report` 를 더한다.
 - `trader scalp report [--market KR|US --days 1..60 --live]` — 상태 파일로 승률·사유별 집계 + 판정자 GO vs NO_GO 사후 비교(`judge`)와 `enabled`·`judge_enabled`. `--live` 면 오늘 NO_GO 의 가상 수익을 당일 분봉으로 잰다. 마감 기준은 `<시장>.monitor.end`(schedule.yaml 이 깨졌으면 정규장 마감).
-- `/status` 「단타(모의 전용)」 절(`status.py`): 꺼짐 → `- 끔 (scalp.enabled=false)`, 켜짐 → 시장마다 `- {m}: 보유 {n}·청산 {k}[, 중단: …]`. 조회 예외는 절 안에서 한 줄(`- 단타 조회 실패: …`)로 바꾼다.
+- `/status` 「단타」 절(`status.py`): 켜진 계좌 없음 → `- 끔 (켜진 계좌 없음)`, 있으면 `- 켬: <계좌들>` + 시장마다 `- {m}: 보유 {n}·청산 {k}[, 중단: …]`. 조회 예외는 절 안에서 한 줄(`- 단타 조회 실패: …`)로 바꾼다.
 
 
 ## 데몬 잡
