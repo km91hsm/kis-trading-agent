@@ -164,6 +164,7 @@ macOS 는 한 번 `alias trader=/Applications/Trader.app/Contents/MacOS/trader` 
 | `trader evaluation backtest --since YYYY-MM-DD` | 백테스트 |
 | `trader ml models` | 퀀트 모델 목록 |
 | `trader saveticker extension status` | 세이브티커 확장 연결 상태 |
+| `trader saveticker login set` | 세이브티커 계속 복구용 이메일·비밀번호 저장(`status`·`clear`) |
 
 ### 4-5. 세이브티커 수집(선택)
 
@@ -172,6 +173,10 @@ macOS 는 한 번 `alias trader=/Applications/Trader.app/Contents/MacOS/trader` 
    데이터 폴더의 `saveticker-extension/extension` 선택(macOS 는 선택 창에서 `Cmd+Shift+G` 로 경로 붙여 넣기)
 3. Chrome 에서 세이브티커에 직접 로그인 → 확장 팝업 **수집 시작**
 4. 보안 확인이 뜨면 전용 탭에서 직접 통과한 뒤 **직접 확인 후 재개**. 확장은 보안 확인·CAPTCHA 를 우회하지 않습니다.
+5. (선택) 멈추지 않게 하려면: `trader saveticker login set` 으로 이메일·비밀번호를 한 번 저장하고, 수집 중지 상태의 팝업에서
+   **재확인 안내 시 1회 자동 새로고침** 과 **재확인 시 계속 복구** 를 켭니다. 재확인·로그아웃이 생겨도 수집을 끄지 않고
+   1→2→4→8→15분(이후 15분마다) 간격으로 새로고침하며, 로그아웃이면 자동으로 이메일 로그인합니다. 전용 탭이 사라졌거나
+   로그인 정보가 없거나 비밀번호가 3번 연속 틀리면 그때만 멈춥니다.
 
 Chrome 이 켜져 있고 컴퓨터가 깨어 있어야 수집합니다. 옵션은 [설치 안내 6절](bundle-usage.md#6-세이브티커-수집선택).
 

@@ -1,4 +1,5 @@
-"""SaveTicker 전용 CLI. 수집은 Chrome 확장이 하고, 이 CLI 는 조회·확장 설치·등록만 한다.
+"""SaveTicker 전용 CLI. 수집은 Chrome 확장이 하고, 이 CLI 는 조회·확장 설치·등록·계속 복구용
+로그인 정보 저장만 한다.
 브로커·LLM·거래 데몬을 실행하지 않는다."""
 
 from __future__ import annotations
@@ -125,6 +126,45 @@ def extension_status():
     from trader.features.saveticker.bridge_install import install_status
 
     _print({**status(home()), "install": install_status()})
+
+
+login_app = typer.Typer(
+    help="재확인 계속 복구 중 로그아웃되면 확장이 쓸 이메일 로그인 정보(secrets/.env)",
+    no_args_is_help=True,
+)
+app.add_typer(login_app, name="login")
+
+
+@login_app.command("set")
+def login_set():
+    """이메일과 비밀번호(화면에 표시 안 함)를 `secrets/.env` 에 저장한다(0600)."""
+    from trader.features.saveticker import credentials
+
+    email = typer.prompt("세이브티커 이메일").strip()
+    password = typer.prompt("비밀번호", hide_input=True, confirmation_prompt=True)
+    try:
+        credentials.save(email, password)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    _print({"stored": True})
+
+
+@login_app.command("status")
+def login_status():
+    """저장 여부만 표시한다(값은 출력하지 않는다)."""
+    from trader.features.saveticker import credentials
+
+    _print({"stored": credentials.stored()})
+
+
+@login_app.command("clear")
+def login_clear():
+    """저장된 세이브티커 로그인 정보를 지운다."""
+    from trader.features.saveticker import credentials
+
+    credentials.clear()
+    _print({"stored": False})
 
 
 @app.command("native-host", hidden=True)

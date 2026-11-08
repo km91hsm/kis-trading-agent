@@ -59,6 +59,9 @@ DIAGNOSTIC_REASONS = {
         "page_unverified",
         "content_unavailable",
         "reload_failed",
+        "credentials_missing",
+        "login_failed",
+        "login_form_missing",
     },
     "html_trial": {
         "invalid_trial",
@@ -333,6 +336,19 @@ class NativeSession:
                     {**v, "api_supported": self.api.descriptor(v) is not None}
                     for v in self._plan["views"]
                 ],
+            }
+        if kind == "credentials":
+            # 확장의 자동 로그인 직전에만 요청된다. 값은 응답으로만 보내고 기록하지 않는다.
+            from trader.features.saveticker import credentials
+
+            account = credentials.load()
+            if account is None:
+                return {"type": "credentials", "available": False}
+            return {
+                "type": "credentials",
+                "available": True,
+                "email": account[0],
+                "password": account[1],
             }
         if kind == "ping":
             self._heartbeat()

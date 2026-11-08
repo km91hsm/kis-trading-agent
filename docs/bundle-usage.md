@@ -96,7 +96,7 @@ Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 -
 
 ## 6. 세이브티커 수집(선택)
 
-세이브티커는 Chrome 확장 + 로컬 Native host 로만 수집합니다(계정 파일·자동 브라우저 수집은 없음).
+세이브티커는 Chrome 확장 + 로컬 Native host 로만 수집합니다(자동 브라우저 수집은 없음). 재확인·로그아웃에도 멈추지 않게 하려면 `trader saveticker login set` 후 팝업의 **재확인 시 계속 복구** 를 켭니다([사용자 설명서 4-5](user-guide.md#4-5-세이브티커-수집선택)).
 
 1. 앱을 응용 프로그램 폴더(macOS) 또는 설치 경로(Windows)에 둔 상태로 터미널에서
    `trader saveticker extension install` 을 한 번 실행합니다(다시 실행해도 됨). 확장을 데이터 폴더의

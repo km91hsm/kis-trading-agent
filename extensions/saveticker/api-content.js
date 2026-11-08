@@ -54,6 +54,45 @@
         const heading = document.querySelector('h1')?.textContent?.trim();
         return /^(잠시만 기다려 주세요|Just a moment)/i.test(document.title) || heading === '접속 환경을 확인하고 있습니다' || [...(document.querySelectorAll?.('h1,h2,h3,[role=heading]') || [])].slice(0, 256).some(e => ['재확인이 필요합니다', '접속 환경을 확인하고 있습니다'].includes(e.textContent?.trim()));
     }
+    // 계속 복구 중 로그아웃이면 사이트의 일반 이메일 로그인 대화상자를 채운다. 보안 확인 화면은 건드리지 않고,
+    // 비밀번호는 입력란에만 넣으며 저장·반환하지 않는다. 결과는 고정 코드만 돌려준다.
+    const pause = () => new Promise(resolve => setTimeout(resolve, 200));
+    async function waitFor(check, ms) {
+        for (let i = 0; i <= ms / 200; i++) { const v = check(); if (v) return v; await pause(); }
+        return null;
+    }
+    const exact = (selector, label, root = document) => [...root.querySelectorAll(selector)].slice(0, 512).find(e => e.textContent?.trim() === label) || null;
+    const authenticated = () => !!document.querySelector('[aria-label="프로필 메뉴"]');
+    function fill(input, value) {
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+        input.focus?.();
+        setter ? setter.call(input, value) : input.value = value;
+        input.dispatchEvent(new input.ownerDocument.defaultView.Event('input', { bubbles: true }));
+        input.dispatchEvent(new input.ownerDocument.defaultView.Event('change', { bubbles: true }));
+    }
+    async function login(email, password) {
+        if (barrier()) return 'challenge';
+        if (authenticated()) return 'logged_in';
+        const opener = await waitFor(() => exact('button,[role=button]', '이메일로 로그인'), 15000);
+        if (!opener) return barrier() ? 'challenge' : authenticated() ? 'logged_in' : 'login_form_missing';
+        let form = null;
+        for (let i = 0; i < 3 && !form; i++) {
+            if (barrier()) return 'challenge';
+            opener.click();
+            form = await waitFor(() => exact('h1,h2,h3,[role=heading]', '이메일로 로그인') && document.querySelector('input[type="password"]'), 2000);
+        }
+        if (!form) return barrier() ? 'challenge' : 'login_form_missing';
+        const scope = form.form || form.closest('[role=dialog]') || document;
+        const id = scope.querySelector('input[type="email"], input[autocomplete="email"], input[type="text"]');
+        const submit = exact('button', '로그인', scope);
+        if (!id || !submit) return 'login_form_missing';
+        fill(id, email); fill(form, password);
+        await pause();
+        if (submit.disabled) return 'login_failed';
+        submit.click();
+        if (await waitFor(authenticated, 20000)) return 'logged_in';
+        return barrier() ? 'challenge' : 'login_failed';
+    }
     chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.id !== chrome.runtime.id) return;
         if (message.type === 'api_pdf_release') {
@@ -63,6 +102,14 @@
         if (message.type === 'api_abort') {
             if (message.token && location.hash === '#trader-saveticker-api=' + message.token) pending?.controller.abort();
             reply({ ok: true }); return;
+        }
+        if (message.type === 'api_login') {
+            (async () => {
+                if (!/^[a-f0-9]{32}$/.test(message.token || '') || !await live(message.token)) return { error: 'api_stopped' };
+                if (typeof message.email !== 'string' || typeof message.password !== 'string' || !message.email || !message.password || message.email.length > 320 || message.password.length > 1024) return { error: 'invalid_message' };
+                return { result: await login(message.email, message.password) };
+            })().then(reply).catch(() => reply({ result: 'login_form_missing' }));
+            return true;
         }
         if (message.type === 'api_probe') {
             (async () => {
