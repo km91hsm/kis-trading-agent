@@ -71,7 +71,8 @@ class OrderIntent:
 
 @dataclass(frozen=True)
 class ExecPolicy:
-    """계좌 1개의 실행 정책(유효 모드·일시정지·dry-run)."""
+    """계좌 1개의 실행 정책(유효 모드·일시정지·dry-run·위험 청산 여부). risk_exit 면 일시정지여도
+    전송한다(off·dry_run 은 그대로 막는다)."""
 
     mode: str
     note: str | None

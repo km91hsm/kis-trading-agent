@@ -975,7 +975,13 @@ def _execute_account(
     is_stop_loss = origin.origin == "stop"
     is_hedge = origin.origin in ("hedge", "park")
     mode, note = ctx.policy(ctx.conn, account)
-    risk_exit = decision.action == "SELL" and origin.origin in ("stop", "scalp")
+    # 승인 요청으로 가는 경로(approve 모드의 비손절)는 위험 청산이 아니다 — 일시정지 중 승인 요청을
+    # 새로 만들지 않는다(승인 실행도 막혀 쌓이기만 한다)
+    risk_exit = (
+        decision.action == "SELL"
+        and origin.origin in ("stop", "scalp")
+        and not (mode == "approve" and not is_stop_loss)
+    )
     policy = ExecPolicy(
         mode=mode, note=note, paused=bool(ctx.paused(ctx.conn)), dry_run=dry_run,
         risk_exit=risk_exit,
