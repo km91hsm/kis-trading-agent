@@ -45,7 +45,6 @@ _DAMAGED = "설치 파일이 손상됐습니다. 앱을 다시 설치한 뒤 해
 INSTALL_ERRORS = {
     "app_translocated": "앱을 응용 프로그램 폴더로 옮긴 뒤 실행하고 다시 하세요",
     "registration_exists": "다른 프로그램이 같은 이름으로 Chrome 연결을 등록해 두었습니다",
-    "registration_owner_mismatch": "다른 프로그램이 같은 이름으로 Chrome 연결을 등록해 두었습니다",
     "registration_failed": "Chrome 연결 등록에 실패했습니다. 잠시 뒤 다시 해 보세요",
     "extension_resources_missing": _DAMAGED,
     "invalid_extension_manifest": _DAMAGED,

@@ -58,11 +58,18 @@ function CopyPath({ path }: { path: string }) {
   </span>;
 }
 
+/** macOS 인지 — Chrome 폴더 선택 창의 경로 붙여 넣기 방법이 OS 마다 다르다. 테스트는 값을 주입한다. */
+export function isMacPlatform(nav: { platform?: string; userAgent?: string } = navigator): boolean {
+  return /Mac/i.test(nav.platform || "") || /Macintosh|Mac OS X/i.test(nav.userAgent || "");
+}
+
 /** 설치 뒤 남은 단계: Chrome 로드(경로 복사) → 로그인 정보(설정) → 팝업에서 수집 시작. */
-export function InstallSteps({ result }: { result: InstallResult }) {
+export function InstallSteps({ result, mac = isMacPlatform() }: { result: InstallResult; mac?: boolean }) {
   return <ol className="st-install-steps">
     <li>확장 복사·Chrome 연결 등록 완료{result.replaced ? " (기존 설치를 바꿈)" : ""}</li>
-    <li>Chrome 주소창에 <code>chrome://extensions</code> → 오른쪽 위 <b>개발자 모드</b> 켜기 → <b>압축해제된 확장 프로그램 로드</b> → 아래 폴더 선택 (macOS 선택 창에서는 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 로 붙여 넣기)
+    <li>Chrome 주소창에 <code>chrome://extensions</code> → 오른쪽 위 <b>개발자 모드</b> 켜기 → <b>압축해제된 확장 프로그램 로드</b> → 아래 폴더 선택 {mac
+      ? <>(선택 창에서 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 로 붙여 넣기)</>
+      : <>(선택 창의 주소 표시줄에 붙여 넣기)</>}
       <div><CopyPath path={result.extension} /></div></li>
     <li>(선택) 재확인·로그아웃에도 멈추지 않게 하려면 <Link to="/system/admin#secrets">설정 › 연결 키 › 세이브티커</Link> 에 이메일·비밀번호 입력</li>
     <li>Chrome 툴바의 확장 아이콘(팝업)에서 <b>수집 시작</b></li>
