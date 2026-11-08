@@ -96,13 +96,14 @@ Windows PowerShell: `$env:FAKE_CLAUDE="1"; trader spot analyze --ticker 005930 -
 
 ## 6. 세이브티커 수집(선택)
 
-세이브티커는 Chrome 확장 + 로컬 Native host 로만 수집합니다(자동 브라우저 수집은 없음). 재확인·로그아웃에도 멈추지 않게 하려면 `trader saveticker login set` 후 팝업의 **재확인 시 계속 복구** 를 켭니다([사용자 설명서 4-5](user-guide.md#4-5-세이브티커-수집선택)).
+세이브티커는 Chrome 확장 + 로컬 Native host 로만 수집합니다(자동 브라우저 수집은 없음). 재확인·로그아웃에도 멈추지 않게 하려면 시스템 › 관리 › 연결 키 「세이브티커」 에 이메일·비밀번호를 넣고 팝업의 **재확인 시 계속 복구** 를 켭니다([사용자 설명서 4-5](user-guide.md#4-5-세이브티커-수집선택)).
 
-1. 앱을 응용 프로그램 폴더(macOS) 또는 설치 경로(Windows)에 둔 상태로 터미널에서
-   `trader saveticker extension install` 을 한 번 실행합니다(다시 실행해도 됨). 확장을 데이터 폴더의
-   `saveticker-extension/extension` 으로 복사하고 설치된 `trader` 를 Chrome Native host 로 등록합니다.
+1. 앱을 응용 프로그램 폴더(macOS) 또는 설치 경로(Windows)에 둔 상태로 실행하고, 웹 화면 맨 위 첫 안내의
+   **설치하기**(또는 시스템 › 기능 › 데이터 수집의 **설치/갱신**)를 누릅니다(다시 해도 됨). 확장을 데이터 폴더의
+   `saveticker-extension/extension` 으로 복사하고 설치된 `trader` 를 Chrome Native host 로 등록합니다. 터미널의
+   `trader saveticker extension install` 도 같습니다(macOS 설치판은 `/Applications/Trader.app/Contents/MacOS/trader`).
 2. Chrome 주소창에 `chrome://extensions` → 오른쪽 위 **개발자 모드** 켜기 → (다른 경로로 로드된 옛 Trader 수집
-   확장이 있으면 먼저 삭제) → **압축해제된 확장 프로그램 로드** → `<데이터 폴더>/saveticker-extension/extension` 선택.
+   확장이 있으면 먼저 삭제) → **압축해제된 확장 프로그램 로드** → 화면의 **경로 복사** 로 복사한 `<데이터 폴더>/saveticker-extension/extension` 선택.
 3. Chrome 에서 세이브티커에 직접 로그인한 뒤 확장 팝업에서 **시작** 을 누릅니다.
 4. Chrome 의 다운로드 위치는 기본값(사용자 `Downloads` 폴더)이어야 합니다 — 「다운로드 전 저장 위치 확인」도 끕니다.
    첫 PDF 를 저장할 때 macOS 가 `trader` 의 다운로드 폴더 접근 허용을 물으면 **허용** 합니다.

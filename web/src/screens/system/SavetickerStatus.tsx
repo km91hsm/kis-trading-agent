@@ -5,6 +5,7 @@ import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { errorText, postJson } from "../../lib/api";
 import { fmtInt, fmtWhen } from "../../lib/format";
+import { SavetickerInstallCard } from "./SavetickerInstall";
 import type { CollectionState, SavetickerResp, SavetickerStream } from "./system";
 import "./SavetickerStatus.css";
 
@@ -111,6 +112,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
     {s.recovery && s.recovery.state !== "none" ? <p className="perf-note">{s.recovery.text}</p> : null}
     <div><button type="button" className="btn" disabled={busy || !s.configured} onClick={() => setConfirming(true)}>다시 시작</button></div>
     {note ? <p className="perf-note" role="status">{note}</p> : null}
+    {s.install ? <SavetickerInstallCard install={s.install} /> : null}
     {error ? <p className="data-error" role="alert">{error}</p> : null}
     <Confirm open={confirming} title="데이터 수집 다시 시작" body={<p>다시 시작을 요청합니다. 수집 재개는 Chrome 확장 아이콘(팝업)에서 합니다. 쌓인 데이터는 그대로입니다.</p>}
       onConfirm={() => void restart()} onClose={() => setConfirming(false)} />

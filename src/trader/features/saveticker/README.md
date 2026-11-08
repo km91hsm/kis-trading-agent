@@ -3,8 +3,9 @@
 ## 책임
 
 - 세이브티커(saveticker.com) 로컬 수집을 소유한다. 수집은 일반 Chrome 의 확장(`extensions/saveticker/`)이 사용자가 직접 로그인한 화면·응답을 읽어 Native host(`native.py`, 숨김 명령 `native-host`)로 보내고, Native host 가 검증해 수집 폴더(`sources.yaml` 의 `saveticker.dir`, 기본 `state/external/saveticker`)의 `data/`(SQLite `feed.sqlite3` 원본 + 날짜별 JSONL·`latest/`·`attachments/`)·`runtime/` 에 쓴다. 뉴스·리포트 PDF·커뮤니티 TOP5/지수/상승·하락·증시 순위·캘린더.
-- 수집 계획(화면 목록·주기·한도)은 `views.py`(`View`·`build_views`·`lane_for`)와 `native.build_plan` 이 정한다. 확장 설치·Native host 등록은 `bridge_install.py`(`extension install|uninstall|status` — 고정 패키지 `<데이터 루트>/saveticker-extension/`, 설치된 앱의 콘솔 `trader` 를 직접 등록, 우리 등록만 멱등 교체). 데몬 잡 첫 틱이 `bridge_install.sync` 로 앱 업데이트 뒤 확장 복사본·등록을 맞추고 확장이 바뀌었으면 새로고침 안내를 한 번 보낸다.
-- 계정 파일·자동 로그인·Playwright Chromium 수집기(`run`·`service`·`monitor`·`install-browser`, launchd plist)는 2026-11 에 제거했다.
+- 수집 계획(화면 목록·주기·한도)은 `views.py`(`View`·`build_views`·`lane_for`)와 `native.build_plan` 이 정한다. 확장 설치·Native host 등록은 `bridge_install.py`(`extension install|uninstall|status` — 고정 패키지 `<데이터 루트>/saveticker-extension/`, 설치된 앱의 콘솔 `trader` 를 직접 등록, 우리 등록만 멱등 교체). 웹은 `POST /system/saveticker/install`(토큰 + 같은 출처 + 이 PC 직접 접속)로 같은 `install()` 을 바로 부르고, `GET /system/saveticker` 의 `install`(경로는 직접 접속일 때만)·`onboarding`(control 플래그 `saveticker.onboarding_dismissed`, `POST /system/saveticker/onboarding`)으로 첫 안내 배너를 띄운다. 데몬 잡 첫 틱이 `bridge_install.sync` 로 앱 업데이트 뒤 확장 복사본·등록을 맞추고 확장이 바뀌었으면 새로고침 안내를 한 번 보낸다.
+- 계속 복구용 로그인 정보는 `credentials.py`(`secrets/.env` 의 `SAVETICKER_EMAIL`·`SAVETICKER_PASSWORD` — CLI `login set|status|clear` 또는 연결 키 설정 화면)이고 Native host `credentials` 메시지로만 확장에 건넨다.
+- 계정 파일·Playwright Chromium 수집기(`run`·`service`·`monitor`·`install-browser`, launchd plist)는 2026-11 에 제거했다.
 - 리더(`reader.py`)가 같은 폴더를 읽어 뉴스 항목·종목 TOP5·지수·순위·캘린더·리포트 발췌를 돌려준다(`snapshot`, `upcoming`, `for_ticker`, `read_news_items`).
 - 데몬 잡 `saveticker`(60초, heavy 밖)는 아무 프로세스도 띄우지 않는다. 확장이 등록돼 있으면(`automation.registered`) 수집기 감시(`automation.monitor` — Native host 생존·`runner*.json`·`status.json` 갱신 지연)가 판정한 장애·복구를 텔레그램(`messages.saveticker_health`)으로 한 번씩 보내고, 운영일 1회 `Store.prune(retention_days)` 를 한다. teardown 없음.
 

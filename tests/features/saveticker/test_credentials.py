@@ -93,3 +93,17 @@ def test_control_characters_are_rejected(project):
         with pytest.raises(ValueError):
             credentials.save("user@example.com", pw)
     assert credentials.load() is None
+
+
+def test_settings_screen_values_are_read_by_credentials(project):
+    from trader.features.accounts import secrets_io
+
+    names = {e["name"]: e["group"] for e in secrets_io.catalog([])}
+    assert names["SAVETICKER_EMAIL"] == names["SAVETICKER_PASSWORD"] == "세이브티커"
+    env = paths.secrets_path()
+    secrets_io.update(
+        env, [], values={"SAVETICKER_EMAIL": "u@x.com", "SAVETICKER_PASSWORD": "a#b\\c"}
+    )
+    assert credentials.load() == ("u@x.com", "a#b\\c")
+    secrets_io.update(env, [], clear=["SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"])
+    assert credentials.load() is None

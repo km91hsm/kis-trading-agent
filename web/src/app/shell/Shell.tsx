@@ -5,6 +5,8 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import { onAuthError, onTokenChange, tokenStore } from "../../lib/api";
 import { Nav } from "./Nav";
+import { SavetickerOnboarding } from "./SavetickerOnboarding";
+import "../../screens/system/SavetickerStatus.css";
 import { StatusBar } from "./StatusBar";
 import "../../styles/shell.css";
 
@@ -46,6 +48,7 @@ export function Shell() {
           </button>
         </div>
       ) : null}
+      <SavetickerOnboarding />
       <div className="shell-body">
         <Nav />
         <main id="main-content" tabIndex={-1} className="shell-main">

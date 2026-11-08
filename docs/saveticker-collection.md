@@ -6,6 +6,8 @@
 
 ## 설치
 
+웹 UI: 확장이 미등록이면 상단 첫 안내 **설치하기**, 언제든 시스템 › 기능 › 데이터 수집 **설치/갱신**(이 PC 직접 접속 한정, `POST /api/system/saveticker/install` = 아래 `install`). 계속 복구용 로그인 정보는 시스템 › 관리 › 연결 키 「세이브티커」(`SAVETICKER_EMAIL`·`SAVETICKER_PASSWORD`).
+
 ```text
 uv run trader saveticker extension install     # 확장 복사 + Native host 등록(재실행 가능)
 uv run trader saveticker extension status      # 등록·등록 JSON path·확장 버전·연결·작업별 상태

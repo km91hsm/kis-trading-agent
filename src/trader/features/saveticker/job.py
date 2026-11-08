@@ -76,6 +76,9 @@ def sync_extension(ctx: Any) -> dict | str | None:
     except Exception as e:  # noqa: BLE001 — 동기화 실패가 수집 감시를 막지 않게
         logger.exception("세이브티커 확장 동기화 실패")
         return f"실패: {type(e).__name__}"
+    if result.get("skipped") == "busy":  # 웹 「설치하기」가 진행 중 — 다음 틱에 다시
+        _STATE.synced = False
+        return None
     if not (result.get("extension_updated") or result.get("host_updated")):
         return None
     logger.info("세이브티커 확장 동기화: %s", result)
