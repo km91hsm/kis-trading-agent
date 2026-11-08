@@ -20,6 +20,7 @@ from trader.kernel.config.secrets import (
     Secrets,
     account_prefix,
     load_secrets,
+    quote_env_value,
 )
 from trader.kernel.config.secrets import editing_env as _editing
 from trader.kernel.config.secrets import ensure_web_token as ensure_web_token
@@ -135,6 +136,9 @@ _ACCOUNT_LABELS = {
     "HTS_ID": "HTS ID(비우면 공용)",
 }
 MAX_VALUE_LEN = 1024
+# 큰따옴표로 감싸 저장하는 키 — 비밀번호처럼 공백·따옴표·`#`·`$` 가 든 값도 그대로 저장한다.
+# 읽는 쪽(`saveticker.credentials.load`)이 interpolate=False·앞뒤 공백 보존으로 읽는다.
+QUOTED_KEYS = frozenset({"SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"})
 
 
 def catalog(accounts: list[Account]) -> list[dict]:
@@ -190,14 +194,21 @@ def update(
 ) -> dict:
     """설정 화면 입력을 .env 에 쓴다 — 목록(`catalog`)에 있는 이름만, 한 줄 값만. 반환은 이름만."""
     allowed = {e["name"] for e in catalog(accounts)}
-    values = {k: (v or "").strip() for k, v in (values or {}).items()}
+    values = {
+        k: (v or "") if k in QUOTED_KEYS else (v or "").strip() for k, v in (values or {}).items()
+    }
     clear_set = set(clear or [])
     bad = sorted((set(values) | clear_set) - allowed)
     if bad:
         raise ConfigError(f"입력할 수 없는 키: {', '.join(bad)}")
     for k, v in values.items():
-        if not v:
+        if not v.strip():
             raise ConfigError(f"{k}: 빈 값은 '지우기'로 보내세요")
+        if k in QUOTED_KEYS:
+            # 줄바꿈류·제어문자는 `.env` 줄을 쪼갤 수 있다(`write_env` 는 splitlines 로 다시 읽는다)
+            if len(v) > MAX_VALUE_LEN or any(not c.isprintable() and c != " " for c in v):
+                raise ConfigError(f"{k}: 줄바꿈·제어문자 없는 한 줄 값만 넣을 수 있습니다")
+            continue
         if "${" in v:
             raise ConfigError(f"{k}: ${{…}} 는 다른 키 값으로 바뀌므로 넣을 수 없습니다")
         if (
@@ -205,13 +216,20 @@ def update(
             or any(ch.isspace() or ch == "\x00" for ch in v)
             or v[0] in "'\"#"
         ):
-            raise ConfigError(f"{k}: 공백 없는 한 줄 값만 넣을 수 있습니다(따옴표·# 로 시작 불가)")
+            raise ConfigError(
+                f"{k}: 공백 없는 한 줄 값만 넣을 수 있습니다(따옴표·# 로 시작 불가 — "
+                "세이브티커 이메일·비밀번호는 예외)"
+            )
     clear_set -= set(values)
     if not values and not clear_set:
         return {"updated": [], "cleared": [], "backup": None, "env_overridden": []}
     with _editing(path):
         backup = _backup(path)
-        _write(path, values, remove=clear_set)
+        _write(
+            path,
+            {k: quote_env_value(v) if k in QUOTED_KEYS else v for k, v in values.items()},
+            remove=clear_set,
+        )
     return {
         "updated": sorted(values),
         "cleared": sorted(clear_set),

@@ -147,3 +147,11 @@ def test_native_accepts_credentials_unreadable_diagnostic(tmp_path):
     )
     assert reply["ok"] is True
 
+
+def test_blank_environment_values_count_as_missing(project, monkeypatch):
+    credentials.save("user@example.com", TRICKY)
+    monkeypatch.setenv(credentials.EMAIL, "   ")
+    monkeypatch.setenv(credentials.PASSWORD, " \t ")
+    assert credentials.load() == ("user@example.com", TRICKY)
+    monkeypatch.setenv(credentials.PASSWORD, "  env pw  ")
+    assert credentials.load() == ("user@example.com", "  env pw  ")

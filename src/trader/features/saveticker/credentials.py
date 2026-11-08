@@ -10,20 +10,22 @@ import os
 from dotenv import dotenv_values
 
 from trader.kernel.config.errors import ConfigError
-from trader.kernel.config.secrets import editing_env, write_env
+from trader.kernel.config.secrets import editing_env, quote_env_value, write_env
 from trader.kernel.platform import paths
 
 EMAIL, PASSWORD = "SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"
 
 
-def _quote(value: str) -> str:
-    # python-dotenv 의 큰따옴표 값은 \\ 와 \" 이스케이프를 푼다 — '#', 공백, '=' 도 안전.
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+def _env(key: str) -> str | None:
+    # 공백뿐인 환경변수는 없는 값으로 본다(연결 키 화면의 「환경변수 우선」 표시와 같은 규칙).
+    value = os.environ.get(key)
+    return value if value and value.strip() else None
 
 
 def load() -> tuple[str, str] | None:
     """(이메일, 비밀번호). 하나라도 없으면 None. 비밀번호는 `${…}` 치환·앞뒤 공백 제거 없이 그대로
-    읽는다(공용 `load_secrets` 는 둘 다 하므로 쓰지 않는다). 비어 있지 않은 환경변수가 우선."""
+    읽는다(공용 `load_secrets` 는 둘 다 하므로 쓰지 않는다). 공백뿐이 아닌 환경변수가 우선(값은
+    원본 그대로)."""
     p = paths.secrets_path()
     values: dict[str, str | None] = {}
     if p.exists():
@@ -31,8 +33,8 @@ def load() -> tuple[str, str] | None:
             values = dotenv_values(p, encoding="utf-8", interpolate=False)
         except UnicodeDecodeError as e:
             raise ConfigError(f"{p.name} 은 UTF-8 로 저장해야 합니다: {e}") from e
-    email = os.environ.get(EMAIL) or values.get(EMAIL) or ""
-    password = os.environ.get(PASSWORD) or values.get(PASSWORD) or ""
+    email = _env(EMAIL) or values.get(EMAIL) or ""
+    password = _env(PASSWORD) or values.get(PASSWORD) or ""
     email = email.strip()
     return (email, password) if email and password else None
 
@@ -51,7 +53,7 @@ def save(email: str, password: str) -> None:
         raise ValueError("이메일과 비밀번호를 확인하세요")
     p = paths.secrets_path()
     with editing_env(p):
-        write_env(p, {EMAIL: _quote(email.strip()), PASSWORD: _quote(password)})
+        write_env(p, {EMAIL: quote_env_value(email.strip()), PASSWORD: quote_env_value(password)})
 
 
 def clear() -> None:
