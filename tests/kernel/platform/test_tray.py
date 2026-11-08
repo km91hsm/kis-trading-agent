@@ -150,7 +150,9 @@ class _FakeIcon:
         self.updated_evt.set()
 
 
-def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None, on_autostart=None):
+def _controller(
+    state_fn, *, on_toggle=lambda: None, on_quit=lambda: None, on_autostart=None, confirm=None
+):
     icon = _FakeIcon()
     ctl = tray.TrayController(
         state_fn=state_fn,
@@ -159,6 +161,7 @@ def _controller(state_fn, *, on_toggle=lambda: None, on_quit=lambda: None, on_au
         initial=state_fn(),
         run_on_main=lambda fn: fn(),
         on_toggle_autostart=on_autostart,
+        confirm_pause=confirm,
     )
     ctl.icon = icon
     return ctl, icon
@@ -215,6 +218,45 @@ def test_pause_action_toggles_on_worker_and_refreshes_title():
     assert icon.updated_evt.wait(5)  # 제목을 바꾼 뒤 메뉴를 갱신한다
     assert icon.title == "trader · 일시정지" and ctl.checked("toggle_pause") is True
     assert icon.menu_updates >= 1
+
+
+def _join_pause_workers():
+    for t in threading.enumerate():
+        if t.name == "trader-tray-pause":
+            t.join(5)
+
+
+def test_pause_confirm_cancel_skips_toggle():
+    calls = []
+    ctl, icon = _controller(
+        lambda: _state(), on_toggle=lambda: calls.append(1), confirm=lambda: False
+    )
+    ctl.pause_action(icon, None)
+    _join_pause_workers()
+    assert calls == []
+
+
+def test_pause_confirm_true_or_none_toggles():
+    for answer in (True, None):
+        calls = []
+        ctl, icon = _controller(
+            lambda: _state(), on_toggle=lambda: calls.append(1), confirm=lambda a=answer: a
+        )
+        ctl.pause_action(icon, None)
+        _join_pause_workers()
+        assert calls == [1]
+
+
+def test_resume_never_asks():
+    asked, calls = [], []
+    ctl, icon = _controller(
+        lambda: _state(paused=True),
+        on_toggle=lambda: calls.append(1),
+        confirm=lambda: asked.append(1) or False,
+    )
+    ctl.pause_action(icon, None)
+    _join_pause_workers()
+    assert asked == [] and calls == [1]
 
 
 def test_on_main_falls_back_to_direct_call_without_appkit(monkeypatch):
