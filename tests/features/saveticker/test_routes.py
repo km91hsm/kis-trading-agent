@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -168,6 +169,7 @@ def test_onboarding_dismiss_persists_and_logs(project, client, fake_install):
     assert keys == [ONBOARDING]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 는 설치판에서만 설치(소스 설치 거부)")
 def test_install_route_returns_real_extension_dir(project, client, tmp_path, monkeypatch):
     """계약: 가짜가 아닌 실제 `install()` 반환값으로 경로가 채워진다(키 이름 불일치 회귀 방지)."""
     real = bridge_install.install
