@@ -33,8 +33,17 @@ export const SIGNAL = { BULLISH: "강세", NEUTRAL: "중립", BEARISH: "약세",
 
 export type TraceStep = { key: string; title: string; lines: string[] };
 
+/** 판 판정: "b" 만 판 b, 그 밖(없음 포함)은 판 a. */
+export const laneKey = (lane: string | null | undefined): "a" | "b" => (lane === "b" ? "b" : "a");
+
 /** 판 이름: 없으면 1판("a"). */
-export const laneLabel = (lane: string | null | undefined) => (lane === "b" ? "2판" : "1판");
+export const laneLabel = (lane: string | null | undefined) => (laneKey(lane) === "b" ? "2판" : "1판");
+
+/** 판 b 턴이 하나라도 있는가(없으면 판 표기를 숨긴다 — 옛 결정·2인 토론). */
+export const hasLaneB = (turns: { lane?: string | null }[]) => turns.some((d) => laneKey(d.lane) === "b");
+
+/** 공급자 표시 이름: codex·claude 는 고유 표기, 그 밖은 값 그대로, 없으면 `missing`. */
+export const providerName = (p: string | null | undefined, missing = "미기록") => (p === "codex" ? "Codex" : p === "claude" ? "Claude" : p ? p : missing);
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v.toFixed(2));
 
@@ -47,14 +56,14 @@ export function traceSteps(t: TraceResp): TraceStep[] {
     lines: t.analysts.map((a) => `${a.label}: ${SIGNAL[a.signal ?? ""] ?? a.signal ?? "—"} · 확신 ${pct(a.confidence)}${a.evidence.length ? ` · ${a.evidence.join(" / ")}` : ""}`),
   });
   const rounds = [...new Set(t.debate.map((d) => d.round ?? 0))].sort((a, b) => a - b);
-  const hasLaneB = t.debate.some((d) => d.lane === "b");
+  const laneB = hasLaneB(t.debate);
   steps.push({
     key: "debate",
     title: `토론 ${rounds.length}라운드`,
     lines: rounds.map((r) => {
       const turns = t.debate.filter((d) => (d.round ?? 0) === r);
-      const named = hasLaneB ? [...turns].sort((x, y) => (x.lane === "b" ? 1 : 0) - (y.lane === "b" ? 1 : 0) || (x.side === "bull" ? 0 : 1) - (y.side === "bull" ? 0 : 1)) : turns;
-      return `r${r}: ${named.map((d) => `${hasLaneB ? `${laneLabel(d.lane)} ` : ""}${d.side === "bull" ? "강세" : "약세"} ${SIGNAL[d.stance ?? ""] ?? d.stance ?? "—"} ${pct(d.conviction)}`).join(" · ")}`;
+      const named = laneB ? [...turns].sort((x, y) => (x.lane === "b" ? 1 : 0) - (y.lane === "b" ? 1 : 0) || (x.side === "bull" ? 0 : 1) - (y.side === "bull" ? 0 : 1)) : turns;
+      return `r${r}: ${named.map((d) => `${laneB ? `${laneLabel(d.lane)} ` : ""}${d.side === "bull" ? "강세" : "약세"} ${SIGNAL[d.stance ?? ""] ?? d.stance ?? "—"} ${pct(d.conviction)}`).join(" · ")}`;
     }),
   });
   if (t.research) {

@@ -1,14 +1,15 @@
 import { Chip } from "../../components/Chip";
 import { Empty } from "../../components/Empty";
 import { Table, type Column } from "../../components/Table";
-import { laneLabel, type TraceDebate } from "../../lib/trace";
+import { hasLaneB, laneKey, laneLabel, providerName, type TraceDebate } from "../../lib/trace";
 import { EvidenceLinks, type InputItem, type InputGroup } from "./InputEvidence";
 
 type Entry = { turn: TraceDebate; text: string; evidence: string[] };
 type Issue = { id: string; issueId: string; topic: string; claims: Entry[]; responses: Entry[]; replies: Entry[] };
 const sideLabel = (side: string | null) => side === "bull" ? "강세 측" : side === "bear" ? "약세 측" : "역할 미기록";
-const laneOf = (turn: TraceDebate) => turn.lane === "b" ? "b" : "a";
-const participant = (turn: TraceDebate) => `${laneLabel(turn.lane)} ${turn.provider === "claude" ? "Claude" : turn.provider === "codex" ? "Codex" : "공급자 미기록"} (${sideLabel(turn.side)})`;
+const laneOf = (turn: TraceDebate) => laneKey(turn.lane);
+/** 참여자 표기. 판 b 턴이 없는 결정(`showLane=false`)은 「1판」 을 붙이지 않는다. */
+const participant = (turn: TraceDebate, showLane: boolean) => `${showLane ? `${laneLabel(turn.lane)} ` : ""}${providerName(turn.provider, "공급자 미기록")} (${sideLabel(turn.side)})`;
 
 function issueRows(turns: TraceDebate[]): Issue[] {
   const issues = new Map<string, Issue>();
@@ -31,7 +32,7 @@ function issueRows(turns: TraceDebate[]): Issue[] {
 }
 
 type Confidence = { key: string; participant: string; change: string; rounds: string };
-function confidenceRows(turns: TraceDebate[]): Confidence[] {
+function confidenceRows(turns: TraceDebate[], showLane: boolean): Confidence[] {
   const rows = new Map<string, TraceDebate[]>();
   for (const turn of [...turns].sort((a, b) => (a.round ?? -1) - (b.round ?? -1))) {
     const key = `${laneOf(turn)}:${turn.side}:${turn.provider ?? "unknown"}:${turn.model ?? "unknown"}`;
@@ -41,7 +42,7 @@ function confidenceRows(turns: TraceDebate[]): Confidence[] {
     const valid = all.filter(turn => typeof turn.conviction === "number" && Number.isFinite(turn.conviction) && turn.conviction >= 0 && turn.conviction <= 1);
     const first = valid[0], last = valid.at(-1);
     return {
-      key, participant: participant(all[0]),
+      key, participant: participant(all[0], showLane),
       change: first && last && valid.length > 1 ? `${Math.round(first.conviction! * 100)}% → ${Math.round(last.conviction! * 100)}%` : first ? `${Math.round(first.conviction! * 100)}% (변화 미기록)` : "확신 미기록",
       rounds: first && last ? `r${first.round ?? "?"} → r${last.round ?? "?"}` : "미기록",
     };
@@ -53,25 +54,26 @@ const confidenceColumns: Column<Confidence>[] = [
   { key: "rounds", label: "기록 라운드", width: "20%" },
 ];
 
-function Entries({ title, entries, items, groups }: { title: string; entries: Entry[]; items: InputItem[]; groups: InputGroup[] }) {
+function Entries({ title, entries, items, groups, showLane }: { title: string; entries: Entry[]; items: InputItem[]; groups: InputGroup[]; showLane: boolean }) {
   return <div className="issue-column"><h4>{title}</h4>{entries.length ? <ul>{entries.map((entry, index) => <li key={index}>
-    <p className="data-muted">r{entry.turn.round ?? "?"} {participant(entry.turn)}</p>
+    <p className="data-muted">r{entry.turn.round ?? "?"} {participant(entry.turn, showLane)}</p>
     <p>{entry.text}</p><EvidenceLinks refs={entry.evidence} items={items} groups={groups} />
   </li>)}</ul> : <p className="data-muted">미기록</p>}</div>;
 }
 
 export function DebateComparison({ turns, items, groups = [] }: { turns: TraceDebate[]; items: InputItem[]; groups?: InputGroup[] }) {
   const issues = issueRows(turns);
+  const showLane = hasLaneB(turns);
   return <>
-    {turns.length ? <Table columns={confidenceColumns} rows={confidenceRows(turns)} rowKey={row => row.key} /> : null}
+    {turns.length ? <Table columns={confidenceColumns} rows={confidenceRows(turns, showLane)} rowKey={row => row.key} /> : null}
     <p className="data-muted evidence-note">확신은 발언 전체의 값입니다. 쟁점별 확신·명시적 수락/거부는 저장되지 않아 의견의 유사성만으로 합의를 판단하지 않습니다.</p>
     {issues.length ? <div className="issue-comparison">{issues.map(issue => <article key={issue.id} data-issue-id={issue.id}>
       <div className="issue-heading"><h3>{issue.topic}</h3><Chip tone="muted">합의 미기록</Chip></div>
       <p className="data-muted">쟁점 ID: {issue.issueId}</p>
       <div className="issue-columns">
-        <Entries title="주장" entries={issue.claims} items={items} groups={groups} />
-        <Entries title="상대 반론" entries={issue.responses} items={items} groups={groups} />
-        <Entries title="재답변" entries={issue.replies} items={items} groups={groups} />
+        <Entries title="주장" entries={issue.claims} items={items} groups={groups} showLane={showLane} />
+        <Entries title="상대 반론" entries={issue.responses} items={items} groups={groups} showLane={showLane} />
+        <Entries title="재답변" entries={issue.replies} items={items} groups={groups} showLane={showLane} />
       </div>
     </article>)}</div> : <Empty title="구조화된 쟁점 기록 없음">이전 형식의 의견은 아래 토론 턴에서 확인할 수 있습니다.</Empty>}
   </>;
