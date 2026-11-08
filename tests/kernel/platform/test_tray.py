@@ -240,7 +240,7 @@ def test_pause_confirm_true_or_none_toggles():
     for answer in (True, None):
         calls = []
         ctl, icon = _controller(
-            lambda: _state(), on_toggle=lambda: calls.append(1), confirm=lambda a=answer: a
+            lambda: _state(), on_toggle=lambda c=calls: c.append(1), confirm=lambda a=answer: a
         )
         ctl.pause_action(icon, None)
         _join_pause_workers()
