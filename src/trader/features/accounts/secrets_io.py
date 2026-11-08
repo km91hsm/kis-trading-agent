@@ -125,6 +125,8 @@ CATALOG: tuple[tuple[str, str, str], ...] = (
     ("REDDIT_CLIENT_ID", "데이터", "Reddit Client ID"),
     ("REDDIT_CLIENT_SECRET", "데이터", "Reddit Client Secret"),
     ("REDDIT_USER", "데이터", "Reddit 사용자명"),
+    ("SAVETICKER_EMAIL", "세이브티커", "세이브티커 로그인 이메일"),
+    ("SAVETICKER_PASSWORD", "세이브티커", "세이브티커 로그인 비밀번호(재확인 계속 복구용)"),
 )
 _ACCOUNT_LABELS = {
     "APP_KEY": "앱키",
