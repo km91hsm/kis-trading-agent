@@ -71,7 +71,7 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
 
 def check_llm(ctx: OpsContext) -> list[Item]:
     out: list[Item] = []
-    cap = ctx.settings.llm.daily_session_cap
+    cap, _ = usage.session_cap(ctx.conn, ctx.settings)
     n = sessions_today(ctx.conn, ctx.now)
     if cap and n >= cap:
         out.append(

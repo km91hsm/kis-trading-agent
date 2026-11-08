@@ -103,6 +103,9 @@ EXPECTED = [
     ("GET", "/api/settings/watchlist"),
     ("PATCH", "/api/settings/watchlist"),
     ("PATCH", "/api/settings/usage-throttle"),
+    ("PATCH", "/api/settings/session-cap"),
+    ("PATCH", "/api/settings/codex-throttle"),
+    ("PATCH", "/api/settings/codex-call-cap"),
     ("GET", "/api/settings/secrets"),
     ("POST", "/api/settings/secrets"),
     # system (옛 /system/ops 는 /system/health 로)

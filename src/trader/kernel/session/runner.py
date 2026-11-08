@@ -344,7 +344,7 @@ def run_session(
     settings, conn, now = ctx.settings, ctx.conn, ctx.now
     if settings.anonymize:
         raise ConfigError("settings.anonymize=true 는 Phase 6 전까지 지원하지 않습니다")
-    cap = settings.llm.daily_session_cap
+    cap, _ = usage.session_cap(conn, settings)
     if calls.sessions_today(conn, now()) >= cap:
         raise PipelineError(f"오늘 세션 상한({cap})에 도달해 세션을 띄우지 않습니다")
     fake = is_fake()

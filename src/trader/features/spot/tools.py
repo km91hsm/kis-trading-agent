@@ -31,7 +31,7 @@ from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import calls, input_receipts, research_policy, runner, tooling
+from trader.kernel.session import calls, input_receipts, research_policy, runner, tooling, usage
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -1222,7 +1222,7 @@ def status(ctx: ToolContext, *, market: str, date: date) -> dict:
         "market": market,
         "tickers": tickers,
         "sessions_today": calls.sessions_today(ctx.conn, ctx.now()) if ctx.conn else 0,
-        "cap": ctx.settings.llm.daily_session_cap,
+        "cap": usage.session_cap(ctx.conn, ctx.settings)[0],
     }
 
 

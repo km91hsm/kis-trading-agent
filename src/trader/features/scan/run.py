@@ -10,7 +10,7 @@ from trader.features.ingest import api as ingest_api
 from trader.features.scan import discovery as discovery_mod
 from trader.features.scan import quant, ranker, screener, watchlist
 from trader.kernel.notify import messages
-from trader.kernel.session import calls
+from trader.kernel.session import calls, usage
 from trader.kernel.session.run_store import market_dir, run_date_for, write_checkpoint
 
 logger = logging.getLogger("trader.scan")
@@ -34,7 +34,7 @@ def run_scan(ctx: Any, *, market: str, cancel: Any | None = None, dry_run: bool 
         asof=today,  # 과거 시점 스캔이 그 뒤 피처 파일을 보지 않도록
     )
     cap_hit = dry_run or (
-        calls.sessions_today(ctx.conn, ctx.now()) >= ctx.settings.llm.daily_session_cap
+        calls.sessions_today(ctx.conn, ctx.now()) >= usage.session_cap(ctx.conn, ctx.settings)[0]
     )
     # 발굴 입력(네이버 블로그)용 http: 주입(`ext["http"]`)이면 그대로, 없으면 만들어 끝에 닫는다
     with ingest_api.owned_client((ctx.ext or {}).get("http"), timeout=15) as http:

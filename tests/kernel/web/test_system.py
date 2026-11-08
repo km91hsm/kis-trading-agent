@@ -375,6 +375,31 @@ def test_usage_throttle_toggle_api(project):
     assert len(c.get("/api/system/control-log").json()) == 2
 
 
+def test_session_cap_api(project):
+    """설정 화면: Claude 하루 세션 제한 변경(토큰 + 같은 출처, 1~1000), control 이력, null 이면
+    yaml 값으로. /api/system/usage 가 실효 값·출처·기본값과 오늘 창의 cap 을 보인다."""
+    from tests.kernel.web.conftest import AUTH
+
+    deps = ledger_deps(project)
+    c = make_client(deps)
+    url = "/api/settings/session-cap"
+    default = deps.settings.llm.daily_session_cap
+    assert c.patch(url, json={"cap": 5}).status_code == 401
+    for bad in (0, 1001, "x", 2.5):
+        assert c.patch(url, json={"cap": bad}, headers=AUTH).status_code == 422, bad
+    assert c.patch(url, json={"cap": 5, "x": 1}, headers=AUTH).status_code == 422
+    r = c.patch(url, json={"cap": 5}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json() == {"value": 5, "source": "control", "default": default}
+    u = c.get("/api/system/usage").json()
+    assert u["session_cap"] == {"value": 5, "source": "control", "default": default}
+    assert u["windows"]["today"]["cap"] == 5
+    log = c.get("/api/system/control-log").json()
+    assert [(x["key"], x["old"], x["new"]) for x in log] == [(usage.SESSION_CAP_FLAG, None, 5)]
+    r = c.patch(url, json={"cap": None}, headers=AUTH)
+    assert r.json() == {"value": default, "source": "yaml", "default": default}
+
+
 def test_notices_date_filter_is_kst_day(project):
     """`date=` 는 KST 하루 [00:00, 24:00) — UTC 로는 전날 15:00 부터. kind 와 같이 쓸 수 있고
     형식이 틀리면 422."""

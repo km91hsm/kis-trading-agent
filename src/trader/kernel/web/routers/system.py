@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.heartbeat import read_status
@@ -125,7 +125,8 @@ def usage_view(request: Request) -> dict:
     path = usage.usage_file(llm.usage_file)
     with closing(deps.conn_factory()) as conn:
         limits = usage.latest_observation(conn, now, path)
-        windows = usage.ledger_windows(conn, now, cap=llm.daily_session_cap)
+        cap, cap_source = usage.session_cap(conn, deps.settings)
+        windows = usage.ledger_windows(conn, now, cap=cap)
         ok_new, why_new = usage.allowance(
             conn, deps.settings, throttle="hard", label="새 세션", now=now
         )
@@ -153,6 +154,7 @@ def usage_view(request: Request) -> dict:
             "state": "ok" if ok_new else ("soft" if ok_re else "hard"),
             "reason": why_new or why_re,
         },
+        "session_cap": {"value": cap, "source": cap_source, "default": llm.daily_session_cap},
         "usage_file_present": path is not None and path.is_file(),  # 홈 경로는 돌려주지 않는다
         "windows": windows,
         "caps_by_kind": caps,
@@ -279,6 +281,33 @@ def usage_throttle(request: Request, body: ThrottleBody) -> dict:
             )  # fmt: skip
         enabled, source = usage.throttle_enabled(conn, deps.settings)
     return {"enabled": enabled, "source": source}
+
+
+class SessionCapBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # None 이면 화면 설정을 지우고 yaml `llm.daily_session_cap` 으로
+    cap: int | None = Field(ge=usage.SESSION_CAP_RANGE[0], le=usage.SESSION_CAP_RANGE[1])
+
+
+@settings_router.patch("/settings/session-cap", dependencies=WRITE)
+def session_cap_update(request: Request, body: SessionCapBody) -> dict:
+    """Claude 하루 세션 제한 변경(설정 화면). 바꾼 값은 다음 세션부터 매일 적용되고, null 이면
+    yaml 값으로 돌아간다. 바뀌면 control 이력에 `web` 으로 남긴다."""
+    deps = _deps(request)
+    with closing(deps.conn_factory()) as conn:
+        old = get_flag(conn, usage.SESSION_CAP_FLAG)
+        if body.cap is None:
+            delete_flag(conn, usage.SESSION_CAP_FLAG)
+        else:
+            set_flag(conn, usage.SESSION_CAP_FLAG, body.cap)
+        if old != body.cap:
+            log_change(
+                conn, channel="web", actor=actor_of(request), key=usage.SESSION_CAP_FLAG,
+                old=old, new=body.cap, at=deps.now().isoformat(),
+            )  # fmt: skip
+        value, source = usage.session_cap(conn, deps.settings)
+    return {"value": value, "source": source, "default": deps.settings.llm.daily_session_cap}
 
 
 @settings_router.get("/settings/codex-debate")

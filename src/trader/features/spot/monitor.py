@@ -41,6 +41,7 @@ from trader.kernel.execution.types import OrderBookkeepingError
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
 from trader.kernel.notify import messages
+from trader.kernel.session import usage
 from trader.kernel.session.calls import sessions_today
 
 logger = logging.getLogger("trader.spot")
@@ -142,7 +143,7 @@ def _can_reevaluate(
         # submit-decision --stage 31_* 은 오늘 30_decision 을 요구한다. analyze 가 아직(또는 실패로)
         # 안 끝난 보유분은 세션을 띄워도 제출이 거부되므로 트리거만 남겨 다음 틱에 다시 본다
         return "오늘 결정 없음 (analyze 미완료)"
-    if sessions_today(ex.conn, ex.now()) >= ex.settings.llm.daily_session_cap:
+    if sessions_today(ex.conn, ex.now()) >= usage.session_cap(ex.conn, ex.settings)[0]:
         return "세션 상한"
     last = spot_ledger.last_trigger_handled_at(ex.conn, market, ticker)
     if last is not None and ex.now() - datetime.fromisoformat(last) < interval:

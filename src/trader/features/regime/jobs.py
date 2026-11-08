@@ -20,7 +20,7 @@ from trader.kernel.lane.types import LaneContext
 from trader.kernel.notify import messages as kmessages
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec, QueueKind
-from trader.kernel.session import calls
+from trader.kernel.session import calls, usage
 from trader.kernel.session.run_store import run_date_for
 
 logger = logging.getLogger("trader.regime")
@@ -114,7 +114,7 @@ def market_view_body(deps, market: str) -> dict:
             return {"skipped": "오늘 이미 제안 있음"}
         llm = deps.settings.llm
         cap_hit = (
-            calls.sessions_today(conn, now) >= llm.daily_session_cap
+            calls.sessions_today(conn, now) >= usage.session_cap(conn, deps.settings)[0]
             or mv.market_sessions_today(conn, now) >= llm.market_session_cap
         )
         port = _port(deps)

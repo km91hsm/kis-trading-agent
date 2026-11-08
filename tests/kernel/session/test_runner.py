@@ -239,6 +239,18 @@ def test_daily_cap_blocks(project, conn):
         _run(spec(), ctx, runner=lambda cmd, **kw: _ok_result())
 
 
+def test_daily_cap_uses_screen_override(project, conn):
+    """설정 화면의 하루 세션 제한(control)이 yaml 대신 적용된다."""
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.session import usage
+
+    ctx = make_ctx(project, conn, llm=LlmSettings(usage_file=None, daily_session_cap=80))
+    set_flag(conn, usage.SESSION_CAP_FLAG, 1)
+    _run(spec(), ctx, runner=lambda cmd, **kw: _ok_result())
+    with pytest.raises(runner.PipelineError, match="상한\\(1\\)"):
+        _run(spec(), ctx, runner=lambda cmd, **kw: _ok_result())
+
+
 def test_daily_cap_ignores_fake_sessions(project, conn, monkeypatch):
     """개발 중 FAKE 를 아무리 돌려도 실제 세션 상한·비용 집계에 들어가지 않는다."""
     ctx = make_ctx(project, conn, llm=LlmSettings(usage_file=None, daily_session_cap=1))
