@@ -61,7 +61,7 @@
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (스펙 §2.6)
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)
 - **룩어헤드 금지**: 판정·학습·백테스트는 그 시점에 알 수 있던 데이터만 쓴다(유니버스 PIT 포함). (피처 `latest_rows(asof)`·유니버스 PIT·라벨 엠바고)
-- **paused**: `control` 의 `paused` 가 켜지면 신규 주문 경로는 모두 멈춘다.
+- **paused**: `control` 의 `paused` 가 켜지면 신규 진입·판단 매도·승인 실행이 멈춘다. 위험 청산(현물 손절·단타 청산·파생 손절/만기/축소)은 계속된다(`ExecPolicy.risk_exit`).
 - **웹은 원장 + 큐만**: 웹 라우터는 브로커·알림을 쥐지 않고(주문 집행 포트는 `build_web_deps` 가 뺀다) 쓰기는 원장·`job_requests` 뿐, 집행은 데몬이 한다. 예외는 `quotes` 시세 조회와, 이 PC 직접 접속(`require_direct_local`) 한정 로컬 파일 쓰기 둘 — 연결 키 설정(`secrets/.env`)·세이브티커 확장 설치(`bridge_install.install`). 실전 쓰기는 `confirm == 계좌 id`. (`docs/architecture.md` web)
 
 ## 금지사항

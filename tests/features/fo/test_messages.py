@@ -93,3 +93,11 @@ def test_constants():
     assert m.CONTRACT_SIDE == {"LONG": "매수", "SHORT": "매도"}
     assert m.FO_KIND == {"FUTURES": "선물", "CALL": "콜", "PUT": "풋"}
     assert m.fo_label("c") == "c" and m.fo_label("c", "n") == "n(c)"
+
+
+def test_fo_exit_while_paused():
+    assert m.fo_exit_while_paused(account="paper-fo", code="A05W11", name=None,
+                                  intent="STOP") == (
+        "[파생 청산 실행: 일시정지 중] paper-fo · A05W11\n"
+        "손절 주문을 냈어요. 일시정지 중이지만 손절·청산·축소는 계속해요."
+    )  # fmt: skip

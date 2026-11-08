@@ -53,6 +53,7 @@ export const FO_STATE_LABEL: Record<string, string> = {
   unverified: "검증 전",
   halted: "손실 한도",
   record_only: "기록만",
+  entries_paused: "새 진입 멈춤",
   active: "활성",
 };
 

@@ -5,6 +5,7 @@
 import { useState, type ReactNode } from "react";
 import { PageTabs } from "../../components/PageTabs";
 import { FoLegs } from "./FoLegs";
+import { FO_STATE_LABEL } from "../accounts/accounts";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
 import { Chip } from "../../components/Chip";
@@ -60,7 +61,7 @@ const FO_COLUMNS: Column<FoAccount>[] = [
   { key: "id", label: "계좌", width: "25%", long: true },
   { key: "env", label: "환경", width: "15%", align: "chip", render: (a) => <Chip tone={a.env === "real" ? "live" : "muted"}>{termLabel(`env.${a.env}`)}</Chip> },
   { key: "mode", label: "모드", width: "15%", render: (a) => termLabel(`mode.${a.mode}`) },
-  { key: "state", label: "상태", width: "20%", render: (a) => (a.state ? termLabel(`fo.status.${a.state}`) : "—") },
+  { key: "state", label: "상태", width: "20%", render: (a) => (a.state ? (FO_STATE_LABEL[a.state] ?? a.state) : "—") },
   { key: "paused", label: "일시정지", width: "10%", render: (a) => (a.paused ? <Chip tone="warn">일시정지</Chip> : "—") },
   { key: "triggers", label: "트리거", width: "15%", align: "num", render: (a) => String(a.triggers.length) },
 ];

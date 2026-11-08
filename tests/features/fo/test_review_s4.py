@@ -62,10 +62,20 @@ def test_dry_run_tick_keeps_pending_flag_and_records_no_trigger(conn):
     assert ctx.brokers[ACCT].orders == []
 
 
-def test_paused_risk_reduce_does_not_lower_target(conn):
+def test_paused_risk_reduce_still_lowers_target_and_sends(conn):
+    """유지 조건 축소(RESIZE_DOWN)는 위험 청산 — 일시정지 중에도 목표를 낮추고 축소 주문을 낸다."""
     ctx = _ctx(conn, at(10, 30), max_contracts=20)
     pos = _held_position(conn, ctx, qty=12, qty_target=12)
     control.set_flag(conn, "paused", True)
+    out = _tick(ctx)
+    m = out["accounts"][ACCT]["maintain"][0]
+    assert m["status"] == "accepted" and store.get_position(conn, pos.id).qty_target < 12
+    assert [o.side for o in ctx.brokers[ACCT].orders] == ["SELL"]
+
+
+def test_dry_run_risk_reduce_does_not_lower_target(conn):
+    ctx = _ctx(conn, at(10, 30), max_contracts=20, dry_run=True)
+    pos = _held_position(conn, ctx, qty=12, qty_target=12)
     out = _tick(ctx)
     m = out["accounts"][ACCT]["maintain"][0]
     assert m["status"] == "recorded" and store.get_position(conn, pos.id).qty_target == 12

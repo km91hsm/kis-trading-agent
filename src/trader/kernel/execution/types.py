@@ -71,17 +71,19 @@ class OrderIntent:
 
 @dataclass(frozen=True)
 class ExecPolicy:
-    """계좌 1개의 실행 정책(유효 모드·일시정지·dry-run)."""
+    """계좌 1개의 실행 정책(유효 모드·일시정지·dry-run·위험 청산 여부). risk_exit 면 일시정지여도
+    전송한다(off·dry_run 은 그대로 막는다)."""
 
     mode: str
     note: str | None
     paused: bool
     dry_run: bool
+    risk_exit: bool = False  # 위험 청산 — 일시정지여도 전송(off·dry_run 은 그대로 막는다)
 
     @property
     def transmits(self) -> bool:
         """브로커로 실제 전송하는가."""
-        return self.mode != "off" and not self.paused and not self.dry_run
+        return self.mode != "off" and not self.dry_run and (self.risk_exit or not self.paused)
 
 
 @dataclass

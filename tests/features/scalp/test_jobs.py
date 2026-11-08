@@ -85,7 +85,7 @@ def test_build_jobs_registers_scalp_interval_per_market(settings, schedule):
     assert jobs["kr_scalp"].spec.teardown is scalp_jobs.judge_teardown
 
 
-def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings, conn):
+def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings, conn, project):
     cfg = settings.scalp.model_copy(update={"enabled": False})
     off = settings.model_copy(update={"scalp": cfg})
     deps = make_deps(settings=off)
@@ -102,7 +102,16 @@ def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings,
     assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "창 밖"}
     deps = make_deps()
     modes.set_paused(conn, True)
-    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "일시정지"}
+    out = scalp_jobs.scalp_body(deps, _job(deps))  # 일시정지여도 틱은 돈다(skipped 는 틱 안의 표시)
+    assert out["skipped"] == "일시정지" and "entries" in out
+    cfg = settings.scalp.model_copy(update={"enabled": False})
+    off = settings.model_copy(update={"scalp": cfg})
+    deps = make_deps(settings=off)  # 스위치도 상태도 없으면 틱을 돌리지 않는다
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "단타 켜진 계좌 없음"}
+    day = run_date_for("KR", NOW)
+    save_state(project / "state", day, "KR", {"open": [{"ticker": "005930", "status": "closing"}]})
+    out = scalp_jobs.scalp_body(deps, _job(deps))  # 열린 다리가 있으면 돈다
+    assert out["entries_blocked"] == "일시정지" and "skipped" not in out and "entries" in out
 
 
 def test_scalp_body_skips_when_monitor_gate_missing(make_deps):
@@ -170,7 +179,7 @@ def test_scalp_body_exits_open_leg_after_all_switches_off(
     market.prices["005930"] = Decimal("9800")  # 손절 −1% 아래
     deps = make_deps(now=NOW + timedelta(minutes=3))
     out = scalp_jobs.scalp_body(deps, _job(deps))
-    assert out.get("skipped") == "켜진 계좌 없음"  # 신규 진입만 막힌다
+    assert "skipped" not in out and out["entries_blocked"] == "켜진 계좌 없음"  # 신규 진입만 막힌다
     sells = conn.execute("SELECT account_id FROM orders WHERE side='SELL'").fetchall()
     assert {r["account_id"] for r in sells} == {"paper-main", "paper-two"}
 

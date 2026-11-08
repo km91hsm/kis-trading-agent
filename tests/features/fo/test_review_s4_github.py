@@ -51,14 +51,30 @@ def test_accepted_entry_fill_synced_each_tick(conn):
 
 def test_record_only_exit_keeps_pending_trigger(conn):
     now = at(10, 30)
+    ctx = make_ctx(conn, market=_market(now, idx="344"), now=now, dry_run=True,
+                   reeval={"periodic_max_per_day": 0})  # fmt: skip
+    pos = _held_position(conn, ctx, qty=2)
+    tid = triggers.record(conn, pos, triggers.Trigger("news", {}, None), now=now)
+    out = _tick(ctx)
+    assert out["accounts"][ACCT]["exits"][0]["status"] == "recorded"
+    assert ledger.get_trigger(conn, tid)["handled_at"] is None
+
+
+def test_paused_stop_exit_transmits_and_discards_trigger(conn):
+    """일시정지 중 손절(stop_pt)은 위험 청산 — 주문을 내고 대기 재평가를 닫고, 하루 1회 알린다."""
+    now = at(10, 30)
     ctx = make_ctx(conn, market=_market(now, idx="344"), now=now,
                    reeval={"periodic_max_per_day": 0})  # fmt: skip
     pos = _held_position(conn, ctx, qty=2)
     tid = triggers.record(conn, pos, triggers.Trigger("news", {}, None), now=now)
     control.set_flag(conn, "paused", True)
     out = _tick(ctx)
-    assert out["accounts"][ACCT]["exits"][0]["status"] == "recorded"
-    assert ledger.get_trigger(conn, tid)["handled_at"] is None
+    ex = out["accounts"][ACCT]["exits"][0]
+    assert (ex["intent"], ex["status"]) == ("STOP", "accepted")
+    assert [o.side for o in ctx.brokers[ACCT].orders] == ["SELL"]
+    assert ledger.get_trigger(conn, tid)["handled_at"] is not None
+    assert sum("일시정지" in t for t in ctx.notifier.msgs) == 1
+    assert store.get_position(conn, pos.id).status == "closing"
 
 
 def test_skipped_queued_reevaluation_releases_trigger(conn):

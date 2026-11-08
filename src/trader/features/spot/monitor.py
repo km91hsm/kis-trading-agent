@@ -3,7 +3,8 @@
 - 손절선: 보유 기간 중 결정들의 손절 바닥(`spot.ledger.max_stop_since`)과 최신 결정 손절가 중 높은
   값, 둘 다 없으면 평단 × (1 + risk.stop_loss_pct) — 판정 규칙은 `monitor_rules`(순수 함수).
 - 트리거: take_profit 도달, 프로필 임계 급등락, `invalidation_rules`, 단기 정기 재평가.
-- 같은 종목 재평가는 프로필 간격(기본 30분)에 1회, 종류별 운영일 1회. paused·세션 상한이면 기록만.
+- 같은 종목 재평가는 프로필 간격(기본 30분)에 1회, 종류별 운영일 1회.
+  재평가는 paused·세션 상한이면 기록만(손절은 paused 에서도 나간다).
 - 데몬은 재평가를 큐(`enqueue_reevaluate`)로 넘기고, CLI 는 틱 안에서 인라인으로 돌린다.
 - 주문은 `executor.execute(..., is_stop_loss=True)`, 취소는 `kernel.execution.core.cancel`
   만 지난다.
@@ -561,8 +562,8 @@ def _sell_now(
     mode, _ = ex.policy(ex.conn, account)
     paused = bool(ex.paused(ex.conn))
     # 실제로 손절 주문을 낼 수 있는 상태인가 — 아니면 KIS 쓰기(미체결 SELL 취소)를 하지 않는다.
-    # 일시정지·off·dry-run 에서 취소만 하고 손절은 안 내면 보호 매도만 사라진다(전체 검토 O5)
-    live = not ctx.dry_run and mode != "off" and not paused
+    # off·dry-run 에서 취소만 하고 손절은 안 내면 보호 매도만 사라진다(전체 검토 O5)
+    live = not ctx.dry_run and mode != "off"
     if live and _blocked_by_open_sell(ctx, account, market, pos.ticker, local_day):
         # 아침 TRIM 지정가 같은 미체결 SELL 이 하루 종일 손절을 막으면 안 된다 → 취소하고 진행.
         # 취소가 안 되면(응답 실패·이미 체결 중) 보수적으로 막힌 채 둔다
@@ -586,20 +587,6 @@ def _sell_now(
     recorded = f"sl_recorded:{account.id}:{market}:{pos.ticker}:{local_day.isoformat()}:{state}"
     if control.get_flag(ex.conn, recorded):
         return 0  # dry-run·off 계좌의 손절은 기록만 하므로 하루 1회면 충분하다(매 분 반복 금지)
-    if paused:
-        key = f"sl_paused_notified:{market}:{pos.ticker}:{today.isoformat()}"
-        if not control.get_flag(ex.conn, key):
-            control.set_flag(ex.conn, key, True)
-            core.notify_quietly(
-                ex.notifier,
-                messages.stop_paused(
-                    market=market,
-                    label=_label(ctx, market, pos.ticker),
-                    quote=quote,
-                    level=sig.detail.get("level"),
-                ),
-            )
-        return 0
     dec = _stop_loss_decision(pos.ticker, market, quote, sig)
     try:
         results = executor.execute(
@@ -636,5 +623,18 @@ def _sell_now(
                 order_no=order.get("order_no"),
             ),
         )
+        if paused:  # 위험 청산은 일시정지 중에도 나간다 — 실제 접수된 때만 하루 1회 알린다
+            key = f"sl_paused_notified:{market}:{pos.ticker}:{today.isoformat()}"
+            if not control.get_flag(ex.conn, key):
+                control.set_flag(ex.conn, key, True)
+                core.notify_quietly(
+                    ex.notifier,
+                    messages.stop_while_paused(
+                        market=market,
+                        label=_label(ctx, market, pos.ticker),
+                        quote=quote,
+                        level=sig.detail.get("level"),
+                    ),
+                )
         return 1
     return 0

@@ -261,7 +261,8 @@ RESOURCES = (
 def _account_status(conn: sqlite3.Connection, deps: Any, a: Any, today: date) -> dict:
     """계좌 상태 한 묶음(원장·control 만 — 브로커 호출 없음). state 우선순위: 실전 파생 off →
     레인 꺼짐(disabled) → 검증 전(unverified) → 일일 손실 한도(halted) → 기록만(record_only:
-    모드 off·일시정지) → active."""
+    모드 off) → 진입 일시정지(entries_paused: 전체 일시정지 — 새 진입만 기록,
+    위험 청산은 전송) → active."""
     cfg = deps.settings.fo
     mode, note = fo_mode(conn, a, deps.ports)
     paused = bool(deps.ports["accounts"].paused(conn))
@@ -295,8 +296,10 @@ def _account_status(conn: sqlite3.Connection, deps: Any, a: Any, today: date) ->
         state = "unverified"
     elif halted:
         state = "halted"
-    elif mode != "auto" or paused:
+    elif mode != "auto":
         state = "record_only"
+    elif paused:
+        state = "entries_paused"
     else:
         state = "active"
     rows = conn.execute(

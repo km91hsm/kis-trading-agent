@@ -3,7 +3,7 @@
 ## 책임
 
 - 분 단위 단타 레인(tier=lane): 1분봉 신호는 파이썬 순수 함수가 감지·집행하고, 에이전트는 후보와 허용 여부(strategist `scalp_ok`)·진입 판정(`scalp-judge`)·보유 조언만 낸다.
-- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py`).
+- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py` — 신규 진입 기준; 열린 다리의 청산은 일시정지 중에도 돈다).
 - 설정: `settings.yaml scalp`(`ScalpCfg`, 17필드). 판정자는 `judge: false` 가 기본.
 - 레인이라 다른 기능을 import 하지 않는다. 필요한 것은 포트(deps 주입)로 받는다.
 
@@ -29,7 +29,7 @@
 
 | 잡 | kind | trigger | schedule_key | gate | 비고 |
 |---|---|---|---|---|---|
-| `{market}_scalp` | `scalp` | interval(기본 60s) | `{market}.monitor.interval_s`(spot `{market}_monitor` 와 같은 키) | none | start_soon 30s, catch_up none, teardown 판정자 풀 종료. 본문이 accounts 의 `monitor` 게이트(창·주말·휴장)와 일시정지를 직접 보고, 건너뛴 틱에도 그날 outbox 를 보낸다(T7-R1) |
+| `{market}_scalp` | `scalp` | interval(기본 60s) | `{market}.monitor.interval_s`(spot `{market}_monitor` 와 같은 키) | none | start_soon 30s, catch_up none, teardown 판정자 풀 종료. 본문이 accounts 의 `monitor` 게이트(창·주말·휴장)를 직접 보고(일시정지여도 틱은 돌아 청산하고 신규 진입만 막는다), 건너뛴 틱에도 그날 outbox 를 보낸다(T7-R1) |
 
 단타 전용 스케줄 키는 없다(`schedule.yaml` 에 `scalp` 절을 더하지 않는다).
 
@@ -45,7 +45,7 @@
 - A1 주문·취소·체결 동기화는 `ports["stock_exec"]`(spot 현물 집행 서비스 — 게이트·승인·멱등·기록은 spot `executor`, 취소는 커널 `core.cancel`, 체결은 spot `fills`)로만 지난다. 옛 엔진은 `orchestrator.executor` 를 직접 불렀다.
 - A2 `scalp` origin 의 `OriginSpec` 은 spot `ORIGINS` 소유다(`47_scalp_<leg>`·`57_order_scalp_<leg>` 단계·`|q{qty}` 멱등 꼬리·`is_scalp` 면제). scalp `Feature.origins=()`.
 - A3 상태는 JSON 파일 그대로(`state/scalp/<date>/<market>.json`·`events.jsonl`, 키 `open/closed/done/halted/pending/outbox/digest_at/carried`) — 원장 마이그레이션 없음. 다리(legs) 없는 옛 상태 파일을 읽는 호환 코드는 남겼지만, 그것만 검사하던 옛 legacy 테스트 1건(`test_engine_exit.py`)은 이식하지 않았다.
-- A4·T7-R1 잡 `{market}_scalp` 은 게이트 `none` 이고 본문이 런타임에 `ctx.gates["monitor"]` 를 재사용한다(창 밖·주말·휴장). 일시정지는 본문이 따로 보고(monitor 게이트는 일시정지를 보지 않는다), 건너뛴 모든 경로에서 outbox 를 비운다. 틱 주기는 `{market}.monitor.interval_s`, 장중 창은 `<시장>.monitor.start/end` 를 재사용한다(단타 전용 주기 없음). `ScalpContext.exchanges` 는 빈 dict — 거래소는 후보 출처 → scan `analyze_targets` → 원장 `ticker_exchanges` 순으로 찾는다.
+- A4·T7-R1 잡 `{market}_scalp` 은 게이트 `none` 이고 본문이 런타임에 `ctx.gates["monitor"]` 를 재사용한다(창 밖·주말·휴장). 일시정지는 틱을 건너뛰지 않는다(신규 진입만 `allowed` 가 막고 청산 SELL 은 risk_exit 로 나간다). 건너뛴 모든 경로에서 outbox 를 비운다. 틱 주기는 `{market}.monitor.interval_s`, 장중 창은 `<시장>.monitor.start/end` 를 재사용한다(단타 전용 주기 없음). `ScalpContext.exchanges` 는 빈 dict — 거래소는 후보 출처 → scan `analyze_targets` → 원장 `ticker_exchanges` 순으로 찾는다.
 - A5 판정자는 커널 `quick.ask_json` 으로 묻고 `session_allowance(kind="scalp_judge")` 감속에 연동된다(옛엔 감속 연동 없음). 시간 제한은 `scalp.judge_timeout_s`.
 - A6 후보 소스: 오늘 `_scan` picks + 새 뉴스 재분석 종목 + 관심종목(`ports["scan"].watchlist(conn, market)`).
 - A7·T5-R1 동시 보유 상한(`max_positions`)은 `allowed()` 가 아니라 진입 루프가 open + pending 으로 센다(옛 동작 — `allowed()` 가 막으면 판정 대기가 버려진다).
@@ -93,3 +93,5 @@
 ## 테스트
 
 `tests/features/scalp/` — 설정·스키마·기능 등록·메시지·상태 파일·신호·판정자·진입·청산·잡·포트·CLI(`test_cli.py`, 옛 `test_cli_regime.py::test_scalp_report_and_backtest_cli`)·상태 절(`test_status.py`). 픽스처는 `conftest.py`(합성 계좌 `paper-main`·`paper-two`·`real-1`, 합성 분봉 `bars()`).
+- 일시정지 중 틱이 돌면 대기 중인 판정 결과는 버려지고 그 종목은 그날 끝으로 표시된다. 열린 포지션의 보유 조언 판정 호출은 일시정지 중에도 계속되고, 진입 판정은 돌지 않는다.
+- 일시정지 중 청산 SELL 이 접수되면 시장별 하루 1회 「단타 청산 실행: 일시정지 중」 알림을 보낸다. 청산 주문을 냈거나 끝낸 틱은 결과가 `skipped` 가 아니라 `entries_blocked`(사유)로 나와 잡 표에 정상 실행으로 보인다.

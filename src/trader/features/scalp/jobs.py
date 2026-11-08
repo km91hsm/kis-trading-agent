@@ -43,7 +43,8 @@ def has_scalp_state(state: Path | None, market: str, today: date) -> bool:
 
 
 def scalp_body(ctx: Any, job: Any) -> dict:
-    """1틱. 켜진 계좌 없음·창 밖·휴장·일시정지·시세 클라이언트 없음이면 skipped(잡 표에 보임)."""
+    """1틱(일시정지여도 돈다 — 열린 다리의 청산은 리스크 청산이라 나가고 신규 진입만 막힌다).
+    켜진 계좌 없음·창 밖·휴장·시세 클라이언트 없음이면 skipped(잡 표에 보임)."""
     market = job.market or "KR"
     settings = ctx.settings
     acc = (ctx.ports or {}).get("accounts")
@@ -57,8 +58,6 @@ def scalp_body(ctx: Any, job: Any) -> dict:
         return {"skipped": reason}
     conn = ctx.conn_factory()
     try:
-        if acc.paused(conn):
-            return {"skipped": "일시정지"}
         today = run_date_for(market, ctx.now())
         # 스위치가 모두 꺼져도 열린 다리의 청산·이월은 틱이 맡는다(신규 진입은 allowed 가 막는다)
         if not switch.any_enabled(conn, settings, acc, market) and not has_scalp_state(

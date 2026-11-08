@@ -10,7 +10,11 @@
 - `sending`·`unknown` 다리는 절대 다시 보내지 않는다. 확정은 `positions.recover`/`_confirm_leg`
   (체결 조회)가 한다. 접수 뒤 원장 기록이 실패하면 `OrderBookkeepingError`(다리는 `sending` 으로
   남아 복구 틱이 확정).
-- `paused`·`off`·`dry_run`·실전 계좌는 **기록만**(취소 요청도 내지 않는다).
+- `off`·`dry_run`·실전 계좌는 **기록만**(취소 요청도 내지 않는다). `paused` 는 진입·판단만
+  기록만이고 위험 청산(`reduce`·`continue_reduce`·`recall_entries` — 엔진 손절·만기·마감·유지
+  축소·수동 청산)은 그대로 낸다(커널 `ExecPolicy.risk_exit`). 판단 유래 축소(`run_leg` 의
+  CLOSE/REPLACE — 아침·재평가 결정)는 `reduce(risk_exit=False)` 라 일시정지 중 기록만. 일시정지
+  중 위험 청산이 접수되면 계좌별 하루 1회 `fo_exit_while_paused` 알림.
 
 M10(A1): fo 는 커널 `execution.core.transmit` 대신 이 자체 전송기를 쓴다(다리 상태와 `orders` 행을
 한 `store.tx` 로 묶고, `FoOrderRequest`·승수 금액·fo 알림 15종을 쓰기 위해). 멱등 선점·묶기는
@@ -331,6 +335,20 @@ def _notify(ctx: FoExecContext, text: str) -> None:
     notify_quietly(ctx.notifier, text)
 
 
+ALERT_FLAG = "fo_alerts:"
+
+
+def notify_once(ctx: FoExecContext, account_id: str, key: str, text: str, today: date) -> None:
+    """같은 운영일·같은 키의 알림은 한 번만(`fo_alerts:<계좌>`, 엔진 `_notify_once` 도 쓴다)."""
+    flag_key = f"{ALERT_FLAG}{account_id}"
+    flag = control.get_flag(ctx.conn, flag_key) or {}
+    sent = list(flag.get("keys") or []) if flag.get("date") == today.isoformat() else []
+    if key in sent:
+        return
+    control.set_flag(ctx.conn, flag_key, {"date": today.isoformat(), "keys": [*sent, key][-200:]})
+    _notify(ctx, text)
+
+
 def fo_mode(
     conn: sqlite3.Connection, account: Any, ports: Mapping[str, Any]
 ) -> tuple[str, str | None]:
@@ -343,13 +361,18 @@ def _paused(ctx: FoExecContext) -> bool:
     return bool(ctx.ports["accounts"].paused(ctx.conn))
 
 
-def record_only(ctx: FoExecContext, mode: str, paused: bool) -> str | None:
+def record_only(
+    ctx: FoExecContext, mode: str, paused: bool, *, risk_exit: bool = False
+) -> str | None:
     """주문·취소를 내지 않는 사유(없으면 None). 커널 `ExecPolicy.transmits` 가 False 면 그 사유
     (`dry_run` → `paused` → `mode=<모드>` 순), 전송하더라도 auto 가 아니면(approve 등 — fo 에는
-    승인 경로가 없다) `mode=<모드>`."""
-    policy = ExecPolicy(mode=mode, note=None, paused=paused, dry_run=ctx.dry_run)
+    승인 경로가 없다) `mode=<모드>`. `risk_exit=True`(축소·회수·청산)면 paused 는 사유가 아니다."""
+    policy = ExecPolicy(mode=mode, note=None, paused=paused, dry_run=ctx.dry_run,
+                        risk_exit=risk_exit)  # fmt: skip
     if not policy.transmits:
-        return "dry_run" if ctx.dry_run else "paused" if paused else f"mode={mode}"
+        if ctx.dry_run:
+            return "dry_run"
+        return "paused" if paused and not risk_exit else f"mode={mode}"
     if mode != "auto":
         return f"mode={mode}"
     return None
@@ -670,10 +693,16 @@ def _send_reduce(
     )
     quote = quote_of(ctx, pos.code, pos.kind)
     ref = leg.price if leg.price is not None else (quote.price if quote else Decimal(0))
-    return _transmit(
+    result = _transmit(
         ctx, account, leg_id=rr.leg_id, position_id=pos.id, req=req, ref_price=ref, mode=mode,
         stage=stage, today=today, intent=leg.intent, extra={"reason": reason},
     )  # fmt: skip
+    if result.get("status") == "accepted" and _paused(ctx):
+        # 여기까지 온 일시정지 중 축소는 위험 청산뿐(판단 유래는 `reduce` 가 기록만으로 끝냈다)
+        notify_once(ctx, account.id, "paused-exit", messages.fo_exit_while_paused(
+            account=account.id, code=pos.code, name=_name_of(ctx, pos.code), intent=leg.intent,
+        ), today)  # fmt: skip
+    return result
 
 
 # --- 결정 실행 ------------------------------------------------------------------------
@@ -743,8 +772,9 @@ def run_leg(
                 "request_id": env.request_id,
             },
         )
+        # 결정(아침·재평가) 유래 청산은 판단 — 일시정지 중 기록만(위험 청산 아님)
         return [reduce(ctx, account, pos, intent="CLOSE", qty=None, reason=source, round=round,
-                       request_id=env.request_id)]  # fmt: skip
+                       request_id=env.request_id, risk_exit=False)]  # fmt: skip
 
     # 진입·HOLD: 재조회 → 전체 재계산
     fi = fetch_fresh(ctx, account, pos.code if pos else None, pos.kind if pos else None)
@@ -918,7 +948,7 @@ def run_leg(
             results.append(
                 reduce(
                     ctx, account, cur, intent="RESIZE_DOWN", qty=None, reason=source, round=round,
-                    stage=od_stage, request_id=env.request_id,
+                    stage=od_stage, request_id=env.request_id, risk_exit=False,  # 판단 감액
                 )  # fmt: skip
             )
     return results
@@ -990,14 +1020,15 @@ def recall_entries(
 ) -> RecallResult:
     """살아 있는 진입 다리 전부 취소 요청 → `get_order_state` 로 확정(취소 중 추가 체결분은
     `filled_qty` 로 반영). 주문번호 없는 `sending|unknown` 다리는 건드리지 않는다(복구 틱이 확정).
-    paused·off·dry_run 이면 취소 요청도 내지 않는다."""
+    off·dry_run 이면 취소 요청도 내지 않는다. 회수는 위험 축소라 일시정지 중에도 낸다(판단 경로
+    `run_leg` 는 기록만 사유를 먼저 보고 여기 오지 않는다)."""
     conn = ctx.conn
     rr = RecallResult()
     legs = [x for x in store.live_legs(conn, position_id=position_id) if is_entry(x.intent)]
     if not legs:
         return rr
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx), risk_exit=True))
     if hold is not None:
         rr.pending = len(legs)
         rr.errors.append(f"회수 보류({hold})")
@@ -1129,15 +1160,17 @@ def reduce(
     round: int = 0,
     stage: str | None = None,
     request_id: str | None = None,
+    risk_exit: bool = False,
 ) -> dict[str, Any]:
     """§5 청산·축소 절차: 진입 회수 → 잔고 재조회로 잔량 확정 → 축소 다리 1개(첫 시도 지정가,
     재시도는 시장가). 다음 틱은 `continue_reduce`. `qty=None` 은 전량(RESIZE_DOWN 은 목표
-    초과분)."""
+    초과분). 기본은 fail-closed(`risk_exit=False` — 일시정지 중 기록만). 위험 청산(엔진 보호선·
+    유지 축소·재시도·수동 청산)은 호출자가 `risk_exit=True` 를 명시한다."""
     conn, cfg = ctx.conn, ctx.settings.fo
     _, today = _today(ctx)
     stage = stage or f"_fo_order_{account.id}_{intent.lower()}_{pos.id}"
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx), risk_exit=risk_exit))
     if hold is not None:
         r = {"position_id": pos.id, "intent": intent, "status": "recorded", "record_only": hold,
              "reason": reason}  # fmt: skip
@@ -1293,11 +1326,11 @@ def _resume_reduce(
     if intent == "RESIZE_DOWN":
         if cur.status in ("resizing", "exit_failed") and cur.qty_held > cur.qty_target:
             return reduce(ctx, account, cur, intent="RESIZE_DOWN", qty=None,
-                          reason="재시도(다리 종료)", round=rnd)  # fmt: skip
+                          reason="재시도(다리 종료)", round=rnd, risk_exit=True)  # fmt: skip
         return finalize(ctx, cur)
     if cur.qty_held > 0 and cur.status in ("closing", "exit_failed"):
         return reduce(ctx, account, cur, intent=intent, qty=None, reason="재시도(다리 종료)",
-                      round=rnd)  # fmt: skip
+                      round=rnd, risk_exit=True)  # fmt: skip
     return finalize(ctx, cur)
 
 
@@ -1314,7 +1347,8 @@ def continue_reduce(
         return {"position_id": pos.id, "status": "missing"}
     leg = store.get_leg(conn, cur.active_reduce_leg_id) if cur.active_reduce_leg_id else None
     mode, _ = fo_mode(conn, account, ctx.ports)
-    hold = real_guard(account, record_only(ctx, mode, _paused(ctx)))
+    # 이미 시작한 축소의 이어가기 — 반쯤 닫힌 포지션을 남기지 않게 위험 청산으로 본다
+    hold = real_guard(account, record_only(ctx, mode, _paused(ctx), risk_exit=True))
     if leg is None or not leg.live:
         if hold is not None:
             return finalize(ctx, cur)
@@ -1390,4 +1424,5 @@ def continue_reduce(
     assert cur is not None
     if cur.qty_held == 0 or (leg.intent == "RESIZE_DOWN" and cur.qty_held <= cur.qty_target):
         return finalize(ctx, cur)
-    return reduce(ctx, account, cur, intent=leg.intent, qty=None, reason="재시도", round=leg.round)
+    return reduce(ctx, account, cur, intent=leg.intent, qty=None, reason="재시도", round=leg.round,
+                  risk_exit=True)  # fmt: skip

@@ -248,7 +248,7 @@ describe("시스템 화면", () => {
   test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
     await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
     const h = section("health");
-    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음");
+    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 매수·진입과 승인을 멈춤 · 손절·청산은 계속");
     expect(h.textContent).toContain("▲ 메뉴");
     expect(Array.from(h.querySelectorAll("a")).find((a) => a.textContent === "재개")?.getAttribute("href")).toBe("/accounts");
   });
@@ -542,6 +542,16 @@ describe("시스템 화면", () => {
     expect(rows[0].querySelector(".chip")?.textContent).toBe("접수");
     expect(rows[0].textContent).toContain("0/2");
     expect(rows[0].textContent).toContain("시장가");
+  });
+
+  test("파생 절: 계좌 상태는 한글 라벨(entries_paused → 새 진입 멈춤)", async () => {
+    const fo = {
+      accounts: [{ id: "paper-fo", env: "paper", mode: "auto", paused: true, state: "entries_paused", enabled: true, triggers: [] }],
+      context: null,
+    };
+    await mount(routes({ "GET /api/system/fo": fo }));
+    expect(section("fo").textContent).toContain("새 진입 멈춤");
+    expect(section("fo").textContent).not.toContain("entries_paused");
   });
 
   test("국면·단타·파생: 비율은 퍼센트로, 상태는 한글 칩, 단타 시장은 표", async () => {

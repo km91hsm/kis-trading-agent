@@ -310,11 +310,10 @@ def test_balance_mismatch_marks_unknown(conn):
 # --- 기록만·skip ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("how", ["dry_run", "paused", "off"])
-def test_paused_off_dry_run_no_cancel_no_order(conn, how):
+@pytest.mark.parametrize("how", ["dry_run", "off"])
+def test_off_dry_run_no_cancel_no_order(conn, how):
+    """off·dry_run 은 위험 청산(손절 reduce·진입 회수)이어도 주문·취소를 내지 않는다."""
     ctx = make_ctx(conn, dry_run=how == "dry_run")
-    if how == "paused":
-        control.set_flag(conn, "paused", True)
     if how == "off":
         modes.set_account_mode(conn, account(), "off")
     broker = ctx.brokers[ACCT]
@@ -331,6 +330,78 @@ def test_paused_off_dry_run_no_cancel_no_order(conn, how):
     r = executor.reduce(ctx, account(), pos, intent="STOP", qty=None, reason="손절")
     assert r["status"] == "recorded" and broker.cancelled == [] and broker.orders == []
     assert store.get_leg(conn, leg_id).status == "accepted"
+
+
+def test_paused_records_entry_but_transmits_risk_reduce(conn):
+    """일시정지: 진입 다리는 기록만, 손절 reduce 는 진입 회수(취소) 뒤 축소 주문을 낸다."""
+    ctx = make_ctx(conn)
+    control.set_flag(conn, "paused", True)
+    broker = ctx.brokers[ACCT]
+    out = executor.run_leg(ctx, account(), env())
+    assert out[0]["status"] == "recorded" and out[0]["record_only"] == "paused"
+    assert broker.orders == [] and store.open_positions(conn, ACCT) == []
+    pos = _held_position(conn, ctx, qty=2, status="resizing", qty_target=4)
+    with store.tx(conn):
+        leg_id = store.insert_leg(conn, position_id=pos.id, account_id=ACCT, intent="RESIZE_UP",
+                                  round=0, attempt=1, qty=2, price=Decimal("350.5"),
+                                  order_type="LIMIT")  # fmt: skip
+        store.set_leg(conn, leg_id, status="accepted", order_no="E1")
+    broker.states["E1"] = state("E1", order_qty=2, filled=0, remaining=0, cancelled=2,
+                                terminal=True, st="cancelled")  # fmt: skip
+    r = executor.reduce(ctx, account(), store.get_position(conn, pos.id), intent="STOP",
+                        qty=None, reason="손절", risk_exit=True)  # fmt: skip
+    assert broker.cancelled == [("E1", 0)] and store.get_leg(conn, leg_id).status == "cancelled"
+    assert r["status"] == "accepted" and [o.side for o in broker.orders] == ["SELL"]
+    assert sum("일시정지" in t for t in ctx.notifier.msgs) == 1
+    # 같은 날 두 번째 위험 청산 접수는 다시 알리지 않는다(하루 1회)
+    pos2 = _held_position(conn, ctx, qty=1, code="105W12")
+    executor.reduce(ctx, account(), pos2, intent="STOP", qty=None, reason="손절", risk_exit=True)
+    assert sum("일시정지" in t for t in ctx.notifier.msgs) == 1
+
+
+def test_paused_reduce_default_is_fail_closed(conn):
+    """`reduce` 의 기본(`risk_exit=False`)은 일시정지 중 기록만 — 위험 청산 호출자만 명시해 낸다."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    control.set_flag(conn, "paused", True)
+    r = executor.reduce(ctx, account(), pos, intent="CLOSE", qty=None, reason="t")
+    assert (r["status"], r["record_only"]) == ("recorded", "paused")
+    assert ctx.brokers[ACCT].orders == [] and store.get_position(conn, pos.id).status == "held"
+
+
+def test_paused_decision_resize_down_is_record_only(conn):
+    """판단(재평가·아침 결정)의 RESIZE↓ 는 일시정지 중 기록만 — 목표도 그대로."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=3, qty_target=3, leverage_used=1.0)
+    control.set_flag(conn, "paused", True)
+    e = env(decision(intent="RESIZE", target_leverage=0.2), position_id=pos.id,
+            expected_version=pos.version)  # fmt: skip
+    out = executor.run_leg(ctx, account(), e, source="reeval")
+    assert out[0]["status"] == "recorded" and out[0]["record_only"] == "paused"
+    assert out[0]["intent"] == "RESIZE_DOWN"
+    assert ctx.brokers[ACCT].orders == [] and store.get_position(conn, pos.id).qty_target == 3
+
+
+def test_paused_decision_close_is_record_only(conn):
+    """재평가·아침 결정의 CLOSE(`run_leg`)는 판단 — 일시정지 중 기록만."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2)
+    control.set_flag(conn, "paused", True)
+    e = env(decision(intent="CLOSE", direction="FLAT", stop_pt=None, target_leverage=0),
+            position_id=pos.id, expected_version=pos.version)  # fmt: skip
+    out = executor.run_leg(ctx, account(), e, source="reeval")
+    assert out[0]["status"] == "recorded" and out[0]["record_only"] == "paused"
+    assert ctx.brokers[ACCT].orders == [] and store.get_position(conn, pos.id).status == "held"
+    assert not any("일시정지" in t for t in ctx.notifier.msgs)
+
+
+def test_paused_continue_reduce_resumes(conn):
+    """진행 중 축소(closing, 다리 없음)는 일시정지 중에도 이어서 낸다."""
+    ctx = make_ctx(conn)
+    pos = _held_position(conn, ctx, qty=2, status="closing")
+    control.set_flag(conn, "paused", True)
+    r = executor.continue_reduce(ctx, account(), pos)
+    assert r["status"] == "accepted" and ctx.brokers[ACCT].orders[0].side == "SELL"
 
 
 def test_real_account_skipped(conn):

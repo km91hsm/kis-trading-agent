@@ -117,7 +117,7 @@ def test_stop_exit_runs_after_bear_switch_and_ret_uses_fill_prices(
     market.prices[T] = Decimal("9800")  # 손절 −1% 아래
     _advance(ctx, 3)
     out = engine.tick(ctx, market="KR", today=D)
-    assert "bear" in out["skipped"]  # 신규 진입은 막히지만
+    assert "skipped" not in out and "bear" in out["entries_blocked"]  # 신규 진입은 막히지만
     assert [r["qty"] for r in _sells(conn)] == [49]  # 청산은 나간다
     st = _st(project)
     assert st["open"][0]["status"] == "closing" and st["closed"] == []
@@ -344,8 +344,8 @@ def test_unfinished_position_carries_over_to_next_day(scalp_ctx, market, brokers
     assert out["entries"] == []
 
 
-def test_paused_does_not_drop_open_position(scalp_ctx, market, brokers, conn, project):
-    """Review Focus 2: 일시정지 중 손절 조건 → 주문·취소 없이 closing 유지, 해제 뒤 첫 틱에 청산."""
+def test_paused_still_exits_open_position(scalp_ctx, market, brokers, conn, project):
+    """일시정지 중에도 손절 조건이면 SELL 이 나간다(리스크 청산) — 신규 진입만 막힌다."""
     ctx = _ctx(scalp_ctx, market)
     _enter(ctx, project)
     b = brokers["paper-main"]
@@ -355,12 +355,79 @@ def test_paused_does_not_drop_open_position(scalp_ctx, market, brokers, conn, pr
     market.prices[T] = Decimal("9900")
     _advance(ctx, 3)
     out = engine.tick(ctx, market="KR", today=D)
-    assert out["skipped"] == "일시정지" and _sells(conn) == []  # 일시정지: 주문 없음
-    assert _st(project)["open"][0]["status"] == "closing"
-    modes.set_paused(conn, False)
-    _advance(ctx, 4)
+    assert "skipped" not in out and out["entries_blocked"] == "일시정지"  # 청산이 돈 틱
+    assert [r["qty"] for r in _sells(conn)] == [49]
+    notes = [m for m in ctx.notifier.msgs if "일시정지 중이지만 단타 청산" in m]
+    assert len(notes) == 1 and engine.label(ctx, "KR", T) in notes[0]  # 종목명(코드) 라벨
+    res = [
+        {"approved": True, "account_id": "paper-main", "order": {"order_id": 99, "accepted": True}}
+    ]
+    exits.notify_paused_exit(ctx, "KR", D, {"ticker": T}, {"paper-main": {}}, res)
+    notes = [m for m in ctx.notifier.msgs if "일시정지 중이지만 단타 청산" in m]
+    assert len(notes) == 1  # 하루 1회
+
+
+def test_paused_rejected_exit_sends_no_notice_nor_flag(scalp_ctx, market, brokers, conn, project):
+    """거절된 SELL(orders 행은 남는다)은 알리지도 하루 플래그를 쓰지도 않고, 틱은 건너뜀."""
+    from trader.kernel.broker.models import OrderResult
+    from trader.kernel.ledger import control
+
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10050")]
+    b.positions = [_pos(49)]
+    b.place_order = lambda req: OrderResult(order_no=None, accepted=False, message="거절")
+    modes.set_paused(conn, True)
+    market.prices[T] = Decimal("9900")
+    _advance(ctx, 3)
+    out = engine.tick(ctx, market="KR", today=D)
+    assert [r["status"] for r in _sells(conn)] == ["rejected"]
+    assert not [m for m in ctx.notifier.msgs if "일시정지 중이지만 단타 청산" in m]
+    assert not control.get_flag(conn, f"scalp_exit_paused_notified:KR:{D.isoformat()}")
+    # 거절돼 열린 다리가 남았다 — 계속 지켜보는 틱이라 skipped 가 아니다
+    assert out["entries_blocked"] == "일시정지" and "skipped" not in out
+    assert "exit_orders" not in out
+
+
+def test_unpaused_exit_sends_no_paused_notice(scalp_ctx, market, brokers, conn, project):
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10050")]
+    b.positions = [_pos(49)]
+    market.prices[T] = Decimal("9900")
+    _advance(ctx, 3)
     engine.tick(ctx, market="KR", today=D)
     assert [r["qty"] for r in _sells(conn)] == [49]
+    assert not [m for m in ctx.notifier.msgs if "일시정지" in m]
+
+
+def test_paused_blocks_new_scalp_entry(scalp_ctx, market, brokers, conn, project):
+    ctx = _ctx(scalp_ctx, market)
+    modes.set_paused(conn, True)
+    scan_checkpoint(project, "KR", [T])
+    out = engine.tick(ctx, market="KR", today=D)
+    assert out["skipped"] == "일시정지" and out["entries"] == []  # 청산이 없으면 skipped
+    assert conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0] == 0
+
+
+def test_paused_approve_mode_account_does_not_sell_or_request_approval(
+    scalp_ctx, market, brokers, conn, project, accounts
+):
+    """can_trade 의 auto 요구: 승인 모드 계좌는 일시정지 중에도 매도·승인 요청을 만들지 않는다."""
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10050")]
+    b.positions = [_pos(49)]
+    modes.set_account_mode(conn, accounts[0], "approve")
+    modes.set_paused(conn, True)
+    market.prices[T] = Decimal("9900")
+    _advance(ctx, 3)
+    engine.tick(ctx, market="KR", today=D)
+    assert _sells(conn) == []
+    assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0] == 0
 
 
 def test_entering_position_adopts_ledger_buy_after_crash(scalp_ctx, market, brokers, project):
@@ -603,7 +670,7 @@ def test_all_switches_off_drops_pending_but_exits_still_run(
     market.prices[T] = Decimal("9800")  # 손절 −1% 아래
     _advance(ctx, 3)
     out = engine.tick(ctx, market="KR", today=D)
-    assert "켜진 계좌 없음" in out["skipped"]
+    assert "skipped" not in out and "켜진 계좌 없음" in out["entries_blocked"]
     after = _st(project)
     assert after["pending"] == {} and "000660" in after["done"]
     assert conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0] == buys

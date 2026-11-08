@@ -41,6 +41,18 @@ def test_policy_transmits_and_constants():
     assert gp.reasons == [] and gp.intents == [] and gp.verdict_payload == {}
 
 
+def test_policy_transmits_risk_exit_ignores_paused():
+    def p(mode="auto", paused=True, dry_run=False, risk_exit=False):
+        return types.ExecPolicy(
+            mode=mode, note=None, paused=paused, dry_run=dry_run, risk_exit=risk_exit
+        )
+
+    assert p(risk_exit=True).transmits
+    assert not p(risk_exit=True, mode="off").transmits
+    assert not p(risk_exit=True, dry_run=True).transmits
+    assert not p().transmits  # risk_exit 기본값 False
+
+
 def test_bookkeeping_error_message():
     e = types.OrderBookkeepingError("0001", ValueError("디스크"))
     assert e.order_no == "0001" and "접수번호 0001" in str(e) and "디스크" in str(e)

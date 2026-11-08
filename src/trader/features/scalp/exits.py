@@ -27,7 +27,10 @@ from trader.features.scalp.state import (
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.execution import ledger as xledger
+from trader.kernel.execution.core import notify_quietly
 from trader.kernel.execution.types import DEAD_STATUSES
+from trader.kernel.ledger import control
+from trader.kernel.notify import messages
 
 logger = logging.getLogger("trader.scalp")
 
@@ -186,12 +189,13 @@ def cancel(
 
 
 def can_trade(ctx: Any, acct: str) -> bool:
-    """실제 주문 다리를 건드려도 되는가: dry-run 아님·일시정지 아님·계좌 실효 모드 auto. 그 밖이면
-    취소도 매도도 하지 않는다 — 승인 요청을 틱마다 쌓거나 안전장치를 우회하지 않게(A8)."""
+    """실제 주문 다리를 건드려도 되는가: dry-run 아님·계좌 실효 모드 auto(일시정지는 보지 않는다 —
+    청산 SELL 은 리스크 청산이라 일시정지 중에도 나간다).
+    그 밖이면 취소도 매도도 하지 않는다 — 승인 요청을 틱마다 쌓거나 안전장치를 우회하지 않게(A8)."""
     from trader.features.scalp import engine
 
     acc = ctx.ports["accounts"]
-    if ctx.dry_run or acc.paused(ctx.conn):
+    if ctx.dry_run:
         return False
     account = next((a for a in engine.accounts(ctx) if a.id == acct), None)
     return account is not None and acc.policy(ctx.conn, account)[0] == "auto"
@@ -242,6 +246,33 @@ def px(v: Decimal) -> str:
 
 
 # --- 청산 단계 ---------------------------------------------------------------------------
+
+
+def notify_paused_exit(
+    ctx: Any, market: str, today: date, pos: dict, lg: dict[str, dict], results: list[dict]
+) -> None:
+    """일시정지 중 청산 SELL 이 실제로 접수되면 하루 1회(시장별) 알린다."""
+    from trader.features.scalp import engine
+
+    accepted = any(
+        r.get("approved")
+        and not r.get("error")
+        and not (lg.get(r.get("account_id")) or {}).get("dry")
+        and (r.get("order") or {}).get("accepted")
+        for r in results
+    )
+    if not accepted or not ctx.ports["accounts"].paused(ctx.conn):
+        return
+    key = f"scalp_exit_paused_notified:{market}:{today.isoformat()}"
+    if control.get_flag(ctx.conn, key):
+        return
+    control.set_flag(ctx.conn, key, True)
+    notify_quietly(
+        ctx.notifier,
+        messages.scalp_exit_while_paused(
+            market=market, labels=[engine.label(ctx, market, pos["ticker"])]
+        ),
+    )
 
 
 def close_step(
@@ -319,7 +350,15 @@ def close_step(
                     need.pop(r["account_id"], None)
             elif order is not None and order.get("order_id") is not None:
                 leg.setdefault("sell", []).append(int(order["order_id"]))
+        notify_paused_exit(ctx, market, today, pos, lg, results)
         persist()  # 접수한 청산 주문 id 를 바로 남긴다(틱 중간에 끊겨도 다시 내지 않게)
+        if any(
+            r.get("approved")
+            and not r.get("error")
+            and (r.get("dry_run") or (r.get("order") or {}).get("accepted"))
+            for r in results
+        ):
+            pos["_exit_sent"] = True  # 메모리 표시 — persist 뒤라 저장되지 않는다
         waiting = waiting or bool(need)
     if waiting:
         return None
@@ -420,6 +459,8 @@ def check_exits(
         res = close_step(
             ctx, market=market, today=today, pos=pos, price=q, skip=skip, persist=persist
         )
+        if pos.pop("_exit_sent", False):  # 이 틱에 청산 SELL 이 접수(또는 dry-run 매도)됐다
+            out["exit_orders"] = out.get("exit_orders", 0) + 1
         if res is None:
             continue
         st["open"].remove(pos)

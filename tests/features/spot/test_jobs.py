@@ -201,10 +201,10 @@ class _Sent:
         return True
 
 
-def test_paused_daemon_monitor_tick_notifies_stop_paused_once(project, conn, settings):
+def test_paused_daemon_monitor_tick_sells_stop_loss_and_notifies_once(project, conn, settings):
     """Ruling 20(a): paused 상태의 데몬 monitor 틱은 게이트에서 건너뛰지 않고 `monitor_body` 가
-    돈다 — 손절선 도달 종목은 주문 없이 `stop_paused` 를 두 틱에 걸쳐 1회만, 다른 종목 트리거는
-    기록(재평가 큐 없음)."""
+    돈다 — 손절선 도달 종목은 손절 SELL 을 내고 `stop_while_paused` 를 두 틱에 걸쳐 1회만,
+    다른 종목 트리거는 기록(재평가 큐 없음)."""
     import threading
     from decimal import Decimal
 
@@ -264,11 +264,11 @@ def test_paused_daemon_monitor_tick_notifies_stop_paused_once(project, conn, set
     (job,) = build([feature], schedule=schedule, settings=settings, markets=["KR"], ctx=deps)
     outs = [run_job(conn, job, deps, stop_event=deps.stop_event) for _ in range(2)]
     assert all("skipped" not in o for o in outs), outs  # 게이트가 일시정지로 건너뛰지 않는다
-    assert all(o["checked"] == 2 and o["stop_loss_orders"] == 0 for o in outs)
-    paused_msgs = [m for m in sent.msgs if "일시정지" in m and "손절" in m]
+    assert all(o["checked"] == 2 for o in outs)
+    assert [o["stop_loss_orders"] for o in outs] == [1, 0]
+    paused_msgs = [m for m in sent.msgs if "일시정지 중이지만 손절 매도를 실행" in m]
     assert len(paused_msgs) == 1
-    assert brokers["paper-main"].orders == [] and brokers["paper-main"].cancelled == []
-    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    assert [o.ticker for o in brokers["paper-main"].orders] == ["005930"]
     rows = conn.execute("SELECT ticker, kind, handled_at FROM triggers").fetchall()
     assert {r["ticker"] for r in rows} == {"000660"} and all(r["handled_at"] is None for r in rows)
     assert "queued" not in outs[0]
