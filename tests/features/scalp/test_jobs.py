@@ -18,7 +18,7 @@ from trader.features.accounts import modes
 from trader.features.accounts.feature import FEATURE as ACCOUNTS
 from trader.features.accounts.gates import build_monitor_gate
 from trader.features.scalp import jobs as scalp_jobs
-from trader.features.scalp import judge
+from trader.features.scalp import judge, switch
 from trader.features.scalp.feature import FEATURE
 from trader.features.scalp.schemas import ScalpVerdict
 from trader.features.scalp.state import load_state, save_state
@@ -27,6 +27,7 @@ from trader.kernel.config.loader import load
 from trader.kernel.daemon import jobs as daemon_jobs
 from trader.kernel.daemon import runner
 from trader.kernel.ledger import db
+from trader.kernel.ledger.control import delete_flag, set_flag
 from trader.kernel.registry import discover
 from trader.kernel.session.run_store import run_date_for
 
@@ -39,7 +40,7 @@ def schedule(project):
 @pytest.fixture
 def make_deps(settings, schedule, ports, project, conn):
     """`DaemonDeps`(monitor 게이트는 accounts 공급자, 휴장 없음). conn 픽스처가 스키마를 만든다."""
-    ports["accounts"].holiday_fn = lambda: (lambda m, d: False)
+    ports["accounts"].holiday_fn = lambda: lambda m, d: False
 
     def make(now=NOW, **kw) -> runner.DaemonDeps:
         base = {
@@ -88,7 +89,10 @@ def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings,
     cfg = settings.scalp.model_copy(update={"enabled": False})
     off = settings.model_copy(update={"scalp": cfg})
     deps = make_deps(settings=off)
-    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "scalp.enabled=false"}
+    assert scalp_jobs.scalp_body(deps, _job(deps)) == {"skipped": "단타 켜진 계좌 없음"}
+    set_flag(conn, switch.flag_key("paper-main"), True)  # 계좌 스위치가 yaml 보다 앞선다
+    assert "skipped" not in scalp_jobs.scalp_body(deps, _job(deps))
+    delete_flag(conn, switch.flag_key("paper-main"))
     deps = make_deps()  # NOW = 수 10:30 KST, 켜짐
     out = scalp_jobs.scalp_body(deps, _job(deps))
     assert out["entries"] == [] and out["candidates"] == 0  # _scan 없음 → 후보 0

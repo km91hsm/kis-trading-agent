@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from trader.features.scalp import engine
+from trader.features.scalp import engine, switch
 from trader.features.scalp.judge import judge_for, shutdown_judge
 from trader.kernel.notify.telegram import NullNotifier
 from trader.kernel.registry.types import JobSpec
@@ -20,11 +20,9 @@ logger = logging.getLogger("trader.scalp")
 
 
 def scalp_body(ctx: Any, job: Any) -> dict:
-    """1틱. 꺼짐·창 밖·휴장·일시정지·시세 클라이언트 없음이면 skipped(잡 표에는 보인다)."""
+    """1틱. 켜진 계좌 없음·창 밖·휴장·일시정지·시세 클라이언트 없음이면 skipped(잡 표에 보임)."""
     market = job.market or "KR"
     settings = ctx.settings
-    if not settings.scalp.enabled:
-        return {"skipped": "scalp.enabled=false"}
     acc = (ctx.ports or {}).get("accounts")
     if acc is None:
         return {"error": "accounts 포트 없음"}
@@ -38,6 +36,8 @@ def scalp_body(ctx: Any, job: Any) -> dict:
     try:
         if acc.paused(conn):
             return {"skipped": "일시정지"}
+        if not switch.any_enabled(conn, settings, acc, market):
+            return {"skipped": "단타 켜진 계좌 없음"}
         market_client = acc.market_client()
         if market_client is None:
             return {"skipped": "시세 클라이언트 없음"}
