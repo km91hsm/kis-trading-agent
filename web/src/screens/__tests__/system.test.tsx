@@ -205,6 +205,23 @@ describe("시스템 화면", () => {
     expect(Array.from(h.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("상태");
   });
 
+  test("헬스 머리: 운영 점검 한 줄 + 자동매매 동작 중", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: false, at: null, by: null } }));
+    const h = section("health");
+    expect(h.textContent).toContain("운영 점검: ");
+    expect(h.textContent).toContain("3개 영역");
+    expect(h.textContent).toContain("자동매매: 동작 중");
+    expect(Array.from(h.querySelectorAll("a")).some((a) => a.textContent === "재개")).toBe(false);
+  });
+
+  test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
+    const h = section("health");
+    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 주문·승인을 내지 않음");
+    expect(h.textContent).toContain("▲ 메뉴");
+    expect(Array.from(h.querySelectorAll("a")).find((a) => a.textContent === "재개")?.getAttribute("href")).toBe("/accounts");
+  });
+
   test("헬스 「지금 점검」 → GET /system/health?live=1 로 다시 그린다", async () => {
     await mount(routes());
     const h = section("health");

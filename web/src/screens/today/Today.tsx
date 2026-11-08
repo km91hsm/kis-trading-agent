@@ -8,6 +8,7 @@ import { useSearchParams } from "react-router-dom";
 import { DatePicker } from "../../components/DatePicker";
 import { Empty } from "../../components/Empty";
 import { PageTabs } from "../../components/PageTabs";
+import { PauseBanner } from "../../components/PauseNotice";
 import { Stats } from "../../components/Stats";
 import { useKstDate, useResource } from "../../lib/hooks";
 import type { NavPage } from "../../lib/nav";
@@ -117,6 +118,7 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
         <DatePicker value={date} onChange={(v) => v && setDate(v)} max={today} />
       </header>
       <PageTabs screen="today" label="오늘 페이지" search={search} />
+      <PauseBanner />
 
       <OperationsSummary historical={date !== today} />
 

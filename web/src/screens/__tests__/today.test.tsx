@@ -75,6 +75,33 @@ const patches = () => ff!.calls.filter((c) => c.init?.method === "PATCH");
 const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
 
 describe("오늘 화면", () => {
+  test("일시정지 배너: paused 면 문구·경로·재개 링크, 아니면 없음, at 없으면 경로 생략", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "telegram" } }));
+    const b = document.querySelector(".pause-banner") as HTMLElement;
+    expect(b.textContent).toContain("자동매매 전체 일시정지 중 · ");
+    expect(b.textContent).toContain("텔레그램");
+    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 새 주문만 멈춤");
+    expect(b.querySelector("a")?.getAttribute("href")).toBe("/accounts");
+  });
+
+  test("일시정지 배너: paused=false 면 없음", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: false, at: null, by: null } }));
+    expect(document.querySelector(".pause-banner")).toBeNull();
+  });
+
+  test("일시정지 배너: at 이 없으면 시각·경로 생략", async () => {
+    await mount(routes({ "GET /api/system/pause": { paused: true, at: null, by: null } }));
+    const b = document.querySelector(".pause-banner") as HTMLElement;
+    expect(b.textContent).toContain("전체 일시정지 중");
+    expect(b.textContent).not.toContain("▲ 메뉴");
+    expect(b.textContent).not.toContain(" · ");
+  });
+
+  test("레인 카드 paused 배지에 「계좌 모드와 별개」 설명", async () => {
+    await mount(routes({ "GET /api/accounts": [fixtureAccount({ paused: true })] }));
+    expect(section("spot-lane").textContent).toContain("전체 자동매매 일시정지 — 계좌 모드와 별개");
+  });
+
   test("섹션 컨테이너는 데이터 전에 있고, 계좌 없는 레인은 hidden", async () => {
     ff = installFakeFetch(routes());
     render(
