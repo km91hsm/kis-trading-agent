@@ -39,7 +39,12 @@ export type UsageResp = {
   windows: { h5: UsageWindow; d7: UsageWindow; today: { sessions: number; cap: number } };
   caps_by_kind: { kind: string; used: number; cap: number | null }[];
   note: string;
+  /** Claude 하루 세션 제한(화면 설정 control 이 설정 파일 yaml 보다 우선) */
+  session_cap?: { value: number; source: "control" | "yaml"; default: number };
 };
+
+/** Codex 사용량 조절 — over 면 새 분석은 Claude 강세·약세로 */
+export type CodexThrottle = { enabled: boolean; source: "control" | "yaml"; hard_pct: number; state: "ok" | "over"; reason: string | null };
 
 export type CodexLimits = {
   status: "ready" | "stale" | "unavailable";
@@ -53,7 +58,8 @@ export type CodexLimits = {
 export type CodexUsageResp = {
   enabled: boolean;
   rate_limits: CodexLimits;
-  usage: { calls: number; daily_call_cap: number; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+  usage: { calls: number; daily_call_cap: number; cap_source?: "control" | "yaml"; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+  throttle?: CodexThrottle;
 };
 
 export function codexLimitReason(reason: string | null | undefined): string {

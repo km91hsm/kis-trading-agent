@@ -96,3 +96,68 @@ test("HTTP 갱신 실패 후 남아 있는 값도 이전 관측임을 표시한�
   expect(section?.textContent ?? "").toContain("이전 프로그램 기록");
   expect(section?.textContent ?? "").toContain("4 / 80회");
 });
+
+// --- 하루 제한·Codex 사용량 조절 설정 (2026-11-08) ---
+import { tokenStore } from "../../lib/api";
+
+const buttonIn = (root: ParentNode, text: string) => Array.from(root.querySelectorAll("button")).find((b) => b.textContent === text) as HTMLButtonElement | undefined;
+const typeInto = (input: HTMLInputElement, value: string) => act(() => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+const withThrottle = (over: object = {}) => ({ ...codex, usage: { ...codex.usage, cap_source: "yaml" }, throttle: { enabled: true, source: "yaml", hard_pct: 0.95, state: "ok", reason: null, ...over } });
+const settingsRoutes = (codexResp: object = withThrottle()) => ({
+  ...routes(),
+  "GET /api/system/codex-usage": codexResp,
+  "PATCH /api/settings/session-cap": (_u: URL, init?: RequestInit) => ({ value: (JSON.parse(String(init?.body)) as { cap: number | null }).cap ?? 80, source: "control", default: 80 }),
+  "PATCH /api/settings/codex-throttle": withThrottle({ enabled: false, source: "control" }),
+  "PATCH /api/settings/codex-call-cap": withThrottle(),
+});
+const patchBodies = (path: string) => fake!.calls.filter((c) => c.init?.method === "PATCH" && String(c.url).includes(path)).map((c) => JSON.parse(String(c.init?.body)));
+
+test("Claude 하루 세션 제한: 「제한 변경」으로 새 값 저장, 「기본값으로」는 null", async () => {
+  tokenStore.set("tok");
+  fake = installFakeFetch(settingsRoutes());
+  const { container } = render(<Usage />);
+  await flush();
+  const claude = container.querySelector('[aria-label="Claude 하루 세션 제한"]') as HTMLElement;
+  expect(claude.textContent).toContain("설정 파일");
+  await act(async () => buttonIn(claude, "제한 변경")!.click());
+  typeInto(claude.querySelector('input[type="number"]') as HTMLInputElement, "120");
+  await act(async () => buttonIn(claude, "저장")!.click());
+  await flush();
+  await act(async () => buttonIn(claude, "제한 변경")!.click());
+  await act(async () => buttonIn(claude, "기본값으로")!.click());
+  await flush();
+  expect(patchBodies("/settings/session-cap")).toEqual([{ cap: 120 }, { cap: null }]);
+});
+
+test("Codex 사용량 조절: 상태 한 줄과 Confirm 뒤 PATCH /settings/codex-throttle {enabled:false}", async () => {
+  tokenStore.set("tok");
+  fake = installFakeFetch(settingsRoutes());
+  const { container } = render(<Usage />);
+  await flush();
+  const section = container.querySelector('[aria-label="Codex 사용량"]') as HTMLElement;
+  expect(section.textContent).toContain("사용량 조절 켜짐");
+  await act(async () => buttonIn(section, "조절 끄기")!.click());
+  const dlg = document.querySelector('[role="dialog"]') as HTMLElement;
+  await act(async () => buttonIn(dlg, "확인")!.click());
+  await flush();
+  expect(patchBodies("/settings/codex-throttle")).toEqual([{ enabled: false }]);
+});
+
+test("Codex 하루 호출 제한 변경과, 사용률 초과 때 새 분석은 Claude 로 넘어간다는 안내", async () => {
+  tokenStore.set("tok");
+  fake = installFakeFetch(settingsRoutes(withThrottle({ state: "over", reason: "Codex 5시간 사용률 97% ≥ 95%" })));
+  const { container } = render(<Usage />);
+  await flush();
+  const section = container.querySelector('[aria-label="Codex 사용량"]') as HTMLElement;
+  expect(section.textContent).toContain("97%");
+  expect(section.textContent).toContain("새 분석은 Claude");
+  const cap = section.querySelector('[aria-label="Codex 하루 호출 제한"]') as HTMLElement;
+  await act(async () => buttonIn(cap, "제한 변경")!.click());
+  typeInto(cap.querySelector('input[type="number"]') as HTMLInputElement, "30");
+  await act(async () => buttonIn(cap, "저장")!.click());
+  await flush();
+  expect(patchBodies("/settings/codex-call-cap")).toEqual([{ cap: 30 }]);
+});

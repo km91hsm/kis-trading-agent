@@ -23,6 +23,7 @@ export function fixtureUsage(
     },
     caps_by_kind: [],
     note: "",
+    session_cap: { value: 40, source: "yaml", default: 40 },
   };
 }
 

@@ -58,7 +58,8 @@ def test_codex_usage_is_visible_when_debate_is_off_and_cli_missing(project):
     data = response.json()
     assert data["enabled"] is False
     assert data["usage"]["calls"] == 0
-    assert data["usage"]["daily_call_cap"] == 80
+    assert data["usage"]["daily_call_cap"] == 80 and data["usage"]["cap_source"] == "yaml"
+    assert data["throttle"]["enabled"] is True and data["throttle"]["state"] == "ok"
     assert data["rate_limits"]["status"] == "unavailable"
     assert data["rate_limits"]["reason"] == "cli_missing"
     assert data["rate_limits"]["five_hour"] is None

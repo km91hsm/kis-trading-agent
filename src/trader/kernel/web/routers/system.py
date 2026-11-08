@@ -202,6 +202,7 @@ def codex_usage_view(request: Request) -> dict:
     return {
         "enabled": status["enabled"],
         "usage": status["usage"],
+        "throttle": status["throttle"],
         "rate_limits": codex_usage.read_limits(deps.settings.llm.codex_debate.bin, now=now),
     }
 
