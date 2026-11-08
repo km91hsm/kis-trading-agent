@@ -126,7 +126,7 @@ def test_app_tray_runs_daemon_in_thread_and_quits(fakes, monkeypatch):
     assert names.index("web_stop") < names.index("shutdown") < names.index("tray_done")
     assert names.count("shutdown") == 1 and ("shutdown", True) in calls
     kw = seen["kw"]
-    assert {"state_fn", "on_toggle_pause", "on_open_web", "on_open_logs", "icon_dir"} <= set(kw)
+    assert {"state_fn", "on_set_pause", "on_open_web", "on_open_logs", "icon_dir"} <= set(kw)
     assert {"on_open_data", "on_toggle_autostart"} <= set(kw)
     assert kw["stop_event"] is not None
 
@@ -205,13 +205,13 @@ def test_app_tray_autostart_disabled_when_translocated(fakes, monkeypatch):
     assert seen["st"].autostart_available is False and touched == []
 
 
-def test_app_tray_toggle_pause_uses_accounts_port_with_tray_channel(fakes, monkeypatch):
+def test_app_tray_set_pause_uses_accounts_port_with_tray_channel(fakes, monkeypatch):
     calls = fakes
     monkeypatch.setattr(app_cmd, "Daemon", _fake_daemon(calls))
     seen = {}
 
     def fake_tray(**kw):
-        kw["on_toggle_pause"]()
+        kw["on_set_pause"](True)
         kw["on_quit"]()
 
     import trader.features.accounts.modes as modes

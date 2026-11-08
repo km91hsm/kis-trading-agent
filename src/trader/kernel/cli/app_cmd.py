@@ -123,13 +123,13 @@ class WebThread:
             self._thread.join(timeout)
 
 
-def _toggle_pause_fn(boot_: Boot, conn_factory):
-    """트레이 일시정지 토글: accounts 포트에 `set_paused` 가 있으면 그것(control_log, channel=tray),
-    없으면 커널 기본(control 플래그)."""
+def _set_pause_fn(boot_: Boot, conn_factory):
+    """트레이 일시정지 쓰기(명시적 값): accounts 포트에 `set_paused` 가 있으면 그것(control_log,
+    channel=tray), 없으면 커널 기본(control 플래그)."""
     port = (boot_.ports or {}).get("accounts")
     setter = getattr(port, "set_paused", None)
     set_fn = (lambda c, v: setter(c, v, channel="tray")) if callable(setter) else None
-    return lambda: tray_mod.toggle_pause(conn_factory, set_fn=set_fn)
+    return lambda value: tray_mod.set_pause(conn_factory, value, set_fn=set_fn)
 
 
 def _autostart_available() -> bool:
@@ -254,7 +254,7 @@ def run_app(
             try:
                 tray_runner(
                     state_fn=_state_fn(boot_, conn_factory, url),
-                    on_toggle_pause=_toggle_pause_fn(boot_, conn_factory),
+                    on_set_pause=_set_pause_fn(boot_, conn_factory),
                     on_open_web=lambda: webbrowser.open(url),
                     on_open_logs=lambda: procs.open_folder(paths.state_dir() / "logs"),
                     on_open_data=lambda: procs.open_folder(paths.project_root()),
