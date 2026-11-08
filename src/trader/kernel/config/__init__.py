@@ -73,6 +73,10 @@ class CodexDebateSettings(BaseModel):
     timeout_s: int = Field(180, ge=1, le=1800)
     daily_call_cap: int = Field(80, ge=1, le=10000)
     bin: str | None = None
+    # 사용량 조절: 켜져 있으면 새 연구 시작 때 Codex 5시간·7일 사용률이 hard_pct 이상이거나
+    # 오늘 호출 상한에 닿았으면 그 연구는 Claude 강세·약세로 진행한다(꺼지면 호출 상한만 본다).
+    usage_throttle: bool = True
+    hard_pct: float = Field(0.95, gt=0, le=1)
 
 
 class LlmSettings(BaseModel):

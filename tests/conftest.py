@@ -14,6 +14,17 @@ def secret_env_names() -> set[str]:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_codex_usage_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """새 연구 시작 때 Codex 사용률을 읽는 훅이 실제 `codex` 를 실행하지 않게(관측 없음 = 허용).
+    사용률 판정을 시험하는 테스트는 같은 훅을 다시 덮어쓴다."""
+    from trader.kernel.session import research_policy
+
+    monkeypatch.setattr(
+        research_policy, "_read_codex_limits", lambda settings, now: {"status": "unavailable"}
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """개발자 셸의 시크릿 환경변수가 테스트에 새어 실제 텔레그램·KIS 를 부르지 않게 지운다."""
     for name in secret_env_names():

@@ -200,6 +200,21 @@ RESUME_KINDS = frozenset({"resume", "fo_resume"})
 THROTTLE_FLAG = "usage_throttle"
 
 
+# 설정 화면에서 바꾼 하루 세션 제한(int). 없으면 yaml `llm.daily_session_cap`
+SESSION_CAP_FLAG = "daily_session_cap"
+SESSION_CAP_RANGE = (1, 1000)
+
+
+def session_cap(conn: sqlite3.Connection | None, settings: Any) -> tuple[int, str]:
+    """(하루 세션 제한, 출처 'control'|'yaml'). 화면 값이 범위 안의 정수면 yaml 보다 우선한다."""
+    if conn is not None:
+        flag = get_flag(conn, SESSION_CAP_FLAG)
+        lo, hi = SESSION_CAP_RANGE
+        if type(flag) is int and lo <= flag <= hi:
+            return flag, "control"
+    return int(settings.llm.daily_session_cap), "yaml"
+
+
 def throttle_enabled(conn: sqlite3.Connection | None, settings: Any) -> tuple[bool, str]:
     """(감속 켜짐, 출처 'control'|'yaml'). 런타임 플래그가 yaml 보다 우선한다."""
     if conn is not None:

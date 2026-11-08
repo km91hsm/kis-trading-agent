@@ -12,6 +12,7 @@ import { termLabel } from "../../lib/glossary";
 import { useNow, useResource } from "../../lib/hooks";
 import type { UsageResp, UsageWindow } from "../../lib/usage";
 import { body } from "../performance/ResourceView";
+import { CapEditor } from "./CapEditor";
 import { CodexUsage } from "./CodexUsage";
 import { throttleLine, usageMeters } from "./system.ts";
 
@@ -129,6 +130,18 @@ export function Usage() {
               { label: "7일", value: `${u.windows.d7.sessions}회`, sub: windowSub(u.windows.d7) },
             ]}
           />
+          {u.session_cap ? (
+            <CapEditor
+              label="Claude 하루 세션 제한"
+              value={u.session_cap.value}
+              source={u.session_cap.source}
+              defaultValue={u.session_cap.default}
+              min={1}
+              max={1000}
+              unit="회"
+              onSave={async (cap) => { await patchJson("/settings/session-cap", { cap }); reload(); }}
+            />
+          ) : null}
           <Table columns={CAP_COLUMNS} rows={u.caps_by_kind} rowKey={(r) => r.kind} empty="kind 별 상한 없음" />
           {u.note ? <p className="perf-note">{u.note}</p> : null}
           <Confirm

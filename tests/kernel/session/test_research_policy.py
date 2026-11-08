@@ -257,3 +257,149 @@ def test_second_rebuttal_round_rejects_missing_or_duplicate_replies(conn, tmp_pa
     assert "재답변 coverage" in p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, turn)
     turn["replies"] = [reply]
     assert p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, turn) is None
+
+
+# --- Codex 사용량 조절·하루 호출 제한 (2026-11-08) -----------------------------
+
+
+def _limits(five=None, seven=None, *, reset_in_h=3):
+    resets = (NOW.replace(hour=0) + __import__("datetime").timedelta(hours=reset_in_h)).isoformat()
+    win = lambda p: None if p is None else {"used_pct": p, "resets_at": resets}  # noqa: E731
+    return {"five_hour": win(five), "seven_day": win(seven), "status": "ready"}
+
+
+def _use_limits(monkeypatch, value):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.setattr(p, "_read_codex_limits", lambda settings, now: value)
+
+
+def _seed_calls(conn, n):
+    with conn:
+        for _ in range(n):
+            conn.execute(
+                "INSERT INTO research_calls(provider,model,policy_hash,input_hash,prompt_hash,"
+                "schema_hash,status,error,counts_toward_cap,created_at) "
+                "VALUES('codex',NULL,'p','i','pr','s','ok',NULL,1,?)",
+                (NOW.isoformat(),),
+            )
+
+
+def test_codex_over_usage_makes_new_research_claude_only_and_frozen(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    _use_limits(monkeypatch, _limits(five=96.0))
+    s = settings()
+    policy = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    assert policy["enabled"] is False and policy["bear"] == "claude"
+    assert "5시간" in policy["codex_skipped"] and "96%" in policy["codex_skipped"]
+    # 다시 시작(재실행)해도 처음 고정한 정책 그대로 — 사용률이 내려가도 해시 불일치가 나지 않는다
+    _use_limits(monkeypatch, _limits(five=10.0))
+    again = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    assert again["enabled"] is False and again["policy_hash"] == policy["policy_hash"]
+    assert p.get(conn, s, tmp_path, SPOT_RESEARCH)["enabled"] is False
+    # 여유가 생기면 다음 새 연구는 다시 Codex
+    fresh = p.start(conn, s, tmp_path / "next", SPOT_RESEARCH, now=NOW)
+    assert fresh["enabled"] is True and fresh["bear"] == "codex"
+
+
+def test_codex_throttle_off_ignores_usage_but_not_daily_cap(conn, tmp_path, monkeypatch):
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.session import research_policy as p
+
+    _use_limits(monkeypatch, _limits(seven=99.0))
+    s = settings()
+    set_flag(conn, p.CODEX_THROTTLE_FLAG, False)
+    assert p.throttle_enabled(conn, s) == (False, "control")
+    assert p.start(conn, s, tmp_path / "a", SPOT_RESEARCH, now=NOW)["enabled"] is True
+    set_flag(conn, p.CODEX_CAP_FLAG, 2)
+    assert p.call_cap(conn, s) == (2, "control")
+    _seed_calls(conn, 2)
+    skipped = p.start(conn, s, tmp_path / "b", SPOT_RESEARCH, now=NOW)
+    assert skipped["enabled"] is False and "상한(2)" in skipped["codex_skipped"]
+
+
+def test_codex_allowance_ignores_unread_or_reset_windows(conn, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    s = settings()
+    for value in ({"status": "unavailable"}, _limits(five=99.0, reset_in_h=-1), _limits(five=94.9)):
+        _use_limits(monkeypatch, value)
+        assert p.codex_allowance(conn, s, now=NOW) == (True, None), value
+
+    def boom(settings, now):
+        raise OSError("x")
+
+    monkeypatch.setattr(p, "_read_codex_limits", boom)
+    assert p.codex_allowance(conn, s, now=NOW) == (True, None)
+
+
+def test_status_reports_throttle_and_effective_cap(conn, monkeypatch):
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.platform import codex_bin
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.setattr(codex_bin, "find_codex", lambda *_: "/bin/codex")
+    reads = []
+    monkeypatch.setattr(p, "_read_codex_limits", lambda settings, now: reads.append(1) or {})
+    s = settings()
+    assert p.status(conn, s, now=NOW)["throttle"]["state"] == "ok"  # 관측을 안 넘기면 상한만
+    st = p.status(conn, s, now=NOW, limits=_limits(five=97.0))
+    assert reads == []  # status() 는 codex 를 직접 실행하지 않는다
+    assert st["throttle"]["enabled"] is True and st["throttle"]["source"] == "yaml"
+    assert st["throttle"]["state"] == "over" and "5시간" in st["throttle"]["reason"]
+    assert st["throttle"]["hard_pct"] == 0.95
+    set_flag(conn, p.CODEX_CAP_FLAG, 7)
+    st = p.status(conn, s, now=NOW)
+    assert st["usage"]["daily_call_cap"] == 7 and st["usage"]["cap_source"] == "control"
+
+
+
+def test_throttle_settings_are_not_part_of_policy_hash(conn, tmp_path):
+    """조절 설정(usage_throttle·hard_pct)은 시작 판단 입력일 뿐 — 바뀌어도(업데이트·yaml 수정)
+    진행 중
+    연구의 정책 해시가 그대로여서 다시 시작이 거부되지 않는다."""
+    from trader.kernel.session import research_policy as p
+
+    s = settings()
+    assert "usage_throttle" not in p.current(conn, s)["config"]
+    assert "hard_pct" not in p.current(conn, s)["config"]
+    first = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    s.llm.codex_debate.hard_pct = 0.5
+    s.llm.codex_debate.usage_throttle = False
+    again = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    assert again["policy_hash"] == first["policy_hash"]
+
+
+def test_completed_research_never_reads_codex_usage(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    reads = []
+    monkeypatch.setattr(p, "_read_codex_limits", lambda settings, now: reads.append(1) or {})
+    write_checkpoint(tmp_path, SPOT_RESEARCH.completed_stage, checkpoint_payload({"ok": True}))
+    out = p.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
+    assert out["enabled"] is False and "codex_skipped" not in out
+    assert reads == []  # 끝난 연구는 사용률을 읽지 않는다
+
+
+def test_skip_when_remaining_calls_cannot_finish_research(conn, tmp_path, monkeypatch):
+    """남은 호출이 이 연구의 bear 턴 수(rounds+1)보다 적으면 시작부터 Claude 로
+    (도중 상한 실패 방지)."""
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.session import research_policy as p
+
+    _use_limits(monkeypatch, {"status": "unavailable"})
+    s = settings()  # debate_rounds=0 → Codex 켜짐이면 rounds 1 → bear 2턴
+    set_flag(conn, p.CODEX_CAP_FLAG, 3)
+    _seed_calls(conn, 2)
+    out = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    assert out["enabled"] is False and "상한(3)" in out["codex_skipped"]
+    set_flag(conn, p.CODEX_CAP_FLAG, 4)
+    assert p.start(conn, s, tmp_path / "b", SPOT_RESEARCH, now=NOW)["enabled"] is True
+
+
+def test_stale_usage_observation_does_not_block(conn, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    _use_limits(monkeypatch, {**_limits(five=99.0), "status": "stale"})
+    assert p.codex_allowance(conn, settings(), now=NOW) == (True, None)

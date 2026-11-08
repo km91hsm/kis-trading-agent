@@ -186,6 +186,30 @@ def test_codex_call_cap_reserves_before_launch(conn, monkeypatch):
     assert sum(row["counts_toward_cap"] for row in rows) == 1
 
 
+def test_codex_call_cap_uses_screen_override(conn, monkeypatch):
+    """설정 화면의 Codex 하루 호출 제한(control)이 yaml 상한 대신 적용된다(출발 전 거부)."""
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.session import codex, research_policy
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    set_flag(conn, research_policy.CODEX_CAP_FLAG, 1)
+    data = {"scope": "spot", "market": "KR", "ticker": "005930", "currency": "KRW",
+            "asof": NOW.isoformat(), "round": 0, "side": "bear"}  # fmt: skip
+    launched = []
+
+    def failed(*a, **kw):
+        launched.append(1)
+        raise OSError("offline")
+
+    kw = dict(settings=enabled_settings(daily_call_cap=80), policy_hash="p", data=data, now=NOW,
+              runner=failed, bin_path=Path("/fake/codex"))  # fmt: skip
+    with pytest.raises(codex.CodexError):
+        codex.run_turn(conn, **kw)
+    with pytest.raises(codex.CodexError, match="상한\\(1\\)"):
+        codex.run_turn(conn, **kw)
+    assert launched == [1]
+
+
 def test_codex_rejects_oversized_sanitized_input_without_launch(conn, monkeypatch):
     from trader.kernel.session import codex
 

@@ -58,7 +58,8 @@ def test_codex_usage_is_visible_when_debate_is_off_and_cli_missing(project):
     data = response.json()
     assert data["enabled"] is False
     assert data["usage"]["calls"] == 0
-    assert data["usage"]["daily_call_cap"] == 80
+    assert data["usage"]["daily_call_cap"] == 80 and data["usage"]["cap_source"] == "yaml"
+    assert data["throttle"]["enabled"] is True and data["throttle"]["state"] == "ok"
     assert data["rate_limits"]["status"] == "unavailable"
     assert data["rate_limits"]["reason"] == "cli_missing"
     assert data["rate_limits"]["five_hour"] is None
@@ -322,3 +323,21 @@ def test_invalid_reset_timestamp_is_not_displayed_as_epoch(tmp_path, monkeypatch
         },
     )
     assert codex_usage.read_limits(str(tmp_path), now=NOW)["five_hour"]["resets_at"] is None
+
+
+def test_codex_usage_throttle_state_uses_single_reading(project, monkeypatch):
+    """/system/codex-usage 는 사용률을 한 번 읽어 그 값으로 조절 상태(over)를 판정한다."""
+    from trader.kernel.session import codex_usage
+
+    reads = []
+
+    def fake(bin_override, *, now):
+        reads.append(1)
+        win = {"used_pct": 97.0, "resets_at": "2099-01-01T00:00:00+00:00"}
+        return {"five_hour": win, "seven_day": None, "status": "ready", "reason": None,
+                "observed_at": now.isoformat()}  # fmt: skip
+
+    monkeypatch.setattr(codex_usage, "read_limits", fake)
+    data = make_client(ledger_deps(project)).get("/api/system/codex-usage").json()
+    assert data["throttle"]["state"] == "over" and "97%" in data["throttle"]["reason"]
+    assert reads == [1]

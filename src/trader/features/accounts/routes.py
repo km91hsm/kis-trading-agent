@@ -189,11 +189,12 @@ def settings_view(request: Request) -> dict:
     """설정 요약. 토큰 없는 조회라 tailnet 사용자 이메일·호스트명은 수만 돌려준다."""
     s = request.app.state.deps.settings
     risk = getattr(s, "risk", None)
-    from trader.kernel.session import research_policy
+    from trader.kernel.session import research_policy, usage
 
     deps = request.app.state.deps
     with closing(deps.conn_factory()) as conn:
         codex_debate = research_policy.status(conn, s, now=deps.now())
+        session_cap = usage.session_cap(conn, s)[0]
     return {
         "markets": list(s.markets),
         "risk": risk.model_dump(mode="json") if risk is not None else None,
@@ -207,7 +208,7 @@ def settings_view(request: Request) -> dict:
         },
         "llm": {
             "budget_usd": s.llm.budget_usd,
-            "daily_session_cap": s.llm.daily_session_cap,
+            "daily_session_cap": session_cap,
             "codex_debate": codex_debate,
         },
     }

@@ -189,3 +189,15 @@ def test_allowance_throttle_grade_independent_of_kind(conn):
     usage.record_rate_limit(conn, _info(0.2, 0.96), now=NOW)
     ok, why = usage.allowance(conn, s, throttle="soft", label="mykind", now=NOW)
     assert not ok and "새 세션을 띄우지 않습니다" in why
+
+
+def test_session_cap_screen_value_overrides_yaml(conn):
+    """설정 화면에서 바꾼 하루 세션 제한(control)이 yaml 보다 우선, 범위 밖·형식 오류는 무시."""
+    s = SimpleNamespace(llm=LlmSettings(usage_file=None, daily_session_cap=80))
+    assert usage.session_cap(conn, s) == (80, "yaml")
+    assert usage.session_cap(None, s) == (80, "yaml")
+    set_flag(conn, usage.SESSION_CAP_FLAG, 120)
+    assert usage.session_cap(conn, s) == (120, "control")
+    for bad in (0, 1001, "50", True, 3.5, None):
+        set_flag(conn, usage.SESSION_CAP_FLAG, bad)
+        assert usage.session_cap(conn, s) == (80, "yaml"), bad
