@@ -276,6 +276,10 @@ _IDENTITY_FIELDS = {
 }
 
 
+# 축약해도 값을 그대로 두는 키 — 요약의 판 목록(`lanes`)은 잘리면 판 b 존재를 잃는다
+_PROTECTED_KEYS = frozenset({"lanes"})
+
+
 def _compact(
     v: Any,
     keep: int,
@@ -303,11 +307,15 @@ def _compact(
     if isinstance(v, dict):
         keys = list(v)
         if mapping_limit is not None and "source_coverage" not in path:
-            priority = [k for k in v if k in _QUALITY_KEYS]
-            ordinary = [k for k in v if k not in _QUALITY_KEYS][:mapping_limit]
+            kept = _QUALITY_KEYS | _PROTECTED_KEYS
+            priority = [k for k in v if k in kept]
+            ordinary = [k for k in v if k not in kept][:mapping_limit]
             keys = priority + ordinary
         return {
-            k: _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit) for k in keys
+            k: v[k]
+            if k in _PROTECTED_KEYS
+            else _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit)
+            for k in keys
         }
     return v
 

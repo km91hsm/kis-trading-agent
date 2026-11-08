@@ -348,3 +348,20 @@ def test_codex_rejects_unknown_side(conn, monkeypatch):
             runner=_runner_emitting({}, "bear"),
             bin_path=Path("/fake/codex"),
         )
+
+
+@pytest.mark.parametrize("side", [["bear"], {"bear": 1}])
+def test_codex_rejects_non_string_side(conn, monkeypatch, side):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    with pytest.raises(codex.CodexError, match="scope/market/asof/ticker/currency/round/side"):
+        codex.run_turn(
+            conn,
+            settings=enabled_settings(),
+            policy_hash="p",
+            data={**_side_data("bear"), "side": side},
+            now=NOW,
+            runner=_runner_emitting({}, "bear"),
+            bin_path=Path("/fake/codex"),
+        )

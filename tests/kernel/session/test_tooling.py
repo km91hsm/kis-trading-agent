@@ -618,3 +618,19 @@ def test_previous_turns_reads_only_same_lane(tmp_path):
     own_a, opp_a = tooling.previous_turns(tmp_path, p, lane="a", round_no=1, side="bear")
     assert own_a.side == "bear" and opp_a.side == "bull"
     assert own_a.arguments != ["판B bear"]
+
+
+def test_shrink_never_cuts_summary_lanes_list():
+    """극단 축약(목록 1개·문자열 1자)에서도 요약의 `lanes` 목록은 자르지 않는다."""
+    obj = {
+        "research_summary": {
+            "lanes": ["a", "b"],
+            "preferred": "final",
+            "final": {"bull": {"arguments": ["가" * 400 for _ in range(50)]}},
+        },
+        "news": [{"title": "나" * 500} for _ in range(200)],
+    }
+    limit = 3000
+    out = shrink(obj, limit)
+    assert _size(out) <= limit
+    assert out["research_summary"]["lanes"] == ["a", "b"]

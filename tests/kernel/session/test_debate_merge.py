@@ -127,3 +127,45 @@ def test_merged_convergence_priority_order():
     assert worst(["uncertainty", "unverified"]) == "unverified"
     assert worst(["unverified", "unjustified"]) == "unjustified"
     assert worst([None, None]) is None
+
+
+def _sc(from_stance, reason="이유", evidence=("s1",)):
+    return {"from_stance": from_stance, "reason": reason, "evidence": list(evidence)}
+
+
+def _two_lane(bull0, bull1) -> dict:
+    """bull 측만 판별로 다르게: bull0·bull1 = {lane: DebateTurn}. bear 는 고정."""
+    bear0, bear1 = turn("bear", "BEARISH", 0.7), turn("bear", "BEARISH", 0.7, round=1)
+    return {
+        lane: research_summary(
+            {"bull": bull0[lane], "bear": bear0}, {"bull": bull1[lane], "bear": bear1}, 1
+        )
+        for lane in ("a", "b")
+    }
+
+
+def test_merged_stance_change_rebased_on_merged_round0():
+    """주 턴(판 b)의 stance_change 는 BEARISH→ 이지만 합친 round0 은 NEUTRAL — 합친 턴의
+    from_stance 는 합친 round0 대표 stance 로 다시 만든다(이유·근거는 주 턴 것)."""
+    r0 = {"a": turn("bull", "NEUTRAL", 0.5), "b": turn("bull", "BEARISH", 0.1)}
+    final = {
+        "a": turn("bull", "BULLISH", 0.5, round=1, stance_change=_sc("NEUTRAL", "a 이유")),
+        "b": turn("bull", "BULLISH", 0.9, round=1, stance_change=_sc("BEARISH", "b 이유")),
+    }
+    out = merge_lanes(_two_lane(r0, final))
+    assert out["round0"]["bull"]["stance"] == "NEUTRAL"
+    assert out["final"]["bull"]["stance"] == "BULLISH"
+    assert out["final"]["bull"]["stance_change"] == _sc("NEUTRAL", "b 이유")
+    DebateTurn.model_validate(out["final"]["bull"])
+
+
+def test_merged_stance_change_none_when_merged_stance_unchanged():
+    """합친 round0·final 대표 stance 가 같으면 주 턴에 stance_change 가 있어도 None."""
+    r0 = {"a": turn("bull", "BEARISH", 0.1), "b": turn("bull", "BULLISH", 0.9)}
+    final = {
+        "a": turn("bull", "BULLISH", 0.9, round=1, stance_change=_sc("BEARISH")),
+        "b": turn("bull", "BULLISH", 0.5, round=1),
+    }
+    out = merge_lanes(_two_lane(r0, final))
+    assert out["round0"]["bull"]["stance"] == out["final"]["bull"]["stance"] == "BULLISH"
+    assert out["final"]["bull"]["stance_change"] is None

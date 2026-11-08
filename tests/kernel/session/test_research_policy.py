@@ -743,7 +743,7 @@ def test_completed_research_never_reads_codex_usage(conn, tmp_path, monkeypatch)
 
 
 def test_skip_when_remaining_calls_cannot_finish_research(conn, tmp_path, monkeypatch):
-    """남은 호출이 이 연구의 bear 턴 수(rounds+1)보다 적으면 시작부터 Claude 로
+    """남은 호출이 이 연구의 Codex 자리 수×(rounds+1)보다 적으면 시작부터 Claude 로
     (도중 상한 실패 방지)."""
     from trader.kernel.ledger.control import set_flag
     from trader.kernel.session import research_policy as p
@@ -833,6 +833,9 @@ def test_stored_v2_policy_accepted_by_v1_mode_start(conn, tmp_path):
         rp.start(conn, settings(enabled=False), tmp_path, SPOT_RESEARCH, now=NOW, version=1)
 
 
+LEGACY_V1_POLICY_HASH = "96bf65e3760c82cf6631f81eccc0a1783b9fbda1151c851b2223bd7bff9df902"
+
+
 def test_v1_current_is_byte_identical_to_legacy(conn):
     from trader.kernel.session import codex
     from trader.kernel.session import research_policy as rp
@@ -845,6 +848,8 @@ def test_v1_current_is_byte_identical_to_legacy(conn):
     }
     assert v1["version"] == 1 and (v1["bull"], v1["bear"]) == ("claude", "codex")
     assert v1["rounds"] == 1 and v1["prompt_hash"] == codex.digest(codex.PROMPT)
+    # 골든: PR #46 이전(1e07337) `current()` 와 같은 정책 해시 — 진행 중 v1 연구의 해시 보존
+    assert codex.digest(v1) == LEGACY_V1_POLICY_HASH
     v2 = rp.current(conn, s)
     assert v2["prompt_hashes"] == {
         "bull": codex.digest(codex.BULL_PROMPT),

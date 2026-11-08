@@ -139,3 +139,48 @@ def test_mark_codex_failed_writes_columns(conn, tmp_path):
     rp.mark_codex_failed(conn, d, r, reason="한도", now=NOW)
     assert _row(conn, "codex_failed_at, codex_failed_reason") == (NOW.isoformat(), "한도")
     assert rp._failure(conn, d, r) == (NOW.isoformat(), "한도")
+
+
+def test_mark_codex_failed_stores_utc(conn, tmp_path):
+    from trader.kernel.config import KST
+
+    s, d, r = settings(), tmp_path, RESEARCHES["spot"]
+    rp.start(conn, s, d, r, now=NOW)
+    rp.mark_codex_failed(conn, d, r, reason="한도", now=NOW.astimezone(KST))
+    (failed_at,) = _row(conn, "codex_failed_at")
+    assert failed_at == NOW.isoformat() and failed_at.endswith("+00:00")
+
+
+def test_restart_after_files_moved_makes_no_empty_archive(conn, tmp_path, monkeypatch):
+    """파일 이동 뒤 UPDATE 전에 죽은 상태(옮길 토론 파일 없음, 실패 표시 남음)에서 재시작해도
+    빈 보관 폴더를 새로 만들지 않고 정책 교체는 끝낸다."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r = settings(), tmp_path, RESEARCHES["spot"]
+    p1 = rp.start(conn, s, d, r, now=NOW)
+    _seed_scope(d, "spot")
+    _fail_once(conn, s, d, r)
+    archive = d / "_codex_failed_20261107_000000"
+    archive.mkdir()
+    for stage in list_checkpoints(d):
+        if stage.startswith((r.turn_prefix, r.cross_turn_prefix)):
+            (d / f"{stage}.json").replace(archive / f"{stage}.json")
+
+    p2 = rp.start(conn, s, d, r, now=NOW)
+    assert not p2["enabled"] and p2["codex_skipped"].startswith("Codex 도중 실패")
+    assert _row(conn, "replaced_from_hash, codex_failed_at") == (p1["policy_hash"], None)
+    assert [x.name for x in d.iterdir() if x.name.startswith("_codex_failed_")] == [archive.name]
+
+
+def test_failover_claude_lane_completes(conn, tmp_path, monkeypatch):
+    """failover 로 교체된 Claude 1판 정책: Claude 강세·약세 턴을 채우면 완료 검사 통과."""
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r = settings(), tmp_path, RESEARCHES["spot"]
+    rp.start(conn, s, d, r, now=NOW)
+    _seed_scope(d, "spot")
+    _fail_once(conn, s, d, r)
+    p2 = rp.start(conn, s, d, r, now=NOW)
+    for rnd in range(p2["rounds"] + 1):
+        for side in ("bull", "bear"):
+            assert rp.write_error(conn, s, d, r, round_no=rnd, side=side) is None
+            _write_claude(d, r, "a", rnd, side)
+    assert rp.completion_error(conn, s, d, r) is None

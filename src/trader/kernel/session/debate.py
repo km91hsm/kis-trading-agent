@@ -152,6 +152,18 @@ def merge_turns(turns: list[DebateTurn]) -> DebateTurn:
     )
 
 
+def _rebase_stance_change(round0: DebateTurn, final: DebateTurn) -> DebateTurn:
+    """합친 final 턴의 `stance_change` 를 합친 round0 대표 stance 기준으로 맞춘다: 대표 stance 가
+    그대로면 None, 바뀌었으면 주 턴의 이유·근거에 from_stance = 합친 round0 stance(주 턴에
+    전환 근거가 없으면 None)."""
+    sc = final.stance_change
+    if sc is None or round0.stance == final.stance:
+        return final.model_copy(update={"stance_change": None})
+    return final.model_copy(
+        update={"stance_change": sc.model_copy(update={"from_stance": round0.stance})}
+    )
+
+
 _CONVERGENCE_SEVERITY = ("unjustified", "unverified", "uncertainty", "justified")
 
 
@@ -171,7 +183,8 @@ def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = N
     계산하고, 경고(`sycophantic`·`convergence_review`)는 판별 결과의 OR, `preferred` 는 한 판이라도
     round0 이면 round0. `convergence` 는 합친 턴으로 다시 계산하지 않고 판별 값 중 가장 경고적인
     값(경고 플래그와 모순되지 않게)이며 판별 값은 `convergence_by_lane` 에 둔다. 판별 원본은
-    `by_lane`(턴 밖)에 둔다."""
+    `by_lane`(턴 밖)에 둔다. 합친 final 턴의 `stance_change` 는 합친 round0 대표 stance 기준으로
+    다시 맞춘다(`_rebase_stance_change`)."""
     if set(summaries) == {"a"}:
         return summaries["a"]
     if set(summaries) != set(LANES):
@@ -186,9 +199,9 @@ def merge_lanes(summaries: dict[str, dict], *, evidence_ids: set[str] | None = N
             for side in ("bull", "bear")
         }
 
-    out = research_summary(
-        merged("round0"), merged("final"), lanes[0]["rounds"], evidence_ids=evidence_ids
-    )
+    round0, final = merged("round0"), merged("final")
+    final = {side: _rebase_stance_change(round0[side], t) for side, t in final.items()}
+    out = research_summary(round0, final, lanes[0]["rounds"], evidence_ids=evidence_ids)
     out["convergence_by_lane"] = {k: summaries[k].get("convergence") for k in LANES}
     out["convergence"] = _worst_convergence(list(out["convergence_by_lane"].values()))
     out["sycophantic"] = any(s.get("sycophantic") for s in lanes)
