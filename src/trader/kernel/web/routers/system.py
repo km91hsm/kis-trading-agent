@@ -341,3 +341,45 @@ def codex_debate_update(request: Request, body: ThrottleBody) -> dict:
                 at=deps.now().isoformat(),
             )
         return research_policy.status(conn, deps.settings, now=deps.now())
+
+
+def _codex_flag_update(request: Request, key: str, value: object) -> dict:
+    """Codex 설정 화면 값 저장(None 이면 지우고 yaml 로) + control 이력 → 최신 Codex 상태."""
+    from trader.kernel.session import research_policy
+
+    deps = _deps(request)
+    with closing(deps.conn_factory()) as conn:
+        old = get_flag(conn, key)
+        if value is None:
+            delete_flag(conn, key)
+        else:
+            set_flag(conn, key, value)
+        if old != value:
+            log_change(
+                conn, channel="web", actor=actor_of(request), key=key,
+                old=old, new=value, at=deps.now().isoformat(),
+            )  # fmt: skip
+        return research_policy.status(conn, deps.settings, now=deps.now())
+
+
+class CodexCapBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cap: int | None = Field(ge=1, le=10000)  # None 이면 yaml `llm.codex_debate.daily_call_cap`
+
+
+@settings_router.patch("/settings/codex-throttle", dependencies=WRITE)
+def codex_throttle_update(request: Request, body: ThrottleBody) -> dict:
+    """Codex 사용량 조절 켜기·끄기. 켜져 있으면 새 분석 시작 때 Codex 사용률이 높거나 오늘 호출
+    상한에 닿았을 때 그 분석은 Claude 강세·약세로 진행한다. 꺼져 있으면 호출 상한만 본다."""
+    from trader.kernel.session import research_policy
+
+    return _codex_flag_update(request, research_policy.CODEX_THROTTLE_FLAG, body.enabled)
+
+
+@settings_router.patch("/settings/codex-call-cap", dependencies=WRITE)
+def codex_call_cap_update(request: Request, body: CodexCapBody) -> dict:
+    """Codex 하루 호출 제한 변경(다음 호출부터 매일 적용, null 이면 yaml 값)."""
+    from trader.kernel.session import research_policy
+
+    return _codex_flag_update(request, research_policy.CODEX_CAP_FLAG, body.cap)

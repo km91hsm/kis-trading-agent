@@ -237,8 +237,11 @@ def run_turn(
             "WHERE provider='codex' AND created_at>=? AND created_at<?",
             (lo, hi),
         ).fetchone()[0]
-        capped = used >= cfg.daily_call_cap
-        cap_error = f"Codex 일일 호출 상한({cfg.daily_call_cap}) 소진" if capped else None
+        from trader.kernel.session import research_policy  # 순환 import 회피(정책 → codex)
+
+        daily_cap, _ = research_policy.call_cap(conn, settings)
+        capped = used >= daily_cap
+        cap_error = f"Codex 일일 호출 상한({daily_cap}) 소진" if capped else None
         cur = conn.execute(
             "INSERT INTO research_calls(provider,model,policy_hash,input_hash,prompt_hash,"
             "schema_hash,status,error,counts_toward_cap,created_at) "
