@@ -5,9 +5,11 @@
 
 웹 프로세스는 수집 프로세스·수집기 파일을 건드리지 않는다(T11-R2). 재시작은 control 플래그
 `RESTART_FLAG = {"at", "actor"}` 를 세우고 `control_log` 에 남길 뿐이고, 데몬 saveticker 잡
-(`job.watch` → `consume_restart`)이 다음 틱(≤1분)에 소비한다. 계정·값은 돌려주지 않는다. 예외: 확장 설치는 연결 키 설정처럼
-이 PC 에서 직접 연 화면에서만 웹이 `bridge_install.install()` 을 바로 부른다(결과를 즉시 보여 주려고).
-확장 경로는 직접 접속일 때만 응답에 싣는다."""
+(`job.watch` → `consume_restart`)이 다음 틱(≤1분)에 소비한다. 계정·값은 돌려주지 않는다.
+
+예외: 확장 설치는 연결 키 설정처럼 이 PC 에서 직접 연 화면에서만 웹이
+`bridge_install.install()` 을 바로 부른다(결과를 즉시 보여 주려고). 확장 경로는 직접
+접속일 때만 응답에 싣는다."""
 
 from __future__ import annotations
 
