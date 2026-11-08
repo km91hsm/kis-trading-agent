@@ -336,3 +336,22 @@ def test_failure_before_any_success_creates_error_entry(tmp_path):
     ]
     assert row["last_error"] == "api_basis_unverified"
     assert row["last_success_at"] is None
+
+
+def test_enrich_rejection_is_recorded_as_failed_attempt(tmp_path):
+    """본문 보강 단계 거절(`ApiError`, 예: api_detail_unverified)도
+    실패 시도로 기록한 뒤 거절한다."""
+    client = native.NativeSession(tmp_path)
+    job = send(client, "api_begin", stream="news_all")
+    base = response(job["request"]["url"], {"news_list": [{"id": "news_one", "title": "One"}]})
+    prepared = send(client, "api_prepare", stream="news_all", job_id=job["job_id"], response=base)
+    detail = response(prepared["requests"][0]["request"]["url"],
+                      {"id": "news_other", "title": "One",
+                       "content": [{"type": "text", "content": "Full body"}]})
+    bad = send(client, "api_snapshot", stream="news_all", job_id=job["job_id"], response=base,
+               details=[detail])
+    assert bad["ok"] is False and bad["error"] == "api_detail_unverified"
+    row = json.loads((tmp_path / "data/status.json").read_text(encoding="utf-8"))["streams"][
+        "news_all"
+    ]
+    assert row["last_error"] == "api_detail_unverified" and row["last_success_at"] is None

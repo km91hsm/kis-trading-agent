@@ -22,7 +22,11 @@ def check(ctx: OpsContext) -> list[Item]:
     if s["health"] == "waiting_chrome":
         out.append(Item("saveticker.disconnected", "warning",
                         "세이브티커 확장 연결 끊김 — Chrome 수집 상태를 확인하세요", link=LINK))
-    if s["blocked"]:
+    if s["blocked"] and (s.get("diagnostic") or {}).get("retrying"):
+        # 지금 차단 이후의 재시도 대기 진단 — 확장이 스스로 다시 시도하므로 관심(info) 수준.
+        out.append(Item("saveticker.retrying", "watch",
+                        "세이브티커 복구 재시도 중 — 자동으로 다시 시도합니다", link=LINK))
+    elif s["blocked"]:
         text = f"세이브티커 수집 멈춤 — {s['reason_text']}"
         out.append(Item("saveticker.stopped", "warning", text, link=LINK))
     return out

@@ -234,8 +234,13 @@ def _lane(name: str) -> str:
 def _recovery(state: dict, root: Path) -> dict:
     service = state["service"]["state"]
     if state["blocked"]:
-        last = automation.diagnostic(root / "runtime", reader=lambda p: _read(p)[0])
-        if last and last["category"] == "recheck" and not last["terminal"]:
+        # 진단이 지금 차단 시각(`at`) 이상일 때만 재시도 대기 — 오래된 진단은 지난 차단의 것.
+        last = automation.diagnostic(
+            root / "runtime",
+            reader=lambda p: _read(p)[0],
+            blocked_at=state["service"]["at"] or "",
+        )
+        if last and last["category"] == "recheck" and last["retrying"]:
             return {"state": "retrying", "text": last["text"]}
         return {"state": "manual", "text": state["reason_text"]}
     if service == "waiting_chrome":
@@ -304,14 +309,15 @@ def read_status(root: Path, *, now: datetime) -> dict:
             and (success is None or attempt > success)
         )
         last_error = code if failed else None
-        # 지연은 지금처럼 성공(저장된 응답) 시각 기준 — 실패 시도가 지연을 가리지 않게.
-        delay_basis = success if failed and success else attempt
+        # 지연·최근 응답·변화 판정·작업 오류 현재성은 성공(저장된 응답) 시각 기준 — 실패 시도가
+        # `last_attempt_at` 을 덮어써도 가리지 않게.
+        basis = success if failed and success else attempt
         interval = row.get("target_interval_s")
         interval = interval if type(interval) in (int, float) and 2 <= interval <= 86400 else 30
         lane = _lane(name)
         lane_row = state["lanes"].get(lane, {})
         lane_at = lane_row.get("updated_at")
-        lane_current = bool(lane_at and attempt and lane_at >= attempt)
+        lane_current = bool(lane_at and basis and lane_at >= basis)
         error = None
         if (
             not attempt
@@ -329,7 +335,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result, error = "login_required", "로그인 또는 사이트 확인이 필요합니다"
         elif lane_current and lane_row.get("state") == "error":
             result, error = "error", "최근 수집 작업에 오류가 있습니다"
-        elif (now - datetime.fromisoformat(delay_basis)).total_seconds() > max(120, interval * 3):
+        elif (now - datetime.fromisoformat(basis)).total_seconds() > max(120, interval * 3):
             result = "delayed"
         elif count == 0:
             result = "empty"
@@ -337,13 +343,13 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result = "partial"
         else:
             result = "normal"
-        response = attempt if status in {"ok", "partial"} else responses.get(name)
+        response = basis if status in {"ok", "partial"} else responses.get(name)
         change = changes.get(name)
         change_state = "unknown"
         if result == "empty":
             change_state = "empty"
         elif change and response and result in {"normal", "partial", "delayed"}:
-            change_state = "changed" if change == attempt else "unchanged"
+            change_state = "changed" if change == basis else "unchanged"
         streams.append(
             {
                 "id": name,

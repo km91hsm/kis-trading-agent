@@ -89,8 +89,8 @@ class Store:
             db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager
-    def _connect(self):
-        db = sqlite3.connect(self.root / "feed.sqlite3", timeout=30)
+    def _connect(self, timeout: float = 30):
+        db = sqlite3.connect(self.root / "feed.sqlite3", timeout=timeout)
         db.execute("PRAGMA journal_mode=WAL")
         db.row_factory = sqlite3.Row
         try:
@@ -263,9 +263,10 @@ class Store:
 
     def record_failure(self, stream: str, *, at: datetime, error: str) -> None:
         """응답 거절도 상태에 남긴다: `last_attempt_at`·`last_error`(고정 코드)만 바꾸고
-        `last_success_at`·`count` 는 그대로. 기록 실패는 응답 경로를 막지 않는다."""
+        `last_success_at`·`count` 는 그대로. 기록 실패는 응답 경로를 막지 않는다 — 응답 경로라
+        잠금은 1초만 기다리고 못 잡으면 기록을 건너뛴다(확장 요청 제한 20초)."""
         try:
-            with self._connect() as db:
+            with self._connect(timeout=1) as db:
                 db.execute("BEGIN IMMEDIATE")  # save() 의 status.json 재작성과 겹치지 않게
                 streams = self._status_or_empty()
                 row = streams.get(stream)

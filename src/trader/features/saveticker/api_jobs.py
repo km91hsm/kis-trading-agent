@@ -156,7 +156,14 @@ class BrowserApiSession:
                 fail("invalid_message")
             if "base_hash" in job and digest(message["response"]) != job["base_hash"]:
                 raise ValueError("api_response_unverified")
-            items, pdf_items = self.enrich(job, message.get("details", []), items)
+            try:
+                items, pdf_items = self.enrich(job, message.get("details", []), items)
+            except ApiError as exc:
+                # 보강 단계 거절도 실패 시도로 남긴 뒤 같은 코드로 거절한다.
+                code = str(exc)
+                if code in api_contract.API_ERRORS:
+                    self.owner.store.record_failure(view["stream"], at=now(), error=code)
+                raise
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             # 계약이 낸 구체적 코드(예: api_basis_unverified)는 보존하고, 그 밖만 뭉뚱그린다.
             code = str(exc) if isinstance(exc, ValueError) else ""

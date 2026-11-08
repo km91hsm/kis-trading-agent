@@ -314,3 +314,28 @@ def test_trend_leaving_current_widget_is_not_returned_as_current(tmp_path):
     )
     rows = store.query(asof=datetime(2026, 10, 25, 0, 2, tzinfo=UTC))
     assert [r["item"]["id"] for r in rows] == ["new"]
+
+
+def test_record_failure_gives_up_quickly_when_database_is_locked(tmp_path):
+    """응답 경로(확장 요청 제한 20초)에서 잠금을 오래 기다리지 않는다 —
+    1초 안팎에 조용히 건너뛴다."""
+    import sqlite3
+    import time
+
+    from trader.features.saveticker.store import Store
+
+    store = Store(tmp_path)
+    store.save(capture([{"id": "a", "title": "합성"}]))
+    before = (tmp_path / "status.json").read_text(encoding="utf-8")
+    holder = sqlite3.connect(tmp_path / "feed.sqlite3", timeout=1, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        began = time.monotonic()
+        store.record_failure("news_all", at=datetime(2026, 10, 25, 1, tzinfo=UTC),
+                             error="api_basis_unverified")
+        elapsed = time.monotonic() - began
+    finally:
+        holder.rollback()
+        holder.close()
+    assert elapsed < 2.5
+    assert (tmp_path / "status.json").read_text(encoding="utf-8") == before
