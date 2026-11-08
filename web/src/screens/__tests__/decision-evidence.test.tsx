@@ -66,7 +66,7 @@ test("같은 쟁점의 주장·반론·재답변을 연결하고 공급자·합�
   ]);
   const comparison = document.getElementById("comparison")!;
   expect(comparison?.textContent).toContain("쟁점별 비교");
-  const issue = comparison.querySelector('[data-issue-id="bull:growth"]')!;
+  const issue = comparison.querySelector('[data-issue-id="a:bull:growth"]')!;
   expect(issue.textContent).toContain("합성 매출 증가 주장");
   expect(issue.textContent).toContain("합성 이익률 반론");
   expect(issue.textContent).toContain("합성 비용 재답변");
@@ -197,4 +197,17 @@ test("내부 원천 실패와 성공을 표시하되 원천별 건수를 추정�
   expect(detail.textContent).toContain("naver: 성공");
   expect(detail.textContent).toContain("원천별 건수 미기록");
   expect(detail.textContent).not.toContain("naver: 성공 2건");
+});
+
+test("issues with same id in two lanes stay separate", async () => {
+  const turn = { stance: "BULLISH", timing: null, timing_note: null, round: 0, side: "bull", conviction: .8 };
+  await mount(inputs(), [
+    { ...turn, lane: "a", provider: "claude", model: "m-a", issues: [{ issue_id: "bull:growth", topic: "1판 성장 쟁점", claim: "1판 주장", evidence: [] }] },
+    { ...turn, lane: "b", provider: "codex", model: "m-b", issues: [{ issue_id: "bull:growth", topic: "2판 성장 쟁점", claim: "2판 주장", evidence: [] }] },
+  ]);
+  const comparison = document.getElementById("comparison")!;
+  expect(comparison.textContent).toContain("1판 성장 쟁점");
+  expect(comparison.textContent).toContain("2판 성장 쟁점");
+  expect(comparison.querySelectorAll("[data-issue-id]")).toHaveLength(2);
+  expect(comparison.textContent).toContain("2판 Codex (강세 측)");
 });

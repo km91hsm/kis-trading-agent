@@ -4,6 +4,7 @@ import { Stats } from "../../components/Stats";
 import { errorText, patchJson } from "../../lib/api";
 import { fmtInt } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
+import { laneLabel } from "../../lib/trace";
 import { body } from "../performance/ResourceView";
 
 type CodexSettings = {
@@ -15,9 +16,12 @@ type CodexSettings = {
   effective_rounds: number;
   applies_to: string;
   roles: { bull: string; bear: string };
+  lanes?: { lane: string; bull: string; bear: string }[];
   usage: { calls: number; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; subscription_utilization: number | null; daily_call_cap?: number };
   last_error: string | null;
 };
+
+const providerName = (p: string) => (p === "codex" ? "Codex" : p === "claude" ? "Claude" : p);
 
 export function CodexDebate() {
   const res = useResource<CodexSettings>("/settings/codex-debate", undefined, ["control", "usage"]);
@@ -53,7 +57,7 @@ export function CodexDebate() {
             <span className="data-muted">{s.source === "control" ? "화면에서 설정" : "설정 파일 사용"}</span>
           </div>
           <p id="codex-scope" className="perf-note">다음 새 분석부터 적용합니다. 켜면 강세 Claude / 약세 Codex가 독립 의견과 상호 반박을 진행합니다. 진행 중이거나 저장된 결정은 기존 설정을 유지합니다.</p>
-          <p className="perf-note">{s.enabled ? `상호 반박 ${s.effective_rounds}회 · Codex 실패 시 새 결정을 보류합니다.` : "현재 토론은 Claude가 맡습니다."} 모델: {s.model ?? "Codex 기본 모델"}</p>
+          <p className="perf-note">{s.enabled && s.lanes?.length === 2 ? `${s.lanes.map((l) => `${laneLabel(l.lane)} ${providerName(l.bull)} 강세 · ${providerName(l.bear)} 약세`).join(" / ")} · 상호 반박 ${s.effective_rounds}회 · Codex 실패 시 새 결정을 보류합니다.` : s.enabled ? `상호 반박 ${s.effective_rounds}회 · Codex 실패 시 새 결정을 보류합니다.` : "현재 토론은 Claude가 맡습니다."} 모델: {s.model ?? "Codex 기본 모델"}</p>
           <Stats cols={4} items={[
             { label: "오늘 Codex 호출 / 상한", value: `${s.usage.calls} / ${s.usage.daily_call_cap ?? "—"}회` },
             { label: "오늘 Codex 오류", value: `${s.usage.errors}회` },

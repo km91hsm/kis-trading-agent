@@ -86,12 +86,27 @@ describe("결정 상세 화면", () => {
     ] });
     await mount({ ...spotRoutes, "GET /api/decisions/spot/7/trace": trace }, "/decisions/spot/7");
     const debate = section("debate")!;
-    expect(debate.textContent).toContain("Codex / fixture-model");
+    expect(debate.textContent).toContain("약세 · Codex");
+    expect(debate.textContent).toContain("fixture-model");
     expect(debate.textContent).toContain("미기록");
-    act(() => (debate.querySelector('button[aria-label="펼치기"]') as HTMLButtonElement).click());
+    act(() => debate.querySelectorAll<HTMLButtonElement>('button[aria-label="펼치기"]').forEach((b) => b.click()));
     expect(debate.textContent).toContain("금리 부담");
     expect(debate.textContent).toContain("매출 증가와 이익 증가는 구분해야 함");
     expect(debate.textContent).toContain("bull:1");
+  });
+
+  test("debate table shows lane and provider per side", async () => {
+    const trace = fixtureSpotTrace({ debate: [
+      { round: 0, side: "bull", lane: "b", stance: "BULLISH", conviction: 0.7, provider: "codex", model: "m-x" },
+      { round: 0, side: "bull", lane: "a", stance: "BULLISH", conviction: 0.8, provider: "claude", model: "m-y" },
+    ] });
+    await mount({ ...spotRoutes, "GET /api/decisions/spot/7/trace": trace }, "/decisions/spot/7");
+    const rows = bodyRows(section("debate")!.querySelector("details table")!);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("1판");
+    expect(rows[0].textContent).toContain("강세 · Claude");
+    expect(rows[1].textContent).toContain("2판");
+    expect(rows[1].textContent).toContain("강세 · Codex");
   });
 
   test("spot 상세는 라운드·토론 턴·게이트·주문을 표로 그리고, 근거는 산문 그대로", async () => {
@@ -106,11 +121,11 @@ describe("결정 상세 화면", () => {
     expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
     // 토론 턴 — details 안 표
     const debate = section("debate")!.querySelector("details table")!;
-    expect(heads(debate)).toEqual(["라운드", "측", "참여 모델", "판단", "확신", "타이밍", "조건"]);
+    expect(heads(debate)).toEqual(["판", "라운드", "측", "참여 모델", "판단", "확신", "타이밍", "조건"]);
     expect(bodyRows(debate)).toHaveLength(3);
-    expect(bodyRows(debate)[1].textContent).toContain("강세 측");
-    expect(bodyRows(debate)[1].textContent).toContain("80%");
-    expect(bodyRows(debate)[1].textContent).toContain("지금");
+    expect(bodyRows(debate)[0].textContent).toContain("강세 · 미기록");
+    expect(bodyRows(debate)[0].textContent).toContain("80%");
+    expect(bodyRows(debate)[0].textContent).toContain("지금");
     // 타이밍이 객체({action, condition})인 턴 — 크래시 없이 action 라벨 + 조건
     expect(bodyRows(debate)[2].textContent).toContain("대기");
     expect(bodyRows(debate)[2].textContent).toContain("194,415 회복 뒤 진입");

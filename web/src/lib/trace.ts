@@ -7,7 +7,7 @@ export type TraceAnalyst = { role: string; label: string; signal: string | null;
 /** timing 은 세션에 따라 문자열("NOW")이거나 객체({action, condition, price_zone}) — 정규화해 action 은 timing, 조건은 timing_note. */
 export type DebateIssue = { issue_id: string; topic: string; claim: string; evidence: string[] };
 export type DebateResponse = { issue_id: string; response: string; evidence: string[] };
-export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null; timing_note: string | null; provider?: string | null; model?: string | null; issues?: DebateIssue[]; responses?: DebateResponse[]; replies?: DebateResponse[] };
+export type TraceDebate = { round: number | null; side: string | null; stance: string | null; conviction: number | null; timing: string | null; timing_note: string | null; lane?: string | null; provider?: string | null; model?: string | null; issues?: DebateIssue[]; responses?: DebateResponse[]; replies?: DebateResponse[] };
 export type TraceGate = { stage: string; account_id: string; approved?: boolean; qty?: number | null; reasons?: string[]; note?: string | null; mode?: string | null; dry_run?: boolean | null };
 export type TraceOrder = { stage: string; account_id: string; status?: string | null; order_no?: string | null; message?: string | null; side?: string | null; qty?: number | null; price?: string | null; mode?: string | null };
 /** fo 게이트·주문 체크포인트 요약(`fo/routes._checks` 값). */
@@ -33,6 +33,9 @@ export const SIGNAL = { BULLISH: "강세", NEUTRAL: "중립", BEARISH: "약세",
 
 export type TraceStep = { key: string; title: string; lines: string[] };
 
+/** 판 이름: 없으면 1판("a"). */
+export const laneLabel = (lane: string | null | undefined) => (lane === "b" ? "2판" : "1판");
+
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v.toFixed(2));
 
 /** 추적 응답 → 단계별 줄 목록(애널리스트 → 토론 → 수렴 → 결정 → 게이트 → 주문 → 재평가·손절·재호가). */
@@ -44,12 +47,14 @@ export function traceSteps(t: TraceResp): TraceStep[] {
     lines: t.analysts.map((a) => `${a.label}: ${SIGNAL[a.signal ?? ""] ?? a.signal ?? "—"} · 확신 ${pct(a.confidence)}${a.evidence.length ? ` · ${a.evidence.join(" / ")}` : ""}`),
   });
   const rounds = [...new Set(t.debate.map((d) => d.round ?? 0))].sort((a, b) => a - b);
+  const hasLaneB = t.debate.some((d) => d.lane === "b");
   steps.push({
     key: "debate",
     title: `토론 ${rounds.length}라운드`,
     lines: rounds.map((r) => {
       const turns = t.debate.filter((d) => (d.round ?? 0) === r);
-      return `r${r}: ${turns.map((d) => `${d.side === "bull" ? "강세" : "약세"} ${SIGNAL[d.stance ?? ""] ?? d.stance ?? "—"} ${pct(d.conviction)}`).join(" · ")}`;
+      const named = hasLaneB ? [...turns].sort((x, y) => (x.lane === "b" ? 1 : 0) - (y.lane === "b" ? 1 : 0) || (x.side === "bull" ? 0 : 1) - (y.side === "bull" ? 0 : 1)) : turns;
+      return `r${r}: ${named.map((d) => `${hasLaneB ? `${laneLabel(d.lane)} ` : ""}${d.side === "bull" ? "강세" : "약세"} ${SIGNAL[d.stance ?? ""] ?? d.stance ?? "—"} ${pct(d.conviction)}`).join(" · ")}`;
     }),
   });
   if (t.research) {
@@ -174,6 +179,7 @@ export function normalizeTrace(asset: "spot" | "fo", raw: unknown): TraceResp {
       return {
         round: typeof d.round === "number" ? d.round : null,
         side: strOrNull(d.side),
+        lane: strOrNull(d.lane),
         provider: strOrNull(d.provider),
         model: strOrNull(d.model),
         issues: arr(d.issues).map((x) => ({ issue_id: String(x.issue_id ?? ""), topic: String(x.topic ?? ""), claim: String(x.claim ?? ""), evidence: Array.isArray(x.evidence) ? x.evidence.map(String) : [] })),

@@ -52,6 +52,17 @@ test("Codex participation can be enabled and disabled, persists server result, a
   expect(ff.calls.filter((c) => c.init?.method === "PATCH").map((c) => JSON.parse(String(c.init?.body)))).toEqual([{ enabled: true }, { enabled: false }]);
 });
 
+test("shows both lanes when cross debate is on", async () => {
+  ff = installFakeFetch({
+    "GET /api/settings": fixtureSettings(),
+    "GET /api/settings/codex-debate": { ...settings(true), lanes: [{ lane: "a", bull: "claude", bear: "codex" }, { lane: "b", bull: "codex", bear: "claude" }], version: 2 },
+  });
+  const { container } = render(<SettingsPanel />);
+  await flush();
+  expect(container.textContent).toContain("1판 Claude 강세 · Codex 약세");
+  expect(container.textContent).toContain("2판 Codex 강세 · Claude 약세");
+});
+
 test("Codex failed save preserves disabled state and displays error without claiming success", async () => {
   ff = installFakeFetch({
     "GET /api/settings": fixtureSettings(),

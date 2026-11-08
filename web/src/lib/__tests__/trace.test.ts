@@ -1,6 +1,6 @@
 // 옛 `web/src/trace.test.ts` 이식 + normalizeTrace(spot·fo).
 import { describe, expect, it } from "vitest";
-import { limitDistancePct, normalizeTrace, traceSteps, type TraceResp, unknownLine } from "../trace";
+import { laneLabel, limitDistancePct, normalizeTrace, traceSteps, type TraceResp, unknownLine } from "../trace";
 import { fixtureFoTrace, fixtureSpotTrace } from "../../test/fixtures/decision";
 
 const T: TraceResp = {
@@ -30,6 +30,19 @@ describe("trace (결정 추적)", () => {
     expect(steps[4].lines[0]).toBe("paper-main: 통과 3주 · r (n)");
     expect(steps[5].lines[0]).toBe("paper-main: 매수 3주 @70000 → 접수 #1");
     expect(steps[6].title).toBe("재평가 r1: HOLD");
+  });
+  it("debate step names lanes only when lane b exists", () => {
+    const withLaneB: TraceResp = { ...T, debate: [
+      { round: 0, side: "bull", lane: "a", stance: "BULLISH", conviction: 0.8, timing: null, timing_note: null },
+      { round: 0, side: "bear", lane: "a", stance: "BEARISH", conviction: 0.4, timing: null, timing_note: null },
+      { round: 0, side: "bull", lane: "b", stance: "BULLISH", conviction: 0.6, timing: null, timing_note: null },
+      { round: 0, side: "bear", lane: "b", stance: "BEARISH", conviction: 0.5, timing: null, timing_note: null },
+    ] };
+    const line = traceSteps(withLaneB).find((s) => s.key === "debate")!.lines[0];
+    expect(line).toBe("r0: 1판 강세 강세 0.80 · 1판 약세 약세 0.40 · 2판 강세 강세 0.60 · 2판 약세 약세 0.50");
+    expect(traceSteps(T).find((s) => s.key === "debate")!.lines[0]).not.toContain("판");
+    expect(laneLabel(undefined)).toBe("1판");
+    expect(laneLabel("b")).toBe("2판");
   });
   it("지정가 거리·unknown 경고", () => {
     expect(limitDistancePct("70700", "70000")).toBeCloseTo(1, 5);
