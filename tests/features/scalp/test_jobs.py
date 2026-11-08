@@ -111,7 +111,7 @@ def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings,
     day = run_date_for("KR", NOW)
     save_state(project / "state", day, "KR", {"open": [{"ticker": "005930", "status": "closing"}]})
     out = scalp_jobs.scalp_body(deps, _job(deps))  # 열린 다리가 있으면 돈다
-    assert out["skipped"] == "일시정지" and "entries" in out  # 청산이 없는 틱은 건너뜀 표시
+    assert out["entries_blocked"] == "일시정지" and "skipped" not in out and "entries" in out
 
 
 def test_scalp_body_skips_when_monitor_gate_missing(make_deps):

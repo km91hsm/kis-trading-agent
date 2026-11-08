@@ -627,7 +627,7 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
             had_state = True
         if had_state:
             save_state(ctx.state, today, market, st)
-        if out["exits"] or out.get("exit_orders"):  # 청산이 돈 틱은 건너뜀이 아니다(잡 표)
+        if out["exits"] or out.get("exit_orders") or st.get("open"):  # 열린 다리 감시 틱은 건너뜀 아님
             return out | {"entries_blocked": why}
         return out | {"skipped": why}
     judge_on = cfg.judge and ctx.judge is not None

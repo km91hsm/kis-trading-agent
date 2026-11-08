@@ -385,9 +385,9 @@ def test_paused_rejected_exit_sends_no_notice_nor_flag(scalp_ctx, market, broker
     assert [r["status"] for r in _sells(conn)] == ["rejected"]
     assert not [m for m in ctx.notifier.msgs if "일시정지 중이지만 단타 청산" in m]
     assert not control.get_flag(conn, f"scalp_exit_paused_notified:KR:{D.isoformat()}")
-    assert (
-        out["skipped"] == "일시정지" and "entries_blocked" not in out and "exit_orders" not in out
-    )
+    # 거절돼 열린 다리가 남았다 — 계속 지켜보는 틱이라 skipped 가 아니다
+    assert out["entries_blocked"] == "일시정지" and "skipped" not in out
+    assert "exit_orders" not in out
 
 
 def test_unpaused_exit_sends_no_paused_notice(scalp_ctx, market, brokers, conn, project):

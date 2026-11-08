@@ -544,6 +544,16 @@ describe("시스템 화면", () => {
     expect(rows[0].textContent).toContain("시장가");
   });
 
+  test("파생 절: 계좌 상태는 한글 라벨(entries_paused → 새 진입 멈춤)", async () => {
+    const fo = {
+      accounts: [{ id: "paper-fo", env: "paper", mode: "auto", paused: true, state: "entries_paused", enabled: true, triggers: [] }],
+      context: null,
+    };
+    await mount(routes({ "GET /api/system/fo": fo }));
+    expect(section("fo").textContent).toContain("새 진입 멈춤");
+    expect(section("fo").textContent).not.toContain("entries_paused");
+  });
+
   test("국면·단타·파생: 비율은 퍼센트로, 상태는 한글 칩, 단타 시장은 표", async () => {
     const scalp = { ...fixtureScalp(), enabled: true, markets: { KR: { open: [1, 2], closed: [], halted: false }, US: { open: [], closed: [3], halted: true } } };
     const fo = {
