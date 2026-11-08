@@ -187,6 +187,12 @@ def codex_slots(policy: dict) -> list[tuple[str, str]]:
     ]
 
 
+def codex_need(policy: dict) -> int:
+    """이 정책의 연구 하나가 쓸 Codex 호출 수 — Codex 자리마다 라운드당 1회(0~rounds).
+    v2 교차는 2×(rounds+1), v1 은 rounds+1."""
+    return len(codex_slots(policy)) * (int(policy["rounds"]) + 1)
+
+
 def is_cross(policy: dict) -> bool:
     """교차 토론(v2·Codex 켜짐·두 판) 정책인가."""
     return policy.get("version") == 2 and bool(policy["enabled"]) and len(lanes(policy)) == 2
@@ -263,7 +269,7 @@ def mark_codex_failed(conn, d: Path, scope: ResearchSpec, *, reason: str, now: d
         conn.execute(
             "UPDATE research_policies SET codex_failed_at=?, codex_failed_reason=? "
             "WHERE research_key=?",
-            (now.isoformat(), reason, key(d, scope)),
+            (now.astimezone(UTC).isoformat(), reason, key(d, scope)),
         )
 
 
@@ -284,12 +290,16 @@ def _archive_dir(d: Path, now: datetime) -> Path:
 def _failover(conn, settings, d: Path, scope: ResearchSpec, old: dict, *, research, reason, now):
     """도중 Codex 실패한 교차 연구를 다시 시작할 때: 두 판 토론·요약을 보관 폴더로 옮기고(삭제하지
     않음, 애널리스트·입력은 그대로) 같은 행의 정책을 Claude 1판으로 바꾼다."""
-    archive = _archive_dir(d, now)
-    for stage in list_checkpoints(d):
-        if stage.startswith((scope.turn_prefix, scope.cross_turn_prefix)) or (
-            stage == scope.summary_stage
-        ):
-            (d / f"{stage}.json").replace(archive / f"{stage}.json")
+    moving = [
+        stage
+        for stage in list_checkpoints(d)
+        if stage.startswith((scope.turn_prefix, scope.cross_turn_prefix))
+        or stage == scope.summary_stage
+    ]
+    # 옮길 파일이 없으면(이동 뒤 UPDATE 전에 죽은 재시작) 빈 보관 폴더를 만들지 않는다
+    archive = _archive_dir(d, now) if moving else None
+    for stage in moving:
+        (d / f"{stage}.json").replace(archive / f"{stage}.json")
     skipped = f"Codex 도중 실패 — {reason} — 이번 분석은 Claude 강세·약세"
     policy = {
         **current(conn, settings, version=2),
@@ -333,7 +343,7 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime, versio
         # Codex 턴은 Codex 자리마다 라운드당 1회(0~rounds) — v2 는 2×(rounds+1), v1 은 rounds+1.
         # 남은 호출이 모자라면 시작부터 Claude 로. 여기서 Claude 로 바뀌면(enabled=False) 아래의
         # 「Codex 참여 증명 없음」·「원장 없음」 거부도 적용되지 않는다 — Codex 증명이 필요 없다.
-        need = len(codex_slots(wanted)) * (int(wanted["rounds"]) + 1)
+        need = codex_need(wanted)
         ok, why = codex_allowance(conn, settings, now=now, need=need)
         if not ok:
             wanted = {
@@ -476,8 +486,9 @@ def _lane_label(lane: str) -> str:
 
 
 def _missing_lane(policy: dict, lane: str) -> str | None:
+    """정책에 그 판이 없으면 오류 문구. 판 a 는 `lanes()` 가 늘 만들므로 판 b 만 걸린다."""
     if lane not in {item["lane"] for item in lanes(policy)}:
-        return f"이 연구에는 {'2' if lane == 'b' else '1'}판이 없습니다"
+        return "이 연구에는 2판이 없습니다"
     return None
 
 
@@ -540,7 +551,11 @@ def _codex_lane(policy: dict, side: str) -> str:
 def payload(conn, settings, d, scope, round_no, *, side="bear"):
     """Codex `side` 턴 입력(그 편이 Codex 인 판의 직전 턴). 입력에 판 이름은 넣지 않는다."""
     policy = get(conn, settings, d, scope)
-    lane = _codex_lane(policy, side)
+    return _payload(_codex_lane(policy, side), d, scope, round_no, side), policy
+
+
+def _payload(lane: str, d, scope, round_no, side) -> dict:
+    """`payload` 본체 — 이미 정한 판으로 입력을 만든다(정책을 두 번 읽지 않게)."""
     other = "bull" if side == "bear" else "bear"
     inputs = read_checkpoint(d, scope.input_stage) or {}
     inputs = inputs.get("data", inputs)
@@ -569,7 +584,7 @@ def payload(conn, settings, d, scope, round_no, *, side="bear"):
         "input_context": tooling.compact_context(inputs),
     }
     try:
-        return tooling.compact_debate(codex.sanitize(data)), policy
+        return tooling.compact_debate(codex.sanitize(data))
     except ValueError as exc:
         raise ResearchPolicyError(str(exc)) from exc
 
@@ -580,10 +595,12 @@ def generate_turn(
     """Codex `side` 턴을 생성해 그 편이 Codex 인 판의 단계에 저장한다."""
     policy = None
     try:
-        if not get(ctx.conn, ctx.settings, d, scope)["enabled"]:
+        fixed = get(ctx.conn, ctx.settings, d, scope)
+        if not fixed["enabled"]:
             return {"ok": False, "error": "Codex 토론 참여가 꺼진 연구입니다"}
-        data, policy = payload(ctx.conn, ctx.settings, d, scope, round_no, side=side)
-        lane = _codex_lane(policy, side)
+        lane = _codex_lane(fixed, side)
+        data = _payload(lane, d, scope, round_no, side)
+        policy = fixed
         if not 0 <= round_no <= policy["rounds"]:
             return {"ok": False, "error": "고정 정책의 라운드 범위를 벗어났습니다"}
         _bind(ctx.conn, d, scope, policy)
@@ -713,7 +730,7 @@ def status(conn, settings, *, now, limits: dict | None = None):
     need = 1
     if enabled:
         rounds = max(1, getattr(settings, "debate_rounds", 0))
-        need = len(codex_slots({"lanes": _v2_lanes(True)})) * (rounds + 1)
+        need = codex_need({"lanes": _v2_lanes(True), "rounds": rounds})
     # 조회 화면은 codex 를 직접 실행하지 않는다 — 사용률은 호출한 쪽이 읽어 넘길 때만 본다
     t_ok, t_reason = codex_allowance(conn, settings, now=now, need=need, limits=limits, probe=False)
     cfg = getattr(settings.llm, "codex_debate", CodexDebateSettings())

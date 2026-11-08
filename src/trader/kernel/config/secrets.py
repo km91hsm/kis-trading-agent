@@ -141,6 +141,13 @@ def read_env_file(path: Path) -> dict[str, str]:
     return {k: (v or "").strip() for k, v in raw.items()}
 
 
+def quote_env_value(value: str) -> str:
+    """큰따옴표로 감싼 `.env` 값. python-dotenv 는 큰따옴표 값의 `\\`·`\"` 이스케이프를 풀므로
+    공백·`#`·`'`·`=`·`$` 가 든 값도 그대로 돌아온다(`$` 는 interpolate=False 로 읽을 때). 줄바꿈·
+    제어문자는 호출 쪽에서 거부한다."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 _THREAD_LOCK = threading.Lock()
 
 

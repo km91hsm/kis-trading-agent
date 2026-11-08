@@ -53,4 +53,13 @@ describe("수집 상세 상태", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
     }
   });
+
+  test("최근 실패한 시도가 있으면 상세에 「최근 실패: 사유(코드)」를 보인다", () => {
+    const s = fixture("delayed");
+    s.streams = [{ ...s.streams![0], error: null, last_error: "api_basis_unverified", last_error_text: "실시간·정규장 기준을 확인하지 못했습니다" }];
+    const { container } = render(<SavetickerStatus s={s} />);
+    const expand = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement;
+    act(() => expand.click());
+    expect(container.textContent).toContain("최근 실패: 실시간·정규장 기준을 확인하지 못했습니다(api_basis_unverified)");
+  });
 });

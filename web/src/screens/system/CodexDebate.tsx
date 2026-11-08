@@ -4,7 +4,7 @@ import { Stats } from "../../components/Stats";
 import { errorText, patchJson } from "../../lib/api";
 import { fmtInt } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
-import { laneLabel } from "../../lib/trace";
+import { laneLabel, providerName } from "../../lib/trace";
 import { body } from "../performance/ResourceView";
 
 type CodexSettings = {
@@ -21,7 +21,6 @@ type CodexSettings = {
   last_error: string | null;
 };
 
-const providerName = (p: string) => (p === "codex" ? "Codex" : p === "claude" ? "Claude" : p);
 
 export function CodexDebate() {
   const res = useResource<CodexSettings>("/settings/codex-debate", undefined, ["control", "usage"]);

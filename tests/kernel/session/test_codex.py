@@ -36,7 +36,9 @@ def test_codex_bridge_sanitizes_and_isolates_child(conn, tmp_path, monkeypatch):
 
     def fake(cmd, **kw):
         captured.update(cmd=cmd, **kw)
-        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(json.dumps(ok_turn("bear", 0)))
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
+            json.dumps(ok_turn("bear", 0)), encoding="utf-8"
+        )
         return subprocess.CompletedProcess(
             cmd,
             0,
@@ -99,7 +101,7 @@ def test_codex_failures_record_error_without_fallback(conn, monkeypatch, failure
                 {} if failure == "schema" else ok_turn("bull" if failure == "side" else "bear", 0)
             )
         )
-        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(value)
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(value, encoding="utf-8")
         return subprocess.CompletedProcess(
             cmd, 1 if failure == "exit" else 0, "", "secret stderr must not leak"
         )
@@ -256,7 +258,9 @@ def _side_data(side: str) -> dict:
 def _runner_emitting(captured: dict, side: str):
     def fake(cmd, **kw):
         captured.update(cmd=cmd, **kw)
-        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(json.dumps(ok_turn(side, 0)))
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
+            json.dumps(ok_turn(side, 0)), encoding="utf-8"
+        )
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     return fake
@@ -344,6 +348,23 @@ def test_codex_rejects_unknown_side(conn, monkeypatch):
             settings=enabled_settings(),
             policy_hash="p",
             data=_side_data("trader"),
+            now=NOW,
+            runner=_runner_emitting({}, "bear"),
+            bin_path=Path("/fake/codex"),
+        )
+
+
+@pytest.mark.parametrize("side", [["bear"], {"bear": 1}])
+def test_codex_rejects_non_string_side(conn, monkeypatch, side):
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    with pytest.raises(codex.CodexError, match="scope/market/asof/ticker/currency/round/side"):
+        codex.run_turn(
+            conn,
+            settings=enabled_settings(),
+            policy_hash="p",
+            data={**_side_data("bear"), "side": side},
             now=NOW,
             runner=_runner_emitting({}, "bear"),
             bin_path=Path("/fake/codex"),

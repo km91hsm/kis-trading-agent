@@ -209,3 +209,31 @@ def test_daemon_sync_retries_next_tick_when_install_busy(monkeypatch):
     assert job.sync_extension(None) is None
     assert calls == [1, 1] and job._STATE.synced is True
     assert job.sync_extension(None) is None and calls == [1, 1]
+
+
+def test_install_error_messages_cover_only_codes_install_can_raise():
+    """`bridge_install.install()` 경로(설치 함수와 그 안에서 부르는 함수)가 던지는 코드만
+    매핑한다."""
+    import inspect
+    import re
+
+    from trader.features.saveticker.routes import INSTALL_ERRORS
+
+    path = [
+        bridge_install.install,
+        bridge_install._install,
+        bridge_install._check_location,
+        bridge_install.extension_source,
+        bridge_install._manifest,
+        bridge_install._copy_extension,
+        bridge_install._write_host,
+        bridge_install._write_registration,
+        bridge_install._restore,
+    ]
+    raised = {
+        code
+        for fn in path
+        for code in re.findall(r'InstallError\("([a-z_]+)"\)', inspect.getsource(fn))
+    }
+    assert set(INSTALL_ERRORS) <= raised
+    assert set(INSTALL_ERRORS) == raised  # 실제로 던지는 코드는 모두 한국어 문구가 있다

@@ -89,8 +89,8 @@ class Store:
             db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager
-    def _connect(self):
-        db = sqlite3.connect(self.root / "feed.sqlite3", timeout=30)
+    def _connect(self, timeout: float = 30):
+        db = sqlite3.connect(self.root / "feed.sqlite3", timeout=timeout)
         db.execute("PRAGMA journal_mode=WAL")
         db.row_factory = sqlite3.Row
         try:
@@ -224,6 +224,7 @@ class Store:
             successes = {json.loads(row[0])["stream"]: json.loads(row[0]) for row in good}
             for stream, payload in successes.items():
                 atomic_json(self.root / "latest" / f"{stream}.json", payload)
+            previous = self._status_or_empty()
             streams = {}
             for row in latest:
                 payload = json.loads(row[0])
@@ -238,8 +239,48 @@ class Store:
                     "elapsed_s": payload["elapsed_s"],
                     "target_interval_s": payload["target_interval_s"],
                     "overrun_s": max(0, payload["elapsed_s"] - payload["target_interval_s"]),
+                    "last_error": None,
                 }
+            # 저장 뒤에 기록된 실패 시도(`record_failure`)는 다른 스트림 저장에 지워지지 않게 옮긴다
+            # (그 스트림의 새 캡처가 더 최근이면 지운다).
+            for stream, old in previous.items():
+                if not isinstance(old, dict) or not isinstance(old.get("last_error"), str):
+                    continue
+                attempt = old.get("last_attempt_at")
+                row = streams.get(stream)
+                if row is None:
+                    streams[stream] = old
+                elif isinstance(attempt, str) and attempt > row["last_attempt_at"]:
+                    row.update(last_attempt_at=attempt, last_error=old["last_error"])
             atomic_json(self.root / "status.json", {"streams": streams})
+
+    def _status_or_empty(self) -> dict:
+        try:
+            streams = self.status().get("streams")
+        except (OSError, ValueError):
+            return {}
+        return streams if isinstance(streams, dict) else {}
+
+    def record_failure(self, stream: str, *, at: datetime, error: str) -> None:
+        """응답 거절도 상태에 남긴다: `last_attempt_at`·`last_error`(고정 코드)만 바꾸고
+        `last_success_at`·`count` 는 그대로. 기록 실패는 응답 경로를 막지 않는다 — 응답 경로라
+        잠금은 1초만 기다리고 못 잡으면 기록을 건너뛴다(확장 요청 제한 20초)."""
+        try:
+            with self._connect(timeout=1) as db:
+                db.execute("BEGIN IMMEDIATE")  # save() 의 status.json 재작성과 겹치지 않게
+                streams = self._status_or_empty()
+                row = streams.get(stream)
+                if not isinstance(row, dict):
+                    row = {"status": "error", "reason": error, "last_success_at": None,
+                           "count": 0}
+                stamp = at.astimezone(UTC).isoformat()
+                last = row.get("last_attempt_at")
+                if not isinstance(last, str) or stamp >= last:
+                    row.update(last_attempt_at=stamp, last_error=error)
+                streams[stream] = row
+                atomic_json(self.root / "status.json", {"streams": streams})
+        except Exception:  # noqa: BLE001 — 상태 기록 실패가 거절 응답을 바꾸지 않는다
+            return
 
     def prune(self, *, today: date, keep_days: int) -> dict[str, int]:
         """보관 기간(`keep_days`)보다 오래된 이력을 지운다(멱등): 변경 버전·화면 캡처(스트림별

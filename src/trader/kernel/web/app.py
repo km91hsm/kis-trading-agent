@@ -57,9 +57,16 @@ def _spa_response(dist: Path, rest: str) -> Response:
     if not index.is_file():
         return HTMLResponse(NO_DIST_HTML)
     candidate = dist / rest if rest else None
-    if candidate is not None and candidate.is_file() and dist in candidate.resolve().parents:
+    if (
+        candidate is not None
+        and candidate.is_file()
+        and dist in candidate.resolve().parents
+        and candidate.resolve() != index.resolve()
+    ):
         return FileResponse(candidate)
-    return FileResponse(index)
+    # index.html 은 매번 재검증한다 — 앱 업데이트 뒤 옛 자산 해시를 가리키는 옛 화면이 남지 않게.
+    # 해시 이름 자산(assets/*-<hash>.js|css)은 이름이 바뀌므로 지금처럼 둔다.
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 def create_app(deps: WebDeps) -> FastAPI:

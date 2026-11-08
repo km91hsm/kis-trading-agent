@@ -121,7 +121,8 @@ describe("결정 상세 화면", () => {
     expect(section("rounds")!.querySelector(".decision-lines")).toBeNull();
     // 토론 턴 — details 안 표
     const debate = section("debate")!.querySelector("details table")!;
-    expect(heads(debate)).toEqual(["판", "라운드", "측", "참여 모델", "판단", "확신", "타이밍", "조건"]);
+    // 판 b 턴이 없는 결정은 「판」 열을 숨긴다
+    expect(heads(debate)).toEqual(["라운드", "측", "참여 모델", "판단", "확신", "타이밍", "조건"]);
     expect(bodyRows(debate)).toHaveLength(3);
     expect(bodyRows(debate)[0].textContent).toContain("강세 · 미기록");
     expect(bodyRows(debate)[0].textContent).toContain("80%");

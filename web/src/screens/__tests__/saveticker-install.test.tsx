@@ -5,7 +5,7 @@ import { SavetickerOnboarding } from "../../app/shell/SavetickerOnboarding";
 import { tokenStore } from "../../lib/api";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { flush, render } from "../../test/render";
-import { SavetickerInstallCard } from "../system/SavetickerInstall";
+import { InstallSteps, isMacPlatform, SavetickerInstallCard } from "../system/SavetickerInstall";
 
 const INSTALL = { registered: false, installed_version: null, bundled_version: "1.5.0", update_needed: false, package: "/data/saveticker-extension", extension_dir: "/data/saveticker-extension/extension" };
 const status = (install: object = INSTALL, dismissed = false) => ({ configured: false, service: null, blocked: false, reason_text: null, last_success_at: null, health: null, install, onboarding: { dismissed } });
@@ -104,4 +104,28 @@ test("「안 씀」 저장이 실패해도 이번 세션에는 다시 묻지 않
   ff = installFakeFetch({ "POST /api/system/saveticker/onboarding": () => new Response("{}", { status: 401 }) });
   await click(button(container, "안 씀"));
   expect(sessionStorage.getItem("saveticker-onboarding-later")).toBe("1");
+});
+
+test("Chrome 폴더 선택 안내: macOS 는 Cmd+Shift+G, Windows 는 주소 표시줄", async () => {
+  expect(isMacPlatform({ platform: "MacIntel", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" })).toBe(true);
+  expect(isMacPlatform({ platform: "Win32", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" })).toBe(false);
+  expect(isMacPlatform({ platform: "", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" })).toBe(true);
+  const mac = render(<MemoryRouter><InstallSteps result={RESULT} mac /></MemoryRouter>); await flush();
+  expect(mac.container.textContent).toContain("Cmd");
+  expect(mac.container.textContent).not.toContain("주소 표시줄");
+});
+
+test("Windows 에서는 Cmd+Shift+G 대신 주소 표시줄에 붙여 넣으라고 안내한다", async () => {
+  const win = render(<MemoryRouter><InstallSteps result={RESULT} mac={false} /></MemoryRouter>); await flush();
+  expect(win.container.textContent).toContain("주소 표시줄에 붙여 넣기");
+  expect(win.container.textContent).not.toContain("Cmd");
+});
+
+test("원격 화면의 첫 안내는 이 PC 에서 열라는 문구와 「나중에」·「안 씀」만 보인다", async () => {
+  const { container } = await banner(status({ ...INSTALL, package: null, extension_dir: null }));
+  expect(container.textContent).toContain("이 PC(앱을 설치한 컴퓨터)에서 웹 화면을 열어 설치하세요");
+  expect(container.textContent).not.toContain(ASK);
+  expect(button(container, "설치하기")).toBeUndefined();
+  expect(button(container, "나중에")).toBeTruthy();
+  expect(button(container, "안 씀")).toBeTruthy();
 });

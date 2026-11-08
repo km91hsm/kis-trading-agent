@@ -618,3 +618,59 @@ def test_previous_turns_reads_only_same_lane(tmp_path):
     own_a, opp_a = tooling.previous_turns(tmp_path, p, lane="a", round_no=1, side="bear")
     assert own_a.side == "bear" and opp_a.side == "bull"
     assert own_a.arguments != ["판B bear"]
+
+
+def test_shrink_never_cuts_summary_lanes_list():
+    """극단 축약(목록 1개·문자열 1자)에서도 요약의 `lanes` 목록은 자르지 않는다."""
+    obj = {
+        "research_summary": {
+            "lanes": ["a", "b"],
+            "preferred": "final",
+            "final": {"bull": {"arguments": ["가" * 400 for _ in range(50)]}},
+        },
+        "news": [{"title": "나" * 500} for _ in range(200)],
+    }
+    limit = 3000
+    out = shrink(obj, limit)
+    assert _size(out) <= limit
+    assert out["research_summary"]["lanes"] == ["a", "b"]
+
+
+
+def test_shrink_compacts_nested_lanes_like_other_lists():
+    """보호는 요약 최상위 `lanes` 뿐 — 다른 곳에 중첩된 `lanes` 는 일반 규칙대로 축약된다."""
+    lanes = [f"판{i}" * 40 for i in range(50)]
+    obj = {
+        "research_summary": {"lanes": ["a", "b"], "by_lane": {"a": {"lanes": lanes}}},
+        "news": [{"title": "나" * 500, "lanes": lanes} for _ in range(200)],
+    }
+    limit = 3000
+    out = shrink(obj, limit)
+    assert _size(out) <= limit
+    assert out["research_summary"]["lanes"] == ["a", "b"]
+    assert out["research_summary"]["by_lane"]["a"]["lanes"] != lanes
+    assert out["news"][0]["lanes"] != lanes
+
+def test_trader_summary_one_lane_round0_briefs_merged_final():
+    """한 판만 preferred=="round0" 인 합친 요약: 합친 preferred 가 round0 이라 `final` 은 핵심만."""
+    from trader.kernel.session.debate import merge_lanes, research_summary
+    from trader.kernel.session.schemas import DebateTurn
+
+    def t(side, rnd, stance, conviction):
+        return DebateTurn.model_validate(
+            {**_turn(side, rnd), "stance": stance, "conviction": conviction,
+             "arguments": ["논거"]}
+        )  # fmt: skip
+
+    calm = _summ(["논거"])
+    syc = research_summary(
+        {"bull": t("bull", 0, "BULLISH", 0.8), "bear": t("bear", 0, "BEARISH", 0.7)},
+        {"bull": t("bull", 1, "BULLISH", 0.6), "bear": t("bear", 1, "BULLISH", 0.5)},
+        1,
+    )
+    assert (calm["preferred"], syc["preferred"]) == ("final", "round0")
+    out = tooling.trader_summary(merge_lanes({"a": calm, "b": syc}))
+    assert out["preferred"] == "round0"
+    for side in ("bull", "bear"):
+        assert set(out["final"][side]) <= BRIEF_KEYS
+        assert "arguments" in out["round0"][side]  # preferred 쪽은 전문

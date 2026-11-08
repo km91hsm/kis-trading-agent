@@ -99,6 +99,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
     <Table columns={COLUMNS} rows={s.streams ?? []} rowKey={(r) => r.id} empty="수집 기록 없음 · 첫 수집을 기다립니다" expand={(r) => <div className="collection-detail">
       {r.scope && r.scope !== "active" ? <p>{r.scope === "historical" ? "과거 월의 저장 기록입니다." : "현재 수집 대상으로 지정되었는지 저장 기록으로 확인할 수 없습니다."} 현재 전체 수집 상태에는 반영하지 않습니다.</p> : null}
       <p>{r.error ?? (r.state === "empty" ? "최근 응답은 0건입니다. 이전 유효 자료가 남아 있을 수 있습니다." : r.state === "delayed" ? "목표 주기보다 수집 시도가 늦습니다. 값 변화 여부와는 별개입니다." : r.state === "partial" ? "일부 자료만 수집되었습니다." : "최근 수집 요청의 오류 기록은 없습니다.")}</p>
+      {r.last_error ? <p>최근 실패: {r.last_error_text ?? "응답을 확인하지 못했습니다"}({r.last_error})</p> : null}
       <p>{s.recovery?.text ?? "복구 상태 미기록"}</p>
       <span className="data-muted">항목 ID: {r.id}</span>
     </div>} />

@@ -67,3 +67,34 @@ def test_saveticker_check_failure_surfaces_as_area_error(project, monkeypatch):
     got = _run_area(health.AREA, ctx(project))
     assert [(i.key, i.level) for i in got] == [("saveticker.error", "warning")]
     assert "읽기 실패" in got[0].text
+
+
+def _blocked_with_diagnostic(project, recorded_at):
+    runtime = paths.home() / "runtime"
+    at = datetime.now(UTC).isoformat()
+    atomic_json(runtime / "bridge-config.json", {"backend": "extension"})
+    atomic_json(runtime / "bridge.json", {"pid": os.getpid(), "state": "waiting_verification",
+                                          "reason": "verification_required",
+                                          "updated_at": at, "at": at})  # fmt: skip
+    atomic_json(runtime / "extension-diagnostics.json",
+                {"category": "recheck", "reason": "page_unverified", "reload_count": 1,
+                 "terminal": False, "recorded_at": recorded_at or at})  # fmt: skip
+    lock = Lock(runtime / "bridge-host.lock")
+    assert lock.acquire()
+    try:
+        return items(project)
+    finally:
+        lock.release()
+
+
+def test_fresh_retrying_recovery_is_watch_not_stopped_warning(project):
+    got = _blocked_with_diagnostic(project, None)
+    assert "saveticker.stopped" not in got
+    item = got["saveticker.retrying"]
+    assert item.level == "watch" and item.link == "/system/features#saveticker"
+    assert item.text == "세이브티커 복구 재시도 중 — 자동으로 다시 시도합니다"
+
+
+def test_stale_retrying_diagnostic_keeps_stopped_warning(project):
+    got = _blocked_with_diagnostic(project, "2026-10-01T00:00:00+00:00")
+    assert got["saveticker.stopped"].level == "warning" and "saveticker.retrying" not in got

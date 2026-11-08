@@ -276,6 +276,11 @@ _IDENTITY_FIELDS = {
 }
 
 
+# 축약해도 값을 그대로 두는 경로 — 요약 최상위의 판 목록(`lanes`)은 잘리면 판 b 존재를 잃는다.
+# 요약 루트(직접 축약)와 묶음의 `research_summary` 루트만 보호하고, 중첩된 `lanes` 는 일반 규칙.
+_PROTECTED_PATHS = frozenset({("lanes",), ("research_summary", "lanes")})
+
+
 def _compact(
     v: Any,
     keep: int,
@@ -303,11 +308,15 @@ def _compact(
     if isinstance(v, dict):
         keys = list(v)
         if mapping_limit is not None and "source_coverage" not in path:
-            priority = [k for k in v if k in _QUALITY_KEYS]
-            ordinary = [k for k in v if k not in _QUALITY_KEYS][:mapping_limit]
+            kept = _QUALITY_KEYS | {k for k in v if (*path, k) in _PROTECTED_PATHS}
+            priority = [k for k in v if k in kept]
+            ordinary = [k for k in v if k not in kept][:mapping_limit]
             keys = priority + ordinary
         return {
-            k: _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit) for k in keys
+            k: v[k]
+            if (*path, k) in _PROTECTED_PATHS
+            else _compact(v[k], keep, chars, (*path, k), mapping_limit=mapping_limit)
+            for k in keys
         }
     return v
 

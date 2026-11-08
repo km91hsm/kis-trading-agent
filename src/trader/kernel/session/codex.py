@@ -223,7 +223,11 @@ def run_turn(
     cfg = CodexDebateSettings.model_validate(config) if config else settings.llm.codex_debate
     clean = sanitize(data)
     required = {"scope", "market", "asof", "ticker", "currency", "round", "side"}
-    if not required <= clean.keys() or clean["side"] not in PROMPTS:
+    if (
+        not required <= clean.keys()
+        or not isinstance(clean["side"], str)
+        or clean["side"] not in PROMPTS
+    ):
         raise CodexError("Codex 입력 scope/market/asof/ticker/currency/round/side가 필요합니다")
     if len(canonical(clean).encode("utf-8")) > 24_000:
         raise CodexError(

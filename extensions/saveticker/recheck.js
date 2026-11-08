@@ -22,11 +22,12 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
         const since = state.apiHealthySince, last = state.lastApiHealthyAt;
         if (Number.isFinite(since) && Number.isFinite(last) && since > 0 && since >= old.completedAt && last - since >= HEALTHY_RESET) { old.failures = 0; old.loginFailures = 0; old.nextAt = null; }
     }
-    const report_ = async reason => { if (!active()) return; try { await report({ category: 'recheck', reason, reload_count: old.reloadCount }); } catch { /* 진단 실패는 복구를 막지 않는다. */ } };
+    // terminal: 중지(true)와 재시도 대기(false)를 진단 파일에서 구분한다.
+    const report_ = async (reason, terminal) => { if (!active()) return; try { await report({ category: 'recheck', reason, reload_count: old.reloadCount, terminal }); } catch { /* 진단 실패는 복구를 막지 않는다. */ } };
     const halt = async reason => {
         if (!active()) return true;
         await store({ recheckRecovery: { ...old, pendingAt: null, reason }, connection: '재확인 자동 복구 중지 · 직접 확인 필요' });
-        await report_(reason);
+        await report_(reason, true);
         if (active()) await stop();
         return true;
     };
@@ -35,7 +36,7 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
         old = { ...old, pendingAt: null, tabId: null, reason };
         const minutes = Math.max(1, Math.ceil(((old.nextAt ?? now) - now) / 60000));
         await store({ recheckRecovery: old, connection: '복구 재시도 대기 · 약 ' + minutes + '분 뒤' });
-        await report_(reason);
+        await report_(reason, false);
         return true;
     };
     const recovered = async () => {
@@ -49,6 +50,7 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
         const account = await credentials();
         if (!active()) return true;
         if (account === undefined) return wait('content_unavailable');
+        if (account?.unreadable === true) return halt('credentials_unreadable');
         if (!account || typeof account.email !== 'string' || typeof account.password !== 'string' || !account.email || !account.password) return halt('credentials_missing');
         // 새로고침 예약을 먼저 지운다(로그인 중 워커가 재시작돼도 같은 시도에서 로그인을 되풀이하지 않는다).
         old = { ...old, pendingAt: null, tabId: null };
@@ -67,6 +69,11 @@ async function persistRecover({ chrome, state, token, active, store, stop, resum
         }
         return wait(result?.result === 'challenge' ? 'page_unverified' : 'login_form_missing');
     };
+    // 「recovered」 저장 뒤 resume() 전에 워커가 죽었으면(그 뒤 새 차단 기록 없음) 새로고침 없이 재개만 다시 한다.
+    if (old.reason === 'recovered' && old.pendingAt === null && Number.isFinite(old.completedAt) && Number.isFinite(state.blockedAt) && state.blockedAt <= old.completedAt) {
+        if (active()) await resume();
+        return true;
+    }
     const ownedTab = async () => {
         const tabs = (await chrome.tabs.query({ url: 'https://www.saveticker.com/*' })).filter(t => ownsApiTab(t, token));
         return tabs.length === 1 ? tabs[0] : null;
@@ -119,7 +126,7 @@ export async function recoverRecheck({ chrome, state, token, active, store, stop
         if (active()) {
             await store({ recheckRecovery: { ...old, attempted: true, pendingAt: null, reason }, connection: '재확인 자동 복구 중지 · 직접 확인 필요' });
             if (active()) {
-                try { await report({ category: 'recheck', reason, reload_count: old?.reloadCount ?? 0 }); }
+                try { await report({ category: 'recheck', reason, reload_count: old?.reloadCount ?? 0, terminal: true }); }
                 catch { /* 진단 전송 실패도 수집 중지를 막지 않는다. */ }
             }
             if (active()) await stop();

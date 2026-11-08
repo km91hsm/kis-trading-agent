@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from trader.features.saveticker import automation
+from trader.features.saveticker import api_contract, automation
 from trader.kernel.config import KST
 from trader.kernel.platform.procs import pid_alive, same_process
 
@@ -30,6 +30,30 @@ STATES = {
 AUTH_ERRORS = {"AccessDenied", "LoginRequired", "VerificationRequired"}
 ERRORS = {*AUTH_ERRORS, "TimeoutError", "RuntimeError", "ConnectionError"}
 REASONS = {*automation.REASON_TEXT, "extension_disconnected"}
+# 응답 거절 코드(`api_contract.API_ERRORS`)의 한국어 사유 — 확장 팝업(popup.js `errors`)과 같은 뜻.
+FAILURE_TEXT = {
+    "api_contract_unverified": "이 항목의 API 요청 조건이 아직 확인되지 않았습니다",
+    "api_response_unverified": "응답 형식·상태를 확인하지 못했습니다",
+    "api_shape_unverified": "데이터 구조를 확인하지 못했습니다",
+    "api_context_unverified": "기본 그룹을 확인하지 못했습니다",
+    "api_detail_unverified": "본문 응답을 확인하지 못했습니다",
+    "api_source_unverified": "출처를 확인하지 못했습니다",
+    "api_basis_unverified": "실시간·정규장 기준을 확인하지 못했습니다",
+    "api_regular_unverified": "정규장 기준을 확인하지 못했습니다",
+    "api_pdf_unverified": "PDF 응답을 확인하지 못했습니다",
+    "api_response_too_large": "응답 크기 제한을 넘었습니다",
+    "api_busy": "이전 응답 처리를 기다립니다",
+    "api_content_unavailable": "전용 탭 응답이 없습니다",
+    "api_already_prepared": "이미 준비된 작업입니다",
+    "invalid_pdf_path": "PDF 저장 경로를 확인하지 못했습니다",
+    "invalid_pdf_ticket": "PDF 저장 요청이 만료됐거나 일치하지 않습니다",
+    "invalid_pdf": "유효한 PDF 파일이 아닙니다",
+    "invalid_job": "작업이 만료됐거나 일치하지 않습니다",
+    "invalid_message": "호스트 메시지를 확인하지 못했습니다",
+    "lane_busy": "이전 수집 작업의 종료를 기다립니다",
+    "snapshot_too_large": "저장 크기 제한을 넘었습니다",
+    "unknown_stream": "수집 항목을 확인하지 못했습니다",
+}
 
 
 def _read(path: Path) -> tuple[dict, bool]:
@@ -207,9 +231,17 @@ def _lane(name: str) -> str:
     )
 
 
-def _recovery(state: dict) -> dict:
+def _recovery(state: dict, root: Path) -> dict:
     service = state["service"]["state"]
     if state["blocked"]:
+        # 진단이 지금 차단 시각(`at`) 이상일 때만 재시도 대기 — 오래된 진단은 지난 차단의 것.
+        last = automation.diagnostic(
+            root / "runtime",
+            reader=lambda p: _read(p)[0],
+            blocked_at=state["service"]["at"] or "",
+        )
+        if last and last["category"] == "recheck" and last["retrying"]:
+            return {"state": "retrying", "text": last["text"]}
         return {"state": "manual", "text": state["reason_text"]}
     if service == "waiting_chrome":
         return {"state": "waiting", "text": "Chrome에서 로그인과 확장 연결을 확인하세요"}
@@ -260,7 +292,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
         for name in names
     }
     changes, responses, history_bad = _history(root, cutoffs, now)
-    recovery = _recovery(state)
+    recovery = _recovery(state, root)
     streams = []
     for name in names:
         row = raw[name] if isinstance(raw[name], dict) else {}
@@ -269,12 +301,23 @@ def read_status(root: Path, *, now: datetime) -> dict:
         status = _known(row.get("status"), {"ok", "partial", "error", "auth_required"})
         count = row.get("count")
         count = count if type(count) is int and 0 <= count <= 1_000_000 else None
+        # 응답 거절로 끝난 최근 시도(`Store.record_failure`): 최근 성공보다 새 시도일 때만 보인다.
+        code = row.get("last_error")
+        failed = (
+            code in api_contract.API_ERRORS
+            and attempt is not None
+            and (success is None or attempt > success)
+        )
+        last_error = code if failed else None
+        # 지연·최근 응답·변화 판정·작업 오류 현재성은 성공(저장된 응답) 시각 기준 — 실패 시도가
+        # `last_attempt_at` 을 덮어써도 가리지 않게.
+        basis = success if failed and success else attempt
         interval = row.get("target_interval_s")
         interval = interval if type(interval) in (int, float) and 2 <= interval <= 86400 else 30
         lane = _lane(name)
         lane_row = state["lanes"].get(lane, {})
         lane_at = lane_row.get("updated_at")
-        lane_current = bool(lane_at and attempt and lane_at >= attempt)
+        lane_current = bool(lane_at and basis and lane_at >= basis)
         error = None
         if (
             not attempt
@@ -292,7 +335,7 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result, error = "login_required", "로그인 또는 사이트 확인이 필요합니다"
         elif lane_current and lane_row.get("state") == "error":
             result, error = "error", "최근 수집 작업에 오류가 있습니다"
-        elif (now - datetime.fromisoformat(attempt)).total_seconds() > max(120, interval * 3):
+        elif (now - datetime.fromisoformat(basis)).total_seconds() > max(120, interval * 3):
             result = "delayed"
         elif count == 0:
             result = "empty"
@@ -300,13 +343,13 @@ def read_status(root: Path, *, now: datetime) -> dict:
             result = "partial"
         else:
             result = "normal"
-        response = attempt if status in {"ok", "partial"} else responses.get(name)
+        response = basis if status in {"ok", "partial"} else responses.get(name)
         change = changes.get(name)
         change_state = "unknown"
         if result == "empty":
             change_state = "empty"
         elif change and response and result in {"normal", "partial", "delayed"}:
-            change_state = "changed" if change == attempt else "unchanged"
+            change_state = "changed" if change == basis else "unchanged"
         streams.append(
             {
                 "id": name,
@@ -321,6 +364,8 @@ def read_status(root: Path, *, now: datetime) -> dict:
                 "change_state": change_state,
                 "count": count,
                 "error": error,
+                "last_error": last_error,
+                "last_error_text": FAILURE_TEXT.get(last_error) if last_error else None,
             }
         )
     active = [s for s in streams if s["scope"] == "active"]

@@ -350,3 +350,75 @@ def test_current_lane_error_is_visible_even_without_a_saved_stream(project, clie
         },
     )
     assert get(client)["summary"]["state"] == "partial"
+
+
+def test_blocked_extension_with_retrying_recovery_is_not_shown_as_stopped(
+    project, client, monkeypatch
+):
+    connect_bridge(monkeypatch, state="waiting_verification", reason="verification_required")
+    path = home() / "runtime/extension-diagnostics.json"
+    row = {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+           "recorded_at": SECOND}
+    atomic_json(path, {**row, "terminal": False})
+    data = get(client)
+    assert data["recovery"]["state"] == "retrying"
+    assert data["recovery"]["text"].startswith("복구 재시도 대기")
+    atomic_json(path, row)
+    assert get(client)["recovery"]["state"] == "manual"
+
+
+def test_recent_rejected_attempt_is_shown_without_hiding_delay(project, client):
+    save(stream="market_turnover_live", when="2026-11-04T00:00:00+00:00")
+    from trader.features.saveticker.store import Store
+
+    Store(home() / "data").record_failure(
+        "market_turnover_live", at=datetime.fromisoformat(SECOND), error="api_basis_unverified"
+    )
+    stream = {s["id"]: s for s in get(client)["streams"]}["market_turnover_live"]
+    assert stream["last_attempt_at"] == SECOND
+    assert stream["last_success_at"] == "2026-11-04T00:00:00+00:00"
+    assert stream["last_error"] == "api_basis_unverified"
+    assert stream["last_error_text"] == "실시간·정규장 기준을 확인하지 못했습니다"
+    assert stream["state"] == "delayed"  # 지연은 성공 시각 기준
+
+
+def test_last_error_is_hidden_after_newer_success(project, client):
+    save(stream="market_turnover_live", when=FIRST)
+    path = home() / "data/status.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["streams"]["market_turnover_live"]["last_error"] = "PRIVATE_SENTINEL"
+    atomic_json(path, data)
+    stream = get(client)["streams"][0]
+    assert stream["last_error"] is None and "PRIVATE_SENTINEL" not in json.dumps(stream)
+
+
+def test_old_wait_diagnostic_before_new_block_is_manual(project, client, monkeypatch):
+    """진단(재시도 대기)이 지금 차단 시각보다 오래됐으면 새 차단 — 직접 확인으로 보인다."""
+    connect_bridge(monkeypatch, state="waiting_verification", reason="verification_required")
+    atomic_json(
+        home() / "runtime/extension-diagnostics.json",
+        {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+         "terminal": False, "recorded_at": FIRST},
+    )
+    data = get(client)
+    assert data["recovery"]["state"] == "manual" and "재확인" in data["recovery"]["text"]
+
+
+def test_recent_failure_keeps_response_change_and_lane_on_success_time(project, client):
+    """실패 기록이 `last_attempt_at` 을 덮어써도 최근 응답·변화 판정·작업 오류
+    현재성은 성공 시각 기준."""
+    save(stream="market_gain_live", when=FIRST)
+    Store(home() / "data").record_failure(
+        "market_gain_live", at=datetime.fromisoformat(SECOND), error="api_basis_unverified"
+    )
+    stream = {s["id"]: s for s in get(client)["streams"]}["market_gain_live"]
+    assert stream["last_attempt_at"] == SECOND
+    assert stream["last_response_at"] == FIRST
+    assert stream["change_state"] == "changed"
+    atomic_json(
+        home() / "runtime/runner-market.json",
+        {"backend": "extension", "state": "error", "error_type": "TimeoutError",
+         "updated_at": "2026-11-04T00:59:10+00:00"},
+    )
+    stream = {s["id"]: s for s in get(client)["streams"]}["market_gain_live"]
+    assert stream["state"] == "error"

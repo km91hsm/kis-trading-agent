@@ -146,3 +146,25 @@ def test_update_rejects_bad_values(project):
             secrets_io.update(p, accts, values={"DART_API_KEY": bad})
     with pytest.raises(ConfigError, match="입력할 수 없는"):
         secrets_io.update(p, accts, values={"WEB_TOKEN": "x"})
+
+
+@pytest.mark.parametrize("value", ["a b", "'x", "#x", "x${HOME}y", 'a"b\\c', " pad "])
+def test_saveticker_password_with_spaces_quotes_hash_dollar_round_trips(project, value):
+    from trader.features.saveticker import credentials
+
+    p = project / "secrets" / ".env"
+    accts = [make_account("p", "paper", "auto")]
+    out = secrets_io.update(
+        p, accts, values={"SAVETICKER_EMAIL": "u@example.com", "SAVETICKER_PASSWORD": value}
+    )
+    assert out["updated"] == ["SAVETICKER_EMAIL", "SAVETICKER_PASSWORD"]
+    assert value not in str(out)
+    assert credentials.load() == ("u@example.com", value)
+
+
+def test_quoted_keys_still_reject_newlines_and_control_chars(project):
+    p = project / "secrets" / ".env"
+    accts = [make_account("p", "paper", "auto")]
+    for bad in ("a\nb", "a\rb", "a\tb", "a\x00b", "x" * 1025, "   "):
+        with pytest.raises(ConfigError):
+            secrets_io.update(p, accts, values={"SAVETICKER_PASSWORD": bad})

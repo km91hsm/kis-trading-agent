@@ -1516,3 +1516,32 @@ def test_summarize_cross_policy_incomplete_lane_b_rejected(ctx, project, monkeyp
     assert out["error"] == "Codex 필수 토론 미완료: 2판 r0_bull"
     assert out["debate_required"] is True
     assert read_checkpoint(d, "25_research_summary") is None
+
+
+def test_summarize_single_lane_equals_research_summary(ctx, project, monkeypatch):
+    """1판 요약 data 는 `research_summary(...)` 를 직접 부른 결과와 같다(합치기 경로 없음)."""
+    from trader.kernel.session.debate import research_summary
+    from trader.kernel.session.schemas import DebateTurn
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    d = _two_reports(ctx, project)
+    sc = {"from_stance": "BEARISH", "reason": "지표 개선", "evidence": ["technical.indicators"]}
+    turns = {
+        (0, "bull"): ok_turn("bull", 0, conviction=0.8),
+        (0, "bear"): ok_turn("bear", 0, conviction=0.7),
+        (1, "bull"): ok_turn("bull", 1, conviction=0.6),
+        (1, "bear"): ok_turn("bear", 1, stance="BULLISH", conviction=0.5, stance_change=sc),
+    }
+    for (rnd, side), payload in turns.items():
+        _save_turn(d, f"20_debate_r{rnd}_{side}", payload, "claude")
+    out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
+    assert out["ok"] is True and out["lanes"] == ["a"]
+
+    def side_turns(rnd):
+        return {s: DebateTurn.model_validate(turns[(rnd, s)]) for s in ("bull", "bear")}
+
+    expected = research_summary(
+        side_turns(0), side_turns(1), 1, evidence_ids={"technical.indicators"}
+    )
+    assert expected["convergence"] == "justified"  # evidence_ids 가 실제로 쓰이는 경우
+    assert read_checkpoint(d, "25_research_summary")["data"] == expected

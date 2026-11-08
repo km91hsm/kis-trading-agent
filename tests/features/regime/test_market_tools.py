@@ -6,10 +6,13 @@ FAKE 진입점(`write_fake_market`)·import 경로뿐이다."""
 from datetime import UTC, datetime
 
 import pytest
+from typer.testing import CliRunner
 
 from tests.features.spot.helpers import ok_report, ok_turn
-from trader.features.regime import fake, tools
+from trader.features.regime import fake, tool_cli, tools
+from trader.features.regime.research import RESEARCH
 from trader.kernel.ledger import control
+from trader.kernel.session import codex, research_policy
 from trader.kernel.session.run_store import market_dir, read_checkpoint, write_checkpoint
 
 T0 = datetime(2026, 10, 9, 6, 0, tzinfo=UTC)  # 2026-10-09 15:00 KST
@@ -163,9 +166,6 @@ def _issue_turn(side, rnd=0, **over):
 
 def _with_report(ctx, *, cross=False):
     """`_market_inputs` + (교차면 v2 정책 고정) + `_market_analyst`."""
-    from trader.features.regime.research import RESEARCH
-    from trader.kernel.session import research_policy
-
     d = _inputs()
     if cross:
         ctx.settings.llm.codex_debate.enabled = True
@@ -264,8 +264,6 @@ def test_market_write_lane_b_rejected_without_cross_policy(ctx, monkeypatch):
 
 
 def test_market_codex_turn_side_passthrough(ctx, monkeypatch):
-    from trader.kernel.session import research_policy
-
     _with_report(ctx)
     seen = {}
 
@@ -284,10 +282,6 @@ def test_market_codex_turn_side_passthrough(ctx, monkeypatch):
 
 
 def test_market_cli_lane_and_side_options(monkeypatch):
-    from typer.testing import CliRunner
-
-    from trader.features.regime import tool_cli
-
     seen = {}
 
     def fake_run(fn, **kw):
@@ -304,8 +298,7 @@ def test_market_cli_lane_and_side_options(monkeypatch):
     assert runner.invoke(tool_cli.market_app, ["codex-turn", *base, "--round", "0"]).exit_code == 0
     assert seen["codex_turn"]["side"] == "bear"
     side_args = ["codex-turn", *base, "--round", "0", "--side", "bull"]
-    res = runner.invoke(tool_cli.market_app, side_args)
-    assert res.exit_code == 0
+    assert runner.invoke(tool_cli.market_app, side_args).exit_code == 0
     assert seen["codex_turn"]["side"] == "bull"
 
 
@@ -346,8 +339,6 @@ def test_market_summarize_cross_policy_incomplete_lane_b_rejected(ctx, monkeypat
 
 def test_market_fake_cross_debate_writes_both_lanes(ctx, conn, monkeypatch):
     """Codex 켜짐 설정 + FAKE: 라운드마다 두 판 4턴과 by_lane 요약(실제 Codex 는 띄우지 않는다)."""
-    from trader.kernel.session import codex
-
     monkeypatch.setenv("FAKE_CLAUDE", "1")
     ctx.settings.llm.codex_debate.enabled = True
     monkeypatch.setattr(codex, "run_turn", lambda *a, **kw: pytest.fail("FAKE launched Codex"))
@@ -357,9 +348,8 @@ def test_market_fake_cross_debate_writes_both_lanes(ctx, conn, monkeypatch):
         for s in ("bull", "bear"):
             assert f"_market_debate_r{n}_{s}" in written
             assert f"_market_debatex_r{n}_{s}" in written
-    assert read_checkpoint(d, "_market_debatex_r0_bull")["call"]["agent"] == (
-        "market-researcher-bull"
-    )
+    call = read_checkpoint(d, "_market_debatex_r0_bull")["call"]
+    assert call["agent"] == "market-researcher-bull"
     summ = read_checkpoint(d, "_market_summary")["data"]
     assert set(summ["by_lane"]) == {"a", "b"} and summ["lanes"] == ["a", "b"]
     assert written[-1] == "_market_view"

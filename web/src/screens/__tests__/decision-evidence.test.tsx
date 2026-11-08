@@ -1,6 +1,6 @@
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { act } from "react";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Decision } from "../decision/Decision.tsx";
 import type { DecisionInputs } from "../decision/InputEvidence";
 import { clearResourceCache } from "../../lib/cache";
@@ -210,4 +210,28 @@ test("issues with same id in two lanes stay separate", async () => {
   expect(comparison.textContent).toContain("2판 성장 쟁점");
   expect(comparison.querySelectorAll("[data-issue-id]")).toHaveLength(2);
   expect(comparison.textContent).toContain("2판 Codex (강세 측)");
+});
+
+describe("판 표기는 판 b 턴이 있을 때만", () => {
+  const turn = { stance: "BULLISH", timing: null, timing_note: null, round: 0, side: "bull", conviction: .8, provider: "claude", model: "m-a", issues: [{ issue_id: "bull:growth", topic: "성장 쟁점", claim: "주장", evidence: [] }] };
+  const heads = (table: Element) => Array.from(table.querySelectorAll("thead th")).map((th) => th.textContent);
+
+  test("1판뿐이면 판 열과 참여자 앞 1판을 숨긴다", async () => {
+    await mount(inputs(), [{ ...turn, lane: "a" }, { ...turn, side: "bear", stance: "BEARISH" }]);
+    const comparison = document.getElementById("comparison")!;
+    expect(comparison.textContent).toContain("Claude (강세 측)");
+    expect(comparison.textContent).not.toContain("1판");
+    const debate = document.getElementById("debate")!.querySelector("details table")!;
+    expect(heads(debate)[0]).toBe("라운드");
+    expect(debate.textContent).not.toContain("1판");
+  });
+
+  test("판 b 가 있으면 판 열과 1판·2판 표기를 그대로 둔다", async () => {
+    await mount(inputs(), [{ ...turn, lane: "a" }, { ...turn, lane: "b", provider: "codex", model: "m-b" }]);
+    const comparison = document.getElementById("comparison")!;
+    expect(comparison.textContent).toContain("1판 Claude (강세 측)");
+    expect(comparison.textContent).toContain("2판 Codex (강세 측)");
+    const debate = document.getElementById("debate")!.querySelector("details table")!;
+    expect(heads(debate)[0]).toBe("판");
+  });
 });

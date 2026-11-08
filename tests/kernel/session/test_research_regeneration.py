@@ -93,7 +93,7 @@ def test_final_codex_regeneration_invalidates_summary_and_blocks_new_decision(
     def fake(cmd, **kw):
         data = json.loads(kw["input"].split("\n", 1)[1])
         Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
-            json.dumps(issue_turn("bear", data["round"], conviction))
+            json.dumps(issue_turn("bear", data["round"], conviction)), encoding="utf-8"
         )
         return subprocess.CompletedProcess(cmd, 0, "", "")
 

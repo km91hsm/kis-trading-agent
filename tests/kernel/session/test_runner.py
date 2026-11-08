@@ -738,10 +738,12 @@ def test_cross_bash_timeout_follows_codex_timeout(project, conn):
     assert captured["timeout"] == 900 + 2 * (600 + 120)
 
 
-def test_disabled_codex_session_has_no_extra(project, conn):
+def test_disabled_codex_session_has_no_extra(project, conn, monkeypatch):
+    monkeypatch.delenv("BASH_DEFAULT_TIMEOUT_MS", raising=False)
     _, captured = _capture_session(project, conn, llm=LlmSettings(usage_file=None))
     assert captured["timeout"] == 900
-    assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
+    # Codex 연구가 없는 세션은 Claude Code 기본 Bash 제한(2분)을 그대로 둔다
+    assert "BASH_DEFAULT_TIMEOUT_MS" not in captured["env"]
     # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
     assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
     assert "researcher-bear" in captured["agents"]
@@ -763,9 +765,53 @@ def test_session_with_v1_codex_research_runs_legacy_mode(project, conn):
     assert "Claude bear를 쓰지 않는다" in captured["prompt"]
     # md 의 조건부 안내(「교차 토론이면」)는 남지만 런타임 절의 2판 지시는 붙지 않는다
     assert "2판 Claude 턴" not in captured["prompt"]
+    # md 의 `--lane b` 지시는 조건 문구와 함께여야 한다(조건이 사라지면 레거시에서도 2판을 돈다)
+    assert (
+        "Codex 교차 토론이면(런타임 절이 알린다) 2판 묶음도 같은 bundle 명령에 `--lane b`"
+    ) in captured["prompt"]
     assert captured["timeout"] == 900
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
     assert not result.ok and "Codex" in result.error
+
+
+def test_cross_session_timeout_message_shows_extended_limit(project, conn):
+    """교차 세션 타임아웃 문구에는 연장된 제한 시간(900 + 600)이 나온다."""
+    from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
+    from trader.features.spot.session_kinds import ANALYZE
+
+    ctx = make_ctx(project, conn, llm=_codex_on())
+    ctx.settings.debate_rounds = 1
+
+    def timeout(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    result = run_session(
+        spec(), ANALYZE, ctx, agents=ag.by_name(SPOT_AGENTS), runner=timeout,
+        claude_bin=Path("/fake/claude"),
+    )  # fmt: skip
+    assert not result.ok and result.error == "세션 타임아웃 (1500s)"
+
+
+def _cross_policy(timeout_s: int) -> dict:
+    lane_a = {"lane": "a", "bull": "claude", "bear": "codex"}
+    lane_b = {"lane": "b", "bull": "codex", "bear": "claude"}
+    return {
+        "version": 2, "enabled": True, "lanes": [lane_a, lane_b],
+        "config": {"timeout_s": timeout_s},
+    }  # fmt: skip
+
+
+def test_cross_section_codex_timeout_wording():
+    """교차 연구가 여럿이면 「각 최대 N초」는 가장 긴 연구 기준임을 밝힌다."""
+    from trader.features.spot.research import RESEARCH
+
+    one = runner.codex_section([(Path("x"), RESEARCH, _cross_policy(180))], cross=True)
+    assert "(각 최대 180초)" in one and "가장 긴" not in one
+    many = runner.codex_section(
+        [(Path("x"), RESEARCH, _cross_policy(180)), (Path("y"), RESEARCH, _cross_policy(600))],
+        cross=True,
+    )
+    assert "(가장 긴 연구 기준 각 최대 600초)" in many
 
 
 def test_legacy_section_text_is_unchanged():

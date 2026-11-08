@@ -183,17 +183,19 @@ function request(type, body = {}, timeoutMs = type === 'pdf' ? 90000 : 20000) {
     const id = ++seq;
     return new Promise((resolve, reject) => { const timer = setTimeout(() => { requests.delete(id); reject(Error('host_timeout')); }, timeoutMs); requests.set(id, { resolve, reject, timer }); port.postMessage({ type, id, ...body }); });
 }
-async function reportTerminal({ category, reason, reload_count }) {
+async function reportTerminal({ category, reason, reload_count, terminal = true }) {
     if (!port) return;
     const count = Number.isInteger(reload_count) && reload_count >= 0 && reload_count <= 1000000 ? reload_count : 0;
-    try { await request('diagnostics', { category, reason, reload_count: count }, 1000); }
+    try { await request('diagnostics', { category, reason, reload_count: count, terminal: terminal !== false }, 1000); }
     catch { /* 구버전·연결 종료·저장 실패는 중지 동작에 영향을 주지 않는다. */ }
 }
-// 자동 로그인 직전에만 Native host 에 요청하고 저장하지 않는다. null = 저장된 정보 없음, undefined = 연결 문제.
+// 자동 로그인 직전에만 Native host 에 요청하고 저장하지 않는다. null = 저장된 정보 없음, undefined = 연결 문제,
+// { unreadable: true } = 로그인 정보 파일을 읽지 못함(값은 받지 않는다).
 async function loadCredentials() {
     try {
         await connect();
         const r = await request('credentials', {}, 5000);
+        if (r.available !== true && r.unreadable === true) return { unreadable: true };
         return r.available === true && typeof r.email === 'string' && typeof r.password === 'string' ? { email: r.email, password: r.password } : null;
     } catch (error) { return error?.message === 'invalid_message' ? null : undefined; }
 }

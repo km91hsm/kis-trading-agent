@@ -37,3 +37,13 @@ test('blocked worker in persist mode asks Native host for credentials only when 
     assert.ok(!JSON.stringify(state).includes('"pw"'));
     await f.action({ action: 'stop' });
 });
+
+test('unreadable credentials file from Native host stops persist recovery with its own reason', async () => {
+    const state = { enabled: false, backend: 'api', ownerToken: TOKEN, autoRecheck: true, persistRecheck: true, hostBlocked: true, blockedLanes: ['news'] };
+    const f = setup(state, { creds: { available: false, unreadable: true } }); const worker = await import('../worker.js?persist-unreadable'); state.enabled = true;
+    await worker.tick();
+    assert.equal(f.calls.filter(x => x.type === 'api_login').length, 0);
+    const diag = f.calls.find(x => x.type === 'diagnostics');
+    assert.equal(diag.reason, 'credentials_unreadable'); assert.equal(diag.terminal, true);
+    assert.equal(state.enabled, false); assert.equal(state.recheckRecovery.reason, 'credentials_unreadable');
+});

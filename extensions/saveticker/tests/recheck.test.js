@@ -34,7 +34,7 @@ test('terminal reason is reported before disconnect; failed diagnostics still st
   const f=fixture();f.state.recheckRecovery={attempted:true,pendingAt:NOW-45000,tabId:7,reloadCount:2};
   f.d.report=async result=>{f.calls.push(result);if(fails)throw Error('disconnected');};
   await f.run();
-  assert.deepEqual(f.calls,[ 'store', {category:'recheck',reason:'recovery_timeout',reload_count:2}, 'stop' ]);
+  assert.deepEqual(f.calls,[ 'store', {category:'recheck',reason:'recovery_timeout',reload_count:2,terminal:true}, 'stop' ]);
  }
 });
 test('cancellation during diagnostic delivery cannot stop a new session',async()=>{

@@ -149,3 +149,53 @@ def test_collector_alive_matches_native_host_only(monkeypatch):
     out = "/usr/bin/python -m trader saveticker run --headed"
     assert automation.collector_alive(123) is False
     assert automation.collector_alive(0) is False and len(calls) == 2
+
+
+def test_status_marks_non_terminal_recheck_diagnostic_as_retry_wait(tmp_path):
+    from trader.features.saveticker.store import atomic_json
+
+    runtime = tmp_path / "runtime"
+    assert automation.status(tmp_path)["diagnostic"] is None
+    row = {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+           "recorded_at": "2026-11-08T00:00:00+00:00"}
+    atomic_json(runtime / "extension-diagnostics.json", {**row, "terminal": False})
+    waiting = automation.status(tmp_path)["diagnostic"]
+    assert waiting["terminal"] is False and waiting["text"].startswith("복구 재시도 대기")
+    # 옛 기록(키 없음)은 중지로 본다
+    atomic_json(runtime / "extension-diagnostics.json", row)
+    stopped = automation.status(tmp_path)["diagnostic"]
+    assert stopped["terminal"] is True and "복구 재시도 대기" not in stopped["text"]
+    assert stopped["reason"] == "page_unverified"
+
+
+def test_status_old_wait_diagnostic_before_new_block_is_not_retrying(tmp_path):
+    """차단 중일 때 진단이 지금 차단 시각(bridge `at`)보다 오래되면
+    「복구 재시도 대기」가 아니다."""
+    import os
+
+    from trader.features.saveticker.store import atomic_json
+    from trader.kernel.daemon.lock import Lock
+
+    runtime = tmp_path / "runtime"
+    now = datetime.now(UTC)
+    blocked_at = now.isoformat()
+    atomic_json(runtime / "bridge.json", {"pid": os.getpid(), "state": "waiting_verification",
+                                          "reason": "verification_required",
+                                          "updated_at": blocked_at, "at": blocked_at})
+    row = {"category": "recheck", "reason": "page_unverified", "reload_count": 2,
+           "terminal": False}
+    lock = Lock(runtime / "bridge-host.lock")
+    assert lock.acquire()
+    try:
+        atomic_json(runtime / "extension-diagnostics.json",
+                    {**row, "recorded_at": (now - timedelta(minutes=5)).isoformat()})
+        stale = automation.status(tmp_path)
+        atomic_json(runtime / "extension-diagnostics.json", {**row, "recorded_at": blocked_at})
+        fresh = automation.status(tmp_path)
+    finally:
+        lock.release()
+    assert stale["blocked"] is True
+    assert stale["diagnostic"]["retrying"] is False
+    assert "복구 재시도 대기" not in stale["diagnostic"]["text"]
+    assert fresh["diagnostic"]["retrying"] is True
+    assert fresh["diagnostic"]["text"].startswith("복구 재시도 대기")

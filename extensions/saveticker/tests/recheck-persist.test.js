@@ -4,12 +4,12 @@ import { recoverRecheck, backoffMs } from '../recheck.js';
 const TOKEN = 'a'.repeat(32), NOW = 10_000_000, MIN = 60000;
 const NORMAL = { status: 200, ready: true, authenticated: true }, OUT = { status: 200, ready: true, authenticated: false }, RECHECK = { status: 403, page_state: 'app_recheck' };
 function fixture({ probe = RECHECK, login = { result: 'logged_in' }, creds = { email: 'u@x.com', password: 'pw' } } = {}) {
-    const state = { autoRecheck: true, persistRecheck: true, backend: 'api', hostBlocked: true, recheckRecovery: null }, calls = [], sent = [];
+    const state = { autoRecheck: true, persistRecheck: true, backend: 'api', hostBlocked: true, recheckRecovery: null }, calls = [], sent = [], reports = [];
     const d = {
         state, token: TOKEN, now: NOW, active: () => true,
         store: async v => { Object.assign(state, v); },
         stop: async () => calls.push('stop'), resume: async () => calls.push('resume'),
-        report: async r => calls.push('report:' + r.reason),
+        report: async r => { reports.push(r); calls.push('report:' + r.reason); },
         credentials: async () => { calls.push('creds'); return creds; },
         chrome: { tabs: {
             query: async () => [{ id: 7, url: 'https://www.saveticker.com/news#trader-saveticker-api=' + TOKEN }],
@@ -17,7 +17,7 @@ function fixture({ probe = RECHECK, login = { result: 'logged_in' }, creds = { e
             reload: async () => calls.push('reload')
         } }
     };
-    const f = { state, calls, sent, d, probe, run: () => recoverRecheck(d), at: t => { d.now = t; d.clock = () => t; } };
+    const f = { state, calls, sent, reports, d, probe, run: () => recoverRecheck(d), at: t => { d.now = t; d.clock = () => t; } };
     return f;
 }
 const count = (f, x) => f.calls.filter(c => c === x).length;
@@ -118,4 +118,32 @@ test('login after reload clears the pending reload reservation first', async () 
     f.d.chrome.tabs.sendMessage = async (_id, m) => { if (m.type === 'api_login') { pendingDuringLogin = f.state.recheckRecovery.pendingAt; return { result: 'login_failed' }; } return OUT; };
     f.at(NOW + 4000); await f.run();
     assert.equal(pendingDuringLogin, null);
+});
+
+test('unreadable credentials file stops with its own reason instead of missing', async () => {
+    const f = fixture({ probe: OUT, creds: { unreadable: true } }); f.at(NOW); await f.run();
+    assert.equal(f.calls.at(-1), 'stop'); assert.equal(count(f, 'login'), 0);
+    assert.ok(f.calls.includes('report:credentials_unreadable'));
+    assert.equal(f.state.recheckRecovery.reason, 'credentials_unreadable');
+});
+
+test('diagnostics say whether persist recovery stopped or only waits', async () => {
+    const waiting = fixture(); waiting.at(NOW); await waiting.run(); waiting.at(NOW + 5000); await waiting.run();
+    assert.deepEqual(waiting.reports.map(r => [r.reason, r.terminal]), [['page_unverified', false]]);
+    const halted = fixture(); halted.d.chrome.tabs.query = async () => []; halted.at(NOW); await halted.run();
+    assert.deepEqual(halted.reports.map(r => [r.reason, r.terminal]), [['owner_unverified', true]]);
+});
+
+test('worker dying after recovered save but before resume retries resume without reloading', async () => {
+    const f = fixture({ probe: NORMAL }); f.at(NOW + 5000);
+    f.state.blockedAt = NOW;
+    f.state.recheckRecovery = { persist: true, failures: 1, reloadCount: 1, loginFailures: 0, nextAt: NOW + MIN, pendingAt: null, tabId: null, reason: 'recovered', completedAt: NOW + 3000 };
+    await f.run();
+    assert.deepEqual(f.calls, ['resume']);
+    // 그 뒤 새 차단이 기록됐으면 평소대로 간격을 기다린다
+    const g = fixture(); g.at(NOW + 5000);
+    g.state.blockedAt = NOW + 4000;
+    g.state.recheckRecovery = { persist: true, failures: 1, reloadCount: 1, loginFailures: 0, nextAt: NOW + MIN, pendingAt: null, tabId: null, reason: 'recovered', completedAt: NOW + 3000 };
+    await g.run();
+    assert.deepEqual(g.calls, []);
 });

@@ -66,3 +66,12 @@ test('popup shows API failure stage and never reports no errors for a failed PDF
     assert.doesNotMatch(diagnostics(), /오류가 없습니다/);
     dom.window.close();
 });
+test('popup explains an unreadable credentials file separately from missing credentials', async () => {
+    const dom = new JSDOM(fs.readFileSync(new URL('../popup.html', import.meta.url), 'utf8'), { runScripts: 'outside-only' });
+    const state = { enabled: false, backend: 'api', autoRecheck: true, persistRecheck: true, recheckRecovery: { persist: true, reason: 'credentials_unreadable', failures: 1 } };
+    dom.window.chrome = { runtime: { getManifest: () => manifest }, storage: { local: { get: async () => ({ ...state }) }, onChanged: { addListener() { } } } };
+    dom.window.eval(fs.readFileSync(new URL('../popup.js', import.meta.url), 'utf8'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.match(dom.window.document.getElementById('recheck-status').textContent, /자동 복구 중지 · 로그인 정보 파일을 읽지 못함 · 연결 키 설정 확인/);
+    dom.window.close();
+});
