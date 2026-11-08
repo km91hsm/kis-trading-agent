@@ -323,3 +323,21 @@ def test_invalid_reset_timestamp_is_not_displayed_as_epoch(tmp_path, monkeypatch
         },
     )
     assert codex_usage.read_limits(str(tmp_path), now=NOW)["five_hour"]["resets_at"] is None
+
+
+def test_codex_usage_throttle_state_uses_single_reading(project, monkeypatch):
+    """/system/codex-usage 는 사용률을 한 번 읽어 그 값으로 조절 상태(over)를 판정한다."""
+    from trader.kernel.session import codex_usage
+
+    reads = []
+
+    def fake(bin_override, *, now):
+        reads.append(1)
+        win = {"used_pct": 97.0, "resets_at": "2099-01-01T00:00:00+00:00"}
+        return {"five_hour": win, "seven_day": None, "status": "ready", "reason": None,
+                "observed_at": now.isoformat()}  # fmt: skip
+
+    monkeypatch.setattr(codex_usage, "read_limits", fake)
+    data = make_client(ledger_deps(project)).get("/api/system/codex-usage").json()
+    assert data["throttle"]["state"] == "over" and "97%" in data["throttle"]["reason"]
+    assert reads == [1]

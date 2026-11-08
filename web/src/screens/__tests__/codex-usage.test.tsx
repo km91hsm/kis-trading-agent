@@ -161,3 +161,32 @@ test("Codex 하루 호출 제한 변경과, 사용률 초과 때 새 분석은 C
   await flush();
   expect(patchBodies("/settings/codex-call-cap")).toEqual([{ cap: 30 }]);
 });
+
+test("제한 입력이 범위 밖이면 저장이 꺼지고 입력란이 오류로 표시된다", async () => {
+  tokenStore.set("tok");
+  fake = installFakeFetch(settingsRoutes());
+  const { container } = render(<Usage />);
+  await flush();
+  const claude = container.querySelector('[aria-label="Claude 하루 세션 제한"]') as HTMLElement;
+  await act(async () => buttonIn(claude, "제한 변경")!.click());
+  const input = claude.querySelector('input[type="number"]') as HTMLInputElement;
+  typeInto(input, "0");
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  const hint = document.getElementById(input.getAttribute("aria-describedby") ?? "");
+  expect(hint?.textContent).toContain("1~1000");
+  expect(buttonIn(claude, "저장")!.disabled).toBe(true);
+});
+
+test("Codex 조절이 꺼져 있어도 하루 제한에 닿았으면 그 사실과 기본값을 보인다", async () => {
+  tokenStore.set("tok");
+  const resp = { ...withThrottle({ enabled: false, state: "over", reason: "Codex 오늘 호출 상한(80) — 사용 80회, 이번 분석에 2회 필요" }), usage: { ...codex.usage, cap_source: "control", default: 80, daily_call_cap: 80 } };
+  fake = installFakeFetch(settingsRoutes(resp));
+  const { container } = render(<Usage />);
+  await flush();
+  const section = container.querySelector('[aria-label="Codex 사용량"]') as HTMLElement;
+  expect(section.textContent).toContain("사용량 조절 꺼짐");
+  expect(section.textContent).toContain("호출 상한(80)");
+  const cap = section.querySelector('[aria-label="Codex 하루 호출 제한"]') as HTMLElement;
+  await act(async () => buttonIn(cap, "제한 변경")!.click());
+  expect(buttonIn(cap, "기본값으로")!.title).toContain("80회");
+});

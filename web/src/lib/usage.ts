@@ -58,7 +58,7 @@ export type CodexLimits = {
 export type CodexUsageResp = {
   enabled: boolean;
   rate_limits: CodexLimits;
-  usage: { calls: number; daily_call_cap: number; cap_source?: "control" | "yaml"; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+  usage: { calls: number; daily_call_cap: number; cap_source?: "control" | "yaml"; default?: number; errors: number; duration_ms: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
   throttle?: CodexThrottle;
 };
 

@@ -239,6 +239,8 @@ def run_turn(
         ).fetchone()[0]
         from trader.kernel.session import research_policy  # 순환 import 회피(정책 → codex)
 
+        # 하루 호출 상한만 고정 정책 config 대신 실효값(화면 설정 우선)을 쓴다 — 운영 상한이라
+        # 바꾸면 진행 중 연구에도 바로 적용된다. timeout_s·model 은 고정 정책 그대로.
         daily_cap, _ = research_policy.call_cap(conn, settings)
         capped = used >= daily_cap
         cap_error = f"Codex 일일 호출 상한({daily_cap}) 소진" if capped else None

@@ -385,7 +385,7 @@ def test_session_cap_api(project):
     url = "/api/settings/session-cap"
     default = deps.settings.llm.daily_session_cap
     assert c.patch(url, json={"cap": 5}).status_code == 401
-    for bad in (0, 1001, "x", 2.5):
+    for bad in (0, 1001, "x", 2.5, True, "5"):
         assert c.patch(url, json={"cap": bad}, headers=AUTH).status_code == 422, bad
     assert c.patch(url, json={"cap": 5, "x": 1}, headers=AUTH).status_code == 422
     r = c.patch(url, json={"cap": 5}, headers=AUTH)

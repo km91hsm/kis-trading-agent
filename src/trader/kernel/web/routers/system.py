@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.heartbeat import read_status
@@ -197,13 +197,15 @@ def codex_usage_view(request: Request) -> dict:
 
     deps = _deps(request)
     now = deps.now()
+    limits = codex_usage.read_limits(deps.settings.llm.codex_debate.bin, now=now)
     with closing(deps.conn_factory()) as conn:
-        status = research_policy.status(conn, deps.settings, now=now)
+        # 한 번 읽은 사용률로 조절 상태(over)까지 판정 — codex 를 두 번 실행하지 않는다
+        status = research_policy.status(conn, deps.settings, now=now, limits=limits)
     return {
         "enabled": status["enabled"],
         "usage": status["usage"],
         "throttle": status["throttle"],
-        "rate_limits": codex_usage.read_limits(deps.settings.llm.codex_debate.bin, now=now),
+        "rate_limits": limits,
     }
 
 
@@ -288,7 +290,8 @@ class SessionCapBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # None 이면 화면 설정을 지우고 yaml `llm.daily_session_cap` 으로
-    cap: int | None = Field(ge=usage.SESSION_CAP_RANGE[0], le=usage.SESSION_CAP_RANGE[1])
+    # StrictInt: true·"5"·5.0 같은 값이 정수로 바뀌어 저장되지 않게
+    cap: StrictInt | None = Field(ge=usage.SESSION_CAP_RANGE[0], le=usage.SESSION_CAP_RANGE[1])
 
 
 @settings_router.patch("/settings/session-cap", dependencies=WRITE)
@@ -366,7 +369,8 @@ def _codex_flag_update(request: Request, key: str, value: object) -> dict:
 class CodexCapBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cap: int | None = Field(ge=1, le=10000)  # None 이면 yaml `llm.codex_debate.daily_call_cap`
+    # None 이면 yaml `llm.codex_debate.daily_call_cap`
+    cap: StrictInt | None = Field(ge=1, le=10000)
 
 
 @settings_router.patch("/settings/codex-throttle", dependencies=WRITE)

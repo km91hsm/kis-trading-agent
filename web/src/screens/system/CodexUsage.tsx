@@ -11,7 +11,10 @@ import { body } from "../performance/ResourceView";
 /** 「사용량 조절 켜짐 · …」 한 줄 — 켜져 있고 초과면 사유와 함께 새 분석은 Claude 가 맡는다고 알린다. */
 function codexThrottleLine(t: CodexThrottle): string {
   const where = t.source === "control" ? " (화면 설정)" : "";
-  if (!t.enabled) return `사용량 조절 꺼짐${where} · 사용률과 관계없이 하루 제한까지 Codex 를 씁니다`;
+  if (!t.enabled) {
+    const base = `사용량 조절 꺼짐${where} · 사용률과 관계없이 하루 제한까지 Codex 를 씁니다`;
+    return t.state === "over" ? `${base} · 지금은 ${t.reason ?? "하루 제한 도달"} — 새 분석은 Claude 가 맡습니다` : base;
+  }
   if (t.state === "over") return `사용량 조절 켜짐${where} · ${t.reason ?? "사용률·제한 초과"} — 새 분석은 Claude 가 강세·약세를 맡습니다`;
   return `사용량 조절 켜짐${where} · 5시간·7일 사용률 ${Math.round(t.hard_pct * 100)}% 이상이거나 하루 제한에 닿으면 새 분석은 Claude 가 강세·약세를 맡습니다`;
 }
@@ -19,14 +22,18 @@ function codexThrottleLine(t: CodexThrottle): string {
 export function CodexUsage({ resource, now }: { resource: Resource<CodexUsageResp>; now: Date }) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const toggle = async (enabled: boolean) => {
     setConfirming(false);
     setError(null);
+    setBusy(true);
     try {
       await patchJson("/settings/codex-throttle", { enabled });
       resource.reload();
     } catch (e) {
       setError(errorText(e));
+    } finally {
+      setBusy(false);
     }
   };
   return <section aria-label="Codex 사용량">
@@ -39,7 +46,7 @@ export function CodexUsage({ resource, now }: { resource: Resource<CodexUsageRes
         <p className="perf-note">토론 참여 {data.enabled ? "켜짐" : "꺼짐"} · 구독 한도는 로그인한 Codex 계정 기준입니다.</p>
         {data.throttle ? <p className="perf-note">
           {codexThrottleLine(data.throttle)}{" "}
-          <button type="button" className="btn" onClick={() => setConfirming(true)}>{data.throttle.enabled ? "조절 끄기" : "조절 켜기"}</button>
+          <button type="button" className="btn" disabled={busy} onClick={() => setConfirming(true)}>{data.throttle.enabled ? "조절 끄기" : "조절 켜기"}</button>
         </p> : null}
         {error ? <p className="data-error" role="alert">{error}</p> : null}
         {data.throttle ? <Confirm
@@ -80,6 +87,7 @@ export function CodexUsage({ resource, now }: { resource: Resource<CodexUsageRes
           label="Codex 하루 호출 제한"
           value={usage.daily_call_cap}
           source={usage.cap_source}
+          defaultValue={usage.default}
           min={1}
           max={10000}
           unit="회"

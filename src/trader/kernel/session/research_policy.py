@@ -26,6 +26,7 @@ FLAG = "codex_debate_enabled"
 CODEX_THROTTLE_FLAG = "codex_usage_throttle"
 CODEX_CAP_FLAG = "codex_daily_call_cap"
 CODEX_CAP_RANGE = (1, 10000)
+POLICY_EXCLUDED = frozenset({"usage_throttle", "hard_pct"})
 
 
 class ResearchPolicyError(RuntimeError):
@@ -80,18 +81,27 @@ def _read_codex_limits(settings, now: datetime) -> dict:
     return codex_usage.read_limits(_cfg(settings).bin, now=now)
 
 
-def codex_allowance(conn, settings, *, now: datetime) -> tuple[bool, str | None]:
-    """새 연구에서 Codex 를 써도 되는가. 오늘 호출 ≥ 상한이면 늘 거부. 조절이 켜져 있으면 5시간·7일
-    사용률 중 하나라도 ≥ hard_pct 일 때도 거부(읽기 실패·관측 없음·리셋 지난 창은 허용)."""
+def codex_allowance(
+    conn, settings, *, now: datetime, need: int = 1, limits: dict | None = None, probe: bool = True
+) -> tuple[bool, str | None]:
+    """새 연구에서 Codex 를 써도 되는가. 오늘 호출 + 이 연구에 필요한 호출(need) > 상한이면 늘 거부.
+    조절이 켜져 있으면 5시간·7일 사용률 중 하나라도 ≥ hard_pct 일 때도 거부. 사용률은 `limits` 로
+    받거나(probe=True 이고 없으면) 직접 읽는다. 읽기 실패·이전 관측(stale)·관측 없음·리셋 지난 창은
+    막지 않는다."""
     cap, _ = call_cap(conn, settings)
     used = calls_today(conn, now)
-    if used >= cap:
-        return False, f"Codex 오늘 호출 상한({cap}) 도달({used}회)"
+    if used + need > cap:
+        return False, f"Codex 오늘 호출 상한({cap}) — 사용 {used}회, 이번 분석에 {need}회 필요"
     if not throttle_enabled(conn, settings)[0] or os.environ.get("FAKE_CLAUDE") == "1":
         return True, None
-    try:
-        limits = _read_codex_limits(settings, now) or {}
-    except Exception:  # noqa: BLE001 — 읽지 못하면 막지 않는다(Claude 쪽과 같은 원칙)
+    if limits is None:
+        if not probe:
+            return True, None
+        try:
+            limits = _read_codex_limits(settings, now) or {}
+        except Exception:  # noqa: BLE001 — 읽지 못하면 막지 않는다(Claude 쪽과 같은 원칙)
+            return True, None
+    if limits.get("status") != "ready":
         return True, None
     hard = float(_cfg(settings).hard_pct)
     worst: tuple[str, float] | None = None
@@ -122,7 +132,9 @@ def current(conn, settings) -> dict:
         "rounds": max(1, settings.debate_rounds) if enabled else settings.debate_rounds,
         "bull": "claude",
         "bear": "codex" if enabled else "claude",
-        "config": cfg.model_dump(),
+        # 조절 설정은 시작 판단 입력일 뿐 공급자 정책이 아니다 — 해시에서 빼서 업데이트·yaml
+        # 변경에도 진행 중 연구의 정책 해시가 바뀌지 않게 한다
+        "config": cfg.model_dump(exclude=POLICY_EXCLUDED),
         "claude_models": dict(getattr(settings, "models", {})),
         "prompt_hash": codex.digest(codex.PROMPT),
         "schema_hash": codex.digest(codex.output_schema()),
@@ -156,8 +168,15 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dic
     if old_stored and old_stored.get("codex_skipped"):
         # 사용량 조절로 Claude 만 쓰기로 고정된 연구 — 다시 시작해도 그대로(사용률이 바뀌어도)
         return old_stored
-    if old_stored is None and wanted["enabled"]:
-        ok, why = codex_allowance(conn, settings, now=now)
+    if (
+        old_stored is None
+        and wanted["enabled"]
+        and scope.completed_stage not in list_checkpoints(d)  # 끝난 연구는 판단하지 않는다
+    ):
+        # bear 턴은 라운드마다 1회(0~rounds) — 남은 호출이 모자라면 시작부터 Claude 로.
+        # 여기서 Claude 로 바뀌면(enabled=False) 아래의 「Codex 참여 증명 없음」·「원장 없음」
+        # 거부도 적용되지 않는다 — Claude 만 쓰는 연구라 Codex 증명이 필요 없다.
+        ok, why = codex_allowance(conn, settings, now=now, need=int(wanted["rounds"]) + 1)
         if not ok:
             wanted = {
                 **wanted,
@@ -431,13 +450,14 @@ def completion_error(conn, settings, d, scope) -> str | None:
         return f"Codex 참여 검증 실패: {type(exc).__name__}"
 
 
-def status(conn, settings, *, now):
+def status(conn, settings, *, now, limits: dict | None = None):
     from trader.kernel.platform import codex_bin
 
     enabled, source = configured(conn, settings)
     cap, cap_source = call_cap(conn, settings)
     t_enabled, t_source = throttle_enabled(conn, settings)
-    t_ok, t_reason = codex_allowance(conn, settings, now=now)
+    # 조회 화면은 codex 를 직접 실행하지 않는다 — 사용률은 호출한 쪽이 읽어 넘길 때만 본다
+    t_ok, t_reason = codex_allowance(conn, settings, now=now, limits=limits, probe=False)
     cfg = getattr(settings.llm, "codex_debate", CodexDebateSettings())
     try:
         codex_bin.find_codex(cfg.bin)
@@ -480,6 +500,7 @@ def status(conn, settings, *, now):
             "subscription_utilization": None,
             "daily_call_cap": cap,
             "cap_source": cap_source,
+            "default": int(cfg.daily_call_cap),
         },
         "throttle": {
             "enabled": t_enabled,

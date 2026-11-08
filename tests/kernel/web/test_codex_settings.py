@@ -47,7 +47,7 @@ def test_codex_throttle_and_call_cap_apis(project, monkeypatch):
     assert c.patch(t_url, json={"enabled": False}).status_code == 401
     assert c.patch(cap_url, json={"cap": 5}).status_code == 401
     assert c.patch(t_url, json={"enabled": "x"}, headers=AUTH).status_code == 422
-    for bad in (0, 10001, "x"):
+    for bad in (0, 10001, "x", True, "5", 5.0):
         assert c.patch(cap_url, json={"cap": bad}, headers=AUTH).status_code == 422, bad
     r = c.patch(t_url, json={"enabled": False}, headers=AUTH)
     assert r.status_code == 200 and r.json()["throttle"]["enabled"] is False
@@ -55,6 +55,7 @@ def test_codex_throttle_and_call_cap_apis(project, monkeypatch):
     r = c.patch(cap_url, json={"cap": 5}, headers=AUTH)
     assert r.status_code == 200
     assert r.json()["usage"]["daily_call_cap"] == 5 and r.json()["usage"]["cap_source"] == "control"
+    assert r.json()["usage"]["default"] == 80
     st = c.get("/api/settings/codex-debate").json()
     assert st["throttle"]["enabled"] is False and st["usage"]["daily_call_cap"] == 5
     with deps.conn_factory() as conn:
