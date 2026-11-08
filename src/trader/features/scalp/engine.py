@@ -232,6 +232,12 @@ def skip_accounts(ctx: ScalpContext, market: str) -> frozenset[str]:
     )
 
 
+def exit_skip_accounts(ctx: ScalpContext, market: str) -> frozenset[str]:
+    """청산용: 그 시장이 아닌 계좌만 건너뛴다. 스위치·일시정지는 보지 않는다 — 열린 다리의 청산
+    (손절 포함)이 영영 못 나가는 일을 막는다. 모드에 따른 대기는 기존 `can_trade`(A8)가 맡는다."""
+    return frozenset(a.id for a in accounts(ctx) if market not in a.markets)
+
+
 def decision(
     action: str,
     ticker: str,
@@ -591,11 +597,12 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
     cfg = ctx.settings.scalp
     st = load_state(ctx.state, today, market)
     exits.carry_over(ctx, market, today, st)
-    skip = skip_accounts(ctx, market)
+    entry_skip = skip_accounts(ctx, market)  # 진입·판정 회수: 스위치·실효 반영
+    exit_skip = exit_skip_accounts(ctx, market)  # 청산: 시장만 — 스위치를 끈 뒤에도 청산은 나간다
     out: dict[str, Any] = {"entries": [], "exits": [], "candidates": 0, "errors": []}
     had_state = bool(st.get("open") or st.get("pending"))
     if st.get("open"):
-        exits.check_exits(ctx, market=market, today=today, st=st, skip=skip, out=out)
+        exits.check_exits(ctx, market=market, today=today, st=st, skip=exit_skip, out=out)
     # 일일 손실 한도: 청산된 거래의 (수익률 × 비중) 합
     realized = sum(
         float(c.get("ret") or 0) * float(c.get("weight") or cfg.max_weight_pct)
@@ -623,7 +630,7 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
     judge_on = cfg.judge and ctx.judge is not None
     # --- 판정 회수 (지난 틱 제출분) ---
     if st.get("pending"):
-        for pos in settle_pending(ctx, market=market, today=today, st=st, skip=skip):
+        for pos in settle_pending(ctx, market=market, today=today, st=st, skip=entry_skip):
             out["entries"].append(
                 {"ticker": pos["ticker"], "price": pos["entry_price"], "qty": pos["qty"]}
             )
@@ -651,7 +658,7 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
                     price=e.price,
                     time_hms=e.time,
                     reason=e.reason(),
-                    skip=skip,
+                    skip=entry_skip,
                 )
             except Exception as err:  # noqa: BLE001 - 종목 하나의 실패가 틱을 멈추지 않는다
                 logger.warning("단타 후보 처리 실패 %s: %s", c["ticker"], err)

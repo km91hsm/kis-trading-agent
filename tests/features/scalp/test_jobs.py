@@ -40,7 +40,7 @@ def schedule(project):
 @pytest.fixture
 def make_deps(settings, schedule, ports, project, conn):
     """`DaemonDeps`(monitor 게이트는 accounts 공급자, 휴장 없음). conn 픽스처가 스키마를 만든다."""
-    ports["accounts"].holiday_fn = lambda: lambda m, d: False
+    ports["accounts"].holiday_fn = lambda: (lambda m, d: False)
 
     def make(now=NOW, **kw) -> runner.DaemonDeps:
         base = {

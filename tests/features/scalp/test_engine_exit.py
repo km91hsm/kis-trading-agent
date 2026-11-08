@@ -130,6 +130,51 @@ def test_stop_exit_runs_after_bear_switch_and_ret_uses_fill_prices(
     assert st["open"] == [] and st["closed"][0]["exit_price"] == "9850"
 
 
+@pytest.mark.parametrize(
+    "accounts",
+    [
+        [
+            make_account("paper-main", "paper", "auto", ["KR"]),
+            make_account("real-1", "real", "auto", ["KR"]),
+        ]
+    ],
+)
+def test_exit_sent_after_switch_turned_off(scalp_ctx, market, brokers, accounts, conn, project):
+    """스위치는 신규 진입만 막는다 — 다리가 있는 계좌의 스위치를 끈 뒤에도 청산(손절)은 나간다."""
+    from trader.features.accounts import api as accounts_api
+    from trader.features.scalp import switch
+
+    real = next(a for a in accounts if a.id == "real-1")
+    modes.set_account_mode(conn, real, "auto", confirm=accounts_api.LIVE_CONFIRM)
+    set_flag(conn, switch.flag_key("real-1"), True)
+    ctx = _ctx(scalp_ctx, market)
+    pos = _enter(ctx, project)
+    assert set(pos["legs"]) == {"paper-main", "real-1"}
+    for acc in ("paper-main", "real-1"):
+        no = conn.execute(
+            "SELECT order_no FROM orders WHERE side='BUY' AND account_id=?", (acc,)
+        ).fetchone()["order_no"]
+        brokers[acc].fills[("KR", D)] = [_fill(no, "BUY", 49, "10000")]
+        brokers[acc].positions = [_pos(49)]
+    set_flag(conn, switch.flag_key("paper-main"), False)
+    set_flag(conn, switch.flag_key("real-1"), False)
+    assert engine.skip_accounts(ctx, "KR") >= {"paper-main", "real-1"}  # 진입 skip 에는 들어간다
+    market.prices[T] = Decimal("9800")  # 손절 −1% 아래
+    _advance(ctx, 3)
+    engine.tick(ctx, market="KR", today=D)
+    assert [r["qty"] for r in _sells(conn, "paper-main")] == [49]
+    assert [r["qty"] for r in _sells(conn, "real-1")] == [49]
+
+
+def test_settle_pending_uses_entry_skip(scalp_ctx, market, conn, project):
+    """판정 회수 진입은 스위치 기반 진입 skip — 꺼진 계좌는 다리가 생기지 않는다."""
+    import inspect
+
+    src = inspect.getsource(engine.tick)
+    assert "settle_pending(ctx, market=market, today=today, st=st, skip=entry_skip)" in src
+    assert "skip=exit_skip" in src
+
+
 @pytest.mark.parametrize("accounts", [TWO_PAPER])
 def test_exit_skips_accounts_that_did_not_enter(scalp_ctx, market, brokers, conn, project):
     ctx = _ctx(scalp_ctx, market)
@@ -354,9 +399,7 @@ def test_failed_fill_query_keeps_recheck(scalp_ctx, market, brokers, project):
     assert _st(project)["open"] == []
 
 
-def test_carry_over_is_idempotent_and_syncs_original_day(
-    scalp_ctx, market, brokers, conn, project
-):
+def test_carry_over_is_idempotent_and_syncs_original_day(scalp_ctx, market, brokers, conn, project):
     """이월이 끊겨 옛 파일에 남아 있어도 중복 승계하지 않고, 전일 주문일로 체결을 다시 읽는다."""
     ctx = _ctx(scalp_ctx, market)
     _enter(ctx, project)
