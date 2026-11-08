@@ -367,13 +367,32 @@ def _lane_label(lane: str) -> str:
     return "" if lane == "a" else "2판 "
 
 
+def _missing_lane(policy: dict, lane: str) -> str | None:
+    if lane not in {item["lane"] for item in lanes(policy)}:
+        return f"이 연구에는 {'2' if lane == 'b' else '1'}판이 없습니다"
+    return None
+
+
+def lane_error(conn, settings, d, scope, lane: str) -> str | None:
+    """연구원 묶음 `--lane` 검사: a|b 형식, 그리고 판 b 는 고정 정책에 그 판이 있어야 한다.
+    판 a 는 정책을 읽지 않는다(묶음의 기존 동작 유지)."""
+    if lane not in ("a", "b"):
+        return "--lane 은 a|b 입니다"
+    if lane == "a":
+        return None
+    try:
+        return _missing_lane(get(conn, settings, d, scope), lane)
+    except ResearchPolicyError as exc:
+        return str(exc)
+
+
 def write_error(conn, settings, d, scope, *, round_no, side, lane="a") -> str | None:
     """Claude 가 토론 턴을 쓰기 전 검사. 판·공급자 칸·라운드 상한·입력 고정·같은 판 직전 라운드."""
     try:
         policy = get(conn, settings, d, scope)
-        if lane not in {item["lane"] for item in lanes(policy)}:
+        if err := _missing_lane(policy, lane):
             # 2판이 없는 정책(v1·꺼짐·건너뜀)에서 판 b 쓰기를 막는다(같은 모델끼리 두 판 방지)
-            return f"이 연구에는 {'2' if lane == 'b' else '1'}판이 없습니다"
+            return err
         if not policy["enabled"]:
             return None
         if provider_for(policy, lane, side) == "codex":

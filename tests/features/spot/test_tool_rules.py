@@ -11,7 +11,12 @@ from trader.kernel.session.stages import check_rule, first_rule
 
 def test_stage_rules_cover_write_and_submit():
     """LLM 쓰기 단계는 애널리스트·토론 턴뿐이고 30_decision 은 제출 전용 규칙만 받는다."""
-    for stage in ("10_analyst_technical", "10_analyst_news_macro", "20_debate_r0_bull"):
+    for stage in (
+        "10_analyst_technical",
+        "10_analyst_news_macro",
+        "20_debate_r0_bull",
+        "20_debatex_r0_bull",
+    ):
         assert first_rule(WRITE_RULES, stage) is not None, stage
     for stage in ("30_decision", "25_research_summary", "00_inputs", "40_risk_check_a"):
         assert first_rule(WRITE_RULES, stage) is None, stage

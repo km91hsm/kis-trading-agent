@@ -10,7 +10,9 @@ import logging
 from datetime import date
 
 from trader.features.spot import tools
+from trader.features.spot.research import RESEARCH
 from trader.kernel.lane.types import LaneContext
+from trader.kernel.session import research_policy
 from trader.kernel.session.fake import fake_call, fake_report, fake_turn
 from trader.kernel.session.run_store import list_checkpoints, read_checkpoint, run_dir
 from trader.kernel.session.runner import SessionSpec
@@ -89,9 +91,17 @@ def run_fake_ticker(
         skipped = True  # 이미 생략 요약이 있다
     if not skipped:
         before = len(written)
+        # 판 목록은 고정 정책(FAKE 는 `configured()` 가 켜짐이면 두 판)에서 — Codex 칸도 FAKE 턴으로
+        # 채우고 실제 Codex 는 부르지 않는다(FAKE 정책은 enabled=False)
+        policy = research_policy.get(ctx.conn, ctx.settings, rd, RESEARCH)
         for n in range(0, debate_rounds + 1):
-            for side in ("bull", "bear"):
-                write(f"20_debate_r{n}_{side}", fake_turn(side, n), f"researcher-{side}")
+            for item in research_policy.lanes(policy):
+                for side in ("bull", "bear"):
+                    write(
+                        RESEARCH.turn_stage(item["lane"], n, side),
+                        fake_turn(side, n),
+                        f"researcher-{side}",
+                    )
         debate_changed = len(written) > before
         # 토론 턴을 새로 썼으면 요약도 다시 만든다 (오케스트레이터 프롬프트와 같은 규칙)
         if debate_changed or "25_research_summary" not in list_checkpoints(rd):

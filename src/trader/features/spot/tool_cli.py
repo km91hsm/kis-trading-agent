@@ -153,6 +153,7 @@ def checkpoint_bundle_cmd(
     kind: str = typer.Option(..., "--kind", help="researcher | trader"),
     round: int | None = typer.Option(None, "--round"),
     side: str | None = typer.Option(None, "--side"),
+    lane: str = typer.Option("a", "--lane", help="교차 토론 판 a | b"),
 ) -> None:
     """서브에이전트 입력 묶음(리포트+턴 또는 리포트+요약+컨텍스트)을 JSON 으로."""
     _run(
@@ -163,6 +164,7 @@ def checkpoint_bundle_cmd(
         kind=kind,
         round=round,
         side=side,
+        lane=lane,
     )
 
 
@@ -172,9 +174,10 @@ def codex_turn_cmd(
     market: str = typer.Option(..., "--market"),
     date: str = typer.Option(..., "--date"),
     round: int = typer.Option(..., "--round"),
+    side: str = typer.Option("bear", "--side", help="Codex 편 bull | bear (기본 bear)"),
 ) -> None:
-    """고정 정책의 Codex bear 호출·검증·증명 기록."""
-    _run(tools.codex_turn, ticker=ticker, market=market, date=date, round=round)
+    """고정 정책의 Codex 턴(bull|bear) 호출·검증·증명 기록."""
+    _run(tools.codex_turn, ticker=ticker, market=market, date=date, round=round, side=side)
 
 
 @checkpoint_app.command("summarize")

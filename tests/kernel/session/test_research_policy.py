@@ -296,6 +296,45 @@ def test_cross_rounds_complete_with_two_codex_sides(conn, tmp_path, monkeypatch,
     assert "증명" in err and "2판" in err
 
 
+def test_lane_error_checks_format_and_policy_lanes(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    (tmp_path / "on").mkdir()
+    (tmp_path / "off").mkdir()
+    s, d, r, _ = _cross_setup(conn, tmp_path / "on")
+    assert p.lane_error(conn, s, d, r, "c") == "--lane 은 a|b 입니다"
+    assert p.lane_error(conn, s, d, r, "a") is None
+    assert p.lane_error(conn, s, d, r, "b") is None
+    off = settings(enabled=False)
+    p.start(conn, off, tmp_path / "off", SPOT_RESEARCH, now=NOW)
+    assert p.lane_error(conn, off, tmp_path / "off", SPOT_RESEARCH, "b") == (
+        "이 연구에는 2판이 없습니다"
+    )
+    assert p.lane_error(conn, off, tmp_path / "off", SPOT_RESEARCH, "a") is None
+
+
+def test_cross_codex_bull_proof_with_bear_prompt_hash_fails(conn, tmp_path, monkeypatch):
+    """판 b Codex 강세 증명의 prompt_hash 가 약세 PROMPT 해시면(행·체크포인트 모두) 증명 실패."""
+    from trader.kernel.session import codex
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r, ctx = _cross_setup(conn, tmp_path)
+    _run_cross(conn, s, d, r, ctx, _codex_fake(d))
+    assert p.completion_error(conn, s, d, r) is None
+    stage = r.turn_stage("b", 0, "bull")
+    cp = read_checkpoint(d, stage)
+    bear_hash = codex.digest(codex.PROMPTS["bear"])
+    assert cp["call"]["prompt_hash"] == codex.digest(codex.PROMPTS["bull"]) != bear_hash
+    conn.execute(
+        "UPDATE research_calls SET prompt_hash=? WHERE id=?", (bear_hash, cp["call"]["call_id"])
+    )
+    write_checkpoint(d, stage, {**cp, "call": {**cp["call"], "prompt_hash": bear_hash}})
+    err = p.completion_error(conn, s, d, r)
+    assert err == "Codex 참여 증명 불일치: 2판 r0_bull, 새 연구로 재분석하세요"
+
+
 def test_cross_claude_slot_requires_claude_provider(conn, tmp_path, monkeypatch):
     from trader.kernel.session import research_policy as p
 

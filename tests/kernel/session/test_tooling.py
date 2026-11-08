@@ -601,3 +601,20 @@ def test_summarize_turns_rejects_lanes_with_different_last_round(tmp_path):
         _write_turn(tmp_path, stage, side, rnd)
     out = tooling.summarize_turns(tmp_path, "25_research_summary", tooling.DEBATE_RE)
     assert out == {"ok": False, "error": "두 판의 마지막 라운드가 다릅니다"}
+
+
+def test_previous_turns_reads_only_same_lane(tmp_path):
+    p = tooling.debate_re("20_debate_r", "20_debatex_r")
+    assert tooling.previous_turns(tmp_path, p, lane="b", round_no=0, side="bull") == (None, None)
+    for side in ("bull", "bear"):
+        write_checkpoint(tmp_path, f"20_debate_r0_{side}", checkpoint_payload(_turn(side, 0)))
+    with pytest.raises(ValueError, match="라운드 0 의 양측 턴이 모두 필요합니다"):
+        tooling.previous_turns(tmp_path, p, lane="b", round_no=1, side="bull")
+    for side in ("bull", "bear"):
+        payload = {**_turn(side, 0), "arguments": [f"판B {side}"]}
+        write_checkpoint(tmp_path, f"20_debatex_r0_{side}", checkpoint_payload(payload))
+    own, opp = tooling.previous_turns(tmp_path, p, lane="b", round_no=1, side="bull")
+    assert own.arguments == ["판B bull"] and opp.arguments == ["판B bear"]
+    own_a, opp_a = tooling.previous_turns(tmp_path, p, lane="a", round_no=1, side="bear")
+    assert own_a.side == "bear" and opp_a.side == "bull"
+    assert own_a.arguments != ["판B bear"]

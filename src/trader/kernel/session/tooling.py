@@ -114,6 +114,22 @@ def load_turns(
     return load_lanes(d, pattern).get(lane, {})
 
 
+def previous_turns(
+    d: Path, pattern: re.Pattern[str], *, lane: str, round_no: int, side: str
+) -> tuple[DebateTurn | None, DebateTurn | None]:
+    """연구원 묶음의 (자기, 상대) 직전 턴 — 같은 판(`lane`)의 `round_no - 1` 에서만 읽는다.
+
+    라운드 0 은 (None, None). 직전 라운드 양측 중 하나라도 없으면 `ValueError`."""
+    if round_no <= 0:
+        return None, None
+    prev = load_turns(d, pattern, lane=lane).get(round_no - 1, {})
+    own = prev.get(side)
+    opp = prev.get("bear" if side == "bull" else "bull")
+    if own is None or opp is None:
+        raise ValueError(f"라운드 {round_no - 1} 의 양측 턴이 모두 필요합니다")
+    return own, opp
+
+
 def schema_error(model: type, e: ValidationError) -> dict:
     """pydantic 검증 실패 → `{"ok": False, "error": "스키마 검증 실패(<모델>): <loc>: <msg>"}`
     (항목은 `; ` 로 잇는다)."""
