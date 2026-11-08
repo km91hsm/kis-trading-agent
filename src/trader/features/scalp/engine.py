@@ -592,7 +592,8 @@ def _judge_submit(
 def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
     """1틱: 청산 → (판정 회수) → 진입. 반환 {entries, exits, candidates, errors[, skipped]}.
     청산은 허용 판정(bear·전략가 금지·일일 손실·일시정지)보다 먼저 돈다 — 그 제한은 신규 진입만
-    막는다. 일시정지여도 청산 SELL 은 나간다(리스크 청산).
+    막는다(이유는 skipped, 청산 주문을 낸/끝낸 틱은 entries_blocked). 일시정지여도 청산 SELL 은
+    나간다(리스크 청산).
     후보 하나의 분봉·주문 예외는 그 종목만 `errors` 에 남기고 다음 후보로 간다."""
     cfg = ctx.settings.scalp
     st = load_state(ctx.state, today, market)
@@ -626,6 +627,8 @@ def tick(ctx: ScalpContext, *, market: str, today: date) -> dict:
             had_state = True
         if had_state:
             save_state(ctx.state, today, market, st)
+        if out["exits"] or out.get("exit_orders"):  # 청산이 돈 틱은 건너뜀이 아니다(잡 표)
+            return out | {"entries_blocked": why}
         return out | {"skipped": why}
     judge_on = cfg.judge and ctx.judge is not None
     # --- 판정 회수 (지난 틱 제출분) ---

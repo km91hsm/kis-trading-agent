@@ -111,7 +111,7 @@ def test_scalp_body_skipped_when_disabled_or_outside_window(make_deps, settings,
     day = run_date_for("KR", NOW)
     save_state(project / "state", day, "KR", {"open": [{"ticker": "005930", "status": "closing"}]})
     out = scalp_jobs.scalp_body(deps, _job(deps))  # 열린 다리가 있으면 돈다
-    assert out["skipped"] == "일시정지" and "entries" in out
+    assert out["skipped"] == "일시정지" and "entries" in out  # 청산이 없는 틱은 건너뜀 표시
 
 
 def test_scalp_body_skips_when_monitor_gate_missing(make_deps):
@@ -179,7 +179,7 @@ def test_scalp_body_exits_open_leg_after_all_switches_off(
     market.prices["005930"] = Decimal("9800")  # 손절 −1% 아래
     deps = make_deps(now=NOW + timedelta(minutes=3))
     out = scalp_jobs.scalp_body(deps, _job(deps))
-    assert out.get("skipped") == "켜진 계좌 없음"  # 신규 진입만 막힌다
+    assert (out.get("skipped") or out["entries_blocked"]) == "켜진 계좌 없음"  # 신규 진입만 막힌다
     sells = conn.execute("SELECT account_id FROM orders WHERE side='SELL'").fetchall()
     assert {r["account_id"] for r in sells} == {"paper-main", "paper-two"}
 

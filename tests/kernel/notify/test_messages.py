@@ -187,12 +187,28 @@ def test_stop_deferred_paused_and_reprice():
         "[손절 실행: 일시정지 중] KR 삼성전자(005930)\n"
         "현재가 64,000원 ≤ 손절선 65,000원\n일시정지 중이지만 손절 매도를 실행했어요."
     )
-    assert M.reprice(
-        account="a", market="KR", label="L", side="BUY", qty=2, old=70000, new=70100, tail="재주문"
-    ) == "[재호가] a · L\n매수 2주 70,000원 → 70,100원\n원 주문 취소 · 재주문"
-    assert M.reprice_deferred(
-        account="a", market="US", label="L", side="SELL", qty=1, limit=10, why="호가 없음"
-    ) == "[재호가 보류] a · L\n매도 1주 @$10.00\n호가 없음 — 원 주문은 그대로 둬요"
+    assert M.scalp_exit_while_paused(market="KR", labels=["005930"]) == (
+        "[단타 청산 실행: 일시정지 중] KR 005930\n일시정지 중이지만 단타 청산 매도를 실행했어요."
+    )
+    assert (
+        M.reprice(
+            account="a",
+            market="KR",
+            label="L",
+            side="BUY",
+            qty=2,
+            old=70000,
+            new=70100,
+            tail="재주문",
+        )
+        == "[재호가] a · L\n매수 2주 70,000원 → 70,100원\n원 주문 취소 · 재주문"
+    )
+    assert (
+        M.reprice_deferred(
+            account="a", market="US", label="L", side="SELL", qty=1, limit=10, why="호가 없음"
+        )
+        == "[재호가 보류] a · L\n매도 1주 @$10.00\n호가 없음 — 원 주문은 그대로 둬요"
+    )
 
 
 def test_reconcile_mismatch_and_fill_ambiguous():
@@ -202,6 +218,7 @@ def test_reconcile_mismatch_and_fill_ambiguous():
         "[대조 불일치] a · KR 2026-10-26\n현금 1 → 2\n"
         "원장 스냅샷을 브로커 값으로 고쳤어요. 주문·체결 행은 그대로예요."
     )
-    assert M.fill_ambiguous(
-        account="a", market="KR", label="L", side="BUY", detail="후보 2건"
-    ) == "[체결 매칭 모호] a · KR L\n매수 — 후보 2건"
+    assert (
+        M.fill_ambiguous(account="a", market="KR", label="L", side="BUY", detail="후보 2건")
+        == "[체결 매칭 모호] a · KR L\n매수 — 후보 2건"
+    )

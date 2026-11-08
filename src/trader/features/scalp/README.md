@@ -93,3 +93,5 @@
 ## 테스트
 
 `tests/features/scalp/` — 설정·스키마·기능 등록·메시지·상태 파일·신호·판정자·진입·청산·잡·포트·CLI(`test_cli.py`, 옛 `test_cli_regime.py::test_scalp_report_and_backtest_cli`)·상태 절(`test_status.py`). 픽스처는 `conftest.py`(합성 계좌 `paper-main`·`paper-two`·`real-1`, 합성 분봉 `bars()`).
+- 일시정지 중 틱이 돌면 대기 중인 판정 결과는 버려지고 그 종목은 그날 끝으로 표시된다. 열린 포지션의 보유 조언 판정 호출은 일시정지 중에도 계속되고, 진입 판정은 돌지 않는다.
+- 일시정지 중 청산 SELL 이 접수되면 시장별 하루 1회 「단타 청산 실행: 일시정지 중」 알림을 보낸다. 청산 주문을 냈거나 끝낸 틱은 결과가 `skipped` 가 아니라 `entries_blocked`(사유)로 나와 잡 표에 정상 실행으로 보인다.

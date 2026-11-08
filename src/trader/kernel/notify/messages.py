@@ -348,6 +348,14 @@ def stop_while_paused(*, market: str, label: str, quote: Any, level: Any) -> str
     )
 
 
+def scalp_exit_while_paused(*, market: str, labels: list[str]) -> str:
+    return render(
+        "단타 청산 실행: 일시정지 중",
+        f"{market} {', '.join(labels)}",
+        ["일시정지 중이지만 단타 청산 매도를 실행했어요."],
+    )
+
+
 def reevaluation_failed(*, market: str, label: str, err: Any) -> str:
     return failure("재평가 실패", f"{market} {label}", err)
 

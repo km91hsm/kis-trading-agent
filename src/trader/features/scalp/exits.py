@@ -27,7 +27,10 @@ from trader.features.scalp.state import (
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.execution import ledger as xledger
+from trader.kernel.execution.core import notify_quietly
 from trader.kernel.execution.types import DEAD_STATUSES
+from trader.kernel.ledger import control
+from trader.kernel.notify import messages
 
 logger = logging.getLogger("trader.scalp")
 
@@ -245,6 +248,28 @@ def px(v: Decimal) -> str:
 # --- 청산 단계 ---------------------------------------------------------------------------
 
 
+def notify_paused_exit(
+    ctx: Any, market: str, today: date, pos: dict, lg: dict[str, dict], results: list[dict]
+) -> None:
+    """일시정지 중 청산 SELL 이 실제로 접수되면 하루 1회(시장별) 알린다."""
+    accepted = any(
+        r.get("approved")
+        and not r.get("error")
+        and not (lg.get(r.get("account_id")) or {}).get("dry")
+        and (r.get("order") or {}).get("order_id") is not None
+        for r in results
+    )
+    if not accepted or not ctx.ports["accounts"].paused(ctx.conn):
+        return
+    key = f"scalp_exit_paused_notified:{market}:{today.isoformat()}"
+    if control.get_flag(ctx.conn, key):
+        return
+    control.set_flag(ctx.conn, key, True)
+    notify_quietly(
+        ctx.notifier, messages.scalp_exit_while_paused(market=market, labels=[pos["ticker"]])
+    )
+
+
 def close_step(
     ctx: Any,
     *,
@@ -320,6 +345,7 @@ def close_step(
                     need.pop(r["account_id"], None)
             elif order is not None and order.get("order_id") is not None:
                 leg.setdefault("sell", []).append(int(order["order_id"]))
+        notify_paused_exit(ctx, market, today, pos, lg, results)
         persist()  # 접수한 청산 주문 id 를 바로 남긴다(틱 중간에 끊겨도 다시 내지 않게)
         waiting = waiting or bool(need)
     if waiting:
@@ -418,9 +444,12 @@ def check_exits(
                 ctx.state, today, market, "closing",
                 now=ctx.now(), ticker=pos["ticker"], reason=reason,
             )  # fmt: skip
+        sent = len(pos.get("exit_results") or [])
         res = close_step(
             ctx, market=market, today=today, pos=pos, price=q, skip=skip, persist=persist
         )
+        if len(pos.get("exit_results") or []) > sent:  # 이 틱에 청산 SELL 을 냈다
+            out["exit_orders"] = out.get("exit_orders", 0) + 1
         if res is None:
             continue
         st["open"].remove(pos)
