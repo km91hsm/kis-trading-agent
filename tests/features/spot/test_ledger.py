@@ -199,3 +199,14 @@ def test_decision_source_follows_last_writer(conn):
     ledger.insert_hedge_decision(conn, D, "KR", "005930", ok_decision())
     assert source("005930") == "hedge"
     assert conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 2
+
+
+def test_lane_b_turn_is_not_ingested(conn):
+    """판 B 턴은 lane 열이 생기기 전까지 debate_turns 에 넣지 않는다(판 A 행 덮어쓰기 방지)."""
+    ledger.ingest_checkpoint(conn, D, "KR", "005930", "20_debate_r0_bull", cp(ok_turn("bull", 0)))
+    before = conn.execute("SELECT data_json FROM debate_turns").fetchall()
+    ledger.ingest_checkpoint(
+        conn, D, "KR", "005930", "20_debatex_r0_bull", cp(ok_turn("bull", 0, stance="BEARISH"))
+    )
+    after = conn.execute("SELECT data_json FROM debate_turns").fetchall()
+    assert len(before) == 1 and [tuple(r) for r in after] == [tuple(r) for r in before]

@@ -596,9 +596,9 @@ def checkpoint_write(
     """LLM 이 쓸 수 있는 단계(`WRITE_RULES`)만 받는다: 스키마·파일명↔페이로드 일치·라운드 상한
     검증 뒤 전제조건(선행 단계)을 본다."""
     d = _dir(ctx, ticker, market, date)
-    if match := _DEBATE_RE.match(stage):
+    if parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(match[1]), side=match[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=parsed[1], side=parsed[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
@@ -654,9 +654,8 @@ def _name_payload_mismatch(
         if v.ticker != ticker:
             return f"ticker 불일치: {v.ticker} ≠ {ticker}"
         return None
-    m = _DEBATE_RE.match(stage)
-    if m:
-        rnd, side = int(m.group(1)), m.group(2)
+    if parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
+        _, rnd, side = parsed
         if v.side != side or v.round != rnd:
             return f"파일명 r{rnd}_{side} 와 페이로드 round={v.round} side={v.side} 불일치"
         if rnd > (ctx.settings.debate_rounds if rounds is None else rounds):

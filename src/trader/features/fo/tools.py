@@ -68,7 +68,7 @@ FO_INPUTS = "_fo_inputs"
 FO_SUMMARY = "_fo_summary"
 FO_MIN_ROLES = 2
 _FO_ANALYST_RE = re.compile(r"^_fo_analyst_(technical|sentiment|news_macro)$")
-_FO_DEBATE_RE = re.compile(r"^_fo_debate_r(\d+)_(bull|bear)$")
+_FO_DEBATE_RE = tooling.debate_re(RESEARCH.turn_prefix, RESEARCH.cross_turn_prefix)
 _FO_DECISION_RE = re.compile(r"^_fo_decision_r(\d+)_([A-Za-z0-9_-]+)$")
 _FO_REEVAL_RE = re.compile(r"^_fo_reeval_r(\d+)_([A-Za-z0-9_-]+)$")
 _FO_WRITABLE = ("_fo_analyst_<technical|sentiment|news_macro>", "_fo_debate_r<n>_<bull|bear>")
@@ -372,25 +372,25 @@ def fo_write(
     `_fo_debate_r<n>_<side>`(DebateTurn, round·side 일치, n ≤ debate_rounds). 토론 턴을 새로 쓰면
     `_fo_summary` 를 지운다(요약은 턴의 함수)."""
     d = _fo_dir(ctx, date)
-    md = _FO_DEBATE_RE.match(stage)
+    md = tooling.parse_debate_stage(_FO_DEBATE_RE, stage)
     if md:
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(md[1]), side=md[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=md[1], side=md[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
     rounds = research_policy.rounds(ctx.conn, ctx.settings, d, RESEARCH)
     ma = _FO_ANALYST_RE.match(stage)
-    md = _FO_DEBATE_RE.match(stage)
+    md = tooling.parse_debate_stage(_FO_DEBATE_RE, stage)
     if ma:
         model: type = AnalystReport
     elif md:
         model = DebateTurn
-        if int(md.group(1)) > rounds:
+        if md[1] > rounds:
             return {
                 "ok": False,
                 "error": (
-                    f"라운드 {md.group(1)} 는 설정(debate_rounds="
+                    f"라운드 {md[1]} 는 설정(debate_rounds="
                     f"{ctx.settings.debate_rounds})을 넘습니다"
                 ),
             }
@@ -416,11 +416,11 @@ def fo_write(
             "ok": False,
             "error": f"리포트 ticker 는 입력의 proxy({proxy})여야 합니다: {v.ticker!r}",
         }
-    if md and (v.round != int(md.group(1)) or v.side != md.group(2)):
+    if md and (v.round != md[1] or v.side != md[2]):
         return {
             "ok": False,
             "error": (
-                f"파일명 r{md.group(1)}_{md.group(2)} 와 페이로드 "
+                f"파일명 r{md[1]}_{md[2]} 와 페이로드 "
                 f"round={v.round} side={v.side} 불일치"
             ),
         }

@@ -20,6 +20,7 @@ RESEARCH = ResearchSpec(
     input_stage="_fo_inputs",
     report_prefix="_fo_analyst_",
     turn_prefix="_fo_debate_r",
+    cross_turn_prefix="_fo_debatex_r",
     completed_stage="_fo_decision",
     summary_stage="_fo_summary",
     cli_template="fo codex-turn --market KR --date <date> --round <n>",

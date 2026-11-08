@@ -22,7 +22,17 @@ from trader.kernel.session.run_store import (
 )
 from trader.kernel.session.schemas import CallMeta, DebateTurn
 
-DEBATE_RE = re.compile(r"^20_debate_r(\d+)_(bull|bear)$")
+
+def debate_re(turn_prefix: str, cross_turn_prefix: str) -> re.Pattern[str]:
+    """토론 턴 단계 정규식. 이름 그룹 `b`(판 B 접두사면 매치)·`round`·`side`."""
+    return re.compile(
+        rf"^(?:(?P<b>{re.escape(cross_turn_prefix)})|{re.escape(turn_prefix)})"
+        r"(?P<round>\d+)_(?P<side>bull|bear)$"
+    )
+
+
+# 기본값: 커널 docstring 의 기존 규약(spot 이름)
+DEBATE_RE = debate_re("20_debate_r", "20_debatex_r")
 ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
 
 # 트레이더 묶음에서 리포트당 남기는 키(evidence 는 뗀다)
@@ -69,16 +79,39 @@ def call_meta(agent: str | None, meta: dict | None) -> dict | None:
     return CallMeta.model_validate(base).model_dump()
 
 
-def load_turns(d: Path, pattern: re.Pattern[str] = DEBATE_RE) -> dict[int, dict[str, DebateTurn]]:
-    """토론 턴 체크포인트를 {round: {side: DebateTurn}} 로. 패턴의 그룹 1 = 라운드, 2 = 측."""
-    turns: dict[int, dict[str, DebateTurn]] = {}
+def parse_debate_stage(pattern: re.Pattern[str], stage: str) -> tuple[str, int, str] | None:
+    """단계 이름 → `(판, 라운드, 측)`. 맞지 않으면 None. `debate_re` 의 이름 그룹이 없는
+    패턴(그룹 1 = 라운드, 2 = 측)은 판 "a" 로 본다."""
+    m = pattern.match(stage)
+    if not m:
+        return None
+    if "round" not in pattern.groupindex:
+        return "a", int(m.group(1)), m.group(2)
+    return ("b" if m.group("b") else "a"), int(m.group("round")), m.group("side")
+
+
+def load_lanes(
+    d: Path, pattern: re.Pattern[str]
+) -> dict[str, dict[int, dict[str, DebateTurn]]]:
+    """토론 턴 체크포인트를 {판: {round: {side: DebateTurn}}} 로. 턴이 있는 판만 키로 둔다."""
+    lanes: dict[str, dict[int, dict[str, DebateTurn]]] = {}
     for stage in list_checkpoints(d):
-        m = pattern.match(stage)
-        if not m:
+        parsed = parse_debate_stage(pattern, stage)
+        if parsed is None:
             continue
+        lane, rnd, side = parsed
         data = read_checkpoint(d, stage) or {}
-        turns.setdefault(int(m.group(1)), {})[m.group(2)] = DebateTurn.model_validate(data["data"])
-    return turns
+        lanes.setdefault(lane, {}).setdefault(rnd, {})[side] = DebateTurn.model_validate(
+            data["data"]
+        )
+    return lanes
+
+
+def load_turns(
+    d: Path, pattern: re.Pattern[str] = DEBATE_RE, *, lane: str = "a"
+) -> dict[int, dict[str, DebateTurn]]:
+    """토론 턴 체크포인트를 {round: {side: DebateTurn}} 로(한 판만, 기본 판 a)."""
+    return load_lanes(d, pattern).get(lane, {})
 
 
 def schema_error(model: type, e: ValidationError) -> dict:

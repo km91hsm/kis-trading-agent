@@ -21,6 +21,7 @@ RESEARCH = ResearchSpec(
     input_stage="00_inputs",
     report_prefix="10_analyst_",
     turn_prefix="20_debate_r",
+    cross_turn_prefix="20_debatex_r",
     completed_stage="30_decision",
     summary_stage="25_research_summary",
     cli_template=(

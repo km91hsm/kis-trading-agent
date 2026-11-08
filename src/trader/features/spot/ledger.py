@@ -26,9 +26,10 @@ from trader.kernel.execution.ledger import (  # noqa: F401 — 재export
 )
 from trader.kernel.execution.types import dead_status_sql
 from trader.kernel.ledger.db import now_iso
+from trader.kernel.session import tooling
 
 _ANALYST_RE = re.compile(r"^10_analyst_([a-z_]+)$")
-_DEBATE_RE = re.compile(r"^20_debate_r(\d+)_(bull|bear)$")
+_DEBATE_RE = tooling.DEBATE_RE
 _DECISION_RE = re.compile(r"^30_decision$")
 _ROUND_RE = re.compile(r"^31_decision_r(\d+)$")  # 재평가 라운드 (M5)
 
@@ -81,7 +82,10 @@ def ingest_checkpoint(
                 now,
             ),
         )
-    elif m := _DEBATE_RE.match(stage):
+    elif parsed := tooling.parse_debate_stage(_DEBATE_RE, stage):
+        lane, rnd, side = parsed
+        if lane != "a":
+            return  # 판 B 는 lane 열이 생기기 전까지 저장하지 않는다(판 A 행 덮어쓰기 방지)
         conn.execute(
             "INSERT INTO debate_turns(decision_date, market, ticker, round, side, stance, "
             "conviction, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -91,8 +95,8 @@ def ingest_checkpoint(
                 day,
                 market,
                 ticker,
-                int(m.group(1)),
-                m.group(2),
+                rnd,
+                side,
                 data.get("stance"),
                 data.get("conviction"),
                 js,

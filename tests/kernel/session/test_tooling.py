@@ -6,6 +6,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
+from trader.kernel.session import tooling
 from trader.kernel.session.run_store import checkpoint_payload, write_checkpoint
 from trader.kernel.session.schemas import CallMeta
 from trader.kernel.session.tooling import call_meta, load_turns, shrink
@@ -67,6 +68,24 @@ def test_load_turns_groups_by_round_and_side(tmp_path):
     write_checkpoint(tmp_path, "20_market_r0_bear", checkpoint_payload(_turn("bear", 0)))
     other = load_turns(tmp_path, re.compile(r"^20_market_r(\d+)_(bull|bear)$"))
     assert list(other) == [0] and list(other[0]) == ["bear"]
+
+
+def test_debate_re_recognises_both_lanes():
+    p = tooling.debate_re("20_debate_r", "20_debatex_r")
+    assert tooling.parse_debate_stage(p, "20_debate_r0_bull") == ("a", 0, "bull")
+    assert tooling.parse_debate_stage(p, "20_debatex_r2_bear") == ("b", 2, "bear")
+    assert tooling.parse_debate_stage(p, "20_debatey_r0_bull") is None
+    assert tooling.parse_debate_stage(p, "20_debate_r0_bull.json") is None
+
+
+def test_load_lanes_splits_by_lane(tmp_path):
+    for stage in ("20_debate_r0_bull", "20_debatex_r0_bull"):
+        write_checkpoint(tmp_path, stage, checkpoint_payload(_turn("bull", 0)))
+    lanes = tooling.load_lanes(tmp_path, tooling.DEBATE_RE)
+    assert set(lanes) == {"a", "b"} and set(lanes["b"][0]) == {"bull"}
+    assert set(tooling.load_turns(tmp_path)) == {0}  # 기본 lane="a"
+    assert set(tooling.load_turns(tmp_path, lane="b")) == {0}
+    assert tooling.load_lanes(tmp_path / "none", tooling.DEBATE_RE) == {}
 
 
 def test_call_meta_rejects_unknown_fields():

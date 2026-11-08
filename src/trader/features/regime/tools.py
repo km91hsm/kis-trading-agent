@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -30,7 +29,7 @@ logger = logging.getLogger("trader.regime")
 BUNDLE_LIMIT_BYTES = 24_000  # Claude Code Bash 출력 한도(30KB, UTF-8 바이트) 아래
 MARKET_PROXY_LABEL = {"KR": "KOSPI200", "US": "SPX"}
 MARKET_VIEW_FLAG = "market_view:"
-_MARKET_DEBATE_RE = re.compile(r"^_market_debate_r(\d+)_(bull|bear)$")
+_MARKET_DEBATE_RE = tooling.debate_re(RESEARCH.turn_prefix, RESEARCH.cross_turn_prefix)
 _MARKET_WRITABLE = ("_market_analyst", "_market_debate_r<n>_<bull|bear>")
 
 
@@ -165,11 +164,11 @@ def market_write(
     `_market_debate_r<n>_<side>`(DebateTurn)."""
     if err := _bad_market(market):
         return err
-    m = _MARKET_DEBATE_RE.match(stage)
+    m = tooling.parse_debate_stage(_MARKET_DEBATE_RE, stage)
     d = market_dir(date, market, ctx.state, create=True)
     if m:
         if err := research_policy.write_error(
-            ctx.conn, ctx.settings, d, RESEARCH, round_no=int(m[1]), side=m[2]
+            ctx.conn, ctx.settings, d, RESEARCH, round_no=m[1], side=m[2]
         ):
             return {"ok": False, "error": err}
         call_meta = {**(call_meta or {}), "provider": "claude"}
@@ -178,10 +177,10 @@ def market_write(
         model: type = AnalystReport
     elif m:
         model = DebateTurn
-        if int(m.group(1)) > rounds:
+        if m[1] > rounds:
             return {
                 "ok": False,
-                "error": f"라운드 {m.group(1)} 는 설정(debate_rounds={rounds})을 넘습니다",
+                "error": f"라운드 {m[1]} 는 설정(debate_rounds={rounds})을 넘습니다",
             }
     else:
         return {
@@ -191,11 +190,11 @@ def market_write(
     v, err = tooling.validate_payload(model, payload)
     if err:
         return err
-    if m and (v.round != int(m.group(1)) or v.side != m.group(2)):
+    if m and (v.round != m[1] or v.side != m[2]):
         return {
             "ok": False,
             "error": (
-                f"파일명 r{m.group(1)}_{m.group(2)} 와 페이로드 "
+                f"파일명 r{m[1]}_{m[2]} 와 페이로드 "
                 f"round={v.round} side={v.side} 불일치"
             ),
         }

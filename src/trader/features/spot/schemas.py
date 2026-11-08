@@ -36,6 +36,7 @@ CHECKPOINT_NAMES = (
     "00_inputs",
     "10_analyst_<role>",
     "20_debate_r<n>_<side>",
+    "20_debatex_r<n>_<side>",
     "25_research_summary",
     "30_decision",
     "40_risk_check_<account>",
@@ -91,7 +92,7 @@ class Decision(BaseModel):
 
 _STAGE_PATTERNS: list[tuple[re.Pattern[str], type[BaseModel]]] = [
     (re.compile(r"^10_analyst_[a-z_]+$"), AnalystReport),
-    (re.compile(r"^20_debate_r\d+_(bull|bear)$"), DebateTurn),
+    (re.compile(r"^20_debatex?_r\d+_(bull|bear)$"), DebateTurn),
     (re.compile(r"^30_decision$"), Decision),
 ]
 
