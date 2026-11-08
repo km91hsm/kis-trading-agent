@@ -3,7 +3,7 @@ import { recoverRecheck } from './recheck.js';
 import { beginHtmlTrial, htmlTrialStep, htmlTrialTerminal, HTML_TRIAL_MS } from './html-refresh.js';
 import { apiCycle, abortApi, apiErrorCode } from './api-runner.js';
 import { LANES, Scheduler, laneFor, marker, ownedLane, safePage, PdfPair } from './core.js';
-const WORKER_VERSION = '1.4.2';
+const WORKER_VERSION = '1.5.0';
 const scheduler = new Scheduler(), pdf = new PdfPair(), reportAttempts = new Map();
 let limits = { max_scrolls: 2, max_details: 2, max_reports: 2 };
 let port = null, requests = new Map(), seq = 0, enabled = false, token = '', ticking = null, retryAt = 0, failures = 0, planAt = 0, epoch = 0, nextTimer = null, presentRequested = false;
@@ -188,6 +188,14 @@ async function reportTerminal({ category, reason, reload_count }) {
     const count = Number.isInteger(reload_count) && reload_count >= 0 && reload_count <= 1000000 ? reload_count : 0;
     try { await request('diagnostics', { category, reason, reload_count: count }, 1000); }
     catch { /* 구버전·연결 종료·저장 실패는 중지 동작에 영향을 주지 않는다. */ }
+}
+// 자동 로그인 직전에만 Native host 에 요청하고 저장하지 않는다. null = 저장된 정보 없음, undefined = 연결 문제.
+async function loadCredentials() {
+    try {
+        await connect();
+        const r = await request('credentials', {}, 5000);
+        return r.available === true && typeof r.email === 'string' && typeof r.password === 'string' ? { email: r.email, password: r.password } : null;
+    } catch (error) { return error?.message === 'invalid_message' ? null : undefined; }
 }
 async function loadPlan(plan) {
     apiSetupRequired = plan.api_setup_required === true;
@@ -583,7 +591,7 @@ export async function tick() {
         return ticking;
     ticking = (async () => {
         const readEpoch = epoch;
-        const state = await chrome.storage.local.get(['enabled', 'ownerToken', 'blockedLanes', 'hostBlocked', 'backend', 'apiCooldownUntil', 'apiSetupRetryAt', 'htmlRefreshTest', 'htmlRefreshTrial', 'lastApiHealthyAt', 'autoRecheck', 'recheckRecovery', 'blockedCause', 'blockedAt', 'repeatRecheck', 'apiHealthySince', 'keepMinimized', 'minimizeAppliedCount', 'apiWindowId']);
+        const state = await chrome.storage.local.get(['enabled', 'ownerToken', 'blockedLanes', 'hostBlocked', 'backend', 'apiCooldownUntil', 'apiSetupRetryAt', 'htmlRefreshTest', 'htmlRefreshTrial', 'lastApiHealthyAt', 'autoRecheck', 'persistRecheck', 'recheckRecovery', 'blockedCause', 'blockedAt', 'repeatRecheck', 'apiHealthySince', 'keepMinimized', 'minimizeAppliedCount', 'apiWindowId']);
         if (epoch !== readEpoch) return;
         enabled = state.enabled === true;
         if (!enabled)
@@ -601,7 +609,7 @@ export async function tick() {
         }
         const recoveryEpoch = epoch, recoveryGeneration = controlGeneration;
         if (await recoverRecheck({ chrome, state, token, active: () => enabled && epoch === recoveryEpoch && controlGeneration === recoveryGeneration, store,
-            report: reportTerminal,
+            report: reportTerminal, credentials: loadCredentials,
             stop: async () => { await control('stop'); if (!enabled && epoch === recoveryEpoch + 1 && controlGeneration === recoveryGeneration + 1) await store({ connection: '재확인 자동 복구 중지 · 직접 확인 필요' }); },
             resume: () => resumeRecovered(recoveryEpoch), busy: !!pdf.pending || activeJobs.size > 0 || requests.size > 0 })) return;
         if (Date.now() < retryAt)
@@ -748,7 +756,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         (async () => {
             const state = await chrome.storage.local.get(['enabled', 'backend', 'autoRecheck']);
             if (state.enabled || state.backend !== 'api' || typeof message.value !== 'boolean' || message.action === 'set_repeat_recheck' && !state.autoRecheck) return { ok: false };
-            await store(message.action === 'set_repeat_recheck' ? { repeatRecheck: message.value, recheckRecovery: null, apiHealthySince: 0, lastApiHealthyAt: 0 } : { keepMinimized: message.value });
+            await store(message.action === 'set_repeat_recheck' ? { repeatRecheck: message.value, ...(message.value ? { persistRecheck: false } : {}), recheckRecovery: null, apiHealthySince: 0, lastApiHealthyAt: 0 } : { keepMinimized: message.value });
             return { ok: true };
         })().then(reply); return true;
     }
@@ -756,7 +764,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         (async () => {
             const state = await chrome.storage.local.get(['enabled', 'backend', 'htmlRefreshTest']);
             if (state.enabled || state.backend !== 'api' || state.htmlRefreshTest || typeof message.value !== 'boolean') return { ok: false };
-            await store({ autoRecheck: message.value, repeatRecheck: false, recheckRecovery: null, apiHealthySince: 0, lastApiHealthyAt: 0 }); return { ok: true };
+            await store({ autoRecheck: message.value, repeatRecheck: false, persistRecheck: false, recheckRecovery: null, apiHealthySince: 0, lastApiHealthyAt: 0 }); return { ok: true };
+        })().then(reply); return true;
+    }
+    if (message.action === 'set_persist_recheck') {
+        (async () => {
+            const state = await chrome.storage.local.get(['enabled', 'backend', 'autoRecheck']);
+            if (state.enabled || state.backend !== 'api' || !state.autoRecheck || typeof message.value !== 'boolean') return { ok: false };
+            await store({ persistRecheck: message.value, ...(message.value ? { repeatRecheck: false } : {}), recheckRecovery: null }); return { ok: true };
         })().then(reply); return true;
     }
     if (message.action === 'set_html_refresh_test') {
@@ -772,7 +787,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         (async () => {
             if ((await chrome.storage.local.get('enabled')).enabled || !['api', 'dom'].includes(message.backend)) return { ok: false };
             scheduler.times.clear(); scheduler.retryAt.clear(); scheduler.failureStreak.clear();
-            await store({ backend: message.backend, autoRecheck: false, repeatRecheck: false, keepMinimized: false, recheckRecovery: null, htmlRefreshTest: false, htmlRefreshTrial: null, collectionSchedule: scheduler.snapshot() });
+            await store({ backend: message.backend, autoRecheck: false, repeatRecheck: false, persistRecheck: false, keepMinimized: false, recheckRecovery: null, htmlRefreshTest: false, htmlRefreshTrial: null, collectionSchedule: scheduler.snapshot() });
             return { ok: true };
         })().then(reply);
         return true;

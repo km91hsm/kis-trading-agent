@@ -19,11 +19,22 @@ async function render() {
     $('html-refresh').disabled = !!s.enabled || s.backend !== 'api' || !!s.autoRecheck;
     $('auto-recheck').checked = !!s.autoRecheck;
     $('auto-recheck').disabled = !!s.enabled || s.backend !== 'api' || !!s.htmlRefreshTest;
-    const recoveryReasons = { recovery_used: '이미 1회 복구함', healthy_period_unverified: '정상 수집 10분 미확인 또는 연속 실패', recovery_timeout: '45초 복구 시간 초과', invalid_recovery: '복구 상태 미확인', owner_unverified: '전용 탭 미확인', page_unverified: '로그인·정상 페이지 미확인', content_unavailable: '페이지 응답 미확인', not_app_recheck: '안내창 감지 전 접근 거부', reload_failed: '새로고침 실패' };
+    const recoveryReasons = { recovery_used: '이미 1회 복구함', healthy_period_unverified: '정상 수집 10분 미확인 또는 연속 실패', recovery_timeout: '45초 복구 시간 초과', invalid_recovery: '복구 상태 미확인', owner_unverified: '전용 탭 미확인', page_unverified: '로그인·정상 페이지 미확인', content_unavailable: '페이지 응답 미확인', not_app_recheck: '안내창 감지 전 접근 거부', reload_failed: '새로고침 실패', credentials_missing: '로그인 정보 없음 · trader saveticker login set', login_failed: '이메일 로그인 실패', login_form_missing: '로그인 화면 미확인' };
     const recovery = s.recheckRecovery;
     $('recheck-status').textContent = recovery?.observedAt != null && recovery.attempted === false ? '안내창 표시 대기 · 최대 15초' : recovery?.pendingAt != null ? '일반 페이지 복구 대기 · 최대 45초' : recovery?.attempted ? (recovery.reason === 'recovered' ? (s.repeatRecheck ? '복구 완료 · 정상 수집 10분 뒤 새 사건 허용' : '1회 복구 완료 · 재발 시 중지') : '자동 복구 중지 · ' + (recoveryReasons[recovery.reason] || '직접 확인 필요') + (Number.isInteger(recovery.tabId) ? ' · 새로고침 예약됨' : ' · 새로고침 안 함')) : s.repeatRecheck ? '사건당 1회 · 정상 수집 10분 뒤에만 다음 복구' : '한 실행에서 1회만 시도 · 로그인 또는 재실패 시 중지';
     $('repeat-recheck').checked = !!s.repeatRecheck;
-    $('repeat-recheck').disabled = !!s.enabled || s.backend !== 'api' || !s.autoRecheck;
+    $('repeat-recheck').disabled = !!s.enabled || s.backend !== 'api' || !s.autoRecheck || !!s.persistRecheck;
+    $('persist-recheck').checked = !!s.persistRecheck;
+    $('persist-recheck').disabled = !!s.enabled || s.backend !== 'api' || !s.autoRecheck;
+    if (s.persistRecheck && recovery?.persist === true) {
+        const two = n => String(n).padStart(2, '0'), next = Number.isFinite(recovery.nextAt) ? new Date(recovery.nextAt) : null;
+        const failures = Number.isSafeInteger(recovery.failures) ? recovery.failures : 0;
+        $('recheck-status').textContent = recovery.pendingAt != null ? '새로고침 뒤 페이지 확인 중 · 최대 45초'
+            : recovery.reason === 'recovered' ? '복구 완료 · 수집 재개'
+            : Object.hasOwn(recoveryReasons, recovery.reason) && !s.enabled ? '자동 복구 중지 · ' + recoveryReasons[recovery.reason]
+            : '계속 복구 중' + (Object.hasOwn(recoveryReasons, recovery.reason) ? ' · ' + recoveryReasons[recovery.reason] : '') + (next && next.getTime() > Date.now() ? ' · 다음 시도 ' + two(next.getHours()) + ':' + two(next.getMinutes()) : '');
+        $('recheck-status').textContent += ' · 연속 시도 ' + failures + '회';
+    } else if (s.persistRecheck && !recovery) $('recheck-status').textContent = '재확인 시 멈추지 않고 1→2→4→8→15분 간격으로 새로고침·로그인';
     $('keep-minimized').checked = !!s.keepMinimized;
     $('keep-minimized').disabled = !!s.enabled || s.backend !== 'api';
     $('window-status').textContent = s.keepMinimized ? (s.ownedWindowState === 'minimized' ? '전용 창 최소화 확인됨 · 화면 확인은 수집 중지 후' : s.ownedWindowState === 'unverified' ? '전용 창 최소화 확인 필요' : '정상 수집 확인 후 전용 창 최소화') : '화면 확인은 수집을 중지한 뒤 진행하세요.';
@@ -89,4 +100,4 @@ $('html-refresh').addEventListener('change', async () => { try { await chrome.ru
 
 $('auto-recheck').addEventListener('change', async () => { try { await chrome.runtime.sendMessage({ action: 'set_auto_recheck', value: $('auto-recheck').checked }); } finally { await render(); } });
 
-for (const [id, action] of [['repeat-recheck', 'set_repeat_recheck'], ['keep-minimized', 'set_keep_minimized']]) $(id).addEventListener('change', async () => { try { await chrome.runtime.sendMessage({ action, value: $(id).checked }); } finally { await render(); } });
+for (const [id, action] of [['repeat-recheck', 'set_repeat_recheck'], ['persist-recheck', 'set_persist_recheck'], ['keep-minimized', 'set_keep_minimized']]) $(id).addEventListener('change', async () => { try { await chrome.runtime.sendMessage({ action, value: $(id).checked }); } finally { await render(); } });

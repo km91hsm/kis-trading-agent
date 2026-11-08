@@ -2,7 +2,7 @@
 
 뉴스 전체를 수집해 속보/SAVE PICK/로이터 등 출처와 카테고리로 분류하고, SAVE 데일리 리포트 PDF 원본과 추출 텍스트를 따로 보관한다. 커뮤니티는 지수/상승/하락/종목별 커뮤니티 TOP5만 수집한다. 사용자 게시글·댓글은 수집하지 않는다. 증시 거래대금/상승/하락, 캘린더 월별 일정도 저장한다. 거래·LLM 실행은 하지 않는다.
 
-수집은 **일반 Chrome 의 확장(`extensions/saveticker/`) + Native host(`trader saveticker native-host`)** 한 가지 방식뿐이다. 사용자가 Chrome 에서 직접 로그인하고, 확장이 로그인된 화면·응답을 읽어 Native host 로 보내면 Native host 가 검증해 저장한다. 계정 파일·자동 로그인·Playwright Chromium 수집기(옛 방식)는 2026-11 에 제거했다. 확장의 동작·권한·버전별 변경은 `extensions/saveticker/README.md` 가 정본이다.
+수집은 **일반 Chrome 의 확장(`extensions/saveticker/`) + Native host(`trader saveticker native-host`)** 한 가지 방식뿐이다. 사용자가 Chrome 에서 직접 로그인하고, 확장이 로그인된 화면·응답을 읽어 Native host 로 보내면 Native host 가 검증해 저장한다. 계정 파일·Playwright Chromium 수집기(옛 방식)는 2026-11 에 제거했다. 대신 확장 팝업의 **재확인 시 계속 복구** 를 켜면 재확인·로그아웃으로 막혀도 수집을 끄지 않고 1→2→4→8→15분(이후 15분) 간격으로 전용 탭 새로고침을 반복하고, 로그아웃이면 `trader saveticker login set` 으로 저장한 이메일·비밀번호(`secrets/.env` 의 `SAVETICKER_EMAIL`·`SAVETICKER_PASSWORD`, 0600)로 사이트의 이메일 로그인 대화상자를 채운다(확장 1.5.0). 보안 확인 화면은 조작하지 않는다. 확장의 동작·권한·버전별 변경은 `extensions/saveticker/README.md` 가 정본이다.
 
 ## 설치
 
@@ -10,6 +10,7 @@
 uv run trader saveticker extension install     # 확장 복사 + Native host 등록(재실행 가능)
 uv run trader saveticker extension status      # 등록·등록 JSON path·확장 버전·연결·작업별 상태
 uv run trader saveticker extension uninstall   # 확장 팝업에서 중지한 뒤 등록 해제
+uv run trader saveticker login set|status|clear # 계속 복구용 이메일 로그인 정보 저장·저장 여부·삭제(값은 출력 안 함)
 ```
 
 `install` 은 경로 인자가 없다. 패키지는 고정 `<데이터 루트>/saveticker-extension/`(번들은 macOS `~/Library/Application Support/Trader/saveticker-extension`, Windows `%LOCALAPPDATA%\Trader\saveticker-extension`)이고, 번들의 확장을 그 안 `extension/` 으로 복사한 뒤 **설치된 앱의 콘솔 `trader` 를 Native host 로 직접 등록**한다(macOS 는 `env TRADER_HOME=… SAVETICKER_NATIVE_ROOT=… <trader>` 래퍼 `native-host`, Windows 는 등록 JSON `path` = 설치 폴더 `trader.exe` + HKCU 레지스트리). 앱 복사본(옛 `native-runtime/`)은 만들지 않는다. Gatekeeper 번역 경로(`AppTranslocation`)나 마운트한 디스크 이미지(`/Volumes/…`)에서 실행 중이면 `app_translocated` 로 거부한다 — 앱을 `/Applications` 로 옮긴 뒤 다시 실행한다.
