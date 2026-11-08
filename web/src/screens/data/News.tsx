@@ -18,7 +18,7 @@ import { usePaged } from "../../lib/usePaged";
 import { body, failed } from "../performance/ResourceView";
 import { useMarket, type Market } from "./Data.tsx";
 import { Events } from "./Events";
-import { newsRows, sourceLabel, USED_CHIP, type Names, type NewsLabels, type NewsRefs, type NewsResp, type NewsRow } from "./data.ts";
+import { NEWS_SOURCES, newsRows, sourceLabel, USED_CHIP, type Names, type NewsLabels, type NewsRefs, type NewsResp, type NewsRow } from "./data.ts";
 
 type ManualResp = { market: string; items: { received_at: string; title: string; url: string; note: string }[] };
 
@@ -26,6 +26,18 @@ export function News() {
   const [market] = useMarket();
   const [sp, setSp] = useSearchParams();
   const filterTicker = (sp.get("ticker") ?? "").trim();
+  const sourceKey = NEWS_SOURCES.some((x) => x.key === sp.get("source")) ? sp.get("source") : null;
+  const setSource = (key: string | null) =>
+    setSp(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (key) next.set("source", key);
+        else next.delete("source");
+        next.delete("page");
+        return next;
+      },
+      { replace: true },
+    );
   const setFilter = (t: string | null) =>
     setSp(
       (prev) => {
@@ -38,7 +50,11 @@ export function News() {
       { replace: true },
     );
   const today = useKstDate();
-  const newsParams = useMemo((): Record<string, string> => (filterTicker ? { market, hours: "48", limit: "100", ticker: filterTicker } : { market, hours: "48", limit: "100" }), [market, filterTicker]);
+  const newsParams = useMemo((): Record<string, string> => ({
+    market, hours: "48", limit: "100",
+    ...(filterTicker ? { ticker: filterTicker } : {}),
+    ...(sourceKey ? { source: sourceKey } : {}),
+  }), [market, filterTicker, sourceKey]);
   const collectParams = useMemo(() => ({ market }), [market]);
   const news = useResource<NewsResp>("/news", newsParams, ["news"]);
   const items = news.data?.items;
@@ -115,6 +131,13 @@ export function News() {
   return (
     <>
       <div className="perf-filters">
+        <span className="chips" role="group" aria-label="출처" data-news-sources>
+          {NEWS_SOURCES.map((x) => (
+            <button key={x.label} type="button" className="chip" data-tone={x.key === sourceKey ? "ok" : "muted"} aria-pressed={x.key === sourceKey} onClick={() => setSource(x.key)}>
+              {x.label}
+            </button>
+          ))}
+        </span>
         <span className="data-muted">
           {news.data?.asof ? `기준 ${fmtWhen(news.data.asof)} · ` : ""}데몬이 주기적으로 수집
         </span>

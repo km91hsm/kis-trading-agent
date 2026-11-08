@@ -180,6 +180,15 @@ def row_to_dict(r: sqlite3.Row) -> dict:
 _row = row_to_dict
 
 
+# 뉴스 화면 출처 필터: 묶음 이름 → (정확히 같은 source, 접두사). 세이브티커는 `saveticker:<발행처>`.
+SOURCE_GROUPS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "saveticker": (("saveticker",), ("saveticker:",)),
+    "naver": (("naver",), ()),
+    "google_rss": (("google_rss", "google"), ()),
+    "disclosure": (("dart", "edgar", "kind"), ()),
+}
+
+
 def recent(
     conn: sqlite3.Connection,
     market: str,
@@ -188,8 +197,10 @@ def recent(
     hours: int = 48,
     limit: int = 60,
     ticker: str | None = None,
+    source: str | None = None,
 ) -> list[dict]:
-    """asof 기준 최근 hours 시간의 뉴스(최신순). asof 뒤에 발행·수신된 항목은 보이지 않는다."""
+    """asof 기준 최근 hours 시간의 뉴스(최신순). asof 뒤에 발행·수신된 항목은 보이지 않는다.
+    source 는 `SOURCE_GROUPS` 의 묶음 이름(없으면 전체)."""
     cutoff = asof.astimezone(UTC).isoformat()
     since = (asof.astimezone(UTC) - timedelta(hours=hours)).isoformat()
     sql = (
@@ -202,6 +213,14 @@ def recent(
     if ticker:
         sql += " AND EXISTS (SELECT 1 FROM json_each(news_items.tickers_json) WHERE value=?)"
         args.append(ticker)
+    if source is not None:
+        exact, prefixes = SOURCE_GROUPS[source]
+        parts = ["source IN (" + ",".join("?" * len(exact)) + ")"]
+        args.extend(exact)
+        for prefix in prefixes:
+            parts.append("substr(source, 1, ?) = ?")
+            args.extend([len(prefix), prefix])
+        sql += " AND (" + " OR ".join(parts) + ")"
     sql += " ORDER BY COALESCE(published_at, received_at) DESC, id DESC LIMIT ?"
     args.append(limit)
     return [row_to_dict(r) for r in conn.execute(sql, args).fetchall()]

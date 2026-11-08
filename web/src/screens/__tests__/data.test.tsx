@@ -1,6 +1,7 @@
 import { act } from "react";
 import { useLocation, MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { sourceLabel } from "../data/data.ts";
 
 const m = vi.hoisted(() => {
   const series = { setData: vi.fn(), createPriceLine: vi.fn(() => ({})), removePriceLine: vi.fn() };
@@ -248,6 +249,29 @@ describe("데이터 화면", () => {
     await flush();
     expect(news.querySelector("[data-news-filter]")).toBeNull();
     expect(news.querySelectorAll("table")[0].querySelectorAll("tbody tr")).toHaveLength(2);
+  });
+
+  test("뉴스 출처 칩: 「세이브티커」를 누르면 source=saveticker 로 다시 읽고 「전체」로 되돌린다", async () => {
+    await mount(routes(), "news", "/data/news");
+    const news = section("news");
+    const chips = news.querySelector("[data-news-sources]") as HTMLElement;
+    expect(Array.from(chips.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["전체", "세이브티커", "네이버", "구글", "공시"]);
+    expect(button(chips, "전체").getAttribute("aria-pressed")).toBe("true");
+    expect(callsTo("/news").at(-1)!.searchParams.get("source")).toBeNull();
+    await act(async () => button(chips, "세이브티커").click());
+    await flush(); await flush();
+    expect(callsTo("/news").at(-1)!.searchParams.get("source")).toBe("saveticker");
+    expect(button(chips, "세이브티커").getAttribute("aria-pressed")).toBe("true");
+    await act(async () => button(chips, "전체").click());
+    await flush(); await flush();
+    // 「전체」는 처음 읽은 응답(캐시)을 다시 쓴다 — 눌림 상태로 확인
+    expect(button(chips, "전체").getAttribute("aria-pressed")).toBe("true");
+    expect(button(chips, "세이브티커").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("세이브티커 출처는 「세이브티커 · 발행처」로 보인다", () => {
+    expect(sourceLabel("saveticker:로이터")).toBe("세이브티커 · 로이터");
+    expect(sourceLabel("naver")).toBe("네이버");
   });
 
   test("뉴스 종목 열은 종목이 하나도 없으면 빼고, 중요도 없는 공시는 칩 대신 「—」", async () => {

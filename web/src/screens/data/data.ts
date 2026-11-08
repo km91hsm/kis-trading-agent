@@ -49,7 +49,21 @@ const SOURCE_LABEL: Record<string, string> = {
   saveticker: "세이브티커",
   blog: "블로그",
 };
-export const sourceLabel = (s: string | null | undefined): string => (s ? (SOURCE_LABEL[s] ?? s) : "—");
+export const sourceLabel = (s: string | null | undefined): string => {
+  if (!s) return "—";
+  // 세이브티커는 `saveticker:<발행처>`(로이터·속보 등)로 쌓인다
+  if (s.startsWith("saveticker:")) return `세이브티커 · ${s.slice("saveticker:".length)}`;
+  return SOURCE_LABEL[s] ?? s;
+};
+
+/** 뉴스 화면 출처 필터 — API `source` 묶음 이름과 같다(전체는 값 없음). */
+export const NEWS_SOURCES: { key: string | null; label: string }[] = [
+  { key: null, label: "전체" },
+  { key: "saveticker", label: "세이브티커" },
+  { key: "naver", label: "네이버" },
+  { key: "google_rss", label: "구글" },
+  { key: "disclosure", label: "공시" },
+];
 
 /** 공시 중요도 → 한글 라벨·칩 색. 값이 없으면 null(칩을 그리지 않는다). */
 const SEVERITY: Record<string, { label: string; tone: "fail" | "warn" | "muted" }> = {
