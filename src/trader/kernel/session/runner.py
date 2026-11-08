@@ -367,7 +367,7 @@ def run_session(
     research = []
     if not fake and kind.research_targets is not None:
         for directory, scope in kind.research_targets(ctx, spec):
-            policy = research_policy.start(conn, settings, directory, scope, now=now())
+            policy = research_policy.start(conn, settings, directory, scope, now=now(), version=1)
             research.append((directory, scope, policy))
     codex_required = any(p["enabled"] for _, _, p in research)
     effective_kind = (

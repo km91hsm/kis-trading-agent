@@ -123,10 +123,12 @@ def codex_allowance(
     return True, None
 
 
-def current(conn, settings) -> dict:
+def current(conn, settings, *, version: int = 2) -> dict:
+    """지금 설정의 공급자 정책. version=1 은 레거시(약세만 Codex) 모양 그대로,
+    version=2 는 교차 토론 두 판(lanes)을 더한다(Codex 꺼짐이면 Claude 한 판)."""
     enabled, _ = configured(conn, settings)
     cfg = getattr(getattr(settings, "llm", None), "codex_debate", CodexDebateSettings())
-    return {
+    policy = {
         "version": 1,
         "enabled": enabled,
         "rounds": max(1, settings.debate_rounds) if enabled else settings.debate_rounds,
@@ -139,6 +141,51 @@ def current(conn, settings) -> dict:
         "prompt_hash": codex.digest(codex.PROMPT),
         "schema_hash": codex.digest(codex.output_schema()),
     }
+    if version == 1:
+        return policy
+    policy["version"] = 2
+    policy["lanes"] = _v2_lanes(enabled)
+    return policy
+
+
+def _v2_lanes(enabled: bool) -> list[dict[str, str]]:
+    """v2 판 고정: 켜짐이면 교차 두 판, 꺼짐이면 Claude 한 판."""
+    if enabled:
+        return [
+            {"lane": "a", "bull": "claude", "bear": "codex"},
+            {"lane": "b", "bull": "codex", "bear": "claude"},
+        ]
+    return [{"lane": "a", "bull": "claude", "bear": "claude"}]
+
+
+def lanes(policy: dict) -> list[dict[str, str]]:
+    """정책의 판 목록. v1(판 없음)은 bull/bear 로 판 a 하나를 만든다."""
+    if policy.get("lanes"):
+        return [dict(lane) for lane in policy["lanes"]]
+    return [{"lane": "a", "bull": policy["bull"], "bear": policy["bear"]}]
+
+
+def provider_for(policy: dict, lane: str, side: str) -> str | None:
+    """판·편의 공급자. 정책에 그 판이 없으면 None."""
+    for item in lanes(policy):
+        if item["lane"] == lane:
+            return item.get(side)
+    return None
+
+
+def codex_slots(policy: dict) -> list[tuple[str, str]]:
+    """공급자가 codex 인 (판, 편) 목록."""
+    return [
+        (item["lane"], side)
+        for item in lanes(policy)
+        for side in ("bull", "bear")
+        if item[side] == "codex"
+    ]
+
+
+def is_cross(policy: dict) -> bool:
+    """교차 토론(v2·Codex 켜짐·두 판) 정책인가."""
+    return policy.get("version") == 2 and bool(policy["enabled"]) and len(lanes(policy)) == 2
 
 
 def key(d: Path, scope: ResearchSpec) -> str:
@@ -162,9 +209,12 @@ def _stored(conn, d, scope):
     return {**json.loads(row[0]), "policy_hash": row[1], "context_hash": row[2]} if row else None
 
 
-def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dict:
-    wanted = current(conn, settings)
+def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime, version: int = 2) -> dict:
     old_stored = _stored(conn, d, scope)
+    # 저장된 정책이 있으면 그 버전으로 비교한다(v1/v2 섞인 세션에서 「정책 변경」 오판 방지)
+    wanted = current(
+        conn, settings, version=int(old_stored.get("version") or 1) if old_stored else version
+    )
     if old_stored and old_stored.get("codex_skipped"):
         # 사용량 조절로 Claude 만 쓰기로 고정된 연구 — 다시 시작해도 그대로(사용률이 바뀌어도)
         return old_stored
@@ -173,10 +223,11 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dic
         and wanted["enabled"]
         and scope.completed_stage not in list_checkpoints(d)  # 끝난 연구는 판단하지 않는다
     ):
-        # bear 턴은 라운드마다 1회(0~rounds) — 남은 호출이 모자라면 시작부터 Claude 로.
-        # 여기서 Claude 로 바뀌면(enabled=False) 아래의 「Codex 참여 증명 없음」·「원장 없음」
-        # 거부도 적용되지 않는다 — Claude 만 쓰는 연구라 Codex 증명이 필요 없다.
-        ok, why = codex_allowance(conn, settings, now=now, need=int(wanted["rounds"]) + 1)
+        # Codex 턴은 Codex 자리마다 라운드당 1회(0~rounds) — v2 는 2×(rounds+1), v1 은 rounds+1.
+        # 남은 호출이 모자라면 시작부터 Claude 로. 여기서 Claude 로 바뀌면(enabled=False) 아래의
+        # 「Codex 참여 증명 없음」·「원장 없음」 거부도 적용되지 않는다 — Codex 증명이 필요 없다.
+        need = len(codex_slots(wanted)) * (int(wanted["rounds"]) + 1)
+        ok, why = codex_allowance(conn, settings, now=now, need=need)
         if not ok:
             wanted = {
                 **wanted,
@@ -185,20 +236,22 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dic
                 "bear": "claude",
                 "codex_skipped": f"{why} — 이번 분석은 Claude 강세·약세",
             }
-    wanted["research"] = {
-        name: getattr(scope, name)
-        for name in (
-            "scope",
-            "input_stage",
-            "report_prefix",
-            "turn_prefix",
-            "completed_stage",
-            "summary_stage",
-            "cli_template",
-            "bull_agent",
-            "bear_agent",
-        )
-    }
+            if "lanes" in wanted:
+                wanted["lanes"] = _v2_lanes(False)
+    research_keys = (
+        "scope",
+        "input_stage",
+        "report_prefix",
+        "turn_prefix",
+        "completed_stage",
+        "summary_stage",
+        "cli_template",
+        "bull_agent",
+        "bear_agent",
+    )
+    if wanted["version"] == 2:
+        research_keys += ("cross_turn_prefix",)  # v2 해시에만 영향(v1 해시 모양 유지)
+    wanted["research"] = {name: getattr(scope, name) for name in research_keys}
     old = old_stored
     analyst_prefix, debate_prefix, completed = (
         scope.report_prefix,
@@ -215,6 +268,9 @@ def start(conn, settings, d: Path, scope: ResearchSpec, *, now: datetime) -> dic
         }
     if old:
         # A running session uses get(), never start(): toggles only affect subsequent starts.
+        if int(old.get("version") or 1) == 1:
+            # v1 진행 중 연구는 업데이트 뒤에도 해시 비교 없이 그대로 이어 간다
+            return old
         if old["policy_hash"] != codex.digest(wanted):
             raise ResearchPolicyError(
                 "미완료 연구의 공급자 정책이 변경되었습니다. "
@@ -489,6 +545,7 @@ def status(conn, settings, *, now, limits: dict | None = None):
         "effective_rounds": max(1, getattr(settings, "debate_rounds", 0)),
         "applies_to": "next_new_research",
         "roles": {"bull": "claude", "bear": "codex" if enabled else "claude"},
+        "lanes": _v2_lanes(enabled),  # = lanes(current(...)) — status 는 debate_rounds 없이도 돈다
         "usage": {
             "provider": "codex",
             "calls": row[0],
@@ -570,7 +627,11 @@ def turn_error(conn, settings, d, scope, value):
 
 def public_policy(conn, settings, d, scope):
     policy = get(conn, settings, d, scope)
-    return {k: policy[k] for k in ("enabled", "rounds", "bull", "bear")}
+    return {
+        **{k: policy[k] for k in ("enabled", "rounds", "bull", "bear")},
+        "version": int(policy.get("version") or 1),
+        "lanes": lanes(policy),
+    }
 
 
 def invalidate_summary(d: Path, research: ResearchSpec) -> bool:

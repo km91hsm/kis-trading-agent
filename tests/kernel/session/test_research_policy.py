@@ -389,13 +389,28 @@ def test_skip_when_remaining_calls_cannot_finish_research(conn, tmp_path, monkey
     from trader.kernel.session import research_policy as p
 
     _use_limits(monkeypatch, {"status": "unavailable"})
-    s = settings()  # debate_rounds=0 → Codex 켜짐이면 rounds 1 → bear 2턴
-    set_flag(conn, p.CODEX_CAP_FLAG, 3)
+    s = settings()  # debate_rounds=0 → Codex 켜짐이면 rounds 1 → 두 판 Codex 2×2턴
+    set_flag(conn, p.CODEX_CAP_FLAG, 5)
     _seed_calls(conn, 2)
     out = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
-    assert out["enabled"] is False and "상한(3)" in out["codex_skipped"]
-    set_flag(conn, p.CODEX_CAP_FLAG, 4)
+    assert out["enabled"] is False and "상한(5)" in out["codex_skipped"]
+    set_flag(conn, p.CODEX_CAP_FLAG, 6)
     assert p.start(conn, s, tmp_path / "b", SPOT_RESEARCH, now=NOW)["enabled"] is True
+
+
+def test_v1_skip_needs_one_call_per_round(conn, tmp_path, monkeypatch):
+    """레거시 v1(약세만 Codex)은 rounds+1 회만 필요."""
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.session import research_policy as p
+
+    _use_limits(monkeypatch, {"status": "unavailable"})
+    s = settings()
+    set_flag(conn, p.CODEX_CAP_FLAG, 3)
+    _seed_calls(conn, 2)
+    out = p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW, version=1)
+    assert out["enabled"] is False and "2회 필요" in out["codex_skipped"]
+    set_flag(conn, p.CODEX_CAP_FLAG, 4)
+    assert p.start(conn, s, tmp_path / "b", SPOT_RESEARCH, now=NOW, version=1)["enabled"] is True
 
 
 def test_stale_usage_observation_does_not_block(conn, monkeypatch):
@@ -403,3 +418,107 @@ def test_stale_usage_observation_does_not_block(conn, monkeypatch):
 
     _use_limits(monkeypatch, {**_limits(five=99.0), "status": "stale"})
     assert p.codex_allowance(conn, settings(), now=NOW) == (True, None)
+
+
+def test_v2_policy_has_two_lanes_when_enabled(conn, tmp_path):
+    from trader.kernel.session import research_policy as rp
+
+    p = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
+    assert p["version"] == 2 and p["rounds"] == 1
+    assert p["lanes"] == [
+        {"lane": "a", "bull": "claude", "bear": "codex"},
+        {"lane": "b", "bull": "codex", "bear": "claude"},
+    ]
+    assert (p["bull"], p["bear"]) == ("claude", "codex")
+    assert rp.codex_slots(p) == [("a", "bear"), ("b", "bull")] and rp.is_cross(p)
+    assert rp.provider_for(p, "b", "bull") == "codex"
+    assert rp.provider_for(p, "a", "bull") == "claude"
+    assert p["research"]["cross_turn_prefix"] == SPOT_RESEARCH.cross_turn_prefix
+
+
+def test_v2_disabled_policy_is_single_claude_lane(conn, tmp_path):
+    from trader.kernel.session import research_policy as rp
+
+    p = rp.start(conn, settings(enabled=False), tmp_path, SPOT_RESEARCH, now=NOW)
+    assert p["version"] == 2
+    assert p["lanes"] == [{"lane": "a", "bull": "claude", "bear": "claude"}]
+    assert not rp.is_cross(p) and rp.codex_slots(p) == []
+    assert rp.provider_for(p, "b", "bull") is None
+
+
+def test_stored_v1_policy_reused_without_hash_check(conn, tmp_path):
+    from trader.kernel.session import research_policy as rp
+
+    old = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW, version=1)
+    assert old["version"] == 1 and "lanes" not in old
+    assert "cross_turn_prefix" not in old["research"]  # v1 해시 모양 그대로
+    again = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)  # 기본 v2 로 재시작
+    assert again["policy_hash"] == old["policy_hash"] and again["version"] == 1
+    assert rp.lanes(again) == [{"lane": "a", "bull": "claude", "bear": "codex"}]
+    assert rp.codex_slots(again) == [("a", "bear")] and not rp.is_cross(again)
+    # 설정이 바뀌어도(꺼짐) v1 진행 중 연구는 해시 비교 없이 그대로
+    off = rp.start(conn, settings(enabled=False), tmp_path, SPOT_RESEARCH, now=NOW)
+    assert off["policy_hash"] == old["policy_hash"] and off["enabled"] is True
+
+
+def test_stored_v2_policy_accepted_by_v1_mode_start(conn, tmp_path):
+    """세션이 v1 모드여도 저장된 v2 연구는 저장 버전으로 비교한다(정책 변경 아님)."""
+    from trader.kernel.session import research_policy as rp
+
+    first = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
+    again = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW, version=1)
+    assert again["policy_hash"] == first["policy_hash"] and again["version"] == 2
+    assert rp.is_cross(again)
+    with pytest.raises(rp.ResearchPolicyError, match="정책이 변경"):
+        rp.start(conn, settings(enabled=False), tmp_path, SPOT_RESEARCH, now=NOW, version=1)
+
+
+def test_v1_current_is_byte_identical_to_legacy(conn):
+    from trader.kernel.session import codex
+    from trader.kernel.session import research_policy as rp
+
+    s = settings()
+    v1 = rp.current(conn, s, version=1)
+    assert set(v1) == {
+        "version", "enabled", "rounds", "bull", "bear", "config",
+        "claude_models", "prompt_hash", "schema_hash",
+    }
+    assert v1["version"] == 1 and (v1["bull"], v1["bear"]) == ("claude", "codex")
+    assert v1["rounds"] == 1 and v1["prompt_hash"] == codex.digest(codex.PROMPT)
+    v2 = rp.current(conn, s)
+    assert {k: v for k, v in v2.items() if k not in ("version", "lanes")} == {
+        k: v for k, v in v1.items() if k != "version"
+    }
+    assert v2["version"] == 2
+
+
+def test_cross_needs_two_calls_per_round(conn, tmp_path, monkeypatch):
+    from trader.kernel.session import research_policy as rp
+
+    _use_limits(monkeypatch, {"status": "unavailable"})
+    _seed_calls(conn, 80 - 3)  # rounds 1 → 필요 4, 남은 3
+    p = rp.start(conn, settings(), tmp_path, SPOT_RESEARCH, now=NOW)
+    assert not p["enabled"] and "4회 필요" in p["codex_skipped"]
+    assert p["lanes"] == [{"lane": "a", "bull": "claude", "bear": "claude"}]
+    assert p["bear"] == "claude" and not rp.is_cross(p)
+
+
+def test_fake_get_and_public_policy_and_status_expose_lanes(conn, tmp_path, monkeypatch):
+    from trader.kernel.platform import codex_bin
+    from trader.kernel.session import research_policy as rp
+
+    monkeypatch.setattr(codex_bin, "find_codex", lambda *_: "/bin/codex")
+    monkeypatch.setenv("FAKE_CLAUDE", "1")
+    fake = rp.get(conn, settings(), tmp_path, SPOT_RESEARCH)
+    assert fake["fake"] and fake["enabled"] is False and len(fake["lanes"]) == 2
+    pub = rp.public_policy(conn, settings(), tmp_path, SPOT_RESEARCH)
+    assert set(pub) == {"enabled", "rounds", "bull", "bear", "version", "lanes"}
+    assert pub["version"] == 2 and len(pub["lanes"]) == 2
+    monkeypatch.delenv("FAKE_CLAUDE")
+    rp.start(conn, settings(), tmp_path / "v1", SPOT_RESEARCH, now=NOW, version=1)
+    pub1 = rp.public_policy(conn, settings(), tmp_path / "v1", SPOT_RESEARCH)
+    assert pub1["version"] == 1
+    assert pub1["lanes"] == [{"lane": "a", "bull": "claude", "bear": "codex"}]
+    st = rp.status(conn, settings(), now=NOW)
+    assert st["lanes"] == rp.lanes(rp.current(conn, settings()))
+    assert len(st["lanes"]) == 2 and st["roles"] == {"bull": "claude", "bear": "codex"}
