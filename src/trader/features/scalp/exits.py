@@ -186,12 +186,13 @@ def cancel(
 
 
 def can_trade(ctx: Any, acct: str) -> bool:
-    """실제 주문 다리를 건드려도 되는가: dry-run 아님·일시정지 아님·계좌 실효 모드 auto. 그 밖이면
-    취소도 매도도 하지 않는다 — 승인 요청을 틱마다 쌓거나 안전장치를 우회하지 않게(A8)."""
+    """실제 주문 다리를 건드려도 되는가: dry-run 아님·계좌 실효 모드 auto(일시정지는 보지 않는다 —
+    청산 SELL 은 리스크 청산이라 일시정지 중에도 나간다).
+    그 밖이면 취소도 매도도 하지 않는다 — 승인 요청을 틱마다 쌓거나 안전장치를 우회하지 않게(A8)."""
     from trader.features.scalp import engine
 
     acc = ctx.ports["accounts"]
-    if ctx.dry_run or acc.paused(ctx.conn):
+    if ctx.dry_run:
         return False
     account = next((a for a in engine.accounts(ctx) if a.id == acct), None)
     return account is not None and acc.policy(ctx.conn, account)[0] == "auto"
