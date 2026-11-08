@@ -252,11 +252,13 @@ def notify_paused_exit(
     ctx: Any, market: str, today: date, pos: dict, lg: dict[str, dict], results: list[dict]
 ) -> None:
     """일시정지 중 청산 SELL 이 실제로 접수되면 하루 1회(시장별) 알린다."""
+    from trader.features.scalp import engine
+
     accepted = any(
         r.get("approved")
         and not r.get("error")
         and not (lg.get(r.get("account_id")) or {}).get("dry")
-        and (r.get("order") or {}).get("order_id") is not None
+        and (r.get("order") or {}).get("accepted")
         for r in results
     )
     if not accepted or not ctx.ports["accounts"].paused(ctx.conn):
@@ -266,7 +268,10 @@ def notify_paused_exit(
         return
     control.set_flag(ctx.conn, key, True)
     notify_quietly(
-        ctx.notifier, messages.scalp_exit_while_paused(market=market, labels=[pos["ticker"]])
+        ctx.notifier,
+        messages.scalp_exit_while_paused(
+            market=market, labels=[engine.label(ctx, market, pos["ticker"])]
+        ),
     )
 
 
@@ -347,6 +352,13 @@ def close_step(
                 leg.setdefault("sell", []).append(int(order["order_id"]))
         notify_paused_exit(ctx, market, today, pos, lg, results)
         persist()  # 접수한 청산 주문 id 를 바로 남긴다(틱 중간에 끊겨도 다시 내지 않게)
+        if any(
+            r.get("approved")
+            and not r.get("error")
+            and (r.get("dry_run") or (r.get("order") or {}).get("accepted"))
+            for r in results
+        ):
+            pos["_exit_sent"] = True  # 메모리 표시 — persist 뒤라 저장되지 않는다
         waiting = waiting or bool(need)
     if waiting:
         return None
@@ -444,11 +456,10 @@ def check_exits(
                 ctx.state, today, market, "closing",
                 now=ctx.now(), ticker=pos["ticker"], reason=reason,
             )  # fmt: skip
-        sent = len(pos.get("exit_results") or [])
         res = close_step(
             ctx, market=market, today=today, pos=pos, price=q, skip=skip, persist=persist
         )
-        if len(pos.get("exit_results") or []) > sent:  # 이 틱에 청산 SELL 을 냈다
+        if pos.pop("_exit_sent", False):  # 이 틱에 청산 SELL 이 접수(또는 dry-run 매도)됐다
             out["exit_orders"] = out.get("exit_orders", 0) + 1
         if res is None:
             continue

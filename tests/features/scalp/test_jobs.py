@@ -179,7 +179,7 @@ def test_scalp_body_exits_open_leg_after_all_switches_off(
     market.prices["005930"] = Decimal("9800")  # 손절 −1% 아래
     deps = make_deps(now=NOW + timedelta(minutes=3))
     out = scalp_jobs.scalp_body(deps, _job(deps))
-    assert (out.get("skipped") or out["entries_blocked"]) == "켜진 계좌 없음"  # 신규 진입만 막힌다
+    assert "skipped" not in out and out["entries_blocked"] == "켜진 계좌 없음"  # 신규 진입만 막힌다
     sells = conn.execute("SELECT account_id FROM orders WHERE side='SELL'").fetchall()
     assert {r["account_id"] for r in sells} == {"paper-main", "paper-two"}
 
