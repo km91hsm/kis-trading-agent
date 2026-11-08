@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -99,9 +100,14 @@ def fake_install(monkeypatch, tmp_path):
         calls.append(1)
         return {
             "ok": True,
-            "extension": str(pkg / "extension"),
-            "next_steps": ["a"],
+            "package": str(pkg),
+            "extension_dir": str(pkg / "extension"),
+            "extension_version": "1.5.0",
+            "registration": "/r.json",
+            "host_path": "/h",
             "replaced": False,
+            "backend": "extension",
+            "next_steps": ["a"],
         }
 
     monkeypatch.setattr(bridge_install, "install_status", status)
@@ -160,3 +166,44 @@ def test_onboarding_dismiss_persists_and_logs(project, client, fake_install):
     finally:
         conn.close()
     assert keys == [ONBOARDING]
+
+
+def test_install_route_returns_real_extension_dir(project, client, tmp_path, monkeypatch):
+    """계약: 가짜가 아닌 실제 `install()` 반환값으로 경로가 채워진다(키 이름 불일치 회귀 방지)."""
+    real = bridge_install.install
+    monkeypatch.setattr(bridge_install, "install", lambda **_: real(user_home=tmp_path / "user"))
+    r = _local(client).post("/api/system/saveticker/install", headers=LOCAL_AUTH)
+    assert r.status_code == 200, r.text
+    ext = r.json()["extension"]
+    assert ext != "None" and (Path(ext) / "manifest.json").is_file()
+
+
+def test_concurrent_install_is_refused_in_korean(project, client, tmp_path):
+    with bridge_install._INSTALL_LOCK:
+        with pytest.raises(bridge_install.InstallError, match="install_busy"):
+            bridge_install.install(user_home=tmp_path / "user")
+        assert bridge_install.sync(user_home=tmp_path / "user") == {"skipped": "busy"}
+        r = _local(client).post("/api/system/saveticker/install", headers=LOCAL_AUTH)
+    assert r.status_code == 400 and "진행 중" in r.json()["detail"]
+
+
+def test_install_os_error_is_korean_400(client, monkeypatch):
+    def boom(**_):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(bridge_install, "install", boom)
+    r = _local(client).post("/api/system/saveticker/install", headers=LOCAL_AUTH)
+    assert r.status_code == 400 and "파일" in r.json()["detail"]
+
+
+def test_daemon_sync_retries_next_tick_when_install_busy(monkeypatch):
+    from trader.features.saveticker import job
+
+    results = [{"skipped": "busy"}, {"extension_updated": False, "host_updated": False}]
+    calls = []
+    monkeypatch.setattr(job._STATE, "synced", False)
+    monkeypatch.setattr(bridge_install, "sync", lambda: calls.append(1) or results[len(calls) - 1])
+    assert job.sync_extension(None) is None
+    assert job.sync_extension(None) is None
+    assert calls == [1, 1] and job._STATE.synced is True
+    assert job.sync_extension(None) is None and calls == [1, 1]

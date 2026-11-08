@@ -1,12 +1,26 @@
 // 세이브티커 Chrome 확장 설치 — 첫 안내 배너(app/shell/SavetickerOnboarding)와 시스템 › 데이터 수집 카드가 함께 쓴다.
 // 설치(확장 복사 + Native host 등록)는 웹이 바로 하고, Chrome 의 「압축해제된 확장 로드」는 Chrome 이 막아 사용자가 한다.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { errorText, postJson } from "../../lib/api";
 import type { SavetickerInstallState } from "./system";
 
 export type InstallResult = { extension: string; next_steps: string[]; replaced: boolean };
+
+/** 설치 성공을 같은 화면의 다른 곳(첫 안내 배너·시스템 카드)에 알리는 창 이벤트. */
+export const INSTALLED_EVENT = "saveticker-installed";
+
+/** 다른 곳에서 설치가 끝났는지 — 배너와 카드가 같은 상태를 보이게. */
+export function useInstalledElsewhere(): boolean {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    const on = () => setDone(true);
+    window.addEventListener(INSTALLED_EVENT, on);
+    return () => window.removeEventListener(INSTALLED_EVENT, on);
+  }, []);
+  return done;
+}
 
 export function useSavetickerInstall() {
   const [busy, setBusy] = useState(false);
@@ -17,6 +31,7 @@ export function useSavetickerInstall() {
     setError(null);
     try {
       setResult(await postJson<InstallResult>("/system/saveticker/install", null));
+      window.dispatchEvent(new Event(INSTALLED_EVENT));
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -27,13 +42,19 @@ export function useSavetickerInstall() {
 }
 
 function CopyPath({ path }: { path: string }) {
-  const [copied, setCopied] = useState(false);
+  const [message, setMessage] = useState("");
+  const failed = "복사하지 못했습니다 — 경로를 직접 선택해 복사하세요";
   return <span className="st-install-path">
     <code>{path}</code>
     <button type="button" className="btn" onClick={() => {
-      void navigator.clipboard?.writeText(path).then(() => setCopied(true), () => setCopied(false));
+      setMessage("");
+      try {
+        const done = navigator.clipboard?.writeText(path);
+        if (!done) { setMessage(failed); return; }
+        done.then(() => setMessage("복사됨"), () => setMessage(failed));
+      } catch { setMessage(failed); }
     }}>경로 복사</button>
-    {copied ? <span className="data-muted" role="status">복사됨</span> : null}
+    <span className="data-muted" role="status">{message}</span>
   </span>;
 }
 
@@ -51,13 +72,15 @@ export function InstallSteps({ result }: { result: InstallResult }) {
 /** 시스템 › 데이터 수집의 「확장 설치」 카드. */
 export function SavetickerInstallCard({ install }: { install: SavetickerInstallState }) {
   const { busy, result, error, install: run } = useSavetickerInstall();
+  const elsewhere = useInstalledElsewhere();
+  const registered = install.registered || !!result || elsewhere;
   const local = install.extension_dir !== null;
   const version = install.installed_version
     ? `확장 ${install.installed_version} · ${install.update_needed ? `새 버전 ${install.bundled_version ?? ""} 있음` : "최신"}`
     : "확장 미설치";
   return <section className="st-install" aria-label="확장 설치">
     <p className="sys-head">
-      <Chip tone={install.registered ? "ok" : "muted"}>{install.registered ? "Chrome 연결 등록됨" : "미등록"}</Chip>
+      <Chip tone={registered ? "ok" : "muted"}>{registered ? "Chrome 연결 등록됨" : "미등록"}</Chip>
       <span>{version}</span>
     </p>
     {local && install.extension_dir ? <p className="data-muted">확장 폴더: <CopyPath path={install.extension_dir} /></p>

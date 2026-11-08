@@ -46,12 +46,11 @@ INSTALL_ERRORS = {
     "app_translocated": "앱을 응용 프로그램 폴더로 옮긴 뒤 실행하고 다시 하세요",
     "registration_exists": "다른 프로그램이 같은 이름으로 Chrome 연결을 등록해 두었습니다",
     "registration_owner_mismatch": "다른 프로그램이 같은 이름으로 Chrome 연결을 등록해 두었습니다",
-    "stop_extension_first": "확장 팝업에서 수집을 중지한 뒤 다시 하세요",
     "registration_failed": "Chrome 연결 등록에 실패했습니다. 잠시 뒤 다시 해 보세요",
     "extension_resources_missing": _DAMAGED,
     "invalid_extension_manifest": _DAMAGED,
     "windows_source_requires_bundle": "설치판(setup.exe)으로 설치한 앱에서만 할 수 있습니다",
-    "not_installed": "확장이 아직 설치되지 않았습니다",
+    "install_busy": "다른 설치가 진행 중입니다. 잠시 뒤 다시 해 보세요",
 }
 
 
@@ -135,10 +134,16 @@ def saveticker_install(request: Request) -> dict:
         raise HTTPException(
             status_code=400, detail=INSTALL_ERRORS.get(code, "확장 설치에 실패했습니다")
         ) from None
+    except OSError:
+        logger.warning("세이브티커 확장 웹 설치 파일 오류", exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail="확장 파일을 쓰지 못했습니다. 폴더 권한·디스크 공간을 확인한 뒤 다시 해 보세요",
+        ) from None
     logger.info("세이브티커 확장 웹 설치(%s)", actor_of(request))
     return {
         "ok": True,
-        "extension": str(result.get("extension")),
+        "extension": str(result["extension_dir"]),
         "next_steps": list(result.get("next_steps") or []),
         "replaced": bool(result.get("replaced")),
     }

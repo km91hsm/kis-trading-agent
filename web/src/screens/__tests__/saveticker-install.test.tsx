@@ -73,3 +73,35 @@ test("시스템 카드: 버전·최신 여부와 「설치/갱신」, 원격 화
   expect(remote.container.textContent).toContain("이 PC 에서 직접 연 화면에서만 설치할 수 있습니다");
   expect(button(remote.container, "설치/갱신")?.disabled).toBe(true);
 });
+
+test("카드에서 설치하면 첫 안내 배너가 닫히고 카드는 등록됨으로 바뀐다", async () => {
+  ff = installFakeFetch({ "GET /api/system/saveticker": status(), "POST /api/system/saveticker/install": RESULT });
+  const { container } = render(<MemoryRouter><SavetickerOnboarding /><SavetickerInstallCard install={INSTALL} /></MemoryRouter>); await flush();
+  expect(container.textContent).toContain(ASK);
+  await click(button(container, "설치/갱신"));
+  expect(container.textContent).not.toContain(ASK);
+  expect(container.textContent).toContain("Chrome 연결 등록됨");
+  expect(button(container, "설치하기")).toBeUndefined();
+});
+
+test("경로 복사 실패는 직접 선택하라고 알린다", async () => {
+  ff = installFakeFetch({});
+  const clip = navigator.clipboard;
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("no")) } });
+  try {
+    const { container } = render(<MemoryRouter><SavetickerInstallCard install={INSTALL} /></MemoryRouter>); await flush();
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
+    await click(button(container, "경로 복사"));
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("복사하지 못했습니다");
+  } finally {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: clip });
+  }
+});
+
+test("「안 씀」 저장이 실패해도 이번 세션에는 다시 묻지 않는다", async () => {
+  const { container } = await banner(status());
+  ff.restore();
+  ff = installFakeFetch({ "POST /api/system/saveticker/onboarding": () => new Response("{}", { status: 401 }) });
+  await click(button(container, "안 씀"));
+  expect(sessionStorage.getItem("saveticker-onboarding-later")).toBe("1");
+});

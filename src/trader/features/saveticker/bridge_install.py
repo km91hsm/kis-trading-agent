@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import sys
+import threading
 from pathlib import Path
 
 from trader.features.saveticker.settings import load_cfg
@@ -256,7 +257,7 @@ def _restore(registration: Path, previous: str | None, windows: bool, previous_r
         pass
 
 
-def install(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+def _install(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
     """확장 복사 + Native host 등록을 한 번에(재실행 가능). 우리 등록(옛 패키지 포함)은 교체하고,
     다른 소유자의 등록이면 거부한다."""
     _check_location()
@@ -332,7 +333,7 @@ def _installed_root(project_home: Path) -> Path:
     return Path(stored) if isinstance(stored, str) else collector_root(project_home)
 
 
-def uninstall(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+def _uninstall(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
     """우리 Native host 등록만 지운다(확장 복사본은 남긴다 — Chrome 에서 직접 제거)."""
     project_home = (project_home or paths.project_root()).resolve()
     root = _installed_root(project_home)
@@ -376,7 +377,7 @@ def install_status(*, project_home: Path | None = None, user_home: Path | None =
     }
 
 
-def sync(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+def _sync(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
     """앱 업데이트 뒤 자가 복구(데몬 잡 첫 틱): 설치된 확장 버전이 번들과 다르면 복사본을 교체하고,
     등록이 현재 실행파일을 가리키지 않으면(앱 위치 변경) 다시 맞춘다. 같으면 아무것도 안 한다.
     다른 소유자의 등록이나 임시 경로(번역·디스크 이미지)에서 돈 앱이면 등록은 건드리지 않는다."""
@@ -434,3 +435,39 @@ def native_entry(origin: str) -> int:
 
 def is_native_origin(value: str) -> bool:
     return re.fullmatch(r"chrome-extension://[a-p]{32}/", value) is not None
+
+
+# 설치·해제·자가 복구는 고정 이름(.extension-new/.extension-old)으로 복사본을 바꾸므로
+# 한 번에 하나만. `trader app` 은 데몬과 웹이 한 프로세스라 스레드 잠금으로 웹 「설치하기」와
+# 데몬 sync 가 겹치지 않는다.
+_INSTALL_LOCK = threading.Lock()
+
+
+def install(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+    """확장 복사 + Native host 등록(재실행 가능). 다른 설치가 진행 중이면 `install_busy`."""
+    if not _INSTALL_LOCK.acquire(blocking=False):
+        raise InstallError("install_busy")
+    try:
+        return _install(project_home=project_home, user_home=user_home)
+    finally:
+        _INSTALL_LOCK.release()
+
+
+def uninstall(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+    """우리 Native host 등록 해제. 다른 설치가 진행 중이면 `install_busy`."""
+    if not _INSTALL_LOCK.acquire(blocking=False):
+        raise InstallError("install_busy")
+    try:
+        return _uninstall(project_home=project_home, user_home=user_home)
+    finally:
+        _INSTALL_LOCK.release()
+
+
+def sync(*, project_home: Path | None = None, user_home: Path | None = None) -> dict:
+    """앱 업데이트 뒤 자가 복구. 설치가 진행 중이면 이번 틱은 건너뛴다(`{"skipped": "busy"}`)."""
+    if not _INSTALL_LOCK.acquire(blocking=False):
+        return {"skipped": "busy"}
+    try:
+        return _sync(project_home=project_home, user_home=user_home)
+    finally:
+        _INSTALL_LOCK.release()
