@@ -1,7 +1,8 @@
 """accounts 가 데몬에 공급하는 게이트: market(일시정지·주말·휴장), monitor(주말·휴장 + 장중 창).
 
 monitor 게이트는 일시정지를 보지 않는다(Ruling 20) — 일시정지 중에도 장중 감시는 돌아 손절선
-도달 시 `stop_paused` 알림(하루 1회)·트리거 기록을 하고, 주문·재평가는 `monitor_once` 가 막는다."""
+도달 시 손절(일시정지 중에도 실행, `stop_while_paused` 알림 하루 1회)·트리거 기록을 하고,
+재평가는 `monitor_once` 가 막는다."""
 
 from __future__ import annotations
 

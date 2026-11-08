@@ -183,9 +183,9 @@ def test_stop_deferred_paused_and_reprice():
         "[손절 보류] a · 삼성전자(005930)\n"
         "당일 미체결 매도를 취소하지 못해 손절을 내지 않았어요. 다음 점검에서 다시 해요."
     )
-    assert M.stop_paused(market="KR", label="삼성전자(005930)", quote=64000, level=65000) == (
-        "[손절 보류: 일시정지] KR 삼성전자(005930)\n"
-        "현재가 64,000원 ≤ 손절선 65,000원\n재개하면 다음 점검에서 매도해요."
+    assert M.stop_while_paused(market="KR", label="삼성전자(005930)", quote=64000, level=65000) == (
+        "[손절 실행: 일시정지 중] KR 삼성전자(005930)\n"
+        "현재가 64,000원 ≤ 손절선 65,000원\n일시정지 중이지만 손절 매도를 실행했어요."
     )
     assert M.reprice(
         account="a", market="KR", label="L", side="BUY", qty=2, old=70000, new=70100, tail="재주문"

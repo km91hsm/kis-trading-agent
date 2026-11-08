@@ -337,13 +337,13 @@ def stop_deferred(*, account: str, market: str, label: str) -> str:
     )
 
 
-def stop_paused(*, market: str, label: str, quote: Any, level: Any) -> str:
+def stop_while_paused(*, market: str, label: str, quote: Any, level: Any) -> str:
     return render(
-        "손절 보류: 일시정지",
+        "손절 실행: 일시정지 중",
         f"{market} {label}",
         [
             f"현재가 {money(quote, market)} ≤ 손절선 {money(level, market)}",
-            "재개하면 다음 점검에서 매도해요.",
+            "일시정지 중이지만 손절 매도를 실행했어요.",
         ],
     )
 

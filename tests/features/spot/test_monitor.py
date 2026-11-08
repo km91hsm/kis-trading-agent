@@ -335,14 +335,37 @@ def test_us_stop_loss_uses_marketable_limit():
     assert dec_kr.order_type == "MARKET"
 
 
-def test_paused_stop_loss_notifies_once(conn, settings):
+def test_paused_stop_loss_still_sells_and_notifies(conn, settings):
     _decision(conn, stop_loss=65000.0)
     ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
     control.set_flag(conn, "paused", True)
+    r1 = monitor.monitor_once(ctx, market="KR", today=D)
     monitor.monitor_once(ctx, market="KR", today=D)
+    assert r1["stop_loss_orders"] == 1
+    orders = ctx.exec.brokers["paper-main"].orders
+    assert len(orders) == 1 and orders[0].side == "SELL"
+    msgs = [m for m in ctx.exec.notifier.msgs if "일시정지 중이지만 손절 매도를 실행" in m]
+    assert len(msgs) == 1  # 하루 1회
+
+
+def test_paused_stop_loss_in_approve_mode_sends_directly(conn, settings):
+    """approve 모드 계좌여도 손절은 승인 요청 없이 직접 나가고, 일시정지에서도 막히지 않는다."""
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000", paper_mode="approve")
+    control.set_flag(conn, "paused", True)
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 1
+    assert len(ctx.exec.brokers["paper-main"].orders) == 1
+    assert repo.pending_approvals(conn) == []
+
+
+def test_off_stop_loss_not_sent_and_no_paused_notice(conn, settings):
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000", paper_mode="off")
+    control.set_flag(conn, "paused", True)
     monitor.monitor_once(ctx, market="KR", today=D)
-    msgs = [m for m in ctx.exec.notifier.msgs if "일시정지" in m and "손절" in m]
-    assert len(msgs) == 1 and ctx.exec.brokers["paper-main"].orders == []
+    assert ctx.exec.brokers["paper-main"].orders == []
+    assert not [m for m in ctx.exec.notifier.msgs if "일시정지 중이지만" in m]
 
 
 def test_trigger_not_duplicated_while_unhandled(conn, settings):
@@ -669,21 +692,23 @@ def test_long_horizon_holding_uses_wider_threshold_and_longer_interval(conn, set
     assert r3["reevaluated"] == 0 and len(ctx.calls) == 1
 
 
-def test_stop_loss_does_not_cancel_resting_sell_when_paused_or_off(conn, settings):
-    """전체 검토 O5: 일시정지·off 계좌에서는 손절 전 미체결 SELL 을 KIS 에서 취소하지 않는다
-    (취소만 하고 손절은 안 나가면 보호 매도만 사라진다)."""
+def test_stop_loss_cancels_resting_sell_when_paused_but_not_when_off(conn, settings):
+    """일시정지 중에도 손절은 나가므로 미체결 SELL 을 취소하고 진행한다. off 계좌는 손절을 못 내므로
+    취소도 하지 않는다(취소만 하고 손절은 안 나가면 보호 매도만 사라진다 — 전체 검토 O5)."""
     pos = _pos()
     ctx = _ctx(conn, settings, positions=[pos])
     _decision(conn, action="HOLD", stop_loss=65000.0)
     _resting(conn)
     control.set_flag(conn, "paused", True)
     monitor.monitor_once(ctx, market="KR", today=D)
-    assert ctx.exec.brokers["paper-main"].cancelled == []
+    assert len(ctx.exec.brokers["paper-main"].cancelled) == 1
+    assert len(ctx.exec.brokers["paper-main"].orders) == 1
     control.set_flag(conn, "paused", False)
-    modes.set_account_mode(conn, ctx.exec.accounts[0], "off")
-    monitor.monitor_once(ctx, market="KR", today=D)
-    assert ctx.exec.brokers["paper-main"].cancelled == []
-    assert conn.execute("SELECT status FROM orders WHERE order_no='T1'").fetchone()[0] == "accepted"
+    ctx2 = _ctx(conn, settings, positions=[pos])
+    modes.set_account_mode(conn, ctx2.exec.accounts[0], "off")
+    _resting(conn, order_no="T2")
+    monitor.monitor_once(ctx2, market="KR", today=D)
+    assert ctx2.exec.brokers["paper-main"].cancelled == []
 
 
 def test_off_mode_stop_record_does_not_block_after_switch_to_auto(conn, settings):
@@ -861,9 +886,9 @@ def test_close_rule_keeps_session_alignment_and_skips_on_missing_session(project
 # --- Review Focus 1 ---------------------------------------------------------------------
 
 
-def test_paused_tick_records_trigger_notifies_once_and_places_no_order(conn, settings):
-    """데몬이 paused 상태에서 monitor 틱을 돌면 손절 주문을 내지 않고 `stop_paused` 알림을 하루
-    1회만 보내며, (다른 종목의) 트리거는 기록하되 재평가를 큐에 넣지 않는다."""
+def test_paused_tick_stop_loss_sells_and_trigger_recorded_without_reevaluation(conn, settings):
+    """데몬이 paused 상태에서 monitor 틱을 돌면 손절은 나가고(안내 하루 1회), (다른 종목의)
+    트리거는 기록하되 재평가를 큐에 넣지 않는다."""
     _decision(conn, stop_loss=65000.0)  # 005930: 63000 ≤ 65000 손절
     dec_b = Decision(**ok_decision(ticker="000660", take_profit=110000.0, stop_loss=90000.0))
     spot_ledger.ingest_checkpoint(
@@ -879,18 +904,17 @@ def test_paused_tick_records_trigger_notifies_once_and_places_no_order(conn, set
     control.set_flag(conn, "paused", True)
     r1 = monitor.monitor_once(ctx, market="KR", today=D)
     r2 = monitor.monitor_once(ctx, market="KR", today=D)
-    paused_msgs = [m for m in ctx.exec.notifier.msgs if "일시정지" in m and "손절" in m]
+    paused_msgs = [m for m in ctx.exec.notifier.msgs if "일시정지 중이지만 손절 매도를 실행" in m]
     assert len(paused_msgs) == 1
-    assert all(b.orders == [] and b.cancelled == [] for b in ctx.exec.brokers.values())
-    assert r1["stop_loss_orders"] == 0 and r2["stop_loss_orders"] == 0
+    orders = ctx.exec.brokers["paper-main"].orders
+    assert len(orders) == 1 and orders[0].ticker == "005930"  # 손절만, 000660 은 주문 없음
+    assert r1["stop_loss_orders"] == 1 and r2["stop_loss_orders"] == 0
     rows = conn.execute("SELECT ticker, kind, handled_at FROM triggers").fetchall()
     assert rows and {r["ticker"] for r in rows} == {"000660"}
     assert "take_profit" in {r["kind"] for r in rows}
     assert all(r["handled_at"] is None for r in rows)  # 미처리로 남아 재개 뒤 다시 본다
     assert r1["triggers"] >= 1 and r2["triggers"] == 0  # 두 번째 틱은 같은 행을 재사용
     assert queued == [] and "queued" not in r1 and ctx.calls == []
-    # 일시정지에서는 손절 주문도 승인 요청도 남지 않는다
-    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
     assert repo.pending_approvals(conn) == []
 
 

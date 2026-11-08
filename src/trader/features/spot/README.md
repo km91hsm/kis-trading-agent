@@ -120,7 +120,7 @@ CLI·명령
 - US 거래소는 잔고 응답(`Position.exchange`) 다음 `MonitorContext.exchanges` 만 본다. 데몬 `monitor_body`·`trader spot monitor`·재호가는 `ledger.ticker_exchanges(conn, 시장)`(관측한 거래소 표)로 채운다. 옛 `universe.us` 폴백은 없다(유니버스는 ingest 소유).
 - 손절 바닥은 `max_stop_since(..., since_date=held_since)` — 보유 묶음 시작일 이후 **날짜**의 결정 라운드 손절가 최고값(옛 `date >= since` 와 같음; 결정 id 순서가 아니라 과거 asof 결정을 나중에 적재해도 바닥에 들어가지 않는다).
 - 손절 전 미체결 SELL·BUY 취소와 결정 전환 시 BUY 취소는 `executor.cancel_rows`/`cancel_open_buys` 한 곳을 지나 `kernel.execution.core.cancel` 로 간다(옛 `broker.cancel_order` 직접 호출). `core.cancel` 은 이미 끝난 주문이면 브로커를 부르지 않는다. M9(T6-R1)부터 `core.cancel` 은 잔량(`qty − SUM(fills.qty)`)으로 취소하고, 잔량 0 이면 브로커 호출 없이 `ok False`·"남은 수량 없음(전량 체결)" 이다 — US 부분 체결 주문의 취소 수량이 바뀐다(KR 은 `QTY_ALL_ORD_YN=Y` 라 영향 없음).
-- 데몬 `{market}_monitor` 의 게이트(`monitor`)는 일시정지를 보지 않는다(주말·휴장·장중 창만) — 옛 데몬은 `market_job` 게이트가 일시정지에 틱 전체를 건너뛰어 `stop_paused` 알림·트리거 기록이 CLI 에서만 났다. 의도한 개선(Ruling 20): 일시정지 중에도 손절선 도달은 하루 1회 알리고 트리거는 기록하되, 주문·취소·재평가는 `monitor_once` 가 막는다. 주문 경로 잡의 `market` 게이트는 그대로 일시정지에 건너뛴다.
+- 데몬 `{market}_monitor` 의 게이트(`monitor`)는 일시정지를 보지 않는다(주말·휴장·장중 창만) — 옛 데몬은 `market_job` 게이트가 일시정지에 틱 전체를 건너뛰어 손절·트리거 기록이 CLI 에서만 났다. 의도한 개선(Ruling 20): 일시정지 중에도 손절선 도달 시 손절을 실행하고(`stop_while_paused` 안내 하루 1회, 위험 청산 `ExecPolicy.risk_exit`) 트리거는 기록하되, 재평가는 `monitor_once` 가 막는다. 주문 경로 잡의 `market` 게이트는 그대로 일시정지에 건너뛴다.
 - 재평가 큐 등록은 데몬의 `enqueue_from_job(deps, "reevaluate", …)` — 등록 실패는 경고만 하고 다음 틱에 다시 본다(인라인으로 돌리지 않음). CLI `trader spot monitor` 는 큐가 없어 재평가 세션을 인라인으로 돌린다.
 
 실행·승인
