@@ -24,12 +24,12 @@ def _mode_label(conn, account: Account) -> str:
 
 def pause(ctx: Any, arg: str | None) -> str:
     modes.set_paused(ctx.conn, True, channel="telegram", actor=ctx.actor)
-    return messages.event("일시정지", "모든 계좌의 주문을 멈췄어요")
+    return messages.event("일시정지", "새 매수·진입과 승인을 멈췄어요(손절·청산은 계속)")
 
 
 def resume(ctx: Any, arg: str | None) -> str:
     modes.set_paused(ctx.conn, False, channel="telegram", actor=ctx.actor)
-    return messages.event("재개", "주문을 다시 내요")
+    return messages.event("재개", "새 매수·진입과 승인을 다시 허용해요")
 
 
 def mode(ctx: Any, arg: str | None) -> str:

@@ -208,6 +208,23 @@ def test_fo_summary_states_and_balance(project, ledger):
                     "direction": "LONG", "qty": 2, "status": "held"}]  # fmt: skip
 
 
+def test_fo_summary_paused_is_entries_paused_not_record_only(project, ledger):
+    """전체 일시정지 + 모드 auto 는 위험 청산이 전송되므로 record_only 가 아니라 entries_paused;
+    모드가 auto 가 아니면 일시정지와 무관하게 record_only."""
+    c = _client(project, [_fo_account()], enabled=True)
+    deps = c.app.state.deps
+    control.set_flag(ledger, executor.verified_key(deps.settings, _fo_account(), "FUTURES"),
+                     CONTRACT_VERSION)  # fmt: skip
+    ledger.commit()
+    assert c.get("/api/fo/summary").json()["accounts"][0]["state"] == "active"
+    control.set_flag(ledger, "paused", True)
+    ledger.commit()
+    row = c.get("/api/fo/summary").json()["accounts"][0]
+    assert row["state"] == "entries_paused" and row["paused"] is True
+    c2 = _client(project, [_fo_account(mode="off")], enabled=True)
+    row = c2.get("/api/fo/summary").json()["accounts"][0]
+    assert row["state"] == "record_only"
+
 def test_fo_summary_real_account_is_off_and_empty_without_fo(project):
     c = _client(project, [_fo_account(env="real", mode="approve")], enabled=True)
     row = c.get("/api/fo/summary").json()["accounts"][0]

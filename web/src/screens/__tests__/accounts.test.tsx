@@ -207,6 +207,13 @@ describe("계좌·보유 통합 화면", () => {
     expect(Array.from(fo.querySelectorAll(".chip")).map((c) => c.textContent)).toContain("기록만");
   });
 
+  test("파생 계좌 state=entries_paused 는 「새 진입 멈춤」 칩", async () => {
+    await mount(routes({ "GET /api/fo/summary": json(fixtureFoSummary({ mode: "auto", paused: true, state: "entries_paused" })) }));
+    const chips = Array.from(section("fo-positions").querySelectorAll(".chip")).map((c) => c.textContent);
+    expect(chips).toContain("새 진입 멈춤");
+    expect(chips).not.toContain("기록만");
+  });
+
   test("/fo/summary 가 실패하면 파생 카드는 /accounts 의 NAV·현금으로 그린다", async () => {
     await mount(routes({ "GET /api/fo/summary": json({ detail: "x" }, 500) }));
     const fo = section("fo-positions");

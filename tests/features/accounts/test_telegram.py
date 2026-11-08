@@ -61,7 +61,9 @@ def test_telegram_pause_resume_mode(project, conn):
     ctx = _ctx(conn, sent)
     r = commands.poll_once(ctx, Recv(["/pause"]))
     assert r["handled"] == 1 and modes.is_paused(conn)
+    assert "새 매수·진입과 승인을 멈췄어요(손절·청산은 계속)" in sent.msgs[-1]
     commands.poll_once(ctx, Recv(["/resume"]))
+    assert "새 매수·진입과 승인을 다시 허용해요" in sent.msgs[-1]
     assert not modes.is_paused(conn)
     commands.poll_once(ctx, Recv(["/mode paper-main approve"]))
     assert modes.get_account_mode(conn, _acct("paper-main")) == "approve"
