@@ -79,6 +79,25 @@ def health_view(request: Request, live: int = Query(0, ge=0, le=1)) -> dict:
     return health.evaluate(_deps(request), live=bool(live))
 
 
+def _pause_info(conn: Any) -> dict:
+    """`paused` 플래그 + 가장 최근 변경 기록의 시각·경로. 기록의 `new` 가 현재 값과 다르면 null."""
+    paused = bool(get_flag(conn, "paused", False))
+    row = conn.execute(
+        "SELECT at, channel, new FROM control_log WHERE key = 'paused' "
+        "ORDER BY at DESC, id DESC LIMIT 1"
+    ).fetchone()
+    if row is not None and bool(_json(row["new"])) == paused:
+        return {"paused": paused, "at": row["at"], "by": row["channel"]}
+    return {"paused": paused, "at": None, "by": None}
+
+
+@router.get("/pause")
+def pause_view(request: Request) -> dict:
+    """전체 일시정지 여부 + 언제·어느 경로로 바뀌었는지(`at`·`by`)."""
+    with closing(_deps(request).conn_factory()) as conn:
+        return _pause_info(conn)
+
+
 @router.get("/status")
 def status_view(request: Request) -> dict:
     """텔레그램 `/status` 와 같은 본문 + 일시정지 여부·control 키 이름(값은 돌려주지 않음)."""
@@ -92,7 +111,11 @@ def status_view(request: Request) -> dict:
         port = deps.ports.get("accounts")
         paused = bool(port.paused(conn)) if port is not None else None
         flags = [r["key"] for r in conn.execute("SELECT key FROM control ORDER BY key")]
-    return {"text": text, "paused": paused, "flags": flags}
+        info = _pause_info(conn)
+    return {
+        "text": text, "paused": paused, "flags": flags,
+        "paused_at": info["at"], "paused_by": info["by"],
+    }  # fmt: skip
 
 
 @router.get("/daemon")
