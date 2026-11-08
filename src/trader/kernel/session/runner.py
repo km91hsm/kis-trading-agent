@@ -375,6 +375,8 @@ def codex_section(research: list[tuple[Path, Any, dict]], *, cross: bool) -> str
     crossed = [(scope, policy) for _, scope, policy in research if research_policy.is_cross(policy)]
     descriptors = {scope.scope: scope for scope, _ in crossed}
     codex_timeout = max(int(policy["config"]["timeout_s"]) for _, policy in crossed)
+    # 교차 연구가 여럿이면 N 은 그 고정 timeout 중 최댓값이다
+    limit = ("가장 긴 연구 기준 " if len(crossed) > 1 else "") + f"각 최대 {codex_timeout}초"
     text = _CODEX_HEADER
     text += (
         "4인 교차 토론: 판 두 개를 같은 라운드 수로 진행한다. "
@@ -393,7 +395,7 @@ def codex_section(research: list[tuple[Path, Any, dict]], *, cross: bool) -> str
     text += (
         "라운드마다 4턴(1판 강세·약세, 2판 강세·약세)이다. 같은 라운드의 4턴은 직전 라운드만 "
         "보므로 Claude 두 턴(1판 강세·2판 약세)은 병렬로 띄우고, Codex 두 턴(1판 약세·2판 강세)은 "
-        f"Bash 로 하나씩 실행한다(각 최대 {codex_timeout}초). "
+        f"Bash 로 하나씩 실행한다({limit}). "
         "네 턴이 모두 끝나야 다음 라운드로 가고, 마지막에 summarize를 실행한다. "
         "전용 도구는 입력 묶음을 Python에서 조립하고 JSON검증 후 저장한다. "
         "목록에 없는 흐름은 기존 흐름(Claude 강세·약세)대로 진행한다. "
@@ -542,11 +544,13 @@ def run_session(
             "TRADER_DRY_RUN": "1" if spec.dry_run else "0",
             "TRADER_HOME": str(paths.project_root()),
             "PATH": str(bundle.tool_bin_dir()) + os.pathsep + claude_bin_mod.child_path(bin_path),
-            # Codex 턴(Bash 도구)이 Claude Code 기본 Bash 제한(2분)에 잘리지 않게
-            "BASH_DEFAULT_TIMEOUT_MS": str(bash_ms),
             # 최대치는 Claude Code 기본 최대(10분) 아래로 낮추지 않는다
             "BASH_MAX_TIMEOUT_MS": str(max(bash_ms, 600000)),
         }
+        if codex_required:
+            # Codex 턴(Bash 도구)이 Claude Code 기본 Bash 제한(2분)에 잘리지 않게 — Codex 가 켜진
+            # 연구가 있는 세션만. 그 밖의 세션은 기본 제한을 그대로 둔다
+            env["BASH_DEFAULT_TIMEOUT_MS"] = str(bash_ms)
         model = settings.models.get("orchestrator", "sonnet")
         call_id = calls.start_call(
             conn, run_id, agent=calls.ORCHESTRATOR, model=model, ticker=tickers,
