@@ -13,6 +13,15 @@ from trader.features.saveticker.models import Item
 ORIGIN = "https://www.saveticker.com"
 MAX_BYTES = 2 * 1024 * 1024
 INDEX_SYMBOLS = ("QQQ", "SPY", "DIA", "IWM", "SOXX")
+# 확장에 돌려주는 고정 오류 코드(확장 `api-runner.js` 의 `API_ERRORS` 와 같은 집합 — 테스트가 고정).
+# 응답 거절 `ValueError` 의 메시지가 이 집합이면 그 코드를 그대로 쓴다.
+API_ERRORS = frozenset(
+    "api_contract_unverified api_response_unverified api_shape_unverified "
+    "api_context_unverified api_detail_unverified api_source_unverified api_basis_unverified "
+    "api_regular_unverified api_pdf_unverified api_response_too_large api_busy "
+    "api_content_unavailable api_already_prepared invalid_pdf_path invalid_pdf_ticket "
+    "invalid_pdf invalid_job invalid_message lane_busy snapshot_too_large unknown_stream".split()
+)
 
 
 def descriptor(view, *, group_id=None):

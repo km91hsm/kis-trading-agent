@@ -255,3 +255,84 @@ def test_explicit_regular_request_and_server_basis(tmp_path, stream, tab):
     latest = json.loads((tmp_path / f"data/latest/{stream}.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["basis"] == "regular"
     assert latest["view"]["requested_regular"] is True
+
+
+def _turnover(client, basis):
+    job = send(client, "api_begin", stream="market_turnover_live")
+    assert job["ok"]
+    data = {
+        "tab": "turnover",
+        "basis": basis,
+        "session": "open",
+        "excludeRisky": False,
+        "items": [{"symbol": "AAA", "rank": 1, "price": 12, "changePercent": 3}],
+    }
+    return send(
+        client,
+        "api_snapshot",
+        stream="market_turnover_live",
+        job_id=job["job_id"],
+        response=response(job["request"]["url"], data),
+    )
+
+
+def test_rejected_response_keeps_specific_contract_code(tmp_path):
+    client = native.NativeSession(tmp_path)
+    setup(client)
+    bad = _turnover(client, "regular")
+    assert bad["ok"] is False and bad["error"] == "api_basis_unverified"
+
+
+def test_api_error_codes_match_extension_runner():
+    import re
+    from pathlib import Path
+
+    js = (Path(__file__).parents[3] / "extensions/saveticker/api-runner.js").read_text(
+        encoding="utf-8"
+    )
+    codes = re.search(r"const API_ERRORS = new Set\('([^']+)'\.split", js).group(1).split(" ")
+    assert set(codes) == set(api_contract.API_ERRORS)
+    from trader.features.saveticker.web_status import FAILURE_TEXT
+
+    assert set(FAILURE_TEXT) == set(api_contract.API_ERRORS)
+
+
+def test_failed_attempt_is_recorded_without_touching_last_success(tmp_path):
+    client = native.NativeSession(tmp_path)
+    setup(client)
+    assert _turnover(client, "live")["ok"]
+    path = tmp_path / "data/status.json"
+    before = json.loads(path.read_text(encoding="utf-8"))["streams"]["market_turnover_live"]
+    assert before["last_error"] is None
+    assert not _turnover(client, "regular")["ok"]
+    after = json.loads(path.read_text(encoding="utf-8"))["streams"]["market_turnover_live"]
+    assert after["last_error"] == "api_basis_unverified"
+    assert after["last_attempt_at"] > before["last_attempt_at"]
+    assert after["last_success_at"] == before["last_success_at"]
+    assert after["count"] == before["count"]
+    # 다른 스트림 저장이 실패 기록을 지우지 않는다
+    # (실패한 작업은 같은 레인을 잠시 잡고 있으므로 다른 레인으로)
+    job = send(client, "api_begin", stream="community_gain_live")
+    data = {"tab": "gainers", "basis": "live", "session": "open", "excludeRisky": True,
+            "items": [{"symbol": "AAA", "rank": 1, "price": 12, "changePercent": 3}]}
+    assert send(client, "api_snapshot", stream="community_gain_live", job_id=job["job_id"],
+                response=response(job["request"]["url"], data))["ok"]
+    kept = json.loads(path.read_text(encoding="utf-8"))["streams"]["market_turnover_live"]
+    assert kept["last_error"] == "api_basis_unverified"
+    assert kept["last_attempt_at"] == after["last_attempt_at"]
+    # 성공하면 지운다
+    client._jobs.pop("market", None)
+    assert _turnover(client, "live")["ok"]
+    done = json.loads(path.read_text(encoding="utf-8"))["streams"]["market_turnover_live"]
+    assert done["last_error"] is None and done["last_success_at"] > before["last_success_at"]
+
+
+def test_failure_before_any_success_creates_error_entry(tmp_path):
+    client = native.NativeSession(tmp_path)
+    setup(client)
+    assert not _turnover(client, "regular")["ok"]
+    row = json.loads((tmp_path / "data/status.json").read_text(encoding="utf-8"))["streams"][
+        "market_turnover_live"
+    ]
+    assert row["last_error"] == "api_basis_unverified"
+    assert row["last_success_at"] is None

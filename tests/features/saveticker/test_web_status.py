@@ -365,3 +365,28 @@ def test_blocked_extension_with_retrying_recovery_is_not_shown_as_stopped(
     assert data["recovery"]["text"].startswith("복구 재시도 대기")
     atomic_json(path, row)
     assert get(client)["recovery"]["state"] == "manual"
+
+
+def test_recent_rejected_attempt_is_shown_without_hiding_delay(project, client):
+    save(stream="market_turnover_live", when="2026-11-04T00:00:00+00:00")
+    from trader.features.saveticker.store import Store
+
+    Store(home() / "data").record_failure(
+        "market_turnover_live", at=datetime.fromisoformat(SECOND), error="api_basis_unverified"
+    )
+    stream = {s["id"]: s for s in get(client)["streams"]}["market_turnover_live"]
+    assert stream["last_attempt_at"] == SECOND
+    assert stream["last_success_at"] == "2026-11-04T00:00:00+00:00"
+    assert stream["last_error"] == "api_basis_unverified"
+    assert stream["last_error_text"] == "실시간·정규장 기준을 확인하지 못했습니다"
+    assert stream["state"] == "delayed"  # 지연은 성공 시각 기준
+
+
+def test_last_error_is_hidden_after_newer_success(project, client):
+    save(stream="market_turnover_live", when=FIRST)
+    path = home() / "data/status.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["streams"]["market_turnover_live"]["last_error"] = "PRIVATE_SENTINEL"
+    atomic_json(path, data)
+    stream = get(client)["streams"][0]
+    assert stream["last_error"] is None and "PRIVATE_SENTINEL" not in json.dumps(stream)

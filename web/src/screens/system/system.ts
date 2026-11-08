@@ -339,6 +339,9 @@ export type SavetickerStream = {
   last_response_at: string | null;
   last_success_at: string | null;
   last_change_at: string | null;
+  /** 최근 성공보다 새 시도가 응답 거절로 끝났으면 그 고정 코드와 한국어 사유. */
+  last_error?: string | null;
+  last_error_text?: string | null;
   change_state: "changed" | "unchanged" | "empty" | "unknown";
   count: number | null;
   error: string | null;

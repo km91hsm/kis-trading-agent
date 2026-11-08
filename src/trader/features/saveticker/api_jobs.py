@@ -155,10 +155,14 @@ class BrowserApiSession:
             if kind != "api_snapshot":
                 fail("invalid_message")
             if "base_hash" in job and digest(message["response"]) != job["base_hash"]:
-                fail("api_response_unverified")
+                raise ValueError("api_response_unverified")
             items, pdf_items = self.enrich(job, message.get("details", []), items)
-        except (ValueError, TypeError, KeyError, AttributeError):
-            fail("api_response_unverified")
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            # 계약이 낸 구체적 코드(예: api_basis_unverified)는 보존하고, 그 밖만 뭉뚱그린다.
+            code = str(exc) if isinstance(exc, ValueError) else ""
+            code = code if code in api_contract.API_ERRORS else "api_response_unverified"
+            self.owner.store.record_failure(view["stream"], at=now(), error=code)
+            fail(code)
         if view["stream"] == "news_all":
             previous = {
                 r["item"]["id"]: Item.model_validate(r["item"])
