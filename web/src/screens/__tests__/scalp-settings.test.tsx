@@ -84,3 +84,48 @@ test("shows error on 400", async () => {
   await flush();
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("확인 필요");
 });
+
+const cell = (c: HTMLElement, id: string, col: number) => {
+  const row = Array.from(c.querySelectorAll("tr")).find((r) => r.querySelector(`[role="switch"][aria-label="${id} 단타"]`))!;
+  return row.querySelectorAll("td")[col] as HTMLElement;
+};
+
+test("real account ON -> OFF sends enabled:false directly (no confirm); reset hidden unless source is control; reason in 실효 cell", async () => {
+  const live = {
+    accounts: [
+      { id: "paper-main", env: "paper", markets: ["KR"], enabled: true, source: "yaml", effective: true, reason: null },
+      { id: "real-1", env: "real", markets: ["KR"], enabled: true, source: "default", effective: false, reason: "전체 일시정지" },
+    ],
+    judge: true, max_positions: 3, max_weight_pct: 5, default_paper: true,
+  };
+  ff = installFakeFetch({
+    "GET /api/settings": fixtureSettings(),
+    "GET /api/settings/codex-debate": codex,
+    "GET /api/settings/scalp": live,
+    "PATCH /api/settings/scalp/real-1": live,
+  });
+  const { container } = render(<SettingsPanel />);
+  await flush();
+  // 기본값으로 버튼은 source === "control" 일 때만
+  expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "기본값으로")).toBe(false);
+  // 실효 칸에는 사유 문구가 그대로(스위치의 「꺼짐 · 켜기」 라벨과 별개)
+  const eff = cell(container, "real-1", 3);
+  expect(eff.textContent).toBe("전체 일시정지");
+  expect(cell(container, "paper-main", 3).textContent).toBe("동작");
+  await act(async () => sw(container, "real-1").click());
+  await flush();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(patches()).toEqual([{ url: expect.stringContaining("/settings/scalp/real-1"), body: { enabled: false } }]);
+});
+
+test("reason text is shown in the 실효 cell for a switched-off account", async () => {
+  ff = installFakeFetch({
+    "GET /api/settings": fixtureSettings(),
+    "GET /api/settings/codex-debate": codex,
+    "GET /api/settings/scalp": scalp,
+  });
+  const { container } = render(<SettingsPanel />);
+  await flush();
+  expect(cell(container, "real-1", 3).textContent).toBe("꺼짐");
+  expect(cell(container, "real-1", 2).textContent).toBe("꺼짐 · 켜기");
+});

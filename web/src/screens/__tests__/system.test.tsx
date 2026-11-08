@@ -237,6 +237,14 @@ describe("시스템 화면", () => {
     expect(h.textContent).toContain("자동매매: 확인하지 못함");
   });
 
+  test("헬스 머리: /system/pause 응답 전에는 「확인 중」", async () => {
+    await mount(routes({ "GET /api/system/pause": () => new Promise<Response>(() => {}) }));
+    const h = section("health");
+    expect(h.textContent).toContain("자동매매: 확인 중");
+    expect(h.textContent).not.toContain("동작 중");
+    expect(h.textContent).not.toContain("확인하지 못함");
+  });
+
   test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
     await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
     const h = section("health");

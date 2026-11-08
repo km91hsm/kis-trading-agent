@@ -99,7 +99,10 @@ describe("오늘 화면", () => {
 
   test("레인 카드 paused 배지에 「계좌 모드와 별개」 설명", async () => {
     await mount(routes({ "GET /api/accounts": [fixtureAccount({ paused: true })] }));
-    expect(section("spot-lane").textContent).toContain("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    const lane = section("spot-lane");
+    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 계좌 모드와 별개");
+    expect(lane.querySelector("[title]")).toBeNull(); // 보이는 줄만 — title 중복 없음
   });
 
   test("섹션 컨테이너는 데이터 전에 있고, 계좌 없는 레인은 hidden", async () => {

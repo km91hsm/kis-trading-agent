@@ -49,9 +49,7 @@ export function LaneCardView({
     <Card
       title={LANE_LABEL[card.lane]}
       right={
-        <span title={card.state === "paused" ? PAUSED_HELP : undefined}>
-          <Badge tone={s.tone}>{s.text}</Badge>
-        </span>
+        <Badge tone={s.tone}>{s.text}</Badge>
       }
     >
       {card.state === "paused" ? <p className="lane-note">{PAUSED_HELP}</p> : null}
