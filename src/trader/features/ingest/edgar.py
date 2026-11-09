@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from trader.features.ingest.dart import RATIO_KEYS, basic_ratios
+from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.platform.logging_setup import quiet_httpx
 
 logger = logging.getLogger("trader.sources")
@@ -255,20 +256,22 @@ def financials_us(facts: dict, asof: date) -> tuple[dict[str, Decimal], int | No
     fin: dict[str, Decimal] = {}
     all_facts = facts.get("facts") or {}
     for key, (tax, tags, duration) in _TAGS.items():
-        for tag in tags:
-            units = ((all_facts.get(tax) or {}).get(tag) or {}).get("units") or {}
-            entries = units.get("USD") or []
-            annual = _annual_entries(entries, asof, duration=duration)
-            if not annual:
-                continue
-            fin[key] = Decimal(str(annual[0]["val"]))
-            latest_end = _d(annual[0]["end"])
-            for prev in annual[1:]:
-                prev_end = _d(prev["end"])
-                if latest_end and prev_end and 300 <= (latest_end - prev_end).days <= 400:
-                    fin[f"{key}_전기"] = Decimal(str(prev["val"]))
-                    break
-            break
+        # 회사가 보고 태그를 바꾸면 옛 태그에 과거 값만 남는다 — 최신 결산일을 가진 태그를 쓴다
+        # (같으면 _TAGS 순서가 앞선 태그, max 는 첫 최댓값을 돌려준다)
+        candidates = [
+            _annual_entries(_unit_entries(all_facts, tax, tag), asof, duration=duration)
+            for tag in tags
+        ]
+        annual = max((c for c in candidates if c), key=lambda c: c[0]["end"], default=None)
+        if annual is None:
+            continue
+        fin[key] = Decimal(str(annual[0]["val"]))
+        latest_end = _d(annual[0]["end"])
+        for prev in annual[1:]:
+            prev_end = _d(prev["end"])
+            if latest_end and prev_end and 300 <= (latest_end - prev_end).days <= 400:
+                fin[f"{key}_전기"] = Decimal(str(prev["val"]))
+                break
     tax, tag, unit = _SHARES_TAG
     shares_entries = (((all_facts.get(tax) or {}).get(tag) or {}).get("units") or {}).get(
         unit
@@ -311,3 +314,63 @@ def ratios_us(
     if not cik:
         return dict.fromkeys(RATIO_KEYS)
     return ratios_from_facts(edgar.companyfacts(cik), asof, price)
+
+
+# 분석 입력에 넣는 제출 종류 — 내부자 거래(Form 4 등)처럼 건수만 많은 양식은 뺀다(/A 정정 포함).
+FILING_FORMS = ("8-K", "10-K", "10-Q", "20-F", "6-K", "S-1", "S-3")
+
+
+def _accepted_at(raw: Any) -> datetime | None:
+    """접수 시각. `Z` 표기가 동부시간 벽시계인 사례가 있어 동부시간으로 읽는다 — 실제 UTC 라도
+    더 늦은 시각으로 해석될 뿐이라 룩어헤드 쪽으로는 틀리지 않는다."""
+    try:
+        return datetime.fromisoformat(str(raw)[:19]).replace(tzinfo=MARKET_TZ["US"])
+    except ValueError:
+        return None
+
+
+def filings_from_submissions(
+    submissions: dict, cik: str, asof: datetime, days: int = 30
+) -> list[dict]:
+    """DART `disclosures` 와 같은 꼴의 최근 days 일 제출 목록(최신순). asof 뒤 접수분은 뺀다."""
+    recent = (submissions.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+
+    def column(name: str) -> list:
+        return recent.get(name) or [""] * len(forms)
+
+    asof_day = asof.astimezone(MARKET_TZ["US"]).date()
+    since = asof_day - timedelta(days=days)
+    base = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}"
+    out: list[dict] = []
+    for form, filed_raw, accepted_raw, acc, doc, items_raw in zip(
+        forms,
+        column("filingDate"),
+        column("acceptanceDateTime"),
+        column("accessionNumber"),
+        column("primaryDocument"),
+        column("items"),
+        strict=True,
+    ):
+        name = str(form)
+        filed = _d(filed_raw)
+        if name.removesuffix("/A") not in FILING_FORMS or filed is None:
+            continue
+        accepted = _accepted_at(accepted_raw)
+        if not since <= filed <= asof_day or (accepted is not None and accepted > asof):
+            continue
+        items = [x.strip() for x in str(items_raw or "").split(",") if x.strip()]
+        out.append(
+            {
+                "title": f"{name} (items {', '.join(items)})" if items else name,
+                "filed": filed.isoformat(),
+                "url": f"{base}/{str(acc).replace('-', '')}/{doc}",
+            }
+        )
+    out.sort(key=lambda i: i["filed"], reverse=True)
+    return out
+
+
+def disclosures_us(edgar: EdgarClient, symbol: str, asof: datetime, days: int = 30) -> list[dict]:
+    cik = edgar.cik(symbol)
+    return filings_from_submissions(edgar.submissions(cik), cik, asof, days) if cik else []

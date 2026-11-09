@@ -219,6 +219,7 @@ def test_us_requires_exchange_and_skips_kr_only_sections(project):
     assert d["errors"] == [
         "fundamental.ratios: no edgar client",
         "fundamental.history: no edgar client",
+        "fundamental.disclosures: no edgar client",
     ]
 
 
@@ -939,3 +940,42 @@ def test_macro_memo_respects_us_cutoff_and_reuses_matching_requests(project):
         assert fetch(earlier)["sp500"]["data"] is None
     finally:
         inputs._MACRO_MEMO.clear()
+
+
+def test_us_disclosures_section_from_edgar(project):
+    class Edgar:
+        def cik(self, symbol):
+            return "0000789019"
+
+        def company_name(self, symbol):
+            return "Microsoft"
+
+        def companyfacts(self, cik):
+            return {"facts": {}}
+
+        def submissions(self, cik):
+            return {
+                "filings": {
+                    "recent": {
+                        "form": ["8-K"],
+                        "filingDate": [(T0 - timedelta(days=1)).date().isoformat()],
+                        "accessionNumber": ["0000-26-000001"],
+                        "primaryDocument": ["d.htm"],
+                        "items": ["2.02"],
+                    }
+                }
+            }
+
+    d = build_inputs(
+        ticker="MSFT",
+        market="US",
+        exchange="NAS",
+        asof=T0,
+        cfg=cfg(),
+        secrets=Secrets(),
+        deps=deps(edgar=Edgar()),
+    )
+    disc = d["fundamental"]["disclosures"]
+    assert disc["error"] is None
+    assert disc["data"][0]["title"] == "8-K (items 2.02)"
+

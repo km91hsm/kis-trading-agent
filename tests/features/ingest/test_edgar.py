@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -6,7 +6,13 @@ import pytest
 
 from tests.features.ingest.helpers import T0, load
 from trader.features.ingest.dart import RATIO_KEYS
-from trader.features.ingest.edgar import EdgarClient, ratios_us
+from trader.features.ingest.edgar import (
+    EdgarClient,
+    disclosures_us,
+    filings_from_submissions,
+    financials_us,
+    ratios_us,
+)
 
 TICKERS = "https://www.sec.gov/files/company_tickers.json"
 FACTS = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"
@@ -175,3 +181,90 @@ def test_amendments_override_original_when_filed_before_asof():
     assert before["years"][2024]["매출액"] == Decimal(330)  # 정정 전엔 원본
     r_after = ratios_from_facts(facts, date(2026, 4, 1), None)
     assert r_after["영업이익률"] == pytest.approx(33 / 340)  # 비율도 정정분 매출 기준
+
+
+def _fy(end, val, filed):
+    y, rest = end.split("-", 1)
+    return {"start": f"{int(y) - 1}-07-01", "end": end, "val": val, "filed": filed, "form": "10-K"}
+
+
+def _stale_revenue_facts():
+    """`Revenues` 는 FY2010 까지만 있고 이후는 새 태그로 보고한 회사(MSFT 형)."""
+    return {
+        "facts": {
+            "us-gaap": {
+                "Revenues": {"units": {"USD": [_fy("2010-06-30", 62, "2010-07-30")]}},
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                    "units": {
+                        "USD": [
+                            _fy("2025-06-30", 280, "2025-07-30"),
+                            _fy("2026-06-30", 330, "2026-07-30"),
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+
+def test_financials_us_prefers_tag_with_latest_period_over_stale_first_tag():
+    fin, _ = financials_us(_stale_revenue_facts(), date(2026, 10, 9))
+    assert fin["매출액"] == Decimal("330")
+    assert fin["매출액_전기"] == Decimal("280")
+
+
+def test_financials_us_uses_stale_tag_when_it_was_latest_known_at_asof():
+    fin, _ = financials_us(_stale_revenue_facts(), date(2011, 1, 3))
+    assert fin["매출액"] == Decimal("62")
+
+
+CIK = "0000789019"
+ASOF = datetime(2026, 11, 9, 20, 0, tzinfo=UTC)
+
+
+def _submissions(*rows):
+    keys = (
+        "form",
+        "filingDate",
+        "acceptanceDateTime",
+        "accessionNumber",
+        "primaryDocument",
+        "items",
+    )
+    return {"filings": {"recent": {k: [r[i] for r in rows] for i, k in enumerate(keys)}}}
+
+
+def _row(form, filed, accepted=None, items="", n="1"):
+    return (form, filed, accepted or f"{filed}T08:00:00.000Z", f"0000-26-00000{n}", "d.htm", items)
+
+
+def test_filings_us_keeps_material_forms_newest_first_with_url():
+    sub = _submissions(
+        _row("10-Q", "2026-10-29", n="1"),
+        _row("4", "2026-11-05", n="2"),
+        _row("8-K", "2026-11-03", items="2.02,9.01", n="3"),
+    )
+    out = filings_from_submissions(sub, CIK, ASOF, days=30)
+    assert [i["title"] for i in out] == ["8-K (items 2.02, 9.01)", "10-Q"]
+    assert out[0]["filed"] == "2026-11-03"
+    assert out[0]["url"] == ("https://www.sec.gov/Archives/edgar/data/789019/000026000003/d.htm")
+
+
+def test_filings_us_excludes_outside_window():
+    sub = _submissions(_row("10-K", "2026-10-09", n="1"), _row("10-K/A", "2026-10-10", n="2"))
+    assert [i["title"] for i in filings_from_submissions(sub, CIK, ASOF, days=30)] == ["10-K/A"]
+
+
+def test_filings_us_excludes_filing_accepted_after_asof_on_same_day():
+    sub = _submissions(_row("8-K", "2026-11-09", accepted="2026-11-09T16:05:00.000Z"))
+    early = datetime(2026, 11, 9, 14, 0, tzinfo=UTC)  # 09:00 ET — 접수 16:05 ET 전
+    assert filings_from_submissions(sub, CIK, early, days=30) == []
+    assert len(filings_from_submissions(sub, CIK, ASOF + timedelta(hours=2), days=30)) == 1
+
+
+def test_disclosures_us_unknown_symbol_is_empty():
+    class Fake:
+        def cik(self, symbol):
+            return None
+
+    assert disclosures_us(Fake(), "ZZZZ", ASOF) == []
