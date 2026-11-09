@@ -41,7 +41,7 @@ def test_policy_frozen_and_mandatory_rounds(conn, tmp_path):
     s.llm.codex_debate.enabled = False
     assert p.get(conn, s, tmp_path, SPOT_RESEARCH)["enabled"]
     err = p.completion_error(conn, s, tmp_path, SPOT_RESEARCH)
-    assert "Codex" in err and "0" in err
+    assert "필수 토론 미완료" in err and "0" in err
     with pytest.raises(p.ResearchPolicyError, match="재분석"):
         p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
     assert read_checkpoint(tmp_path, "00_inputs") is not None
@@ -444,9 +444,9 @@ def test_cross_completion_reports_missing_lane_b(conn, tmp_path, monkeypatch):
         assert p.generate_turn(
             ctx, d, r, rnd, side="bear", runner=fake, bin_path=Path("/fake/codex")
         )["ok"]
-    assert p.completion_error(conn, s, d, r) == "Codex 필수 토론 미완료: 2판 r0_bull"
+    assert p.completion_error(conn, s, d, r) == "필수 토론 미완료: 2판 r0_bull (Codex)"
     _write_claude(d, r, "b", 0, "bull")  # 강세 칸은 채웠지만 약세 Claude 누락
-    assert p.completion_error(conn, s, d, r) == "Codex 필수 토론 미완료: 2판 r0_bear"
+    assert p.completion_error(conn, s, d, r) == "필수 토론 미완료: 2판 r0_bear (Claude)"
 
 
 def _growth_turn(side, rnd, topic):
@@ -927,3 +927,16 @@ def test_cross_extra_s_formula_override_and_non_cross(conn, tmp_path):
     assert p.cross_extra_s(s, p.current(conn, s, version=1)) == 0
     off = SimpleNamespace(llm=LlmSettings(), debate_rounds=2)
     assert p.cross_extra_s(off, p.current(conn, off)) == 0
+
+
+def test_turn_error_names_rejected_and_allowed_evidence(conn, tmp_path):
+    from trader.kernel.session import research_policy as p
+
+    s = settings()
+    p.start(conn, s, tmp_path, SPOT_RESEARCH, now=NOW)
+    seed(tmp_path)
+    issue = {"issue_id": "bull:a", "topic": "t", "claim": "c", "evidence": ["technical"]}
+    err = p.turn_error(conn, s, tmp_path, SPOT_RESEARCH, ok_turn("bull", 0, issues=[issue]))
+    assert err.startswith("쟁점/반론 evidence는 실제 리포트 source_id를 사용해야 합니다")
+    assert "잘못된 값: technical" in err
+    assert "사용 가능: " in err and "technical.indicators" in err

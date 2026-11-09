@@ -482,10 +482,24 @@ def compact_debate(obj: dict, limit: int = 24_000) -> dict:
     raise ValueError(f"토론 필수 근거·쟁점 구조가 {limit:,} UTF-8 bytes 상한을 넘습니다")
 
 
+def report_source_ids(reports: list[dict]) -> list[str]:
+    """리포트 `evidence[].source_id` 의 정렬된 고유 목록 — 토론 쟁점이 인용할 수 있는 근거 ID."""
+    return sorted(
+        {
+            e["source_id"]
+            for report in reports
+            for e in report.get("evidence") or []
+            if isinstance(e, dict) and isinstance(e.get("source_id"), str)
+        }
+    )
+
+
 def debate_bundle(obj: dict, limit: int = 24_000) -> dict:
-    """Claude 도구 경계에서도 필수 구조 초과를 자료 없는 성공으로 숨기지 않는다."""
+    """Claude 도구 경계에서도 필수 구조 초과를 자료 없는 성공으로 숨기지 않는다.
+    토론자가 그대로 베껴 쓸 근거 ID 목록 `allowed_evidence` 를 압축 전에 붙인다."""
+    data = {**obj, "allowed_evidence": report_source_ids(obj.get("reports") or [])}
     try:
-        return {"ok": True, "data": compact_debate(obj, limit)}
+        return {"ok": True, "data": compact_debate(data, limit)}
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 

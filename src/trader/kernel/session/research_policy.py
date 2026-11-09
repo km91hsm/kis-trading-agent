@@ -661,7 +661,8 @@ def completion_error(conn, settings, d, scope) -> str | None:
             for rnd in range(policy["rounds"] + 1):
                 for side in ("bull", "bear"):
                     if read_checkpoint(d, scope.turn_stage(item["lane"], rnd, side)) is None:
-                        return f"Codex 필수 토론 미완료: {label}r{rnd}_{side}"
+                        who = "Codex" if item[side] == "codex" else "Claude"
+                        return f"필수 토론 미완료: {label}r{rnd}_{side} ({who})"
         if policy.get("context_hash") != _context_hash(d, scope):
             return "Codex 입력/리포트 증명 불일치: 새 연구로 재분석하세요"
         for item in plan:
@@ -804,16 +805,17 @@ def turn_error(conn, settings, d, scope, value, *, lane="a"):
             or any(not i.startswith(turn.side + ":") for i in ids)
         ):
             return "각 공급자는 자기 쟁점 1~5개와 고유 side:issue ID를 제시해야 합니다"
-        evidence = {
-            e.get("source_id")
-            for report in reports(d, scope)
-            for e in report.get("evidence", [])
-            if isinstance(e, dict)
-        }
-        if any(
-            not set(item.evidence) <= evidence for item in [*issues, *turn.responses, *turn.replies]
-        ):
-            return "쟁점/반론 evidence는 실제 리포트 source_id를 사용해야 합니다"
+        allowed = tooling.report_source_ids(reports(d, scope))
+        rejected = {
+            source
+            for item in [*issues, *turn.responses, *turn.replies]
+            for source in item.evidence
+        } - set(allowed)
+        if rejected:
+            return (
+                "쟁점/반론 evidence는 실제 리포트 source_id를 사용해야 합니다 — "
+                f"잘못된 값: {', '.join(sorted(rejected))} / 사용 가능: {', '.join(allowed)}"
+            )
         if turn.round == 0:
             if turn.responses or turn.replies:
                 return "독립 r0은 상대 responses/replies를 참조할 수 없습니다"

@@ -631,7 +631,7 @@ def test_codex_policy_missing_turns_fail_even_when_claude_exits_success(project,
         runner=fake,
         claude_bin=Path("/fake/claude"),
     )
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
     assert "codex-turn" in captured["prompt"]
     assert "researcher-bear" not in captured["agents"]
     assert conn.execute("SELECT status FROM runs ORDER BY id DESC LIMIT 1").fetchone()[0] == "error"
@@ -705,7 +705,7 @@ def test_cross_session_keeps_bear_agent_and_extends_timeout(project, conn):
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
     # 최대치는 Claude Code 기본 최대(600000) 아래로 낮추지 않는다
     assert captured["env"]["BASH_MAX_TIMEOUT_MS"] == "600000"
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
 
 
 def test_market_cross_timeout_is_1200(project, conn):
@@ -717,7 +717,7 @@ def test_market_cross_timeout_is_1200(project, conn):
     assert captured["timeout"] == 600 + 600
     assert "market-researcher-bear" in captured["agents"]
     assert "_market_debatex_r" in captured["prompt"]
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
 
 
 def test_cross_extra_override(project, conn):
@@ -771,7 +771,7 @@ def test_session_with_v1_codex_research_runs_legacy_mode(project, conn):
     ) in captured["prompt"]
     assert captured["timeout"] == 900
     assert captured["env"]["BASH_DEFAULT_TIMEOUT_MS"] == "240000"
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
 
 
 def test_cross_session_timeout_message_shows_extended_limit(project, conn):

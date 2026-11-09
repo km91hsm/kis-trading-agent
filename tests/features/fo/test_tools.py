@@ -499,5 +499,5 @@ def test_fo_summarize_cross_policy_incomplete_lane_b_rejected(ctx, monkeypatch):
         for side in ("bull", "bear"):
             _fo_save_turn(d, f"_fo_debate_r{rnd}_{side}", ok_turn(side, rnd), "claude")
     out = tools.fo_summarize(ctx, date=D)
-    assert out == {"ok": False, "error": "Codex 필수 토론 미완료: 2판 r0_bull"}
+    assert out == {"ok": False, "error": "필수 토론 미완료: 2판 r0_bull (Codex)"}
     assert read_checkpoint(d, "_fo_summary") is None

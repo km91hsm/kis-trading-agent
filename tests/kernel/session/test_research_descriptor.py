@@ -92,7 +92,7 @@ def test_runner_uses_feature_cli_and_bear_agent(conn, project, monkeypatch):
     result = run_session(
         spec(), kind, ctx, agents=agents, runner=fake, claude_bin=Path("/fake/claude")
     )
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
     assert "lunar debate --round <n>" in captured["prompt"]
     assert "alpha" in captured["agents"] and "lunar-skeptic" not in captured["agents"]
 
@@ -138,7 +138,7 @@ def test_runner_cross_keeps_feature_bear_agent_and_lane_b_prefix(conn, project, 
     result = run_session(
         spec(), kind, ctx, agents=agents, runner=fake, claude_bin=Path("/fake/claude")
     )
-    assert not result.ok and "Codex" in result.error
+    assert not result.ok and "필수 토론 미완료" in result.error
     assert "lunar debate --round <n> --side bear" in captured["prompt"]
     assert "lunar debate --round <n> --side bull" in captured["prompt"]
     assert "cross_r<n>_<side>" in captured["prompt"]

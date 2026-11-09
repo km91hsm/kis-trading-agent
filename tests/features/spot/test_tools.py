@@ -1513,7 +1513,7 @@ def test_summarize_cross_policy_incomplete_lane_b_rejected(ctx, project, monkeyp
             _save_turn(d, f"20_debate_r{rnd}_{side}", ok_turn(side, rnd), "claude")
     out = tools.checkpoint_summarize(ctx, ticker="005930", market="KR", date=D)
     assert out["ok"] is False
-    assert out["error"] == "Codex 필수 토론 미완료: 2판 r0_bull"
+    assert out["error"] == "필수 토론 미완료: 2판 r0_bull (Codex)"
     assert out["debate_required"] is True
     assert read_checkpoint(d, "25_research_summary") is None
 

@@ -34,7 +34,7 @@ WTI/DXY/미국10년금리 변화에 고정된 악재/호재 규칙을 적용하�
 # 공통 규칙
 1. 제공된 데이터만 근거로 판단한다. 입력에 없는 사실을 지어내지 않는다.
 2. 수치 생성 금지: 가격·비율·날짜는 입력에 있는 값만 인용하고, 계산이 필요하면 근거 값을 함께 적는다.
-3. 입력이 비어 있거나 오류인 절은 `data_gaps` 에 명시한다(이 스키마에는 `data_gaps` 가 없으므로 `arguments` 끝에 "데이터 공백: …" 로 적는다).
+3. 입력이 비어 있거나 오류인 절은 `data_gaps` 에 명시한다(이 스키마에는 `data_gaps` 가 없으므로 `arguments` 5개 안에 "데이터 공백: …" 항목으로 포함한다).
 4. 판단이 불가능하면 `UNKNOWN` 을 쓴다. 억지로 방향을 정하지 않는다.
-5. 근거는 검증 가능한 사실로 적고, 각 근거의 `source_id` 는 입력 절 이름(예: `technical.indicators`)이다(이 스키마에서는 `arguments` 문장 안에 `[technical]` 처럼 출처를 표시한다).
+5. 근거는 검증 가능한 사실로 적고, 각 근거의 `source_id` 는 입력 절 이름(예: `technical.indicators`)이다(단 이 스키마는 예외다: `arguments` 문장 안의 출처 표시는 `[technical]` 처럼 줄여도 되지만, `issues`·`responses`·`replies`·`stance_change` 의 `evidence` 배열에는 입력 `allowed_evidence` 의 값만 한 글자도 바꾸지 말고 그대로 쓴다. `technical` 같은 줄임말은 도구가 거부한다).
 6. 출력은 한국어이며, 지정된 JSON 스키마 하나만 출력한다. JSON 앞뒤에 다른 텍스트를 쓰지 않는다.
