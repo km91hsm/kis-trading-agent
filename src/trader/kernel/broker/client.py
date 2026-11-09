@@ -1,4 +1,4 @@
-"""KIS HTTP 클라이언트: 공통 헤더, 레이트리밋(토큰 버킷), 오류 통일, EGW00201 재시도."""
+"""KIS HTTP 클라이언트: 공통 헤더, 레이트리밋(토큰 버킷), 오류 통일, 초당 한도 재시도."""
 
 from __future__ import annotations
 
@@ -28,7 +28,8 @@ class RateLimitBusy(KisApiError):
 
 
 RATE_PER_SEC: dict[Env, int] = {"real": 20, "paper": 2}
-RETRY_CODE = "EGW00201"  # 초당 거래건수 초과 (HTTP 200·500 양쪽으로 온다, 실기 확인)
+# 초당 거래건수 초과: EGW00201 은 HTTP 200·500 양쪽으로 온다(실기 확인), EGW00215 는 계좌 원장 한도
+RETRY_CODES = frozenset({"EGW00201", "EGW00215"})
 TOKEN_ERROR_CODES = frozenset({"EGW00123", "EGW00121"})  # 만료·유효하지 않은 토큰
 RETRY_WAIT_S = 0.5
 MAX_PAGES = 20  # 연속조회 상한(잔고·체결)
@@ -172,8 +173,9 @@ class KisClient:
     def _request_full(
         self, method: str, path: str, tr_name: str, **kw: Any
     ) -> tuple[dict, httpx.Headers]:
-        """초당 한도(EGW00201)는 0.5·1.0·2.0초로 최대 RETRY_MAX 회 물러나 재시도하고(백필처럼 연속
-        호출에선 한 번으로 모자랐다), 토큰 오류는 캐시를 지우고 1회 재발급 뒤 재시도한다."""
+        """초당 한도(`RETRY_CODES`)는 0.5·1.0·2.0초로 최대 RETRY_MAX 회 물러나 재시도하고
+        (백필처럼 연속 호출에선 한 번으로 모자랐다), 토큰 오류는 캐시를 지우고
+        1회 재발급 뒤 재시도한다."""
         tr = tr_id(tr_name, self.env)
         wait = RETRY_WAIT_S
         token_retried = False
@@ -181,7 +183,7 @@ class KisClient:
             try:
                 return self._once(method, path, tr, **kw)
             except KisApiError as e:
-                if e.msg_cd == RETRY_CODE and attempt < RETRY_MAX:
+                if e.msg_cd in RETRY_CODES and attempt < RETRY_MAX:
                     logger.warning("KIS 초당 한도 초과(%s), %.1f초 후 재시도", tr, wait)
                     self._sleep(wait)
                     wait *= 2

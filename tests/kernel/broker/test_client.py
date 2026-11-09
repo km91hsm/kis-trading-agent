@@ -78,6 +78,27 @@ def test_egw00201_retry_once(real_client, respx_mock, monkeypatch):
     assert route.call_count == 2 and slept == [0.5]
 
 
+def test_egw00215_ledger_rate_limit_retries_like_egw00201(real_client, respx_mock, monkeypatch):
+    """원장 초당 한도(EGW00215)는 일시적이므로 잔고 조회가 바로 실패하지 않고 물러나 재시도한다."""
+    slept = []
+    monkeypatch.setattr(real_client, "_sleep", lambda s: slept.append(s))
+    limited = httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "초과"})
+    route = respx_mock.get(REAL + PRICE).mock(
+        side_effect=[limited, limited, ok({"stck_prpr": "1"})]
+    )
+    assert real_client.get(PRICE, "DOM_PRICE", {})["output"]["stck_prpr"] == "1"
+    assert route.call_count == 3 and slept == [0.5, 1.0]
+
+
+def test_egw00215_raises_after_retry_limit(real_client, respx_mock, monkeypatch):
+    monkeypatch.setattr(real_client, "_sleep", lambda s: None)
+    limited = httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "초과"})
+    route = respx_mock.get(REAL + PRICE).mock(return_value=limited)
+    with pytest.raises(KisApiError) as e:
+        real_client.get(PRICE, "DOM_PRICE", {})
+    assert e.value.msg_cd == "EGW00215" and route.call_count == 4
+
+
 def test_egw00201_as_http500_retries_once(paper_client, respx_mock, monkeypatch):
     """실기 확인: KIS 는 초당 한도 초과를 HTTP 500 + JSON 본문으로도 돌려준다."""
     slept = []
