@@ -34,13 +34,13 @@ def test_kernel_registry_is_valid_v1():
     assert [(m.version, m.name, m.owner) for m in KERNEL] == [(1, "kernel-core", "kernel")]
 
 
-def test_all_migrations_through_v19_include_session_tables(project):
+def test_all_migrations_through_v20_include_session_tables(project):
     from trader.kernel.ledger import db
     from trader.kernel.registry import discover
     from trader.kernel.registry.contracts import all_migrations
 
     migs = all_migrations(discover())
-    assert [m.version for m in migs] == list(range(1, 20))
+    assert [m.version for m in migs] == list(range(1, 21))
     v4 = next(m for m in migs if m.version == 4)
     assert v4.owner == "kernel/session"
     c = db.connect()

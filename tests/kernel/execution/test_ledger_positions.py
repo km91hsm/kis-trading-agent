@@ -43,3 +43,24 @@ def test_latest_positions_filters_asset(conn):
     assert [p["ticker"] for p in stock["positions"]] == ["005930"]
     fo = latest_positions(conn, "paper-main", "KR", asset="fo")
     assert [p["ticker"] for p in fo["positions"]] == ["A0565"]
+
+
+def test_snapshot_keeps_settlement_aware_cash(conn):
+    """예수금과 주문 가능 금액(결제 예정 반영)을 따로 남기고, 같은 날 다시 쓰면 갱신한다."""
+    args = {"account_id": "a", "d": date(2026, 10, 2), "market": "KR", "positions": []}
+    xledger.snapshot_positions(
+        conn, nav=Decimal("100"), cash=Decimal("100"), cash_available=Decimal("80"), **args
+    )
+    assert latest_positions(conn, "a", "KR")["cash_available"] == "80"
+    xledger.snapshot_positions(
+        conn, nav=Decimal("100"), cash=Decimal("100"), cash_available=Decimal("70"), **args
+    )
+    assert latest_positions(conn, "a", "KR")["cash_available"] == "70"
+
+
+def test_snapshot_cash_available_is_optional(conn):
+    xledger.snapshot_positions(
+        conn, account_id="a", d=date(2026, 10, 2), market="KR",
+        nav=Decimal("100"), cash=Decimal("100"), positions=[],
+    )  # fmt: skip
+    assert latest_positions(conn, "a", "KR")["cash_available"] is None

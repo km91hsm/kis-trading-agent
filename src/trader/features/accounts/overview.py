@@ -41,7 +41,8 @@ def _s(v: Decimal | None) -> str | None:
 
 def _latest_nav(conn: sqlite3.Connection, account_id: str, market: str) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT date, nav, cash, created_at FROM account_nav WHERE account_id=? AND market=? "
+        "SELECT date, nav, cash, cash_available, created_at FROM account_nav "
+        "WHERE account_id=? AND market=? "
         "ORDER BY date DESC, id DESC LIMIT 1",
         (account_id, market),
     ).fetchone()
@@ -97,6 +98,11 @@ def account_rows(
                 "nav": _s(Decimal(row["nav"])) if row else None,
                 "nav_at": row["created_at"] if row else None,
                 "cash": _s(Decimal(row["cash"])) if row else None,
+                "cash_available": (
+                    _s(Decimal(row["cash_available"]))
+                    if row and row["cash_available"] is not None
+                    else None
+                ),
                 "cash_at": row["created_at"] if row else None,
                 "usd_nav": _s(Decimal(us["nav"])) if us else None,
                 "day_pnl": _s(_day_pnl(conn, a.id, market, row, now)),

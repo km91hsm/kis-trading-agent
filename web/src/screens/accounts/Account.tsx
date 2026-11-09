@@ -227,6 +227,7 @@ function BackLink() {
 
 function Header({ account: a, at, now, onDone }: { account: AccountRow; at: number; now: Date; onDone(): void }) {
   const c = a.currency === "USD" ? "USD" : "KRW";
+  const settled = a.cash_available !== undefined && a.cash_available !== null;
   const fetched = at > 0 ? new Date(at).toISOString() : null;
   return (
     <div className="account-head">
@@ -240,10 +241,11 @@ function Header({ account: a, at, now, onDone }: { account: AccountRow; at: numb
         }
       >
         <Stats
-          cols={2}
+          cols={settled ? 3 : 2}
           items={[
             { id: "nav", label: "NAV", value: fmtMoney(a.nav, c) },
-            { id: "cash", label: "현금", value: fmtMoney(a.cash ?? null, c), sub: `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
+            { id: "cash", label: settled ? "예수금(결제 전)" : "현금", value: fmtMoney(a.cash ?? null, c), sub: `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
+            ...(settled ? [{ id: "cash_available", label: "주문 가능", value: fmtMoney(a.cash_available ?? null, c) }] : []),
           ]}
         />
         {a.paused ? <p className="mode-note">(전체 일시정지로 새 매수 멈춤)</p> : null}

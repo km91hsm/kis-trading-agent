@@ -20,7 +20,7 @@ OK_ROOT = FIXTURES / "features_ok"
 def _ok() -> list[Feature]:
     # alpha 가 기능 소유 v2·v3·v6·v9~v14·v16 자리를 채운다.
     alpha, beta = discover("tests.fixtures.features_ok")
-    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, *range(9, 15), 16))
+    stubs = tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 3, 6, *range(9, 15), 16, 19))
     return [replace(alpha, migrations=stubs), beta]
 
 
@@ -86,12 +86,14 @@ def test_interleaved_migration_versions_across_features_are_accepted():
     alpha, beta = _ok()
     alpha = replace(
         alpha,
-        migrations=tuple(Migration(v, f"a{v}", owner="alpha") for v in (2, 6, *range(9, 15), 16)),
+        migrations=tuple(
+            Migration(v, f"a{v}", owner="alpha") for v in (2, 6, *range(9, 15), 16, 19)
+        ),
     )
     beta = replace(beta, migrations=(Migration(3, "b3", owner="beta"),))
     msgs = contracts.check([alpha, beta], roots=[OK_ROOT])
     assert not any("마이그레이션" in m for m in msgs)
-    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 19))
+    assert [m.version for m in contracts.all_migrations([alpha, beta])] == list(range(1, 21))
 
 
 def test_duplicate_version_still_reported_with_interleaving():

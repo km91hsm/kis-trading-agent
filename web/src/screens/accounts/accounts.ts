@@ -17,6 +17,8 @@ export type Account = {
   paused: boolean;
   nav: Amount;
   cash?: Amount;
+  /** 결제 예정 매수대금을 뺀 주문 가능 금액. 옛 기록·파생 계좌는 없다. */
+  cash_available?: Amount;
   cash_at?: string | null;
   usd_nav?: Amount;
   day_pnl: Amount;

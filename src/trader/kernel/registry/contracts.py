@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from trader.kernel.daemon.migrations import QUEUE
-from trader.kernel.execution.migrations import EXECUTION, EXECUTION_V7
+from trader.kernel.execution.migrations import EXECUTION, EXECUTION_V7, EXECUTION_V20
 from trader.kernel.execution.types import ORIGIN_CHECK
 from trader.kernel.lane.types import LANES
 from trader.kernel.ledger.db import LedgerError
@@ -31,6 +31,7 @@ KERNEL_MODULES: list[Migration] = [
     SESSION,
     EXECUTION,
     EXECUTION_V7,
+    EXECUTION_V20,
     QUEUE,
     WEB,
     RESEARCH,

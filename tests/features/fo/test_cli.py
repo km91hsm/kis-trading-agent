@@ -174,7 +174,10 @@ def test_chain_atm_window_and_errors(project, install, sample, monkeypatch):
 
 def _verify(install, balance, *args, **env_kw):
     env = install(Env(balance=balance, **env_kw))
-    r = _run("verify", "--account", ACCT, *args)
+    # verify 는 --today 가 없어 실제 날짜로 근월물을 고른다 — 고정 계약표(105W11)가 낡지 않게 고정
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("trader.features.fo.cli._today", lambda _value: T0.date())
+        r = _run("verify", "--account", ACCT, *args)
     return r, env
 
 

@@ -311,3 +311,41 @@ def test_risk_card_limits_and_usage(project, accounts, ml):
     empty = client.get("/api/positions/risk", params={"account_id": "paper-two"}).json()
     assert empty["insufficient"] == "잔고 스냅샷 없음" and empty["limits"] == want_limits
     assert set(empty["usage"]) == set(u) and all(v is None for v in empty["usage"].values())
+
+
+def _usage_with_cash(conn, **cash):
+    from datetime import date as _date
+    from decimal import Decimal as _D
+
+    from trader.features.spot.risk_view import usage
+    from trader.kernel.execution import ledger as _xledger
+
+    _xledger.snapshot_positions(
+        conn, account_id="paper-main", d=_date(2026, 11, 4), market="KR",
+        nav=_D("1000000"), cash=_D("1000000"), positions=[], **cash,
+    )  # fmt: skip
+    return usage(conn, account_id="paper-main", market="KR", sector_of=None)
+
+
+def test_usage_cash_pct_uses_settlement_aware_cash(project, accounts):
+    """결제 전 매수대금이 남은 예수금이 아니라 주문 가능 금액으로 현금 비중을 계산한다."""
+    from decimal import Decimal as _D
+
+    make_web_client(project, [SPOT], ports={}, now=NOW)  # 원장 생성
+    c = db.connect(project / "state" / "trader.db")
+    try:
+        got = _usage_with_cash(c, cash_available=_D("800000"))
+    finally:
+        c.close()
+    assert got["cash_pct"] == pytest.approx(0.8)
+
+
+def test_usage_cash_pct_falls_back_to_cash_for_old_rows(project, accounts):
+    make_web_client(project, [SPOT], ports={}, now=NOW)  # 원장 생성
+    c = db.connect(project / "state" / "trader.db")
+    try:
+        got = _usage_with_cash(c)
+    finally:
+        c.close()
+    assert got["cash_pct"] == pytest.approx(1.0)
+

@@ -40,10 +40,10 @@ export type LimitRow = { label: string; used: number | null; limit: number; kind
 
 export function limitRows(limits: RiskLimits, usage: Partial<RiskUsage> = {}): LimitRow[] {
   return [
-    { label: "최대 종목 비중", used: usage.position_pct_max ?? null, limit: limits.max_position_pct, kind: "max" },
-    { label: "보유 종목 수", used: usage.positions ?? null, limit: limits.max_positions, kind: "max", count: true },
-    { label: "섹터 합계", used: usage.sector_pct_max ?? null, limit: limits.max_sector_pct, kind: "max" },
-    { label: "현금 비중", used: usage.cash_pct ?? null, limit: limits.min_cash_pct, kind: "min" },
+    { label: "최대 종목 비중 (헤지·현금 ETF 제외)", used: usage.position_pct_max ?? null, limit: limits.max_position_pct, kind: "max" },
+    { label: "보유 종목 수 (헤지·현금 ETF 제외)", used: usage.positions ?? null, limit: limits.max_positions, kind: "max", count: true },
+    { label: "섹터 합계 (헤지·현금 ETF 제외)", used: usage.sector_pct_max ?? null, limit: limits.max_sector_pct, kind: "max" },
+    { label: "현금 비중 (결제 예정 반영)", used: usage.cash_pct ?? null, limit: limits.min_cash_pct, kind: "min" },
     { label: "일일 손익", used: usage.daily_loss_pct ?? null, limit: limits.daily_loss_stop_pct, kind: "loss" },
   ];
 }

@@ -65,9 +65,9 @@ def usage(
     맵 없음, 직전 NAV 없음(일일 손익).
 
     게이트(`rules.evaluate`)와 같은 규약: `exclude`(`excluded_tickers` — 헤지·현금 운용 ETF)는
-    종목 수·최대 비중·섹터에서 빼고, 섹터 맵에 없는 종목은 '기타' 로 묶는다. 현금은 브로커 현금
-    (`account_nav.cash`)만 — 게이트의 현금 하한도 가능금액(현금)으로 보므로 현금 운용 ETF 평가액을
-    현금에 더하지 않는다."""
+    종목 수·최대 비중·섹터에서 빼고, 섹터 맵에 없는 종목은 '기타' 로 묶는다. 현금은 브로커 주문 가능
+    금액(`account_nav.cash_available`, 옛 행은 `cash`)만 — 게이트의 현금 하한도 가능금액으로
+    보므로 현금 운용 ETF 평가액을 현금에 더하지 않는다."""
     out: dict[str, Any] = dict.fromkeys(
         ("position_pct_max", "positions", "sector_pct_max", "cash_pct", "daily_loss_pct")
     )
@@ -84,8 +84,10 @@ def usage(
     if nav is None or nav <= 0:
         return out
     out["position_pct_max"] = float(max(held.values(), default=Decimal(0)) / nav)
-    if snap["cash"] is not None:
-        out["cash_pct"] = float(Decimal(str(snap["cash"])) / nav)
+    # 옛 행은 주문 가능 금액이 없어 예수금으로 대신한다
+    cash = snap["cash_available"] if snap.get("cash_available") is not None else snap["cash"]
+    if cash is not None:
+        out["cash_pct"] = float(Decimal(str(cash)) / nav)
     if sector_of is not None:
         sectors: dict[str, Decimal] = {}
         for t, amount in held.items():

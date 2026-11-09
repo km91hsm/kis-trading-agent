@@ -878,6 +878,15 @@ def test_record_portfolio_false_skips_snapshot(ectx):
     assert n > 0
 
 
+def test_record_portfolio_stores_available_cash(ectx):
+    """잔고 스냅샷은 예수금(`cash.total`)과 주문 가능 금액(`cash.available`)을 함께 남긴다."""
+    _run(ectx)
+    row = ectx.conn.execute(
+        "SELECT cash, cash_available FROM account_nav WHERE market='KR' LIMIT 1"
+    ).fetchone()
+    assert row["cash_available"] == "10000000" and row["cash"] is not None
+
+
 def _inflight(conn, *, ticker="000660", amount="9000000", created_at=None, key="other|k"):
     """다른 프로세스가 방금 선점했지만 아직 주문 행이 없는 매수 예약(판정 스냅샷에 안 보인다)."""
     conn.execute(

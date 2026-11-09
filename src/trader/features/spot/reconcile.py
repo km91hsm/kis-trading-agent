@@ -90,6 +90,7 @@ def reconcile_account(
             market=market,
             nav=nav,
             cash=cash.total,
+            cash_available=cash.available,
             positions=[
                 {
                     "ticker": p.ticker,
