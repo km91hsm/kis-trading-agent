@@ -197,7 +197,9 @@ describe("계좌별 화면", () => {
     expect(pos.textContent).toContain("71,000");
     expect(pos.textContent).toContain("+10,000");
     expect(pos.textContent).toContain("210.00");
-    expect(pos.textContent).toContain("평가 합계(KRW) 710,000 · 손익 +10,000");
+    expect(pos.textContent).toContain("평가금액");
+    expect(pos.textContent).toContain("매수금액");
+    expect(pos.textContent).toContain("매수 합계(KRW) 700,000 · 평가 합계(KRW) 710,000 · 손익 +10,000");
     expect(pos.textContent).toContain("평가 합계(USD) 420.00 · 손익 +19.00");
     expect(pos.textContent).not.toContain("실시간");
     expect(pos.textContent).not.toContain("지연");

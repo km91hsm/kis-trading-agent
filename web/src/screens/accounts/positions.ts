@@ -60,21 +60,39 @@ const n = (v: Amount | undefined): number | null => {
   return Number.isFinite(x) ? x : null;
 };
 
-/** 평가 합계·손익 — 같은 통화 행만 넘긴다(첫 행 통화로 형식). 현재가가 없으면 평단으로, 단타 행은 뺀다. */
-export function sumEval(rows: PositionRow[]): { eval: string; pnl: string } {
+/** 행 매수금액(수량 × 평단). 평단을 모르면 null. */
+export function costBasis(r: PositionRow): number | null {
+  const qty = n(r.qty);
+  const avg = n(r.avg_price);
+  return qty === null || avg === null ? null : qty * avg;
+}
+
+/** 행 평가금액(수량 × 현재가). 시세를 모르면 평단으로 대신하지 않고 null. */
+export function marketValue(r: PositionRow): number | null {
+  const qty = n(r.qty);
+  const price = n(r.current_price);
+  return qty === null || price === null ? null : qty * price;
+}
+
+/** 매수·평가 합계와 손익 — 같은 통화 행만 넘긴다(첫 행 통화로 형식). 현재가가 없으면 평단으로, 단타 행은 뺀다. */
+export function sumEval(rows: PositionRow[]): { cost: string; eval: string; pnl: string } {
   const held = rows.filter((r) => r.lane !== "scalp");
   const currency = held[0]?.currency === "USD" ? "USD" : "KRW";
   let total = 0;
+  let cost = 0;
   let pnl = 0;
   for (const r of held) {
     const qty = n(r.qty) ?? 0;
     const avg = n(r.avg_price);
     const price = n(r.current_price) ?? avg ?? 0;
     total += price * qty;
-    if (avg !== null) pnl += (price - avg) * qty;
+    if (avg !== null) {
+      cost += avg * qty;
+      pnl += (price - avg) * qty;
+    }
   }
   const p = fmtMoney(pnl, currency);
-  return { eval: fmtMoney(total, currency), pnl: pnl > 0 ? `+${p}` : p };
+  return { cost: fmtMoney(cost, currency), eval: fmtMoney(total, currency), pnl: pnl > 0 ? `+${p}` : p };
 }
 
 /** 「<수준> · <출처>」(출처 문구는 서버 그대로: 결정·추적·기본 −7%·단타 규칙·손절 −N%). 파생은 unit "PT". */

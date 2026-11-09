@@ -263,7 +263,7 @@ function Totals({ rows }: { rows: LiveRow<PositionRow>[] }) {
         const s = sumEval(rows.filter((r) => r.currency === c));
         return (
           <span key={c}>
-            평가 합계({c}) {s.eval} · 손익 {s.pnl}
+            매수 합계({c}) {s.cost} · 평가 합계({c}) {s.eval} · 손익 {s.pnl}
           </span>
         );
       })}
