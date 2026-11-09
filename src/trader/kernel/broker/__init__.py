@@ -18,7 +18,7 @@ from trader.kernel.broker.broker import (
 from trader.kernel.broker.client import (
     MAX_PAGES,
     RATE_PER_SEC,
-    RETRY_CODE,
+    RETRY_CODES,
     RETRY_MAX,
     RETRY_WAIT_S,
     TOKEN_ERROR_CODES,
@@ -86,7 +86,7 @@ __all__ = [
     "KisAuth",
     "MAX_PAGES",
     "RATE_PER_SEC",
-    "RETRY_CODE",
+    "RETRY_CODES",
     "RETRY_MAX",
     "RETRY_WAIT_S",
     "TOKEN_ERROR_CODES",
