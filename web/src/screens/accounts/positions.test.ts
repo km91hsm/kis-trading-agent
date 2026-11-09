@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { fixtureFoReport, fixturePerformance, fixturePositions } from "../../test/fixtures/accounts";
-import { modeOptions, navSeries, splitLanes, stopLabel, sumEval, withLive, type PositionRow } from "./positions.ts";
+import { costBasis, marketValue, modeOptions, navSeries, splitLanes, stopLabel, sumEval, withLive, type PositionRow } from "./positions.ts";
 
 const rows = () => fixturePositions().items as PositionRow[];
 const quote = (price: string, at: string, over: Record<string, unknown> = {}) => ({
@@ -19,12 +19,12 @@ describe("계좌별 화면 순수 함수", () => {
     expect(lanes.fo).toEqual([]);
     // KRW 행만: 005930 10주 × 서버 현재가 71,000(평단 70,000) — 단타 000660 은 빠진다
     const krw = rows().filter((r) => r.currency === "KRW");
-    expect(sumEval(krw)).toEqual({ eval: "710,000", pnl: "+10,000" });
-    expect(sumEval(withLive(krw, null, 0))).toEqual({ eval: "710,000", pnl: "+10,000" });
+    expect(sumEval(krw)).toEqual({ cost: "700,000", eval: "710,000", pnl: "+10,000" });
+    expect(sumEval(withLive(krw, null, 0))).toEqual({ cost: "700,000", eval: "710,000", pnl: "+10,000" });
     // 현재가가 아예 없으면 평단으로(손익 0)
-    expect(sumEval(krw.map((r) => ({ ...r, current_price: null })))).toEqual({ eval: "700,000", pnl: "0" });
+    expect(sumEval(krw.map((r) => ({ ...r, current_price: null })))).toEqual({ cost: "700,000", eval: "700,000", pnl: "0" });
     const live = withLive(krw, quote("72000", "2026-11-05T01:00:00Z"), Date.parse("2026-11-05T01:00:05Z"));
-    expect(sumEval(live)).toEqual({ eval: "720,000", pnl: "+20,000" });
+    expect(sumEval(live)).toEqual({ cost: "700,000", eval: "720,000", pnl: "+20,000" });
   });
 
   test("stopLabel({level:'70000', source:'추적'}) === '70,000 · 추적'", () => {
@@ -65,3 +65,37 @@ describe("계좌별 화면 순수 함수", () => {
     expect(modeOptions("real")).toEqual(["approve", "off", "auto"]);
   });
 });
+
+describe("marketValue", () => {
+  test("수량 × 현재가", () => {
+    expect(marketValue({ qty: "10", current_price: "72000" } as PositionRow)).toBe(720000);
+    expect(marketValue({ qty: 2, current_price: 210.5 } as PositionRow)).toBe(421);
+  });
+
+  test("수량이나 현재가를 모르면 null — 평단으로 대신 계산하지 않는다", () => {
+    expect(marketValue({ qty: "10", current_price: null } as PositionRow)).toBeNull();
+    expect(marketValue({ qty: null, current_price: "72000" } as PositionRow)).toBeNull();
+    expect(marketValue({ qty: "10", avg_price: "70000" } as PositionRow)).toBeNull();
+  });
+});
+
+describe("costBasis", () => {
+  test("수량 × 평단", () => {
+    expect(costBasis({ qty: "10", avg_price: "70000" } as PositionRow)).toBe(700000);
+  });
+
+  test("수량이나 평단을 모르면 null", () => {
+    expect(costBasis({ qty: "10", avg_price: null } as PositionRow)).toBeNull();
+    expect(costBasis({ qty: null, avg_price: "70000" } as PositionRow)).toBeNull();
+  });
+});
+
+test("sumEval 은 총 매수금액도 돌려준다", () => {
+  const held = [
+    { lane: "spot", currency: "KRW", qty: "10", avg_price: "70000", current_price: "71000" },
+    { lane: "spot", currency: "KRW", qty: "1", avg_price: "5000", current_price: "6000" },
+    { lane: "scalp", currency: "KRW", qty: "1", avg_price: "9000", current_price: "9000" },
+  ] as PositionRow[];
+  expect(sumEval(held).cost).toBe("705,000");
+});
+
