@@ -31,7 +31,11 @@ from trader.features.ingest.base import MAX_PAST as _MAX_PAST
 from trader.features.ingest.base import SKIP_REASONS, Section, run_section, skipped_section
 from trader.features.ingest.community import collect_channels, collect_community  # noqa: F401
 from trader.features.ingest.dart import ratios_kr
-from trader.features.ingest.edgar import financial_history_us, ratios_from_facts
+from trader.features.ingest.edgar import (
+    disclosures_us,
+    financial_history_us,
+    ratios_from_facts,
+)
 from trader.features.ingest.macro import collect_macro
 from trader.features.ingest.news import collect_news
 from trader.features.ingest.settings import SourcesConfig
@@ -261,9 +265,9 @@ def _fundamental(ticker, market, asof, cfg, deps, technical) -> dict[str, Sectio
             "peer": peer,
         }
     if not cfg.edgar.enabled:
-        ratios = history = skipped_section("disabled", now=now)
+        ratios = history = disclosures = skipped_section("disabled", now=now)
     elif deps.edgar is None:
-        ratios = history = skipped_section("no edgar client", now=now)
+        ratios = history = disclosures = skipped_section("no edgar client", now=now)
     else:
         cache: dict[str, dict] = {}
 
@@ -278,10 +282,11 @@ def _fundamental(ticker, market, asof, cfg, deps, technical) -> dict[str, Sectio
 
         ratios = run_section(lambda: ratios_from_facts(facts(), day, price), now=now)
         history = run_section(lambda: financial_history_us(facts(), day), now=now)
+        disclosures = run_section(lambda: disclosures_us(deps.edgar, ticker, asof), now=now)
     return {
         "ratios": ratios,
         "history": history,
-        "disclosures": skipped_section("phase6", now=now),
+        "disclosures": disclosures,
         "peer": peer,
     }
 

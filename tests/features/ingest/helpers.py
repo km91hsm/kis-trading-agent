@@ -202,6 +202,9 @@ class FakeEdgar:
     def company_name(self, symbol):
         return "Apple Inc." if symbol.upper() == "AAPL" else None
 
+    def submissions(self, cik):
+        return {}
+
     def companyfacts(self, cik):
         self.calls += 1
         if self.fail:
