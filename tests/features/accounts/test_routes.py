@@ -144,6 +144,18 @@ def test_accounts_rows_carry_cash_and_timestamps(web_client, fixtures):
     assert us["nav_at"] is None and us["cash_at"] is None
 
 
+def test_accounts_rows_carry_cash_available(web_client, fixtures, project):
+    conn = db.connect(project / "state" / "trader.db")
+    try:
+        conn.execute("UPDATE account_nav SET cash_available='90000' WHERE account_id='paper-main'")
+        conn.commit()
+    finally:
+        conn.close()
+    rows = _rows(web_client)
+    assert rows["paper-main"]["cash_available"] == "90000"
+    assert rows["paper-us"]["cash_available"] is None
+
+
 def test_lane_of_rules(project, accounts):
     from tests.features.conftest import load_settings
 

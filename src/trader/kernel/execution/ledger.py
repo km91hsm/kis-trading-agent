@@ -538,6 +538,7 @@ def snapshot_positions(
     positions: list[Position] | list[dict],
     market: str,
     asset: str = "stock",
+    cash_available: Decimal | None = None,
 ) -> None:
     """계좌·날짜·시장·종목 단위 upsert(positions_snapshot) + 계좌 NAV upsert(account_nav).
 
@@ -570,10 +571,11 @@ def snapshot_positions(
         (account_id, day, market, asset, *keep),
     )
     conn.execute(
-        "INSERT INTO account_nav(account_id, date, market, nav, cash, created_at) "
-        "VALUES (?,?,?,?,?,?) ON CONFLICT(account_id, date, market) DO UPDATE SET "
-        "nav=excluded.nav, cash=excluded.cash, created_at=excluded.created_at",
-        (account_id, day, market, str(nav), str(cash), created),
+        "INSERT INTO account_nav(account_id, date, market, nav, cash, cash_available, created_at) "
+        "VALUES (?,?,?,?,?,?,?) ON CONFLICT(account_id, date, market) DO UPDATE SET "
+        "nav=excluded.nav, cash=excluded.cash, cash_available=excluded.cash_available, "
+        "created_at=excluded.created_at",
+        (account_id, day, market, str(nav), str(cash), _s(cash_available), created),
     )
     conn.commit()
 
@@ -753,7 +755,8 @@ def expire_pending_buys(
 def latest_positions(
     conn: sqlite3.Connection, account_id: str, market: str, *, asset: str = "stock"
 ) -> dict | None:
-    """해당 계좌·시장·자산(기본 현물)의 최신 스냅샷 날짜 포지션 `{date, nav, cash, positions}`.
+    """해당 계좌·시장·자산(기본 현물)의 최신 스냅샷 날짜 포지션
+    `{date, nav, cash, cash_available, positions}`.
     없으면 None. 날짜는 positions_snapshot·account_nav 중 최신(전량 청산일은 빈 positions).
     nav·cash 는 같은 날짜의 `account_nav` 행(없으면 None)."""
     # 전량 청산한 날은 positions_snapshot 행이 없다 → 날짜는 두 표 중 최신(NAV 행이 항상 남는다)
@@ -768,7 +771,8 @@ def latest_positions(
         return None
     d = row["date"]
     nav = conn.execute(
-        "SELECT nav, cash FROM account_nav WHERE account_id=? AND market=? AND date=?",
+        "SELECT nav, cash, cash_available FROM account_nav "
+        "WHERE account_id=? AND market=? AND date=?",
         (account_id, market, d),
     ).fetchone()
     positions = [
@@ -784,6 +788,7 @@ def latest_positions(
         "date": d,
         "nav": nav["nav"] if nav else None,
         "cash": nav["cash"] if nav else None,
+        "cash_available": nav["cash_available"] if nav else None,
         "positions": positions,
     }
 

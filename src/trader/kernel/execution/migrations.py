@@ -126,3 +126,11 @@ EXECUTION_V7 = Migration(
     ),
     owner="kernel",
 )
+
+# 예수금(`cash`)은 결제 전 매수대금이 안 빠진 금액이라, 주문 가능 금액(결제 예정 반영)을 따로 둔다
+EXECUTION_V20 = Migration(
+    20,
+    "execution_cash_available",
+    statements=("ALTER TABLE account_nav ADD COLUMN cash_available TEXT",),
+    owner="kernel",
+)

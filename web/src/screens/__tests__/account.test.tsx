@@ -1,3 +1,4 @@
+import { limitRows } from "../accounts/RiskCard";
 import { act } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -290,6 +291,25 @@ describe("계좌별 화면", () => {
     expect(thin.querySelector(".empty")!.textContent).toContain("종가 부족(3일)");
     expect(thin.querySelector(".risk-insufficient")).toBeNull();
     expect(thin.querySelectorAll(".risk-limits tbody tr")).toHaveLength(5);
+  });
+
+  test("리스크: 헤지·현금 ETF 를 뺀 항목과 결제 반영 현금 비중임을 표시한다", () => {
+    const labels = limitRows({ max_position_pct: 0.25, max_positions: 5, max_sector_pct: 0.4, min_cash_pct: 0, daily_loss_stop_pct: -0.05 }).map((r) => r.label);
+    expect(labels).toEqual([
+      "최대 종목 비중 (헤지·현금 ETF 제외)",
+      "보유 종목 수 (헤지·현금 ETF 제외)",
+      "섹터 합계 (헤지·현금 ETF 제외)",
+      "현금 비중 (결제 예정 반영)",
+      "일일 손익",
+    ]);
+  });
+
+  test("머리: 주문 가능 금액이 있으면 「예수금(결제 전)」과 「주문 가능」을 나눠 보인다", async () => {
+    await mount(routes({ "GET /api/accounts": () => [{ ...fixtureAccounts()[0], cash_available: "4000000" }] }));
+    const h = head();
+    expect(h.querySelector('dl.stats [data-stat="cash"] dt')?.textContent).toBe("예수금(결제 전)");
+    expect(h.querySelector('dl.stats [data-stat="cash_available"] dd')?.textContent).toBe("4,000,000");
+    expect(h.querySelector('dl.stats [data-stat="cash_available"] dt')?.textContent).toBe("주문 가능");
   });
 
   test("머리: h1 「계좌 id」, Stats(NAV·현금 + 갱신 시각), 모드 전환은 머리 카드 안(#mode 절 없음); 절 순서 주문 → 보유 → 단타 → 리스크 → NAV", async () => {

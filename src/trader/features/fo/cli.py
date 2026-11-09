@@ -332,7 +332,7 @@ def verify_cmd(
             return r
 
         pcfg = settings.fo.product_cfg()
-        d = datetime.now(KST).date()
+        d = _today(None)
         cs = step("master", _master) or []
         out["master"] = {"contracts": len(cs)} if cs else out["master"]
         if not cs and not errors:

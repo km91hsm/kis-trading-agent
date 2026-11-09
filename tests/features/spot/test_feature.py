@@ -11,7 +11,7 @@ def test_boot_ports_has_accounts_and_inputs(project):
         b.conn.close()
 
 
-def test_spot_owns_v6_v9_and_kernel_extends_through_v19():
+def test_spot_owns_v6_v9_and_kernel_extends_through_v20():
     from trader.features.spot.feature import FEATURE
 
     assert FEATURE.tier == "lane" and [m.version for m in FEATURE.migrations] == [6, 9, 19]
@@ -21,9 +21,9 @@ def test_spot_owns_v6_v9_and_kernel_extends_through_v19():
         "spot",
     ]  # accounts 와 같은 기능 이름 규약
     assert [k.retry_guard for k in FEATURE.session_kinds] == [True, False]  # analyze 만 차단
-    # 마지막 spot 소유는 19(판 열), 커널 모듈(session=18)보다 뒤
+    # 마지막 spot 소유는 19(판 열), 그 뒤 커널 execution v20(주문 가능 금액)
     assert [m.version for m in FEATURE.migrations][-1] == 19
-    assert [m.version for m in all_migrations([FEATURE])][-1] == 19
+    assert [m.version for m in all_migrations([FEATURE])][-1] == 20
 
 
 def test_spot_declares_scan_analyze_job_queue_kinds_and_schedule():
