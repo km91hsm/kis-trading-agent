@@ -172,13 +172,26 @@ def test_chain_atm_window_and_errors(project, install, sample, monkeypatch):
     assert "Traceback" not in (r.stdout + (r.stderr or ""))
 
 
+@pytest.fixture
+def frozen_today(monkeypatch):
+    """verify 의 기준일(`datetime.now(KST)`)을 T0 로 고정한다 — 표본 마스터는 202611 월물이 front 인
+    날을 전제하므로, 실제 날짜가 11월물 roll 창(만기 D-roll_days)에 들면 front 가 바뀐다."""
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return T0.astimezone(tz) if tz else T0.replace(tzinfo=None)
+
+    monkeypatch.setattr(cli, "datetime", _Frozen)
+
+
 def _verify(install, balance, *args, **env_kw):
     env = install(Env(balance=balance, **env_kw))
     r = _run("verify", "--account", ACCT, *args)
     return r, env
 
 
-def test_verify_marks_only_verified_vehicles(project, install):
+def test_verify_marks_only_verified_vehicles(project, install, frozen_today):
     # 빈 잔고: 조회는 성공해도 어떤 수단도 검증되지 않는다(빈 응답은 검증이 아니다)
     r, env = _verify(install, FoBalance(positions=[], unverified=[], cash=_cash()))
     assert r.exit_code == 0, r.stdout + (r.stderr or "")
@@ -206,7 +219,7 @@ def test_verify_nav_missing_is_not_verified(project, install):
     assert _last_json(r)["verified"] == [] and _flags() == {}
 
 
-def test_verify_vehicle_filter(project, install):
+def test_verify_vehicle_filter(project, install, frozen_today):
     bal = FoBalance(positions=[_pos("105W11", "FUTURES", "LONG"),
                                _pos("205W11350", "CALL", "LONG")], unverified=[],
                     cash=_cash())  # fmt: skip

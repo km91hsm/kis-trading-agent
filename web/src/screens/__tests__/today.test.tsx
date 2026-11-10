@@ -391,23 +391,31 @@ describe("배치", () => {
   });
 
   test("아침 파이프라인: 시장마다 단계 칩(스캔·시장 세션·분석)과 종목 표(코드+이름·단계), 발굴 줄; US 처럼 빈 날은 「기록 없음」", async () => {
-    await mount(routes({ "GET /api/markets/KR/today": fixtureMarketToday("KR"), "GET /api/markets/US/today": fixtureMarketToday("US") }));
-    const sec = section("pipeline");
-    expect(sec.hidden).toBe(false);
-    const kr = sec.querySelector('[data-market="KR"]') as HTMLElement;
-    expect(Array.from(kr.querySelectorAll(".pipeline-steps .chip")).map((c) => [c.textContent, c.getAttribute("data-tone")])).toEqual([
-      ["스캔", "ok"], ["시장 세션", "ok"], ["분석 2종목 · 결정 1", "ok"],
-    ]);
-    expect(kr.textContent).toContain("발굴 005930 삼성전자 돌파(실적) · 000660 수급");
-    expect(kr.textContent).toContain("뉴스 발굴 요청 1건");
-    // long 열은 말풍선(Tooltip)이 같은 글을 한 번 더 넣으므로 보이는 span 만 읽는다
-    const cells = Array.from(kr.querySelectorAll("tbody tr")).map((tr) =>
-      Array.from(tr.querySelectorAll("td")).map((td) => (td.querySelector(".cell-ellipsis") ?? td).textContent),
-    );
-    expect(cells).toEqual([["005930 삼성전자", "리스크 게이트", "5"], ["000660", "애널리스트", "2"]]);
-    const us = sec.querySelector('[data-market="US"]') as HTMLElement;
-    expect(us.textContent).toContain("기록 없음");
-    expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=" + new Date().toISOString().slice(0, 10));
+    // 기대 URL 의 날짜가 실제 시각(KST/UTC 날짜 차이)에 흔들리지 않게 시각을 고정한다
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-09T03:00:00Z")); // KST 2026-11-09 12:00
+    try {
+      await mount(routes({ "GET /api/markets/KR/today": fixtureMarketToday("KR"), "GET /api/markets/US/today": fixtureMarketToday("US") }));
+      const sec = section("pipeline");
+      expect(sec.hidden).toBe(false);
+      const kr = sec.querySelector('[data-market="KR"]') as HTMLElement;
+      expect(Array.from(kr.querySelectorAll(".pipeline-steps .chip")).map((c) => [c.textContent, c.getAttribute("data-tone")])).toEqual([
+        ["스캔", "ok"], ["시장 세션", "ok"], ["분석 2종목 · 결정 1", "ok"],
+      ]);
+      expect(kr.textContent).toContain("발굴 005930 삼성전자 돌파(실적) · 000660 수급");
+      expect(kr.textContent).toContain("뉴스 발굴 요청 1건");
+      // long 열은 말풍선(Tooltip)이 같은 글을 한 번 더 넣으므로 보이는 span 만 읽는다
+      const cells = Array.from(kr.querySelectorAll("tbody tr")).map((tr) =>
+        Array.from(tr.querySelectorAll("td")).map((td) => (td.querySelector(".cell-ellipsis") ?? td).textContent),
+      );
+      expect(cells).toEqual([["005930 삼성전자", "리스크 게이트", "5"], ["000660", "애널리스트", "2"]]);
+      const us = sec.querySelector('[data-market="US"]') as HTMLElement;
+      expect(us.textContent).toContain("기록 없음");
+      expect(ff!.calls.map((c) => c.url)).toContain("/api/markets/KR/today?date=2026-11-09");
+    } finally {
+      vi.useRealTimers();
+    }
+
   });
 
   test("리스크 게이트: 0건이면 hidden, 있으면 표(시각·계좌·종목·결과 칩·수량 조정·사유) + 결정 링크", async () => {
@@ -430,18 +438,26 @@ describe("배치", () => {
   });
 
   test("파생 레인 카드: /fo/today?date= 의 아침 결정 한 줄·재평가 횟수·계좌 칩(손실 한도·진입 대기)", async () => {
-    await mount(
-      routes({
-        "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-fo", lane: "fo", markets: ["KR"] })],
-        "GET /api/fo/today": fixtureFoToday(),
-      }),
-    );
-    const fo = section("fo-lane");
-    expect(fo.hidden).toBe(false);
-    expect(fo.textContent).toContain("아침 결정 진입 롱 · 선물 · 확신 70%");
-    expect(fo.textContent).toContain("재평가 1회");
-    const chips = Array.from(fo.querySelectorAll(".lane-extra .chip")).map((c) => c.textContent);
-    expect(chips).toEqual(["paper-fo 손실 한도", "paper-fo 진입 대기"]);
-    expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=" + new Date().toISOString().slice(0, 10));
+    // 기대 URL 의 날짜가 실제 시각(KST/UTC 날짜 차이)에 흔들리지 않게 시각을 고정한다
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-09T03:00:00Z")); // KST 2026-11-09 12:00
+    try {
+      await mount(
+        routes({
+          "GET /api/accounts": [fixtureAccount(), fixtureAccount({ id: "paper-fo", lane: "fo", markets: ["KR"] })],
+          "GET /api/fo/today": fixtureFoToday(),
+        }),
+      );
+      const fo = section("fo-lane");
+      expect(fo.hidden).toBe(false);
+      expect(fo.textContent).toContain("아침 결정 진입 롱 · 선물 · 확신 70%");
+      expect(fo.textContent).toContain("재평가 1회");
+      const chips = Array.from(fo.querySelectorAll(".lane-extra .chip")).map((c) => c.textContent);
+      expect(chips).toEqual(["paper-fo 손실 한도", "paper-fo 진입 대기"]);
+      expect(ff!.calls.map((c) => c.url)).toContain("/api/fo/today?date=2026-11-09");
+    } finally {
+      vi.useRealTimers();
+    }
+
   });
 });
