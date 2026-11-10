@@ -624,6 +624,7 @@ def generate_turn(
             bin_path=bin_path,
             cancel=cancel,
             validate=lambda turn: turn_error(ctx.conn, ctx.settings, d, scope, turn, lane=lane),
+            repair=lambda turn: trim_evidence(turn, tooling.report_source_ids(reports(d, scope))),
         )
         stage = scope.turn_stage(lane, round_no, side)
         result["call"]["agent"] = scope.bull_agent if side == "bull" else scope.bear_agent
@@ -788,6 +789,36 @@ def status(conn, settings, *, now, limits: dict | None = None):
         },
         "last_error": last[0] if last else None,
     }
+
+
+_NOTE_START = frozenset("([{:,;—–|")
+
+
+def trim_evidence(value, allowed):
+    """`evidence` 문자열 목록에서 「유효 source_id + 공백·괄호 등 뒤 설명」을 그 ID 로 줄인다.
+    Codex 가 ID 뒤에 메모를 붙여(예: `news_macro.events 원문 그대로…`) 턴 전체가 거부되던
+    문제 대응. 유효 ID 로 시작하지 않는 값은 그대로 둬 `turn_error` 가 거부하게 한다."""
+    ids = sorted(set(allowed), key=len, reverse=True)  # 가장 긴 ID 우선(a.b.c > a.b)
+
+    def fix(item):
+        if not isinstance(item, str) or item in allowed:
+            return item
+        for sid in ids:
+            rest = item[len(sid) :]
+            if item.startswith(sid) and rest and (rest[0].isspace() or rest[0] in _NOTE_START):
+                return sid
+        return item
+
+    if isinstance(value, dict):
+        return {
+            k: [fix(e) for e in v]
+            if k == "evidence" and isinstance(v, list)
+            else trim_evidence(v, allowed)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [trim_evidence(v, allowed) for v in value]
+    return value
 
 
 def turn_error(conn, settings, d, scope, value, *, lane="a"):
