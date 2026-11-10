@@ -793,7 +793,7 @@ def status(conn, settings, *, now, limits: dict | None = None):
     }
 
 
-_NOTE_START = frozenset("([{:,;—–|")
+_NOTE_START = frozenset("([{:,;—–|”")
 
 
 def trim_evidence(value, allowed):

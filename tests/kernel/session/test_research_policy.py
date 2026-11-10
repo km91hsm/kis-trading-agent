@@ -942,7 +942,7 @@ def test_turn_error_names_rejected_and_allowed_evidence(conn, tmp_path):
     assert "사용 가능: " in err and "technical.indicators" in err
 
 
-def _noisy_codex(d):
+def _noisy_codex(d, suffix=" 원문 그대로라고 간주하지 않음"):
     """실제 실패 재현(2026-11-09 PG): Codex 가 evidence 에 유효 source_id 뒤 설명을 덧붙인다
     (예: `news_macro.events 원문 그대로라고 간주하지 않음`)."""
     from pathlib import Path
@@ -955,20 +955,23 @@ def _noisy_codex(d):
         turn = json.loads(out.read_text(encoding="utf-8"))
         for key in ("issues", "responses", "replies"):
             for item in turn.get(key) or []:
-                item["evidence"] = [f"{e} 원문 그대로라고 간주하지 않음" for e in item["evidence"]]
+                item["evidence"] = [f"{e}{suffix}" for e in item["evidence"]]
         out.write_text(json.dumps(turn), encoding="utf-8")
         return proc
 
     return fake
 
 
-def test_codex_evidence_with_trailing_note_is_trimmed_to_source_id(conn, tmp_path, monkeypatch):
+@pytest.mark.parametrize("suffix", [" 원문 그대로라고 간주하지 않음", "”, /"])
+def test_codex_evidence_with_trailing_note_is_trimmed_to_source_id(
+    conn, tmp_path, monkeypatch, suffix
+):
     """Codex 가 근거 ID 뒤에 설명을 붙여도 그 ID 로 정규화해 턴을 살린다(증명 해시도 정규화 값)."""
     from trader.kernel.session import research_policy as p
 
     monkeypatch.delenv("FAKE_CLAUDE", raising=False)
     s, d, r, ctx = _cross_setup(conn, tmp_path)
-    _run_cross(conn, s, d, r, ctx, _noisy_codex(d))
+    _run_cross(conn, s, d, r, ctx, _noisy_codex(d, suffix))
     saved = read_checkpoint(d, r.turn_stage("a", 1, "bear"))["data"]
     assert saved["issues"][0]["evidence"] == ["technical.indicators"]
     assert saved["responses"][0]["evidence"] == ["technical.indicators"]
@@ -986,3 +989,22 @@ def test_trim_evidence_only_strips_note_after_known_id():
     assert p.trim_evidence(
         {"issues": [{"evidence": ["a.b (메모)", "a.b.c 설명", "a.b.c"]}]}, allowed
     ) == {"issues": [{"evidence": ["a.b", "a.b.c", "a.b.c"]}]}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("news_macro.events hyp rest", "news_macro.events"),
+        ("news_macro.news 구문 오류", "news_macro.news"),
+        ("news_macro.macro.wti”, /", "news_macro.macro.wti"),
+        ("news_macro.macro.wtiX”, /", "news_macro.macro.wtiX”, /"),
+        ("news_macro.macro.wti.unknown”, /", "news_macro.macro.wti.unknown”, /"),
+        ("unknown”, /", "unknown”, /"),
+    ],
+)
+def test_trim_evidence_observed_notation_keeps_unknown_ids_rejected(source, expected):
+    """관측된 설명·닫는 따옴표만 정규화하며 비슷한 접두사의 미존재 근거는 살리지 않는다."""
+    from trader.kernel.session import research_policy as p
+
+    allowed = ["news_macro.events", "news_macro.news", "news_macro.macro.wti"]
+    assert p.trim_evidence({"evidence": [source]}, allowed) == {"evidence": [expected]}

@@ -1,9 +1,10 @@
 // 감시목록 — GET /settings/watchlist 를 칩 목록으로 고치고(빼기·추가 — 추가 즉시 임시 칩 `data-draft`) 「저장」 → 확인 →
-// PATCH /settings/watchlist {tickers}(목록 전체 교체). 쓰기라 토큰이 필요하다 — 없거나 401/403 이면 오류 줄(api.ts 가 전역 안내도 띄운다).
+// PATCH /settings/watchlist {tickers}(목록 전체 교체). 인증이 없으면 저장 전에 안내한다. 서버의 401/403 은 오류 줄과 전역 안내로 알린다.
 import { useState } from "react";
 import { Chip } from "../../components/Chip";
 import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
+import { WriteAuthNotice, useWriteAuth } from "../../components/WriteAuthNotice";
 import { errorText, patchJson } from "../../lib/api";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
@@ -11,6 +12,7 @@ import { body } from "../performance/ResourceView";
 type WatchlistResp = { tickers: string[] };
 
 export function Watchlist() {
+  const hasAuth = useWriteAuth();
   const res = useResource<WatchlistResp>("/settings/watchlist", undefined, ["watchlist"]);
   // 고치기 전에는 서버 목록을 그대로 보이고, 고치기 시작하면 draft 를 보인다(저장하면 다시 서버 목록으로).
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -44,6 +46,7 @@ export function Watchlist() {
 
   return body(res, "감시목록", () => (
     <>
+      <WriteAuthNotice available={hasAuth} />
       {list.length ? (
         <ul className="data-watchlist">
           {list.map((t) => (
@@ -71,11 +74,12 @@ export function Watchlist() {
         <button type="submit" className="btn">
           추가
         </button>
-        <button type="button" className="btn btn-primary" disabled={busy || draft === null} onClick={() => setConfirming(true)}>
+        <button type="button" className="btn btn-primary" disabled={busy || !hasAuth || draft === null} onClick={() => setConfirming(true)}>
           저장
         </button>
       </form>
       <Confirm
+        confirmDisabled={!hasAuth}
         open={confirming}
         title="감시목록 저장"
         body={<p>감시목록을 {list.length}종목으로 바꿉니다({list.join(", ") || "비움"}). 데몬이 다음 스캔부터 이 목록을 씁니다.</p>}

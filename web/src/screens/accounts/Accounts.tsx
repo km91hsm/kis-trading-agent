@@ -9,6 +9,7 @@ import { Confirm } from "../../components/Confirm";
 import { Empty } from "../../components/Empty";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
+import { WriteAuthNotice, useWriteAuth } from "../../components/WriteAuthNotice";
 import { errorText, patchJson } from "../../lib/api";
 import { fmtDate, fmtPct } from "../../lib/format";
 import { useResource } from "../../lib/hooks";
@@ -213,6 +214,7 @@ function CurrencyTotals({ data, accounts }: { data: OverviewGroup; accounts: Acc
 
 /** 일시정지는 확인만, 재개는 실전 auto 계좌가 있으면 그 id 재입력 → `confirm`. 계좌 목록 전에는 버튼을 끈다(confirm 대상 판단 불가). */
 function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; confirmId: string | null; ready: boolean; onDone(): void }) {
+  const hasAuth = useWriteAuth();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,7 +236,8 @@ function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; c
 
   return (
     <div className="pause-control">
-      <button type="button" className={paused ? "btn btn-primary" : "btn"} disabled={busy || (paused && !ready)} onClick={() => setOpen(true)}>
+      <WriteAuthNotice available={hasAuth} />
+      <button type="button" className={paused ? "btn btn-primary" : "btn"} disabled={busy || !hasAuth || (paused && !ready)} onClick={() => setOpen(true)}>
         {label}
       </button>
       {error ? (
@@ -243,6 +246,7 @@ function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; c
         </p>
       ) : null}
       <Confirm
+        confirmDisabled={!hasAuth}
         open={open}
         title={paused ? "전체 재개" : "전체 일시정지"}
         body={paused ? "모든 계좌의 자동 매매를 다시 켭니다." : "모든 계좌의 신규 진입·판단 매도·승인 실행을 멈춥니다. 손절 등 위험 청산은 계속됩니다."}

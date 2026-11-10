@@ -67,7 +67,11 @@ export function Runs() {
       { key: "status", label: "상태", width: "10%", align: "chip", render: (r) => <Chip tone={r.tone}>{r.status}</Chip> },
       { key: "started_at", label: "시작", width: "12%", align: "num", render: (r) => fmtWhen(r.started_at) },
       { key: "duration", label: "소요", width: "10%", align: "num" },
-      { key: "error", label: "오류", width: "34%", long: true, render: (r) => r.error ?? "" },
+      { key: "error", label: "오류 이력", width: "34%", long: true, render: (r) => <>
+        {r.error ?? ""}
+        {r.followup_at ? <p className="data-muted">후속 정상 시각 {fmtWhen(r.followup_at)}</p> : null}
+        {r.scope_confirmed === false && r.tone === "fail" ? <p className="data-muted">대상 범위 미확인 — 후속 정상 연결 보류</p> : null}
+      </> },
     ],
     [run, labels],
   );
@@ -103,6 +107,7 @@ export function Runs() {
           CSV
         </a>
       </div>
+      <p className="data-muted">중단은 종료 요청으로 멈춘 이력입니다. 후속 정상은 같은 대상 범위에서 나중에 시작한 실행이 완료된 기록이며, 원인 해결을 보장하지 않습니다. 원문 오류는 그대로 남깁니다.</p>
       {body(runs, "실행 기록", (rs) => (
         <PagedRuns rows={runRows(rs)} columns={columns} />
       ))}

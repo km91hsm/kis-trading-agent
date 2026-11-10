@@ -1,12 +1,14 @@
 // 모드 전환 — 선택 + 「적용」 → 확인 대화상자. 실전 계좌는 항상 계좌 id 재입력(→ `confirm`), 모의는 확인만(`confirm` 없음).
 import { useState } from "react";
 import { Confirm } from "../../components/Confirm";
+import { WriteAuthNotice, useWriteAuth } from "../../components/WriteAuthNotice";
 import { errorText, patchJson } from "../../lib/api";
 import { modeOptions, type Mode } from "./positions.ts";
 
 const MODE_LABEL: Record<string, string> = { auto: "자동", approve: "승인", off: "끔" };
 
 export function ModeSwitch({ id, env, mode, modeNote, onDone }: { id: string; env: string; mode: string; modeNote?: string | null; onDone(): void }) {
+  const hasAuth = useWriteAuth();
   const [value, setValue] = useState<string>(mode);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -29,9 +31,10 @@ export function ModeSwitch({ id, env, mode, modeNote, onDone }: { id: string; en
 
   return (
     <div className="mode-switch">
+      <WriteAuthNotice available={hasAuth} />
       <label>
         모드{" "}
-        <select value={value} onChange={(e) => setValue(e.target.value)} disabled={busy}>
+        <select value={value} onChange={(e) => setValue(e.target.value)} disabled={busy || !hasAuth}>
           {modeOptions(env).map((m: Mode) => (
             <option key={m} value={m}>
               {MODE_LABEL[m]}
@@ -39,7 +42,7 @@ export function ModeSwitch({ id, env, mode, modeNote, onDone }: { id: string; en
           ))}
         </select>
       </label>{" "}
-      <button type="button" className="btn" disabled={busy || value === mode} onClick={() => setOpen(true)}>
+      <button type="button" className="btn" disabled={busy || !hasAuth || value === mode} onClick={() => setOpen(true)}>
         적용
       </button>
       {modeNote ? <p className="mode-note">{modeNote}</p> : null}
@@ -49,6 +52,7 @@ export function ModeSwitch({ id, env, mode, modeNote, onDone }: { id: string; en
         </p>
       ) : null}
       <Confirm
+        confirmDisabled={!hasAuth}
         open={open}
         title="모드 전환"
         body={

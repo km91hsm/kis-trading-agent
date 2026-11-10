@@ -88,7 +88,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
     }
   };
 
-  const summary = !hasToken ? "쓰기 토큰 필요" : loadError ? "상태 조회 실패" : !data ? "상태 확인 중" : `설정됨 ${configured} · 비어 있음 ${rows.length - configured} · 전체 ${rows.length}개`;
+  const summary = !hasToken ? "설정 변경 인증 필요" : loadError ? "상태 조회 실패" : !data ? "상태 확인 중" : `설정됨 ${configured} · 비어 있음 ${rows.length - configured} · 전체 ${rows.length}개`;
   return (
     <div className="secrets-panel">
       <div className="secrets-panel-header">
@@ -102,7 +102,7 @@ export function Secrets({ tokenKey }: { tokenKey: number }) {
       </div>
       {notice ? <p className="perf-note" role="status">{notice}</p> : null}
       <div id={panelId} hidden={!open}>
-        {open && (!hasToken ? <Empty title="쓰기 토큰을 먼저 저장하세요">연결 키는 토큰이 있고 이 PC 에서 직접 연 화면에서만 봅니다.</Empty>
+        {open && (!hasToken ? <Empty title="설정 변경 인증을 먼저 설정하세요" helpHref="/system/admin#token" helpLabel="설정 변경 인증 열기">연결 키는 설정 변경 인증을 거치고 이 PC 에서 직접 연 화면에서만 봅니다.</Empty>
           : loadError ? <Empty title="연결 키를 불러오지 못했습니다">{loadError}<button type="button" className="btn" onClick={reload}>다시 확인</button></Empty>
           : !data ? <Empty title="불러오는 중" />
           : <form className="sys-secrets" onSubmit={(e) => {

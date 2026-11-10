@@ -44,3 +44,10 @@
 .job-request-filters label { display: grid; gap: var(--space-1); font-size: var(--text-sm); }
 .job-request-filters select { min-width: 9rem; }
 .job-request-filters > .data-muted { margin-left: auto; align-self: center; }
+.job-activity { margin-block: var(--space-3); }
+.job-activity > .perf-sub { margin-top: 0; }
+.job-activity-counts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.job-activity p { margin-bottom: var(--space-2); }
+.job-active-steps { display: grid; gap: var(--space-2); padding-left: var(--space-4); margin-block: var(--space-3); }
+.job-active-steps li, .job-activity-history { overflow-wrap: anywhere; }
+.job-followup { display: block; white-space: normal; overflow-wrap: anywhere; }

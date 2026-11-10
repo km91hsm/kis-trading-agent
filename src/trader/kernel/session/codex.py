@@ -275,6 +275,7 @@ def run_turn(
     if capped:
         raise CodexError(cap_error)
     start = time.monotonic()
+    stage = "실행 준비"
     try:
         from trader.kernel.session.runner import run_claude
 
@@ -284,6 +285,7 @@ def run_turn(
             schema_file, output = cwd / "schema.json", cwd / "turn.json"
             schema_file.write_text(canonical(schema), encoding="utf-8")
             cmd = command(binary, schema_file, output, cfg)
+            stage = "실행"
             proc = (runner or run_claude)(
                 cmd,
                 input=prompt + "\n" + canonical(clean),
@@ -299,18 +301,26 @@ def run_turn(
             )
             if proc.returncode:
                 raise CodexError(f"Codex 비정상 종료(exit={proc.returncode})")
+            stage = "출력 읽기"
             if not output.is_file():
                 raise CodexError("Codex 최종 JSON 출력이 없습니다")
-            turn = DebateTurn.model_validate_json(output.read_text(encoding="utf-8"))
+            raw = output.read_text(encoding="utf-8")
+            stage = "출력 스키마 검증"
+            turn = DebateTurn.model_validate_json(raw)
             if turn.side != side or turn.round != clean["round"]:
                 raise CodexError("Codex 턴 side/round 불일치")
             result = turn.model_dump()
             if repair is not None:
+                stage = "근거 정규화"
                 result = DebateTurn.model_validate(repair(result)).model_dump()
             if validate is not None:
-                if error := validate(result):
-                    raise CodexError(error)
+                stage = "토론 규칙 검증"
+                if validate(result):
+                    # 검증 사유에는 모델이 쓴 잘못된 근거 원문이 포함될 수 있다.
+                    raise CodexError("Codex 토론 규칙 검증 실패")
+            stage = "사용량 파싱"
             input_tokens, output_tokens = _usage(proc.stdout or "")
+        stage = "성공 기록"
         duration = int((time.monotonic() - start) * 1000)
         with conn:
             conn.execute(
@@ -337,8 +347,9 @@ def run_turn(
             },
         }
     except Exception as exc:
-        # stderr and provider payload can contain credentials. Record only classified failure.
+        # 공급자 출력·예외 원문 대신 실패 경계와 종류만 남긴다.
         error = str(exc) if isinstance(exc, CodexError) else f"Codex 실패: {type(exc).__name__}"
+        error = f"{error} (단계: {stage})"
         with conn:
             conn.execute(
                 ("UPDATE research_calls SET status='error',error=?,duration_ms=? WHERE id=?"),

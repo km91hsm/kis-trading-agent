@@ -75,7 +75,10 @@ export function jobRows(jobs: JobsResp): { kinds: KindRow[]; schedules: Schedule
   };
 }
 
-export type JobRequest = {
+export type Outcome = "queued" | "running" | "ok" | "skipped" | "interrupted" | "failed" | "followed_by_success";
+export type OutcomeFields = { outcome?: Outcome; followup_at?: string | null; scope_confirmed?: boolean };
+
+export type JobRequest = OutcomeFields & {
   id: number;
   kind: string;
   params: Record<string, unknown> | null;
@@ -97,6 +100,9 @@ const STATUS: Record<string, { text: string; tone: Tone }> = {
   running: { text: "실행 중", tone: "warn" },
   ok: { text: "완료", tone: "ok" },
   error: { text: "오류", tone: "fail" },
+  failed: { text: "확인 필요", tone: "fail" },
+  interrupted: { text: "중단", tone: "muted" },
+  followed_by_success: { text: "후속 정상", tone: "muted" },
   skipped: { text: "건너뜀", tone: "muted" },
 };
 /** 잡·실행 상태 → 한글 칩(데몬·잡 큐·실행 기록이 같은 표를 쓴다). 모르는 값은 그대로. */
@@ -117,7 +123,7 @@ export function summarizeArgs(params: Record<string, unknown> | null | undefined
   return [...head, ...rest].join(" · ");
 }
 
-export type RequestRow = {
+export type RequestRow = OutcomeFields & {
   id: number;
   kind: string;
   label: string;
@@ -132,7 +138,7 @@ export type RequestRow = {
 
 export function requestRows(requests: JobRequest[]): RequestRow[] {
   return requests.map((r) => {
-    const st = statusOf(r.status);
+    const st = statusOf(r.outcome ?? r.status);
     return {
       id: r.id,
       kind: r.kind,
@@ -143,13 +149,15 @@ export function requestRows(requests: JobRequest[]): RequestRow[] {
       requested_at: r.requested_at,
       finished_at: r.finished_at,
       error: r.error,
+      followup_at: r.followup_at,
+      scope_confirmed: r.scope_confirmed,
       params: summarizeArgs(r.params),
     };
   });
 }
 
 // ── runs·calls ───────────────────────────────────────────────────────────────
-export type Run = {
+export type Run = OutcomeFields & {
   id: number;
   kind: string;
   market: string | null;
@@ -159,7 +167,7 @@ export type Run = {
   error: string | null;
   result_json: unknown;
 };
-export type RunRow = { id: number; kind: string; market: string; status: string; tone: Tone; started_at: string | null; duration: string; error: string | null };
+export type RunRow = OutcomeFields & { id: number; kind: string; market: string; status: string; tone: Tone; started_at: string | null; duration: string; error: string | null };
 
 /** 소요 「<1초」·「4초」·「1분 36초」·「2시간 3분」. 시작·끝이 없거나 깨지면 —. */
 export function durationText(from: string | null, to: string | null): string {
@@ -177,7 +185,7 @@ export function durationText(from: string | null, to: string | null): string {
 
 export function runRows(runs: Run[]): RunRow[] {
   return runs.map((r) => {
-    const st = statusOf(r.status);
+    const st = statusOf(r.outcome ?? r.status);
     return {
       id: r.id,
       kind: r.kind,
@@ -187,9 +195,20 @@ export function runRows(runs: Run[]): RunRow[] {
       started_at: r.started_at,
       duration: durationText(r.started_at, r.finished_at),
       error: r.error,
+      followup_at: r.followup_at,
+      scope_confirmed: r.scope_confirmed,
     };
   });
 }
+
+export type ActivityResp = {
+  checked_at: string;
+  since: string;
+  running_runs: Run[];
+  queued_requests: number;
+  running_requests: number;
+  recent_errors: { total: number; failed: number; interrupted: number; followed_by_success: number };
+};
 
 export type Call = {
   id: number;
@@ -263,6 +282,7 @@ export type DaemonJob = {
   last_start: string | null;
   last_end: string | null;
   last_status: string | null;
+  last_outcome?: Outcome | null;
   last_error: string | null;
 };
 export type DaemonRow = {
@@ -308,7 +328,7 @@ export function intervalText(s: number): string {
  *  일정은 주기면 intervalText, 예약(cron)이면 다음 실행의 KST 시각 「HH:MM」(내부 schedule_key 는 노출하지 않음), 소요는 마지막 실행. */
 export function daemonRows(jobs: DaemonJob[], labels: Map<string, string>): { user: DaemonRow[]; internal: DaemonRow[] } {
   const rows = jobs.map((j): DaemonRow => {
-    const st = statusOf(j.last_status);
+    const st = statusOf(j.last_outcome ?? j.last_status);
     const prefix = Object.keys(MARKET_PREFIX).find((p) => j.id.startsWith(p));
     const schedule = j.trigger === "interval" && j.interval_s ? intervalText(j.interval_s) : j.next_at ? fmtTime(j.next_at).slice(0, 5) : "—";
     return {

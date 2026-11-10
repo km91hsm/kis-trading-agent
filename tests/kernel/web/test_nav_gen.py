@@ -66,7 +66,7 @@ def test_nav_ts_kernel_system_sections_order_and_without_features():
     assert [i["id"] for i in items] == KERNEL_SYSTEM_IDS
     assert [i["label"] for i in items] == [
         "운영 점검", "자동매매 서비스", "작업 대기열", "실행 기록", "AI 사용량",
-        "쓰기 토큰", "연결 키", "설정", "조작 이력",
+        "설정 변경 인증", "연결 키", "설정", "조작 이력",
     ]
     assert all(i["order"] < 30 for i in items[:5])
     assert all(i["order"] > 60 for i in items[5:])

@@ -5,6 +5,7 @@
 // 실패(409 데몬 없음·중복, 400, 401/403 등)는 버튼 아래 한 줄. 401/403 은 api.ts 가 전역 안내도 띄운다.
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError, postJson } from "../lib/api";
+import { WriteAuthNotice, useWriteAuth } from "./WriteAuthNotice";
 import { Confirm } from "./Confirm";
 import { Icon } from "./Icon";
 
@@ -21,6 +22,7 @@ export type RunJobButtonProps = {
 };
 
 export function RunJobButton({ kind, params, label, trading, realAccounts, targetAccountId, onDone }: RunJobButtonProps) {
+  const hasAuth = useWriteAuth();
   const name = label ?? kind;
   const options = targetAccountId
     ? realAccounts.includes(targetAccountId)
@@ -76,10 +78,11 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
 
   return (
     <div className="run-job">
-      <button type="button" className="btn" disabled={busy} onClick={start}>
+      <button type="button" className="btn" disabled={busy || !hasAuth} onClick={start}>
         <Icon name="run" />
         {name}
       </button>
+      <WriteAuthNotice available={hasAuth} />
       {error ? (
         <p className="run-job-error" role="alert">
           {error}
@@ -119,7 +122,7 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
           </div>
         }
         live={real && choice ? { accountId: choice } : undefined}
-        confirmDisabled={real && !choice}
+        confirmDisabled={!hasAuth || (real && !choice)}
         onConfirm={() => void run()}
         onClose={() => setOpen(false)}
       />

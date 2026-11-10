@@ -87,7 +87,7 @@ KERNEL_NAV = (
     NavItem("system", "jobs", "작업 대기열", 2),
     NavItem("system", "runs", "실행 기록", 3),
     NavItem("system", "usage", "AI 사용량", 4),
-    NavItem("system", "token", "쓰기 토큰", 70),
+    NavItem("system", "token", "설정 변경 인증", 70),
     NavItem("system", "secrets", "연결 키", 71),
     NavItem("system", "settings", "설정", 72),
     NavItem("system", "control-log", "조작 이력", 73),

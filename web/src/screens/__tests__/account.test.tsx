@@ -550,3 +550,26 @@ test("없는 계좌는 계좌 연결 설정과 목록으로 안내한다", async
   expect(document.querySelector('a[href="/system/admin#secrets"]')).not.toBeNull();
   expect(document.body.textContent).toContain("계좌 목록");
 });
+
+
+test("계좌 모드는 인증 없음을 미리 안내하며 저장 후에도 실전 계좌 재입력을 요구한다", async () => {
+  tokenStore.set("");
+  await mount(routes({ "GET /api/accounts": fixtureAccounts().map((a) => a.id === "real-1" ? { ...a, mode: "approve" } : a) }), "real-1");
+  const mode = head();
+  const select = mode.querySelector("select")!;
+  expect(select.disabled).toBe(true);
+  expect(button(mode, "적용").disabled).toBe(true);
+  expect(mode.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  expect(patches()).toHaveLength(0);
+  act(() => tokenStore.set("saved-fixture"));
+  expect(select.disabled).toBe(false);
+  choose(select, "auto");
+  act(() => button(mode, "적용").click());
+  expect(button(dialog(), "확인").disabled).toBe(true);
+  type(dialog().querySelector("input")!, "real-1");
+  expect(button(dialog(), "확인").disabled).toBe(false);
+  act(() => tokenStore.set(""));
+  expect(button(dialog(), "확인").disabled).toBe(true);
+  act(() => button(dialog(), "취소").click());
+  expect(patches()).toHaveLength(0);
+});

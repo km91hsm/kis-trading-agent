@@ -84,7 +84,7 @@ test("저장 실패는 펼친 입력을 유지하고 오류를 보여준다", as
 test("토큰이 없거나 조회가 실패해도 연결 키 영역을 열고 숨길 수 있다", async () => {
   localStorage.clear();
   const first = await mount(); toggle(first.container);
-  expect(first.container.textContent).toContain("쓰기 토큰을 먼저 저장");
+  expect(first.container.textContent).toContain("설정 변경 인증을 먼저 설정");
   expect(ff.calls).toHaveLength(0); toggle(first.container); first.unmount(); ff.restore();
   tokenStore.set("synthetic-token");
   const second = await mount(SAVED, new Response(JSON.stringify({ detail: "remote" }), { status: 403 }));

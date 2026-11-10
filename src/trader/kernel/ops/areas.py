@@ -9,6 +9,7 @@ from datetime import timedelta
 from trader.kernel.broker import rate_store
 from trader.kernel.config.market_hours import market_close
 from trader.kernel.config.time import MARKET_TZ
+from trader.kernel.daemon.activity import recent_errors
 from trader.kernel.daemon.heartbeat import read_status
 from trader.kernel.execution.ledger import day_bounds, pending_approvals
 from trader.kernel.execution.types import dead_status_sql
@@ -48,20 +49,17 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
                 count=len(missed),
             )
         )
-    since = (ctx.now - DAY).isoformat()
-    row = ctx.conn.execute(
-        "SELECT COUNT(*) AS n, (SELECT kind FROM runs WHERE status='error' AND started_at >= ? "
-        "ORDER BY started_at DESC, id DESC LIMIT 1) AS k "
-        "FROM runs WHERE status='error' AND started_at >= ?",
-        (since, since),
-    ).fetchone()
-    n = int(row["n"] or 0)
+    counts = recent_errors(ctx.conn, ctx.now)
+    n = counts["total"]
     if n:
         out.append(
             Item(
                 "jobs.errors",
-                "warning" if n >= 3 else "watch",
-                f"24시간 안에 오류로 끝난 잡 {n}건 (최근 {row['k']})",
+                "warning" if counts["failed"] >= 3 else "watch",
+                f"24시간 오류 이력 {n}건 · 확인 필요 {counts['failed']}건 · "
+                f"후속 정상 실행 {counts['followed_by_success']}건 · "
+                f"종료 요청 중단 {counts['interrupted']}건"
+                " — 대상 범위 미확인 이력은 확인 필요에 포함, 현재 장애·원인 해결 여부는 별도 확인",
                 link="/system",
                 count=n,
             )

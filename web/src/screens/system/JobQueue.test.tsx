@@ -7,7 +7,7 @@ import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
 import { fixtureJobs, fixtureRequests } from "../../test/fixtures/system";
 import { flush, render } from "../../test/render";
 import { JobQueue } from "./JobQueue";
-import type { JobKind, JobRequest } from "./system";
+import type { ActivityResp, JobKind, JobRequest } from "./system";
 
 let fake: FakeFetch | null = null;
 const events: EventsClient = { subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} };
@@ -27,9 +27,16 @@ function Location() {
   return <output data-location>{useLocation().search}</output>;
 }
 
-async function mount(requests: JobRequest[], { kinds = fixtureJobs().kinds, entry = "/system/jobs" }: { kinds?: JobKind[]; entry?: string } = {}) {
+const emptyActivity: ActivityResp = {
+  checked_at: "2026-11-05T12:00:00+09:00", since: "2026-11-04T12:00:00+09:00",
+  running_runs: [], queued_requests: 0, running_requests: 0,
+  recent_errors: { total: 0, failed: 0, interrupted: 0, followed_by_success: 0 },
+};
+
+async function mount(requests: JobRequest[], { kinds = fixtureJobs().kinds, entry = "/system/jobs", activity = emptyActivity }: { kinds?: JobKind[]; entry?: string; activity?: ActivityResp } = {}) {
   fake = installFakeFetch({
     "GET /api/jobs": { kinds, jobs: [] },
+    "GET /api/jobs/activity": activity,
     "GET /api/jobs/requests": { alive: true, active: requests.filter((r) => r.status === "running" || r.status === "queued").length, requests },
     "GET /api/accounts": [],
   });
@@ -123,4 +130,38 @@ describe("잡 큐 표시 순서", () => {
     expect(Array.from(root.querySelectorAll("[data-lane]")).map((group) => group.getAttribute("data-lane"))).toEqual(["fast", "reeval", "slow", "info"]);
     expect(Array.from(root.querySelectorAll('[data-lane="slow"] button')).map((button) => button.textContent)).toEqual(["시장 분석", "지표 학습"]);
   });
+});
+
+
+test("수동 요청이 없어도 예약 작업과 하위 분석의 실행 단계를 보여 주고 합산하지 않는다", async () => {
+  const root = await mount([], { activity: {
+    ...emptyActivity,
+    running_runs: [
+      { id: 91, kind: "scan_analyze", market: "US", status: "running", started_at: "2026-11-05T11:00:00+09:00", finished_at: null, error: null, result_json: null },
+      { id: 92, kind: "analyze", market: "US", status: "running", started_at: "2026-11-05T11:10:00+09:00", finished_at: null, error: null, result_json: null },
+    ],
+    recent_errors: { total: 12, failed: 3, interrupted: 5, followed_by_success: 4 },
+  } });
+  const activity = root.querySelector('[aria-label="자동 작업 현황"]');
+  expect(activity).not.toBeNull();
+  expect(activity!.textContent).toContain("실행 단계 2개");
+  expect(activity!.textContent).toContain("요청 대기 0건");
+  expect(activity!.textContent).toContain("US");
+  expect(activity!.textContent).toContain("확인 필요 3건");
+  expect(activity!.textContent).toContain("후속 정상 4건");
+  expect(activity!.textContent).toContain("종료 요청 중단 5건");
+  expect(activity!.textContent).toContain("합산하지 않습니다");
+  expect(root.textContent).toContain("요청 큐 기록");
+});
+
+test("후속 정상 요청은 원문 오류와 후속 시각을 함께 남기고 현재 장애처럼 우선 정렬하지 않는다", async () => {
+  const root = await mount([
+    request({ id: 2, status: "error", outcome: "followed_by_success", followup_at: "2026-11-05T12:00:00+09:00", error: "과거 타임아웃", finished_at: "2026-11-05T11:30:00+09:00" }),
+    request({ id: 1, status: "error", outcome: "failed", followup_at: null, error: "범위 미확인 오류", finished_at: "2026-11-05T10:00:00+09:00", scope_confirmed: false }),
+  ]);
+  expect(ids(root)).toEqual([1, 2]);
+  expect(root.textContent).toContain("후속 정상");
+  expect(root.textContent).toContain("과거 타임아웃");
+  expect(root.textContent).toContain("후속 정상 시각");
+  expect(root.textContent).toContain("대상 범위 미확인");
 });

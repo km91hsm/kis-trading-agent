@@ -889,7 +889,7 @@ def test_nested_codex_group_is_terminated_when_tool_parent_receives_sigterm(tmp_
                 pass
 
 
-def _cross_run(project, conn, first):
+def _cross_run(project, conn, first, *, cancel=None):
     """교차 토론 세션 — 첫 실행은 `first(ctx)` 를 부르고 성공처럼 끝나며(필수 토론 미완료로 실패),
     이후 실행은 그대로 성공. (결과, 실행별 프롬프트 목록)."""
     from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
@@ -906,7 +906,7 @@ def _cross_run(project, conn, first):
         return _ok_result()
 
     result = run_session(spec(), ANALYZE, ctx, agents=ag.by_name(SPOT_AGENTS), runner=fake,
-                         claude_bin=Path("/fake/claude"))  # fmt: skip
+                         claude_bin=Path("/fake/claude"), cancel=cancel)  # fmt: skip
     return result, prompts
 
 
@@ -934,6 +934,14 @@ def test_incomplete_debate_without_codex_mark_reruns_once(project, conn):
     result, prompts = _cross_run(project, conn, lambda ctx: None)
     assert len(prompts) == 2
     assert "codex-turn" in prompts[1]  # 표시가 없으니 교차 토론 그대로
+    assert not result.ok and "필수 토론 미완료" in result.error
+
+
+def test_cancelled_incomplete_debate_is_not_rerun(project, conn):
+    """종료 요청 때 토론 미완료가 남아도 같은 잡의 추가 구독 호출을 만들지 않는다."""
+    cancel = threading.Event()
+    result, prompts = _cross_run(project, conn, lambda ctx: cancel.set(), cancel=cancel)
+    assert len(prompts) == 1
     assert not result.ok and "필수 토론 미완료" in result.error
 
 

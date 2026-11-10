@@ -9,6 +9,8 @@ import { useNow, useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 import { daemonRows, type DaemonJob, type DaemonRow, type JobsResp } from "./system.ts";
 
+import { JobActivity } from "./JobActivity";
+
 type DaemonResp = {
   alive: boolean;
   pid: number | null;
@@ -92,6 +94,7 @@ export function Daemon() {
               : { label: "멈춤", value: fmtWhen(d.stopped_at), sub: d.updated_at ? `마지막 박동 ${agoText(d.updated_at, now)}` : undefined },
           ]}
         />
+        <JobActivity compact />
         <Table columns={userCols} rows={rows.user} rowKey={(j) => j.id} empty="등록된 잡 없음" />
         {rows.internal.length ? (
           <details className="sys-details">
