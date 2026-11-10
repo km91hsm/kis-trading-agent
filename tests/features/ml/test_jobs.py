@@ -227,7 +227,7 @@ def test_queue_kinds_declaration():
 
 
 @pytest.mark.parametrize(
-    "has_files,market,recent_fail,expected",
+    "has_history,market,recent_fail,expected",
     [
         (False, True, False, ["features_backfill", "ml_train"]),
         (True, True, False, []),
@@ -235,12 +235,13 @@ def test_queue_kinds_declaration():
         (False, True, True, []),
     ],
 )
-def test_bootstrap(project, settings, has_files, market, recent_fail, expected):
+def test_bootstrap(project, settings, has_history, market, recent_fail, expected):
     deps = _deps(project, settings, client=object() if market else None)
-    if has_files:
+    if has_history:
         d = project / "state" / "features"
         d.mkdir(parents=True)
-        (d / "2026-10-23.parquet").write_bytes(b"x")
+        for i in range(ml_jobs.BOOTSTRAP_MIN_DAYS):
+            (d / f"{(NOW - timedelta(days=i)).date().isoformat()}.parquet").write_bytes(b"x")
     if recent_fail:
         conn = deps.conn_factory()
         kinds = deps.queue.kinds
@@ -249,6 +250,25 @@ def test_bootstrap(project, settings, has_files, market, recent_fail, expected):
         jobq.finish(conn, rid, "error", error="x", now=NOW - timedelta(hours=1))
     r = ml_jobs.bootstrap(deps=deps, point="daemon.bootstrap")
     assert r["queued"] == expected
+
+
+def test_bootstrap_requeues_backfill_when_only_snapshots_exist(project, settings):
+    """백필이 실패한 뒤 일일 스냅샷이 날짜 파일 몇 개를 쓰면 `has_files` 만으로는 다시 넣지 않아
+    과거 이력 없이 학습이 영영 `insufficient_data` 로 끝났다 — 이력이 짧으면 다시 넣는다."""
+    deps = _deps(project, settings, client=object())
+    d = project / "state" / "features"
+    d.mkdir(parents=True)
+    for day in ("2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"):
+        (d / f"{day}.parquet").write_bytes(b"x")
+    conn = deps.conn_factory()
+    rid = jobq.enqueue(
+        conn, deps.queue.kinds, "features_backfill", {"years": 3}, source="daemon", now=NOW
+    )
+    jobq.claim_next(conn, now=NOW, kinds=["features_backfill"])
+    jobq.finish(conn, rid, "error", error="x", now=NOW - timedelta(days=5))
+    conn.close()
+    r = ml_jobs.bootstrap(deps=deps, point="daemon.bootstrap")
+    assert r["queued"] == ["features_backfill", "ml_train"]
 
 
 def test_bootstrap_without_accounts_port_is_noop(project, settings):

@@ -125,6 +125,13 @@ def has_files(state: Path | None) -> bool:
     return d.exists() and any(d.glob("*.parquet"))
 
 
+def day_count(state: Path | None) -> int:
+    """날짜 파일 수 (데몬 부트스트랩의 이력 충분 판단; 디렉터리는 만들지 않음)."""
+    base = state if state is not None else paths.state_dir()
+    d = base / "features"
+    return sum(1 for _ in d.glob("*.parquet")) if d.exists() else 0
+
+
 def latest_day(state: Path | None) -> str | None:
     """가장 최근 날짜 파일의 날짜(`YYYY-MM-DD`) — 없으면 None (디렉터리는 만들지 않음)."""
     base = state if state is not None else paths.state_dir()
