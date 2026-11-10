@@ -3,7 +3,7 @@
 ## 책임
 
 - 분 단위 단타 레인(tier=lane): 1분봉 신호는 파이썬 순수 함수가 감지·집행하고, 에이전트는 후보와 허용 여부(strategist `scalp_ok`)·진입 판정(`scalp-judge`)·보유 조언만 낸다.
-- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py` — 신규 진입 기준; 열린 다리의 청산은 일시정지 중에도 돈다).
+- **계좌별 스위치·기본 끔**: control 플래그 `scalp_enabled:<계좌 id>`(웹 `PATCH /settings/scalp/{id}`, 텔레그램 `/scalp [<계좌> on|off|기본]` — 실전 켜기는 웹 확인으로만). 없으면 모의는 `settings.yaml scalp.enabled`, 실전은 꺼짐. 실전은 켜기에 `confirm == 계좌 id` 가 필요하고 실효는 스위치 ∧ 계좌 모드 auto(LIVE 확인) ∧ 일시정지 아님(`switch.py` — 신규 진입 기준; 열린 다리의 청산은 일시정지 중에도 돈다).
 - 설정: `settings.yaml scalp`(`ScalpCfg`, 17필드). 판정자는 `judge: false` 가 기본.
 - 레인이라 다른 기능을 import 하지 않는다. 필요한 것은 포트(deps 주입)로 받는다.
 

@@ -407,8 +407,8 @@ def evaluate(gi: GateInput) -> FoVerdict:
 def _entry_rejections(gi: GateInput, reasons: list[str]) -> None:
     """§4.2 진입 다리 거부 목록(전부 수집). 감액·축소에는 적용하지 않는다."""
     d, cfg, port, pos = gi.decision, gi.cfg, gi.port, gi.position
-    if not cfg.enabled:
-        reasons.append("fo.enabled 꺼짐(신규 금지)")
+    if not (cfg.enabled if port.enabled is None else port.enabled):
+        reasons.append("파생 꺼짐(신규 금지 — 계좌 스위치·fo.enabled)")
     if d.vehicle not in cfg.vehicles:
         reasons.append(f"허용 수단 아님: {d.vehicle}")
     if not port.verified.get(d.vehicle, False):

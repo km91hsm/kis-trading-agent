@@ -199,6 +199,8 @@ class FoPortfolio:
     blocking: str | None = None
     halted: bool = False
     verified: dict[str, bool] = field(default_factory=dict)
+    # 계좌별 스위치(`switch.stored`) — None 이면 yaml `fo.enabled`(게이트 단위 테스트 등)
+    enabled: bool | None = None
     realized_today: Decimal = Decimal(0)
     # 오늘 손익(실현 + 평가 변화분, `executor.pnl_today`). None 이면 실현만(기준 관측 전)
     pnl_today: Decimal | None = None

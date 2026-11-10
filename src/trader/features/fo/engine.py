@@ -38,7 +38,17 @@ from decimal import Decimal
 from typing import Any
 
 from trader.features.fo import balance as fo_balance
-from trader.features.fo import executor, positions, reeval, rules, sizing, store, tools, triggers
+from trader.features.fo import (
+    executor,
+    positions,
+    reeval,
+    rules,
+    sizing,
+    store,
+    switch,
+    tools,
+    triggers,
+)
 from trader.features.fo import fills as fo_fills
 from trader.features.fo.messages import (
     fo_exit,
@@ -50,7 +60,6 @@ from trader.features.fo.messages import (
 from trader.features.fo.schemas import FoDecisionEnvelope
 from trader.features.fo.settings import FoCfg
 from trader.features.fo.types import FoExecContext, FoPositionRow, is_entry
-from trader.kernel.broker.fo import CONTRACT_VERSION
 from trader.kernel.broker.models import FoBalance, FoQuote
 from trader.kernel.config import KST
 from trader.kernel.config.market_hours import fo_close_hm, index_live
@@ -631,16 +640,15 @@ def _recall_reason(ctx: FoExecContext, a: Any, *, now: datetime,
     conn, cfg = ctx.conn, ctx.settings.fo
     if halted:
         return "일일 손실 한도"
-    if not cfg.enabled:
-        return "fo.enabled=false"
+    if not switch.stored(conn, ctx.settings, a)[0]:
+        return "파생 꺼짐(계좌 스위치·fo.enabled)"
     ks = ctx.ports["regime"].killswitch_reason(conn, a.id)
     if ks:
         return f"킬스위치: {ks}"
     if now.astimezone(KST).strftime("%H:%M") >= cfg.entry_window.cutoff:
         return f"진입 cutoff({cfg.entry_window.cutoff}) 지남"
     for pos in store.open_positions(conn, a.id):
-        key = executor.verified_key(ctx.settings, a, pos.vehicle)
-        if control.get_flag(conn, key) != CONTRACT_VERSION and any(
+        if not executor.is_verified(conn, ctx.settings, a, pos.vehicle) and any(
             is_entry(x.intent) for x in store.live_legs(conn, position_id=pos.id)
         ):
             return f"{pos.vehicle} 검증 플래그 없음"

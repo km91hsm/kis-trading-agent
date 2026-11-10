@@ -85,10 +85,10 @@ def test_system_fo_context_triggers_and_flags(project):
         conn.commit()
         r = c.get("/api/system/fo").json()
         (a,) = r["accounts"]
-        assert a["id"] == ACCT and a["env"] == "paper" and a["state"] == "unverified"
+        assert a["id"] == ACCT and a["env"] == "paper" and a["state"] == "active"
         assert [t["kind"] for t in a["triggers"]] == ["move"]
         assert a["flags"] == {
-            "fo_verified": {"FUTURES": False, "OPTION_BUY": False, "OPTION_SELL": False},
+            "fo_verified": {"FUTURES": True, "OPTION_BUY": True, "OPTION_SELL": True},
             "fo_halted": False, "fo_day_open": None, "fo_alerts": 0, "fo_ref_iv": {},
             "fo_pending_entry": False, "fo_replace": [],
         }  # fmt: skip

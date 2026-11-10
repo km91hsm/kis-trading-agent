@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from trader.features.fo import store
+from trader.features.fo import store, switch
 from trader.features.fo.inputs import INPUTS_STAGE, limits_of
 from trader.features.fo.routes import MARKET, _account_status, _fo_accounts, _today
 from trader.kernel.execution import ledger
@@ -87,7 +87,8 @@ def _context(deps: Any, conn: sqlite3.Connection, today: Any) -> dict:
                    "count": regime.get("count") if isinstance(regime, dict) else None},
         "market_view": {k: view.get(k) for k in ("stance", "confidence", "date")}
         if isinstance(view, dict) and view else None,
-        "limits": limits_of(deps.settings.fo, rstate),
+        "limits": {**limits_of(deps.settings.fo, rstate),
+                   "enabled": switch.any_enabled(conn, deps.settings, _fo_accounts(deps))},
         "products": None,
     }  # fmt: skip
 
