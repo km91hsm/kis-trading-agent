@@ -98,14 +98,18 @@ export function RiskCard({ risk, names = {} }: { risk: Risk; names?: Record<stri
   const top = (risk.contributions ?? []).slice(0, 3);
   return (
     <Card title={title}>
-      <Stats
-        cols={3}
-        items={[
-          { id: "var95", label: "VaR95", value: fmtPct(risk.var95 ?? null) },
-          { id: "cvar95", label: "CVaR95", value: fmtPct(risk.cvar95 ?? null) },
-          { id: "beta", label: "베타", value: risk.beta === null || risk.beta === undefined ? "—" : risk.beta.toFixed(2) },
-        ]}
-      />
+      <details className="account-detail">
+        <summary>전문 위험 지표 · VaR·CVaR·베타</summary>
+        <p className="data-muted">과거 가격으로 추정한 손실 범위와 시장 민감도입니다. 미래 손실을 보장하지 않습니다.</p>
+        <Stats
+          cols={3}
+          items={[
+            { id: "var95", label: "VaR95", value: fmtPct(risk.var95 ?? null) },
+            { id: "cvar95", label: "CVaR95", value: fmtPct(risk.cvar95 ?? null) },
+            { id: "beta", label: "베타", value: risk.beta === null || risk.beta === undefined ? "—" : risk.beta.toFixed(2) },
+          ]}
+        />
+      </details>
       {limits}
       {top.length ? (
         <ul className="risk-contrib" aria-label="위험 기여 상위">

@@ -1,9 +1,11 @@
 // 계좌별 보유 표 — 현물·단타(종목·수량·평단·매수금액·현재가·평가금액·평가손익·손절·목표, 현물은 lot 펼침)와 파생(코드·종류·방향·계약·평단·현재가·원화·만기/보유기한·상태·손절·목표).
 // 현재가는 시세가 오기 전 「—」, 실시간이면 「실시간」 칩, 낡은 시세면 「지연」 칩.
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Chip } from "../../components/Chip";
 import { Table, type Column } from "../../components/Table";
 import { fmtKrw, fmtMoney, fmtPct, fmtPt } from "../../lib/format";
+import { GLOSSARY } from "../../lib/glossary";
 import { costBasis, marketValue, stopLabel, type LiveRow, type PositionRow } from "./positions.ts";
 
 type Row = LiveRow<PositionRow>;
@@ -31,6 +33,23 @@ function signed(v: number | null, fmt: (v: number | null) => string): string {
 
 const key = (r: Row) => `${r.lane}-${r.market}-${r.ticker}`;
 
+function StockLinks({ row: r }: { row: Row }) {
+  const params = new URLSearchParams({ market: r.market, ticker: r.ticker });
+  if (r.exchange) params.set("exchange", r.exchange);
+  const query = params.toString();
+  const decision = r.plan?.decision_id;
+  const fallback = new URLSearchParams({ decision_search: r.ticker, decision_market: r.market });
+  return <span className="position-stock">
+    <span>{r.name ? `${r.ticker} ${r.name}` : r.ticker}</span>
+    <span className="position-context">{r.market} · {r.currency}{r.exchange ? ` · ${r.exchange}` : ""}</span>
+    <span className="position-links">
+      <Link to={`/data?${query}#stock-chart`}>차트</Link>
+      <Link to={`/data/news?${query}`}>관련 뉴스</Link>
+      <Link to={decision ? `/decisions/spot/${encodeURIComponent(decision)}` : `/?${fallback}#decisions`}>판단 근거</Link>
+    </span>
+  </span>;
+}
+
 export function PositionsTable({
   rows,
   partial,
@@ -43,7 +62,7 @@ export function PositionsTable({
   expand?: (row: Row) => ReactNode;
 }) {
   const columns: Column<Row>[] = [
-    { key: "ticker", label: "종목", width: "17%", long: true, render: (r) => (r.name ? `${r.ticker} ${r.name}` : r.ticker) },
+    { key: "ticker", label: "종목", width: "17%", long: true, render: (r) => <StockLinks row={r} /> },
     { key: "qty", label: "수량", width: "6%", align: "num", render: (r) => String(r.qty ?? "—") },
     { key: "avg", label: "평단", width: "9%", align: "num", render: (r) => fmtMoney(r.avg_price, cur(r)) },
     { key: "cost", label: "매수금액", width: "11%", align: "num", render: (r) => fmtMoney(costBasis(r), cur(r)) },
@@ -73,13 +92,13 @@ export function FoPositionsTable({ rows, partial }: { rows: Row[]; partial?: boo
   const columns: Column<Row>[] = [
     { key: "code", label: "코드", width: "10%", long: true, render: (r) => r.ticker },
     { key: "kind", label: "종류", width: "6%", render: (r) => label(KIND, r.kind) },
-    { key: "side", label: "보유·뷰", width: "9%", render: (r) => `${label(SIDE, r.contract_side)}·${label(DIRECTION, r.direction)}` },
+    { key: "side", label: "보유·예상 방향", width: "9%", render: (r) => `${label(SIDE, r.contract_side)}·${label(DIRECTION, r.direction)}` },
     { key: "qty", label: "계약", width: "6%", align: "num", render: (r) => String(r.qty ?? "—") },
     { key: "avg", label: "평단(pt)", width: "9%", align: "num", render: (r) => fmtPt(r.avg_price) },
     { key: "price", label: "현재가(pt)", width: "12%", align: "num", render: (r) => price(r, fmtPt) },
     { key: "krw", label: "원화", width: "11%", align: "num", render: (r) => fmtKrw(r.krw_value ?? null) },
     { key: "horizon", label: "만기/보유기한", width: "11%", render: (r) => `${r.last_trade_date ?? "—"} / ${r.horizon_until ?? "—"}` },
-    { key: "status", label: "상태", width: "6%", align: "chip", render: (r) => <Chip>{r.status ?? "—"}</Chip> },
+    { key: "status", label: "상태", width: "6%", align: "chip", render: (r) => <Chip>{r.status ? GLOSSARY[`fo.status.${r.status}`]?.label ?? r.status : "—"}</Chip> },
     { key: "stop", label: "손절", width: "10%", align: "chip", render: (r) => <Chip>{stopLabel(r.stop, "PT")}</Chip> },
     { key: "target", label: "목표", width: "10%", align: "chip", render: (r) => <Chip>{stopLabel(r.target, "PT")}</Chip> },
   ];

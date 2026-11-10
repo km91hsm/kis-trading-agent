@@ -102,6 +102,36 @@ async function mount(r: Routes, page: Page = "quotes", path = "/data") {
   await flush();
   return out;
 }
+test("종목 검색·차트를 시장 개요와 거래 순위보다 먼저 표시하고 기존 딥링크 거래소를 유지한다", async () => {
+  await mount(routes({ "GET /api/names/search": [] }), "quotes", "/data?market=US&ticker=XYZ&exchange=NYS#stock-chart");
+  await flush();
+  const chart = document.getElementById("stock-chart")!;
+  const macro = document.querySelector(".macro-overview")!;
+  const activity = document.querySelector(".market-activity")!;
+  expect(chart.compareDocumentPosition(macro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(chart.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(chart.querySelector('input[aria-label="종목 검색"]')).not.toBeNull();
+  expect(callsTo("/charts").at(-1)?.searchParams.get("exchange")).toBe("NYS");
+});
+
+test.each([["NASD", "NAS"], ["NYSE", "NYS"], ["AMEX", "AMS"], ["UNKNOWN", null]])(
+  "차트 직접 접속의 거래소 %s를 조회 코드 %s로만 정규화하고 원본 주소는 유지한다", async (exchange, expected) => {
+    ff = installFakeFetch(routes({ "GET /api/names/search": [] }));
+    render(<MemoryRouter initialEntries={[`/data?market=US&ticker=XYZ&exchange=${exchange}#stock-chart`]}><Data /><LocationProbe /></MemoryRouter>);
+    await flush(); await flush();
+    expect(callsTo("/charts").at(-1)?.searchParams.get("exchange")).toBe(expected);
+    expect(document.querySelector("[data-search]")!.getAttribute("data-search")).toContain(`exchange=${exchange}`);
+  },
+);
+
+test.each([["NASD", "NAS"], ["NYSE", "NYS"], ["AMEX", "AMS"], ["UNKNOWN", null]])(
+  "종목 검색 결과의 거래소 %s도 조회 코드 %s로만 정규화한다", async (exchange, expected) => {
+    await mount(routes({ "GET /api/names/search": [{ market: "US", ticker: "XYZ", name: "합성 종목", exchange, source: "master" }] }), "quotes", "/data?market=US&ticker=XYZ");
+    await flush();
+    expect(callsTo("/charts").at(-1)?.searchParams.get("exchange")).toBe(expected);
+  },
+);
+
 test("US 거래대금 차트 링크는 종목명 검색에 없어도 거래소를 보존한다", async () => {
   await mount(routes({ "GET /api/names/search": [] }), "quotes", "/data?market=US&ticker=XYZ&exchange=NYS");
   await flush();
@@ -244,11 +274,41 @@ describe("데이터 화면", () => {
     expect(last.searchParams.get("ticker")).toBe("005930");
     const bar = news.querySelector("[data-news-filter]") as HTMLElement;
     expect(bar.textContent).toContain("005930 삼성전자");
-    expect((bar.querySelector("a") as HTMLAnchorElement).getAttribute("href")).toBe("/data?ticker=005930");
+    expect((bar.querySelector("a") as HTMLAnchorElement).getAttribute("href")).toBe("/data?market=KR&ticker=005930#stock-chart");
     await act(async () => button(bar, "해제").click());
     await flush();
     expect(news.querySelector("[data-news-filter]")).toBeNull();
     expect(news.querySelectorAll("table")[0].querySelectorAll("tbody tr")).toHaveLength(2);
+  });
+
+  test("보유 종목에서 뉴스로 온 시장·종목·거래소를 차트 절까지 보존하고 다른 종목 선택 시 거래소를 지운다", async () => {
+    const news = fixtureNews();
+    await mount(routes({
+      "GET /api/news": { ...news, market: "US", items: news.items.map((item) => ({ ...item, tickers: ["AAPL", "MSFT"] })) },
+      "GET /api/names": { "US:AAPL": "합성 미국A", "US:MSFT": "합성 미국B" },
+    }), "news", "/data/news?market=US&ticker=AAPL&exchange=NYSE");
+    const chartLink = () => new URL((section("news").querySelector("[data-news-filter] a") as HTMLAnchorElement).href);
+    expect(chartLink().searchParams.get("market")).toBe("US");
+    expect(chartLink().searchParams.get("ticker")).toBe("AAPL");
+    expect(chartLink().searchParams.get("exchange")).toBe("NYSE");
+    expect(chartLink().hash).toBe("#stock-chart");
+    act(() => (section("news").querySelector('button[title="MSFT 뉴스만"]') as HTMLButtonElement).click());
+    await flush();
+    expect(chartLink().searchParams.get("ticker")).toBe("MSFT");
+    expect(chartLink().searchParams.get("exchange")).toBeNull();
+  });
+
+  test("뉴스 라벨 조회 실패는 다시 조회로 복구한다", async () => {
+    let failed = true;
+    await mount(routes({ "GET /api/news/labels": () => failed
+      ? new Response(JSON.stringify({ detail: "합성 라벨 실패" }), { status: 500 })
+      : fixtureLabels() }), "news", "/data/news");
+    expect(section("news").textContent).toContain("뉴스 라벨 조회에 실패했습니다");
+    failed = false;
+    act(() => button(section("news"), "다시 조회").click());
+    await flush();
+    expect(section("news").textContent).not.toContain("합성 라벨 실패");
+    expect(section("news").textContent).toContain("촉매");
   });
 
   test("뉴스 출처 칩: 「세이브티커」를 누르면 source=saveticker 로 다시 읽고 「전체」로 되돌린다", async () => {
@@ -541,6 +601,7 @@ describe("데이터 화면", () => {
     expect((f.querySelector('th[data-key="flow_foreign_20d"]') as HTMLElement).textContent).toBe("외국인 20일 순매수");
     expect(th.getAttribute("aria-sort")).toBe("none");
     act(() => (th.querySelector("button") as HTMLButtonElement).click());
+    await flush(); // 정렬로 바뀐 종목 순서에 맞춰 이름도 다시 조회한다.
     expect(th.getAttribute("aria-sort")).toBe("descending");
     const firstRow = f.querySelector("tbody tr") as HTMLElement;
     expect(firstRow.textContent).toContain("000660");
@@ -635,7 +696,7 @@ describe("데이터 화면", () => {
       }),
       "news",
     );
-    expect(section("news").textContent).toContain("불러오지 못했습니다");
+    expect(section("news").textContent).toContain("조회에 실패했습니다");
     expect(section("news").textContent).toContain("뉴스 저장소 오류");
     // 같은 절 안의 공시 표는 그대로
     expect(section("news").textContent).toContain("주요사항보고서(유상증자결정)");

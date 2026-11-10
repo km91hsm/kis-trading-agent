@@ -70,6 +70,20 @@ function Res(props: { keys: SseKey[]; params?: Record<string, string>; enabled?:
 }
 
 describe("useResource", () => {
+  it("계좌·시장 인자가 바뀌면 응답 대기와 오류 중에 이전 값이 남지 않는다", async () => {
+    let fail: ((value: Response) => void) | undefined;
+    fake = installFakeFetch({ "GET /api/positions": (url: URL) => url.searchParams.get("account") === "a"
+      ? { n: 9 } : new Promise<Response>((resolve) => { fail = resolve; }) });
+    const ui = render(createElement(Res, { keys: ["positions"], params: { account: "a" } }));
+    await flush();
+    expect(ui.container.textContent).toBe("9||");
+    ui.rerender(createElement(Res, { keys: ["positions"], params: { account: "b" } }));
+    expect(ui.container.textContent).toBe("-|L|");
+    await act(async () => fail!(new Response(JSON.stringify({ detail: "합성 조회 실패" }), { status: 500 })));
+    await flush();
+    expect(ui.container.textContent).toBe("-||500");
+  });
+
   it("useResource 는 구독 키 'positions' 변화에만 재조회한다", async () => {
     let n = 0;
     fake = installFakeFetch({ "GET /api/positions": () => ({ n: ++n }) });

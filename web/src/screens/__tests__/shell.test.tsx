@@ -28,6 +28,16 @@ function app(path = "/") {
 
 const ok = { "GET /api/system/health": fixtureHealth(), "GET /api/system/usage": fixtureUsage() };
 
+test("계좌 목차와 성과 하위 메뉴도 시장·계좌·기간 선택을 보존한다", async () => {
+  fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+  const a = app("/accounts/paper-1?market=US"); await flush();
+  expect(a.container.querySelector('[data-nav-item="risk"]')?.getAttribute("href")).toBe("/accounts/paper-1?market=US#risk");
+  a.unmount();
+  const b = app("/performance?account_id=real-1&market=KR&days=90"); await flush();
+  const href = b.container.querySelector('[data-nav-item="analysis"]')?.getAttribute("href");
+  expect(href).toContain("account_id=real-1"); expect(href).toContain("market=KR"); expect(href).toContain("days=90");
+});
+
 test("이동한 수집 절의 기존 북마크는 검색 조건을 유지해 새 위치로 이동한다", async () => {
   const Location = () => { const l = useLocation(); return <output data-current-url>{l.pathname}{l.search}{l.hash}</output>; };
   fake = installFakeFetch(ok);
@@ -51,6 +61,7 @@ test("본문 바로가기는 키보드 초점을 주 콘텐츠로 이동한다",
 
 beforeEach(() => {
   clearResourceCache();
+  sessionStorage.clear();
   setEventsClient(stubClient);
 });
 afterEach(() => {
@@ -58,6 +69,18 @@ afterEach(() => {
   fake = null;
   noteServerTime(new Date(0).toISOString(), 0);
   vi.useRealTimers();
+});
+
+test("다른 주 메뉴 방문과 재마운트 뒤에도 마지막 성과 계좌·시장·기간으로 돌아간다", async () => {
+  fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+  const ui = app("/performance?account_id=real-1&market=KR&days=90"); await flush();
+  act(() => ui.container.querySelector<HTMLAnchorElement>('[data-nav-screen="accounts"]')!.click()); await flush();
+  const performance = ui.container.querySelector<HTMLAnchorElement>('[data-nav-screen="performance"]')!;
+  expect(performance.href).toContain("account_id=real-1"); expect(performance.href).toContain("days=90");
+  ui.unmount();
+  const again = app("/accounts"); await flush();
+  const href = again.container.querySelector<HTMLAnchorElement>('[data-nav-screen="performance"]')!.href;
+  expect(href).toContain("account_id=real-1"); expect(href).toContain("days=90");
 });
 
 test("주 메뉴는 목적을 드러내는 다섯 화면이고 설정·운영은 기존 주소로 이동한다", async () => {
@@ -172,7 +195,8 @@ describe("왼쪽 메뉴 2단", () => {
     const a = app("/performance");
     await flush();
     const links = Array.from(a.container.querySelectorAll("[data-nav-item]")).map((e) => [e.getAttribute("data-nav-item"), e.getAttribute("href")]);
-    expect(links).toEqual([["performance", "/performance"], ["memory", "/performance/memory"], ["analysis", "/performance/analysis"]]);
+    const perfSearch = "?account_id=paper-1&market=KR&days=30";
+    expect(links).toEqual([["performance", `/performance${perfSearch}`], ["memory", `/performance/memory${perfSearch}`], ["analysis", `/performance/analysis${perfSearch}`]]);
     expect(a.container.querySelector("#performance-overview")).not.toBeNull();
     expect(a.container.querySelector("#compare")).not.toBeNull();
     expect(a.container.querySelector("#memory")).toBeNull();
@@ -186,7 +210,7 @@ describe("왼쪽 메뉴 2단", () => {
     expect(b.container.querySelector("#shadow")).not.toBeNull();
     expect(b.container.querySelector("#rl")).not.toBeNull();
     expect(b.container.querySelector("#performance-overview")).toBeNull();
-    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "추가 분석"]);
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["성과", "복기", "고급 분석"]);
     b.unmount();
     const c = app("/data/themes");
     await flush();
@@ -298,11 +322,11 @@ describe("상세 화면 하위 목차(본문 DOM)", () => {
     expect(items[0].getAttribute("href")).toBe("/accounts");
     const rest = items.slice(1).map((e) => [e.getAttribute("data-nav-item"), e.textContent, e.getAttribute("href")]);
     expect(rest).toEqual([
-      ["orders", "오늘 주문·체결", "/accounts/paper-1#orders"],
-      ["positions", "보유", "/accounts/paper-1#positions"],
-      ["risk", "리스크", "/accounts/paper-1#risk"],
-      ["tax-lots", "세금 로트", "/accounts/paper-1#tax-lots"],
-      ["nav-chart", "NAV 추이", "/accounts/paper-1#nav-chart"],
+      ["positions", "보유", "/accounts/paper-1?market=KR#positions"],
+      ["risk", "리스크", "/accounts/paper-1?market=KR#risk"],
+      ["orders", "오늘 주문·체결", "/accounts/paper-1?market=KR#orders"],
+      ["nav-chart", "자산 추이 (KR · KRW)", "/accounts/paper-1?market=KR#nav-chart"],
+      ["tax-lots", "세금 로트", "/accounts/paper-1?market=KR#tax-lots"],
     ]);
   });
 
@@ -406,7 +430,7 @@ test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", 
   const notice = container.querySelector("[data-auth-notice]");
   expect(notice?.textContent).toContain("쓰기 토큰이 필요합니다");
   expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system/admin#token"); // 토큰 절로 바로
-  expect(notice?.querySelector("a")?.textContent).toBe("시스템 › 관리 › 쓰기 토큰");
+  expect(notice?.querySelector("a")?.textContent).toBe("설정·운영 › 연결·설정 › 쓰기 토큰");
   act(() => (notice!.querySelector("button") as HTMLButtonElement).click());
   expect(container.querySelector("[data-auth-notice]")).toBeNull();
 });

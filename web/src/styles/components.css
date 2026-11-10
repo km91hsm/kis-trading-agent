@@ -320,3 +320,5 @@
 
 /* 흐린 보조 글자(표 안 「없음」 등) */
 .muted { color: var(--fg-muted); }
+
+.empty-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; width: 100%; margin-top: var(--space-2); }

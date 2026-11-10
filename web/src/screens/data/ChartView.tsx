@@ -11,7 +11,7 @@ import { fmtInt } from "../../lib/format";
 import { useQuotes, useResource, useVisible } from "../../lib/hooks";
 import { body, failed } from "../performance/ResourceView";
 import { useMarket, type Market } from "./Data.tsx";
-import { chartLines, chartMarkers, type FillMarker } from "./data.ts";
+import { chartLines, chartMarkers, quoteExchange, type FillMarker } from "./data.ts";
 
 type NameHit = { market: string; ticker: string; name: string | null; exchange: string | null; source: string };
 type Picked = { ticker: string; market: Market; name: string | null; exchange: string | null };
@@ -56,7 +56,7 @@ export function ChartView() {
   const [sp] = useSearchParams();
   const deep = (sp.get("ticker") ?? "").trim(); // 뉴스 「차트 보기」 딥링크
   const requestedExchange = sp.get("exchange");
-  const deepExchange = market === "US" && ["NAS", "NYS", "AMS"].includes(requestedExchange ?? "") ? requestedExchange : null;
+  const deepExchange = market === "US" ? quoteExchange(requestedExchange) : null;
   const [text, setText] = useState(deep);
   const [q, setQ] = useState(deep);
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -74,7 +74,7 @@ export function ChartView() {
   useEffect(() => {
     if (!deep || q !== deep || !search.data || picked) return;
     const hit = search.data.find((h) => h.ticker === deep) ?? null;
-    setPicked(hit ? { ticker: hit.ticker, market: hit.market === "US" ? "US" : "KR", name: hit.name, exchange: hit.exchange ?? deepExchange } : { ticker: deep, market, name: null, exchange: deepExchange });
+    setPicked(hit ? { ticker: hit.ticker, market: hit.market === "US" ? "US" : "KR", name: hit.name, exchange: deepExchange ?? quoteExchange(hit.exchange) } : { ticker: deep, market, name: null, exchange: deepExchange });
   }, [deep, deepExchange, q, search.data, picked, market]);
 
   return (
@@ -101,7 +101,7 @@ export function ChartView() {
                       type="button"
                       className="btn"
                       aria-pressed={picked?.ticker === h.ticker && picked.market === h.market}
-                      onClick={() => setPicked({ ticker: h.ticker, market: h.market === "US" ? "US" : "KR", name: h.name, exchange: h.exchange })}
+                      onClick={() => setPicked({ ticker: h.ticker, market: h.market === "US" ? "US" : "KR", name: h.name, exchange: quoteExchange(h.exchange) })}
                     >
                       {h.name ? (
                         <>

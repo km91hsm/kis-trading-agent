@@ -145,6 +145,7 @@ def account_rows(
         out.append({
             "account_id": account.id, "asset": "stock", "lane": "spot", "market": market,
             "ticker": ticker, "name": names.resolve(conn, market, ticker),
+            "exchange": xledger.exchange_of(conn, market, ticker),
             "qty": int(p["qty"] or 0), "avg_price": p["avg_price"], "last_price": None,
             "currency": CURRENCY.get(market, "KRW"),
             "stop": None if ticker in excluded else stop_of(

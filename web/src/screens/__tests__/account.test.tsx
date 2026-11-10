@@ -1,6 +1,6 @@
 import { limitRows } from "../accounts/RiskCard";
 import { act } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("lightweight-charts", () => {
@@ -23,6 +23,7 @@ import {
   fixtureAccounts,
   fixtureFoPositions,
   fixtureFoReport,
+  fixtureFoSummary,
   fixturePerformance,
   fixturePositions,
   fixtureRisk,
@@ -56,16 +57,24 @@ function routes(over: Routes = {}): Routes {
     "GET /api/positions/risk": fixtureRisk(),
     "GET /api/analytics/performance": fixturePerformance(),
     "GET /api/analytics/fo/report": fixtureFoReport(),
+    "GET /api/fo/summary": fixtureFoSummary(),
+    "GET /api/fo/legs": [],
     "GET /api/quotes": { session: "closed", at: new Date().toISOString(), quotes: {}, source: "rest", next_poll_ms: 60000 },
     "GET /api/quotes/fo": { session: "closed", at: new Date().toISOString(), quotes: {}, kospi200: null, next_poll_ms: 60000 },
     ...over,
   };
 }
 
+function Location() {
+  const loc = useLocation();
+  return <output data-location>{loc.pathname}{loc.search}{loc.hash}</output>;
+}
+
 async function mount(r: Routes, id = "paper-1") {
   ff = installFakeFetch(r);
   const out = render(
     <MemoryRouter initialEntries={[`/accounts/${id}`]}>
+      <Location />
       <Routes>
         <Route path="/accounts/:id" element={<Account />} />
       </Routes>
@@ -312,7 +321,7 @@ describe("계좌별 화면", () => {
     expect(h.querySelector('dl.stats [data-stat="cash_available"] dt')?.textContent).toBe("주문 가능");
   });
 
-  test("머리: h1 「계좌 id」, Stats(NAV·현금 + 갱신 시각), 모드 전환은 머리 카드 안(#mode 절 없음); 절 순서 주문 → 보유 → 단타 → 리스크 → NAV", async () => {
+  test("머리: h1 「계좌 id」, Stats(NAV·현금 + 갱신 시각), 모드 전환은 머리 카드 안(#mode 절 없음); 절 순서 자산 → 보유 → 단타 → 리스크 → 주문", async () => {
     const { container } = await mount(routes());
     expect(container.querySelector("h1.screen-title")?.textContent).toBe("계좌 paper-1");
     const h = head();
@@ -323,8 +332,8 @@ describe("계좌별 화면", () => {
     expect(h.querySelector("select")).not.toBeNull();
     expect(section("mode")).toBeNull();
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual([
-      "orders", "positions", "fo-positions", "scalp-positions", "risk",
-      "tax-lots", "nav-chart",
+      "positions", "fo-positions", "scalp-positions", "risk",
+      "orders", "nav-chart", "tax-lots",
     ]);
   });
 
@@ -425,4 +434,119 @@ describe("계좌별 화면", () => {
     const { container } = await mount(routes(), "nope");
     expect(container.textContent).toContain("계좌 없음");
   });
+});
+
+
+describe("계좌 맥락과 바로가기", () => {
+  test("주소의 시장을 위험·자산 추이 조회와 성과 링크에 함께 쓴다", async () => {
+    await mount(routes(), "paper-1?market=US");
+    expect((document.querySelector('[aria-label="조회 시장"]') as HTMLSelectElement)?.value).toBe("US");
+    const calls = ff!.calls.filter((c) => c.url.startsWith("/api/positions/risk") || c.url.startsWith("/api/analytics/performance"));
+    expect(calls).toHaveLength(2);
+    expect(calls.every((c) => new URL(c.url, "http://x").searchParams.get("market") === "US")).toBe(true);
+    expect(document.querySelector('a[data-account-performance]')?.getAttribute("href")).toBe("/performance?account_id=paper-1&market=US");
+    choose(document.querySelector('[aria-label="조회 시장"]') as HTMLSelectElement, "KR");
+    await flush(); await flush();
+    expect(document.querySelector("[data-location]")?.textContent).toBe("/accounts/paper-1?market=KR");
+    expect(ff!.calls.filter((c) => c.url.startsWith("/api/positions/risk")).at(-1)?.url).toContain("market=KR");
+    expect(ff!.calls.filter((c) => c.url.startsWith("/api/analytics/performance")).at(-1)?.url).toContain("market=KR");
+  });
+  test("지원하지 않는 시장은 지원 시장으로 보정하고 잘못된 시장으로 조회하지 않는다", async () => {
+    await mount(routes({ "GET /api/accounts": fixtureAccounts().map((a) => a.id === "paper-1" ? { ...a, markets: ["US"] } : a) }), "paper-1?market=KR#risk");
+    expect(document.querySelector("[data-location]")?.textContent).toBe("/accounts/paper-1?market=US#risk");
+    const calls = ff!.calls.filter((c) => c.url.startsWith("/api/positions/risk") || c.url.startsWith("/api/analytics/performance"));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((c) => new URL(c.url, "http://x").searchParams.get("market") === "US")).toBe(true);
+  });
+  test("보유 종목 링크는 시장·코드·거래소와 연결된 판단을 보존한다", async () => {
+    const positions = fixturePositions();
+    await mount(routes({ "GET /api/accounts/paper-1/positions": { ...positions, items: positions.items.map((r) => r.ticker === "AAPL" ? { ...r, exchange: "NYSE", plan: { decision_id: 42 } } : r) } }));
+    const pos = section("positions")!;
+    const hrefs = Array.from(pos.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/data?market=US&ticker=AAPL&exchange=NYSE#stock-chart");
+    expect(hrefs).toContain("/data/news?market=US&ticker=AAPL&exchange=NYSE");
+    expect(hrefs).toContain("/decisions/spot/42");
+    expect(hrefs).toContain("/?decision_search=005930&decision_market=KR#decisions");
+    expect(pos.textContent).toContain("US · USD");
+    expect(pos.textContent).toContain("KR · KRW");
+  });
+  test("자산·보유·위험 다음에 주문을 두고 세금·매수 이력·전문 지표는 접어 둔다", async () => {
+    const { container } = await mount(routes());
+    const ids = Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id);
+    expect(ids.indexOf("positions")).toBeLessThan(ids.indexOf("nav-chart"));
+    expect(ids.indexOf("orders")).toBeLessThan(ids.indexOf("nav-chart"));
+    expect(section("nav-chart")!.querySelector("details")?.open).toBe(false);
+    expect(ids.indexOf("positions")).toBeLessThan(ids.indexOf("risk"));
+    expect(ids.indexOf("risk")).toBeLessThan(ids.indexOf("orders"));
+    expect(section("tax-lots")!.closest("details")?.open).toBe(false);
+    const advanced = section("risk")!.querySelector("details");
+    expect(advanced?.open).toBe(false);
+    expect(advanced?.querySelector("summary")?.textContent).toContain("전문 위험 지표");
+    act(() => (section("positions")!.querySelector(".row-toggle") as HTMLButtonElement).click());
+    expect(section("positions")!.querySelector(".table-expand")?.textContent).toContain("매수 이력");
+  });
+  test("파생 계좌 상세에 해당 계좌 주문 다리·상태·증거금과 만기를 보존한다", async () => {
+    await mount(routes({ "GET /api/fo/legs": [{ id: 9, position_id: 1, code: "A0166000", intent: "entry", round: 1, attempt: 1, status: "accepted", order_no: "paper-order", qty: 2, filled_qty: 1, price: "350", order_type: "limit", sent_at: null, created_at: "2026-11-05T01:00:00Z" }] }), "paper-fo");
+    expect(section("fo-legs")?.textContent).toContain("paper-order");
+    expect(ff!.calls.filter((c) => c.url.startsWith("/api/fo/legs")).map((c) => new URL(c.url, "http://x").searchParams.get("account_id"))).toEqual(["paper-fo"]);
+    expect(document.body.textContent).toContain("증거금");
+    expect(document.body.textContent).toContain("12,000,000");
+    expect(document.body.textContent).toContain("기록만");
+    expect(section("fo-positions")!.textContent).toContain("2026-12-10");
+  });
+});
+
+
+test("지원 시장이 없는 계좌는 임의 시장 위험·성과를 조회하지 않는다", async () => {
+  await mount(routes({ "GET /api/accounts": [{ ...fixtureAccounts()[0], markets: [] }] }));
+  expect(ff!.calls.some((c) => c.url.startsWith("/api/positions/risk") || c.url.startsWith("/api/analytics/performance"))).toBe(false);
+  expect(document.body.textContent).toContain("지원 시장 없음");
+});
+
+
+test("시장 변경 조회 중과 실패 뒤 이전 시장 위험·자산 추이를 보여 주지 않는다", async () => {
+  let finishRisk: ((response: Response) => void) | undefined;
+  let finishPerf: ((response: Response) => void) | undefined;
+  await mount(routes({
+    "GET /api/positions/risk": (u: URL) => u.searchParams.get("market") === "US"
+      ? new Promise<Response>((resolve) => { finishRisk = resolve; })
+      : fixtureRisk({ var95: .1234 }),
+    "GET /api/analytics/performance": (u: URL) => u.searchParams.get("market") === "US"
+      ? new Promise<Response>((resolve) => { finishPerf = resolve; })
+      : fixturePerformance(),
+  }));
+  expect(section("risk")!.textContent).toContain("12.34%");
+  expect(section("nav-chart")!.querySelector(".chart")).not.toBeNull();
+  choose(document.querySelector('[aria-label="조회 시장"]') as HTMLSelectElement, "US");
+  expect(section("risk")!.textContent).not.toContain("12.34%");
+  expect(section("nav-chart")!.querySelector(".chart")).toBeNull();
+  await flush();
+  finishRisk!(new Response(JSON.stringify({ detail: "US 위험 조회 실패" }), { status: 503 }));
+  finishPerf!(new Response(JSON.stringify({ detail: "US 자산 조회 실패" }), { status: 503 }));
+  await flush(); await flush();
+  expect(section("risk")!.textContent).toContain("US 위험 조회 실패");
+  expect(section("risk")!.textContent).not.toContain("12.34%");
+  expect(section("nav-chart")!.querySelector(".chart")).toBeNull();
+  expect(section("nav-chart")!.textContent).toContain("US 자산 조회 실패");
+});
+
+
+test("위험 조회 오류는 다시 조회로 복구하고 연결 설정을 안내한다", async () => {
+  let attempts = 0;
+  await mount(routes({ "GET /api/positions/risk": () => ++attempts === 1
+    ? new Response(JSON.stringify({ detail: "일시적인 조회 오류" }), { status: 503 })
+    : fixtureRisk() }));
+  const risk = section("risk")!;
+  expect(risk.querySelector('a[href="/system/admin#secrets"]')).not.toBeNull();
+  expect(button(risk, "다시 조회")).toBeDefined();
+  act(() => button(risk, "다시 조회").click());
+  await flush(); await flush();
+  expect(attempts).toBe(2);
+  expect(risk.textContent).toContain("2.13%");
+});
+
+test("없는 계좌는 계좌 연결 설정과 목록으로 안내한다", async () => {
+  await mount(routes(), "missing-account");
+  expect(document.querySelector('a[href="/system/admin#secrets"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("계좌 목록");
 });

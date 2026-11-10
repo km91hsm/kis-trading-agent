@@ -1,4 +1,4 @@
-// 잡 큐 — 수동 실행(GET /jobs kind 를 레인별 버튼 묶음)이 먼저, 그 아래 요청 기록(GET /jobs/requests limit=200, 진행 중 전체 포함; 30행씩 ?rpage=N).
+// 잡 큐 — 요청 기록을 먼저, 수동 실행(GET /jobs kind 레인별 버튼)은 기본 접기. 진행 중·실패부터 확인한다.
 // 상태 칩·인자 요약, 대기 중 행만 「취소」 → Confirm → DELETE /jobs/{id})(RunJobButton — trading 은 kind 값, realAccounts 는 GET /accounts 의 실전 계좌).
 // 일정 표는 상태 페이지의 데몬 절(같은 42행)에만 둔다 — 「데몬 ›」 링크.
 import { useMemo, useState } from "react";
@@ -43,7 +43,7 @@ function timestamp(value: string | null): number {
 
 /** 표시 순서만 바꾼다. 대기는 큐 저장소와 같은 priority DESC, id ASC. */
 function sortedRequests(requests: JobRequest[], sort: RequestSort, status: string): JobRequest[] {
-  const rank = (request: JobRequest) => request.status === "running" ? 0 : request.status === "queued" ? 1 : 2;
+  const rank = (request: JobRequest) => request.status === "running" ? 0 : request.status === "queued" ? 1 : request.status === "error" ? 2 : 3;
   return requests.filter((request) => !status || request.status === status).sort((a, b) => {
     if (sort === "recent") return timestamp(b.requested_at) - timestamp(a.requested_at) || b.id - a.id;
     const group = rank(a) - rank(b);
@@ -84,7 +84,7 @@ function PagedRequests({ requests, columns }: { requests: JobRequest[]; columns:
         <span className="data-muted" aria-live="polite">{rows.length} / {requests.length}건</span>
       </div>
       <p className="data-muted job-request-guide">
-        {sort === "active" ? "실행 중 → 대기(우선순위·접수 순) → 종료(종료 시각 최신순)" : "요청 시각이 최신인 순서"}
+        {sort === "active" ? "실행 중 → 대기(우선순위·접수 순) → 오류 → 나머지 종료(종료 시각 최신순)" : "요청 시각이 최신인 순서"}
         <br />화면 정렬은 실제 실행 순서를 변경하지 않습니다. 실제 실행은 작업 종류와 데몬 상태에 따라 달라집니다.
       </p>
       <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty={status ? "선택한 상태의 요청 없음" : "최근 요청 없음"} />
@@ -141,32 +141,7 @@ export function JobQueue() {
 
   return (
     <div className="job-queue">
-      <h3 className="perf-sub">수동 실행</h3>
-      {body(jobs, "잡 목록", (j) => {
-        const rows = jobRows(j);
-        if (!rows.kinds.length) return <p className="data-muted">실행할 수 있는 잡 없음</p>;
-        return (
-          <div className="job-grid">
-            {byLane(rows.kinds).map(([lane, kinds]) => (
-              <div key={lane} className="job-lane" data-lane={lane}>
-                <h4>{termLabel(`lane.${lane}`)} <span className="num">{kinds.length}</span></h4>
-                <div className="job-lane-buttons">
-                  {kinds.map((k) =>
-                    settled ? (
-                      <div key={k.kind} title={k.kind}>
-                        <RunJobButton kind={k.kind} label={k.label} trading={k.trading} realAccounts={realAccounts} onDone={reloadRequests} />
-                      </div>
-                    ) : (
-                      <span key={k.kind}>…</span>
-                    ),
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-      })}
-      <h3 className="perf-sub">요청 기록</h3>
+      <h3 className="perf-sub" id="job-requests" tabIndex={-1}>요청 기록</h3>
       {body(requests, "잡 요청", (r) => (
         <>
           <p className="data-muted job-request-summary">
@@ -188,6 +163,34 @@ export function JobQueue() {
           />
         </>
       ))}
+      <details className="job-manual">
+        <summary>수동 실행</summary>
+        <p className="data-muted">작업을 선택하면 대상과 주문·AI 영향을 확인한 뒤 요청을 등록합니다.</p>
+        {body(jobs, "잡 목록", (j) => {
+          const rows = jobRows(j);
+          if (!rows.kinds.length) return <p className="data-muted">실행할 수 있는 잡 없음</p>;
+          return (
+            <div className="job-grid">
+              {byLane(rows.kinds).map(([lane, kinds]) => (
+                <div key={lane} className="job-lane" data-lane={lane}>
+                  <h4>{termLabel(`lane.${lane}`)} <span className="num">{kinds.length}</span></h4>
+                  <div className="job-lane-buttons">
+                    {kinds.map((k) =>
+                      settled ? (
+                        <div key={k.kind} title={k.kind}>
+                          <RunJobButton kind={k.kind} label={k.label} trading={k.trading} realAccounts={realAccounts} onDone={reloadRequests} />
+                        </div>
+                      ) : (
+                        <span key={k.kind}>…</span>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </details>
       <p className="data-muted">
         정기 일정과 다음 실행 시각은 <Link to={`${pagePathOf("system", "daemon")}#daemon`}>데몬 ›</Link> 절에.
       </p>

@@ -36,6 +36,7 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
   const [choice, setChoice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState<number | null>(null);
   const selectId = useId();
   const alive = useRef(true);
   useEffect(() => {
@@ -48,6 +49,7 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
   const start = () => {
     setChoice(preset);
     setError(null);
+    setAccepted(null);
     setOpen(true);
   };
 
@@ -61,7 +63,10 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
     if (real) body.confirm = confirm;
     try {
       const res = await postJson<JobResp>("/jobs", body);
-      if (alive.current) onDone?.(res.id);
+      if (alive.current) {
+        setAccepted(res.id);
+        onDone?.(res.id);
+      }
     } catch (e) {
       if (alive.current) setError(e instanceof ApiError ? e.message : "잡을 실행하지 못했습니다");
     } finally {
@@ -80,14 +85,24 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
           {error}
         </p>
       ) : null}
+      {accepted !== null ? (
+        <p className="data-muted" role="status">
+          요청 #{accepted} 접수 · 실행 완료가 아닙니다. 데몬이 처리한 결과는 <a href="/system/jobs#job-requests">요청 기록에서 확인</a>하세요.
+        </p>
+      ) : null}
       <Confirm
         open={open}
         title={`${name} 실행`}
         body={
-          real ? (
-            <div className="run-job-real">
-              <p>실전 계좌로 실행합니다. 계좌를 확인하세요.</p>
-              <label htmlFor={selectId}>실전 계좌</label>
+          <div>
+            <p>대상 시장: {typeof params?.market === "string" && params.market ? params.market : "작업 기본값 사용 (범위 미확인)"}</p>
+            <p>대상 계좌: {typeof params?.account_id === "string" && params.account_id ? params.account_id : "작업 기본값 사용 (범위 미확인)"}</p>
+            <p>{trading ? "주문이 발생할 수 있습니다. 실제 집행은 계좌 모드와 실행 시점의 안전 조건에 따라 달라집니다." : "비매매 작업으로 등록되어 있습니다."}</p>
+            <p>AI 호출 여부와 비용은 확인되지 않았습니다. 작업에 따라 AI 사용량이나 비용이 발생할 수 있으니 실행 전에 확인하세요.</p>
+            <p>요청 등록은 실행 완료가 아닙니다. 대기열에 넣은 뒤 데몬이 실행하며, 결과는 요청 기록에서 확인하세요.</p>
+            {real ? <div className="run-job-real">
+              <p>실전 계좌가 포함될 수 있어 재입력 확인이 필요합니다. 실전 확인 계좌 선택은 실행 대상을 변경하지 않습니다.</p>
+              <label htmlFor={selectId}>실전 확인 계좌</label>
               <select id={selectId} value={choice} onChange={(e) => setChoice(e.target.value)}>
                 {preset ? null : (
                   <option value="" disabled>
@@ -100,10 +115,8 @@ export function RunJobButton({ kind, params, label, trading, realAccounts, targe
                   </option>
                 ))}
               </select>
-            </div>
-          ) : (
-            <p>잡을 대기열에 넣습니다.</p>
-          )
+            </div> : null}
+          </div>
         }
         live={real && choice ? { accountId: choice } : undefined}
         confirmDisabled={real && !choice}

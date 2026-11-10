@@ -83,7 +83,7 @@ export function Accounts() {
       <section id="overview" className="screen-section">
         <h2>계좌별 자산 현황</h2>
         {overview.error ? (
-          <Empty title="합계를 불러오지 못했습니다">{overview.error.message}</Empty>
+          <Empty title="합계를 불러오지 못했습니다" onRetry={overview.reload} retrying={overview.loading} helpHref="/system/admin#secrets" helpLabel="연결 설정 확인">{overview.error.message}</Empty>
         ) : overview.data ? (
           <TotalsRow data={overview.data} accounts={accounts.data ?? null} />
         ) : (
@@ -99,12 +99,12 @@ export function Accounts() {
           }}
         />
         {accounts.error ? (
-          <Empty title="계좌를 불러오지 못했습니다">{accounts.error.message}</Empty>
+          <Empty title="계좌를 불러오지 못했습니다" onRetry={accounts.reload} retrying={accounts.loading} helpHref="/system/admin#secrets" helpLabel="연결 설정 확인">{accounts.error.message}</Empty>
         ) : accounts.data ? (
           spotCards.length ? (
             <Table columns={ACCOUNT_COLUMNS} rows={spotCards} rowKey={(c) => c.id} empty="현물 계좌 없음" />
           ) : (
-            <Empty title={accounts.data.length ? "현물 계좌 없음" : "계좌 없음"} />
+            <Empty title={accounts.data.length ? "현물 계좌 없음" : "계좌 없음"} helpHref="/system/admin#secrets" helpLabel="연결 설정 확인">연결 설정과 계좌 목록을 확인하세요.</Empty>
           )
         ) : (
           <Empty title="계좌 불러오는 중" />
@@ -162,7 +162,10 @@ function FoAccountCard({ account: a, status }: { account: Account; status?: FoSt
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
       <Stats cols={2} items={items} />
-      <Link to={`/accounts/${encodeURIComponent(a.id)}`}>계좌별 화면 ›</Link>
+      <div className="screen-actions">
+        <Link to={`/accounts/${encodeURIComponent(a.id)}`}>계좌별 화면 ›</Link>
+        <Link to={`/accounts/${encodeURIComponent(a.id)}#fo-legs`}>주문 진행</Link>
+      </div>
     </Card>
   );
 }

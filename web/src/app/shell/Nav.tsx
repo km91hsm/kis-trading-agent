@@ -19,6 +19,19 @@ export type NavGroup = { screen: Screen; label: string; path: string; items: { i
 const SCREENS = Object.keys(NAV) as Screen[];
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 const LEVEL_TEXT = { ok: "정상", warn: "주의", fail: "장애" } as const;
+const PERFORMANCE_CONTEXT = "trader.performance-context";
+const PERFORMANCE_KEYS = ["account_id", "market", "days"];
+
+function contextQuery(search: string, keys: string[]): string {
+  const params = new URLSearchParams(search);
+  const kept = new URLSearchParams();
+  for (const key of keys) { const value = params.get(key); if (value) kept.set(key, value); }
+  return kept.toString();
+}
+
+function savedPerformanceContext(): string {
+  try { return contextQuery(sessionStorage.getItem(PERFORMANCE_CONTEXT) ?? "", PERFORMANCE_KEYS); } catch { return ""; }
+}
 
 /** NAV 를 화면 순서대로, 각 화면의 items 를 order 오름차순으로. */
 export function navGroups(): NavGroup[] {
@@ -165,12 +178,16 @@ function NavFoot() {
 export function Nav() {
   const { pathname, hash, key, search } = useLocation();
   // 페이지 링크는 화면 머리의 상태(오늘 ?date=, 데이터 ?market=)만 같이 옮긴다 — ?page= 같은 페이지 자체의 상태는 옮기지 않는다.
-  const keep = new URLSearchParams();
-  for (const k of ["date", "market"]) {
-    const v = new URLSearchParams(search).get(k);
-    if (v) keep.set(k, v);
-  }
-  const pageTo = (path: string) => (keep.size ? `${path}?${keep.toString()}` : path);
+  const onPerformance = pathname === "/performance" || pathname.startsWith("/performance/");
+  const keep = contextQuery(search, onPerformance ? PERFORMANCE_KEYS : ["date", "market"]);
+  const [lastPerformance, setLastPerformance] = useState(savedPerformanceContext);
+  useEffect(() => {
+    if (!onPerformance || !keep) return;
+    setLastPerformance(keep);
+    try { sessionStorage.setItem(PERFORMANCE_CONTEXT, keep); } catch { /* 저장이 막힌 브라우저에서는 열린 화면 동안만 보존한다. */ }
+  }, [onPerformance, keep]);
+  const performanceQuery = onPerformance ? keep : lastPerformance;
+  const pageTo = (path: string) => keep ? `${path}?${keep}` : path;
   const groups = navGroups();
   const active = screenOf(pathname);
   const detail = detailOf(pathname);
@@ -181,10 +198,10 @@ export function Nav() {
   const shown = useShownSections(activeIds, pathname);
   const current = useCurrentSection(activeIds, hash, key);
   // 2단에 그릴 절 목록 — 상세 화면은 DOM 목차, 아니면 생성 표의 items 중 보이는 것
-  const sectionLinks = (g: NavGroup): { id: string; label: string; to: string | { pathname: string; hash: string } }[] =>
+  const sectionLinks = (g: NavGroup): { id: string; label: string; to: string | { pathname: string; search: string; hash: string } }[] =>
     detail
-      ? domSections.map((d) => ({ id: d.id, label: d.label, to: { pathname, hash: `#${d.id}` } }))
-      : g.items.filter((it) => shown.includes(it.id)).map((it) => ({ id: it.id, label: it.label, to: { pathname: g.path, hash: `#${it.id}` } }));
+      ? domSections.map((d) => ({ id: d.id, label: d.label, to: { pathname, search, hash: `#${d.id}` } }))
+      : g.items.filter((it) => shown.includes(it.id)).map((it) => ({ id: it.id, label: it.label, to: { pathname: g.path, search, hash: `#${it.id}` } }));
 
   return (
     <nav className="nav" aria-label="주 메뉴">
@@ -196,7 +213,7 @@ export function Nav() {
           const on = g.screen === active;
           return (
             <li key={g.screen} className="nav-group" data-active={on || undefined}>
-              <Link to={g.path} className="nav-screen" data-nav-screen={g.screen} aria-current={on ? "page" : undefined} title={g.label}>
+              <Link to={g.screen === "performance" && performanceQuery ? `${g.path}?${performanceQuery}` : g.path} className="nav-screen" data-nav-screen={g.screen} aria-current={on ? "page" : undefined} title={g.label}>
                 <Icon name={g.screen} />
                 <span className="nav-label">{g.label}</span>
               </Link>

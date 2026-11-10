@@ -1,10 +1,6 @@
-// 계좌별 화면 — `/accounts/:id`. 돌아가기·h1·머리 카드(모의/실전·레인 칩, Stats NAV·현금(갱신 시각), 모드 전환) →
-// 오늘 주문·체결(CSV) → 보유(현물 lot 펼침, 파생 계좌는 「파생 보유」) → 단타(합계 미포함) → 리스크(현물만) →
-// 세금 로트(현물만: 연도 선택 → `/accounts/{id}/tax-lots?market&year`, 시장별 요약 Stats·실현 로트 표·CSV) → NAV 차트(30일).
-// 섹션 컨테이너는 데이터 전에 바로 그린다. 파생 계좌는 보유 절 id 가 `fo-positions`(메뉴 앵커), 아니면 `positions` + 빈 hidden `fo-positions`.
-// 계좌 단위 일시정지는 API 에 없어 그리지 않는다.
-import { useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+// 계좌 상세 — 시장 맥락을 URL에 보존하고 자산·보유·위험 다음에 주문을 보여 준다.
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Card } from "../../components/Card";
 import { Chart } from "../../components/Chart";
 import { Chip } from "../../components/Chip";
@@ -12,11 +8,13 @@ import { Empty } from "../../components/Empty";
 import { Stats } from "../../components/Stats";
 import { Table, type Column } from "../../components/Table";
 import { csvUrl, type ApiError } from "../../lib/api";
-import { agoText, fmtDate, fmtInt, fmtMoney, fmtPt, fmtTime } from "../../lib/format";
+import { agoText, fmtDate, fmtInt, fmtMoney, fmtPct, fmtPt, fmtTime } from "../../lib/format";
 import { tickerLabel } from "../../lib/ticker";
 import { useFoQuotes, useKstDate, useNow, useQuotes, useResource } from "../../lib/hooks";
 import { statusLabel, type Merged, type Order } from "../today/today.ts";
-import type { Account as AccountRow } from "./accounts.ts";
+import { FO_STATE_LABEL, type Account as AccountRow, type FoStatus, type FoSummary } from "./accounts.ts";
+import { FoLegs } from "../system/FoLegs";
+import "./Account.css";
 import { ModeSwitch } from "./ModeSwitch";
 import { FoPositionsTable, PositionsTable } from "./PositionsTable";
 import { navSeries, splitLanes, sumEval, withLive, type LiveRow, type NavFoReport, type NavPerf, type PositionRow } from "./positions.ts";
@@ -30,13 +28,16 @@ type TaxLots = { open_lots: OpenLot[]; realized: RealizedLot[]; summary: TaxSumm
 const LANE_LABEL: Record<string, string> = { spot: "현물", scalp: "단타", fo: "파생" };
 const SIDE_LABEL: Record<string, string> = { BUY: "매수", SELL: "매도", buy: "매수", sell: "매도" };
 
-function failed(what: string, e: ApiError) {
-  return <Empty title={`${what}을(를) 불러오지 못했습니다`}>{e.message}</Empty>;
+function failed(what: string, e: ApiError, onRetry?: () => void, retrying?: boolean) {
+  return <Empty title={`${what}을(를) 불러오지 못했습니다`} onRetry={onRetry} retrying={retrying} helpHref="/system/admin#secrets" helpLabel="연결 설정 확인">{e.message}</Empty>;
 }
 
 export function Account() {
   const { id = "" } = useParams();
   const enc = encodeURIComponent(id);
+  const [search] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const today = useKstDate();
   const now = useNow(1000);
 
@@ -44,19 +45,35 @@ export function Account() {
   const account = accounts.data?.find((a) => a.id === id) ?? null;
   const ready = !!account;
   const fo = account?.lane === "fo";
-  const market = account?.markets?.[0] ?? "KR";
-  const markets = account?.markets ?? [];
+  const markets = (account?.markets ?? []).filter((m) => m === "KR" || m === "US");
+  const marketReady = ready && markets.length > 0;
+  const requestedMarket = search.get("market");
+  const market = (requestedMarket === "KR" || requestedMarket === "US") && markets.includes(requestedMarket)
+    ? requestedMarket : markets[0] ?? "KR";
+  useEffect(() => {
+    if (!ready || !markets.length || requestedMarket === market) return;
+    const next = new URLSearchParams(search);
+    next.set("market", market);
+    navigate({ search: next.toString(), hash: location.hash }, { replace: true });
+  }, [ready, market, requestedMarket, markets.length, search, navigate, location.hash]);
+  const selectMarket = (value: string) => {
+    const next = new URLSearchParams(search);
+    next.set("market", value);
+    navigate({ search: next.toString(), hash: location.hash });
+  };
 
   const positions = useResource<Merged<PositionRow>>(`/accounts/${enc}/positions`, undefined, ["positions", "fo", "scalp", "triggers"]);
   const orderParams = { date: today, account_id: id };
   const orders = useResource<Merged<Order>>("/orders", orderParams, ["orders", "fo", "scalp"]);
-  const risk = useResource<Risk>("/positions/risk", { account_id: id, market }, ["positions"], { enabled: ready && !fo });
+  const risk = useResource<Risk>("/positions/risk", { account_id: id, market }, ["positions"], { enabled: marketReady && !fo });
   // 세금 로트 연도 — 기본 올해(KST), "" 는 전체. 보유 로트(open_lots)는 연도와 무관하게 전부 온다.
   const [year, setYear] = useState(today.slice(0, 4));
   const lotParams = (m: string): Record<string, string> => (year ? { market: m, year } : { market: m });
   const lotsKr = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, lotParams("KR"), ["positions", "orders"], { enabled: ready && !fo && markets.includes("KR") });
   const lotsUs = useResource<TaxLots>(`/accounts/${enc}/tax-lots`, lotParams("US"), ["positions", "orders"], { enabled: ready && !fo && markets.includes("US") });
-  const perf = useResource<NavPerf>("/analytics/performance", { account_id: id, market, days: "30" }, ["accounts"], { enabled: ready && !fo });
+  const perf = useResource<NavPerf>("/analytics/performance", { account_id: id, market, days: "30" }, ["accounts"], { enabled: marketReady && !fo });
+  const foSummary = useResource<FoSummary>("/fo/summary", undefined, ["fo", "accounts"], { enabled: ready && fo });
+  const foStatus = foSummary.data?.accounts.find((a) => a.id === id);
   const foReport = useResource<NavFoReport>("/analytics/fo/report", { account_id: id, days: "30" }, ["accounts"], { enabled: ready && fo });
 
   const lanes = splitLanes(positions.data?.items ?? []);
@@ -74,7 +91,7 @@ export function Account() {
     return (
       <Screen>
         <BackLink />
-        {failed("계좌", accounts.error)}
+        {failed("계좌", accounts.error, accounts.reload, accounts.loading)}
       </Screen>
     );
   }
@@ -82,7 +99,7 @@ export function Account() {
     return (
       <Screen>
         <BackLink />
-        <Empty title="계좌 없음">{id}</Empty>
+        <Empty title="계좌 없음" helpHref="/system/admin#secrets" helpLabel="연결 설정 확인">{id} · 계좌 목록에서 현재 연결된 계좌를 확인하세요.</Empty>
       </Screen>
     );
   }
@@ -90,32 +107,37 @@ export function Account() {
   const nav = fo ? foReport : perf;
   const lotsOf = (r: LiveRow<PositionRow>) => {
     const res = r.market === "US" ? lotsUs : lotsKr;
-    if (res.error) return failed("lot", res.error);
+    if (res.error) return failed("매수 이력", res.error, res.reload, res.loading);
     if (!res.data) return <Empty title="불러오는 중" />;
     const lots = res.data.open_lots.filter((l) => l.ticker === r.ticker);
-    if (!lots.length) return <Empty title="lot 없음" />;
+    if (!lots.length) return <Empty title="매수 이력 없음" />;
     const c = r.currency === "USD" ? "USD" : "KRW";
     return (
-      <ul className="lot-list">
-        {lots.map((l, i) => (
-          <li key={`${l.bought_at}-${i}`}>
-            {fmtDate(l.bought_at)} · {fmtInt(l.qty)}주 · {fmtMoney(l.price, c)}
-          </li>
-        ))}
-      </ul>
+      <>
+        <h3 className="perf-sub">매수 이력</h3>
+        <ul className="lot-list">
+          {lots.map((l, i) => (
+            <li key={`${l.bought_at}-${i}`}>
+              {fmtDate(l.bought_at)} · {fmtInt(l.qty)}주 · {fmtMoney(l.price, c)}
+            </li>
+          ))}
+        </ul>
+      </>
     );
   };
 
   const positionsBody = (body: ReactNode) =>
-    positions.error ? failed("보유", positions.error) : !positions.data ? <Empty title="불러오는 중" /> : body;
+    positions.error ? failed("보유", positions.error, positions.reload, positions.loading) : !positions.data ? <Empty title="불러오는 중" /> : body;
 
   const names: Record<string, string | null | undefined> = {};
   for (const r of positions.data?.items ?? []) names[r.ticker] = r.name;
 
-  const navChart = !ready ? (
+  const navChart = ready && !markets.length ? (
+    <Empty title="지원 시장 없음">계좌의 연결 시장을 확인해 주세요.</Empty>
+  ) : !ready ? (
     <Empty title="불러오는 중" />
   ) : nav.error ? (
-    failed("NAV", nav.error)
+    failed("NAV", nav.error, nav.reload, nav.loading)
   ) : !nav.data ? (
     <Empty title="불러오는 중" />
   ) : navSeries(nav.data).length ? (
@@ -135,13 +157,18 @@ export function Account() {
           <Link to="/log">전체 주문·체결 기록</Link>
         </div>
       </div>
-      {account ? <Header account={account} at={accounts.at} now={now} onDone={accounts.reload} /> : <Empty title="불러오는 중" />}
+      {account ? <Header account={account} status={foStatus} at={accounts.at} now={now} onDone={accounts.reload} /> : <Empty title="불러오는 중" />}
 
-      <section id="orders" className="screen-section">
-        <h2>오늘 주문·체결</h2>
-        {orders.error ? failed("주문", orders.error) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} csvHref={orders.data.items.length ? csvUrl("/orders", orderParams) : undefined} />}
-      </section>
-
+      {marketReady ? (
+        <div className="perf-filters account-market-filters">
+          <label>조회 시장 <select aria-label="조회 시장" value={market} onChange={(e) => selectMarket(e.target.value)}>
+            {markets.map((m) => <option key={m} value={m}>{m === "KR" ? "한국 (KR)" : "미국 (US)"}</option>)}
+          </select></label>
+          <span className="data-muted">{fo ? "자산 추이 기준" : "위험·자산 추이 기준 · 보유는 전체 시장 표시"}</span>
+          <Link data-account-performance to={`/performance?account_id=${enc}&market=${market}`}>이 계좌 성과</Link>
+        </div>
+      ) : null}
+      {foSummary.error ? failed("파생 상태·증거금", foSummary.error, foSummary.reload, foSummary.loading) : null}
       {fo ? (
         <section id="fo-positions" className="screen-section">
           <h2>파생 보유</h2>
@@ -170,10 +197,12 @@ export function Account() {
       {fo ? null : (
         <section id="risk" className="screen-section">
           <h2>리스크</h2>
-          {!ready ? (
+          {ready && !markets.length ? (
+            <Empty title="지원 시장 없음" />
+          ) : !ready ? (
             <Empty title="불러오는 중" />
           ) : risk.error ? (
-            failed("리스크", risk.error)
+            failed("리스크", risk.error, risk.reload, risk.loading)
           ) : !risk.data ? (
             <Empty title="불러오는 중" />
           ) : (
@@ -182,36 +211,50 @@ export function Account() {
         </section>
       )}
 
-      {fo ? null : (
-        <section id="tax-lots" className="screen-section">
-          <h2>세금 로트</h2>
-          <p className="perf-filters">
-            <label>
-              연도{" "}
-              <select aria-label="연도" value={year} onChange={(e) => setYear(e.target.value)}>
-                {yearOptions(today).map((y) => (
-                  <option key={y} value={y}>
-                    {y || "전체"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <span className="data-muted">FIFO 실현 로트·워시세일(표시 전용)</span>
-          </p>
-          {!ready ? (
-            <Empty title="불러오는 중" />
-          ) : (
-            markets.map((m) => (
-              <TaxBlock key={m} market={m} res={m === "US" ? lotsUs : lotsKr} names={names} csvHref={csvUrl(`/accounts/${enc}/tax-lots`, lotParams(m))} single={markets.length === 1} />
-            ))
-          )}
-        </section>
-      )}
+      <section id="orders" className="screen-section">
+        <h2>오늘 주문·체결</h2>
+        {orders.error ? failed("주문", orders.error, orders.reload, orders.loading) : !orders.data ? <Empty title="불러오는 중" /> : <OrdersTable data={orders.data} csvHref={orders.data.items.length ? csvUrl("/orders", orderParams) : undefined} />}
+      </section>
+
+      {fo ? <section id="fo-legs" className="screen-section">
+        <h2>파생 주문 진행</h2>
+        <p className="data-muted">이 계좌의 계약별 주문 단계와 접수·체결 진행을 확인합니다.</p>
+        <FoLegs accounts={[{ id }]} />
+      </section> : null}
 
       <section id="nav-chart" className="screen-section">
-        <h2>NAV 추이</h2>
-        {navChart}
+        <h2>자산 추이{!fo ? ` (${market} · ${market === "US" ? "USD" : "KRW"})` : " (KRW)"}</h2>
+        <details className="account-detail"><summary>최근 30일 자산 추이 보기</summary>{navChart}</details>
       </section>
+
+      {fo ? null : (
+        <details className="account-detail">
+          <summary>세금·실현 매매 이력 상세</summary>
+          <section id="tax-lots" className="screen-section">
+            <h2>세금 로트</h2>
+            <p className="perf-filters">
+              <label>
+                연도{" "}
+                <select aria-label="연도" value={year} onChange={(e) => setYear(e.target.value)}>
+                  {yearOptions(today).map((y) => (
+                    <option key={y} value={y}>
+                      {y || "전체"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="data-muted">FIFO 실현 로트·워시세일(표시 전용)</span>
+            </p>
+            {!ready ? (
+              <Empty title="불러오는 중" />
+            ) : (
+              markets.map((m) => (
+                <TaxBlock key={m} market={m} res={m === "US" ? lotsUs : lotsKr} names={names} csvHref={csvUrl(`/accounts/${enc}/tax-lots`, lotParams(m))} single={markets.length === 1} />
+              ))
+            )}
+          </section>
+        </details>
+      )}
     </Screen>
   );
 }
@@ -232,7 +275,7 @@ function BackLink() {
   );
 }
 
-function Header({ account: a, at, now, onDone }: { account: AccountRow; at: number; now: Date; onDone(): void }) {
+function Header({ account: a, status, at, now, onDone }: { account: AccountRow; status?: FoStatus; at: number; now: Date; onDone(): void }) {
   const c = a.currency === "USD" ? "USD" : "KRW";
   const settled = a.cash_available !== undefined && a.cash_available !== null;
   const fetched = at > 0 ? new Date(at).toISOString() : null;
@@ -244,17 +287,23 @@ function Header({ account: a, at, now, onDone }: { account: AccountRow; at: numb
           <span className="chips">
             <Chip tone={a.env === "paper" ? "muted" : "live"}>{a.env === "paper" ? "모의" : "실전"}</Chip>
             <Chip>{LANE_LABEL[a.lane] ?? a.lane}</Chip>
+            <Chip>{a.currency}</Chip>
+            {status ? <Chip>{FO_STATE_LABEL[status.state] ?? status.state}</Chip> : null}
           </span>
         }
       >
         <Stats
           cols={settled ? 3 : 2}
           items={[
-            { id: "nav", label: "NAV", value: fmtMoney(a.nav, c) },
-            { id: "cash", label: settled ? "예수금(결제 전)" : "현금", value: fmtMoney(a.cash ?? null, c), sub: `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
+            { id: "nav", label: "순자산(NAV)", value: fmtMoney(status?.nav ?? a.nav, c), sub: status?.nav_date ? `파생 결산 기준 ${fmtDate(status.nav_date)}` : undefined },
+            { id: "cash", label: settled ? "예수금(결제 전)" : "현금", value: fmtMoney(status ? status.cash ?? null : a.cash ?? null, c), sub: status?.nav_date ? `파생 결산 기준 ${fmtDate(status.nav_date)}` : `갱신 ${agoText(a.cash_at ?? fetched, now)}` },
             ...(settled ? [{ id: "cash_available", label: "주문 가능", value: fmtMoney(a.cash_available ?? null, c) }] : []),
           ]}
         />
+        {status ? <Stats cols={2} items={[
+          { id: "margin", label: "증거금", value: fmtMoney(status.margin_total ?? null, c) },
+          { id: "margin_pct", label: "NAV 대비 증거금", value: fmtPct(status.margin_pct ?? null) },
+        ]} /> : null}
         {a.paused ? <p className="mode-note">(전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)</p> : null}
         <ModeSwitch key={`${a.id}:${a.mode}`} id={a.id} env={a.env} mode={a.mode} modeNote={a.mode_note} onDone={onDone} />
       </Card>
@@ -305,7 +354,7 @@ function TaxBlock({ market, res, names, csvHref, single }: { market: string; res
     <div data-tax-market={market} className="tax-block">
       {single ? null : <h3 className="perf-sub">{market}</h3>}
       {res.error ? (
-        failed("세금 로트", res.error)
+        failed("세금 로트", res.error, res.reload, res.loading)
       ) : !res.data ? (
         <Empty title="불러오는 중" />
       ) : (

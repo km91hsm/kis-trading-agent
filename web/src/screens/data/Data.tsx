@@ -14,6 +14,7 @@ import { MarketActivity } from "./MarketActivity";
 import { MacroOverview } from "./MacroOverview";
 import { Themes } from "./Themes";
 import { Watchlist } from "./Watchlist";
+import "./market-data.css";
 
 export type Market = "KR" | "US";
 const MARKETS: Market[] = ["KR", "US"];
@@ -64,11 +65,16 @@ function MarketData() {
   const [market] = useMarket();
   const [params] = useSearchParams();
   return <>
-    <MacroOverview market={market} />
-    <MarketActivity key={market} />
     <div id="stock-chart" className="stock-chart-section">
-      <h3>종목 차트</h3>
+      <h3>종목 검색·차트</h3>
+      <p className="data-context-description">종목명이나 코드를 검색해 선택한 종목의 가격·거래 이력을 확인합니다.</p>
       <ChartView key={`${market}:${params.get("ticker") ?? ""}:${params.get("exchange") ?? ""}`} />
+    </div>
+    <div className="market-overview-section">
+      <h3>시장 개요·거래 순위</h3>
+      <p className="data-context-description">시장 전체의 주요 지표와 거래 동향입니다. 순위의 종목을 누르면 위 차트로 이동합니다.</p>
+      <MacroOverview market={market} />
+      <MarketActivity key={market} />
     </div>
   </>;
 }
@@ -90,7 +96,7 @@ export function Data({ page = "quotes" }: { page?: DataPage }) {
     <div className="screen" data-screen="data" data-page={page}>
       <h1 className="screen-title">시장 데이터 · {pageLabel}</h1>
       <div className="screen-intro">
-        <p className="screen-description">{page === "news" ? "수집된 뉴스·공시를 확인하고 종목별 판단 근거를 살펴봅니다." : page === "themes" ? "관심 테마와 감시 종목을 살펴보고 다음 분석 대상을 관리합니다." : page === "features" ? "분석에 쓰는 지표와 모델의 저장 자료·학습 상태를 확인합니다." : "시장을 고른 뒤 주요 지표와 거래 동향을 살펴보고 종목 차트로 이어갑니다."}</p>
+        <p className="screen-description">{page === "news" ? "수집된 뉴스·공시를 확인하고 종목별 판단 근거를 살펴봅니다." : page === "themes" ? "관심 테마와 감시 종목을 살펴보고 다음 분석 대상을 관리합니다." : page === "features" ? "분석에 쓰는 지표와 모델의 저장 자료·학습 상태를 확인합니다." : "시장을 고르고 종목을 검색해 차트를 확인합니다. 아래에서 시장 개요와 거래 순위도 살펴볼 수 있습니다."}</p>
         <div className="screen-actions">
           {page !== "quotes" ? <Link to={market === "US" ? "/data?market=US" : "/data"}>시장 시세·차트</Link> : <Link to={market === "US" ? "/data/news?market=US" : "/data/news"}>뉴스·공시 확인</Link>}
           <Link to="/system/admin#saveticker">수집 상태 확인</Link>

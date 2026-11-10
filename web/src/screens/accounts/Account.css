@@ -1,0 +1,8 @@
+.account-detail { margin-block: var(--space-4); }
+.account-detail > summary { cursor: pointer; font-weight: 600; padding-block: var(--space-3); }
+.account-detail[open] > summary { margin-bottom: var(--space-3); }
+.position-context { display: block; color: var(--fg-muted); font-size: var(--text-sm); margin-block: .25rem; }
+.position-links { display: flex; flex-wrap: wrap; gap: .3rem .7rem; font-size: var(--text-sm); }
+.account-market-filters { flex-wrap: wrap; }
+.position-stock { display: block; min-width: 0; }
+.position-links { white-space: normal; font-weight: 400; }

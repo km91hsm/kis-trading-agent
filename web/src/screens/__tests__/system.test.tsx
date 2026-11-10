@@ -23,7 +23,6 @@ import {
   fixtureSettings,
   fixtureStatus,
 } from "../../test/fixtures/system";
-import { fixtureFoLeg } from "../../test/fixtures/today";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | null = null;
@@ -332,9 +331,10 @@ describe("시스템 화면", () => {
     expect(button(grid, "현물 매매")).toBeTruthy();
     expect(button(grid, "지표 스냅샷")).toBeTruthy();
     expect(Array.from(j.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("일정");
-    // 수동 실행(행동)이 요청 기록 위에 온다
-    expect(j.querySelector("h3")?.textContent).toBe("수동 실행");
-    expect(j.querySelector(".job-grid")!.compareDocumentPosition(j.querySelector("table")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 실행 상태를 먼저 보고 수동 실행은 필요할 때 펼친다.
+    expect(j.querySelector("h3")?.textContent).toBe("요청 기록");
+    expect(j.querySelector("table")!.compareDocumentPosition(j.querySelector("details")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(j.querySelector("details")?.open).toBe(false);
     expect(j.textContent).toContain("데몬"); // 일정은 데몬 절로
   });
 
@@ -527,21 +527,15 @@ describe("시스템 화면", () => {
     expect(button(st, "다시 시작").disabled).toBe(true);
   });
 
-  test("파생 절: 계좌마다 /fo/legs?account_id= 다리 표(다리·상태 칩·수량 체결/주문·가격·시각)", async () => {
+  test("파생 정책은 계좌 상세로 연결하며 주문 다리를 중복 조회하지 않는다", async () => {
     const fo = {
       accounts: [{ id: "paper-fo", env: "paper", mode: "auto", paused: false, state: "idle", enabled: true, triggers: [] }],
       context: null,
     };
-    await mount(routes({ "GET /api/system/fo": fo, "GET /api/fo/legs": (url: URL) => (url.searchParams.get("account_id") === "paper-fo" ? [fixtureFoLeg()] : []) }));
-    const legs = section("fo").querySelector('[data-legs="paper-fo"]') as HTMLElement;
-    expect(legs).not.toBeNull();
-    const rows = legs.querySelectorAll("tbody tr");
-    expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toContain("진입");
-    expect(rows[0].textContent).toContain("R0");
-    expect(rows[0].querySelector(".chip")?.textContent).toBe("접수");
-    expect(rows[0].textContent).toContain("0/2");
-    expect(rows[0].textContent).toContain("시장가");
+    await mount(routes({ "GET /api/system/fo": fo }));
+    expect(section("fo").querySelector('[data-legs]')).toBeNull();
+    expect(section("fo").querySelector('a[href="/accounts/paper-fo"]')).not.toBeNull();
+    expect(ff!.calls.some((call) => call.url.startsWith("/api/fo/legs"))).toBe(false);
   });
 
   test("파생 절: 계좌 상태는 한글 라벨(entries_paused → 새 진입 멈춤)", async () => {

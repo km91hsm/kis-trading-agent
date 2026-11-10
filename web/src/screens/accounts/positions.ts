@@ -12,6 +12,8 @@ export type PositionRow = {
   ticker: string;
   name: string | null;
   market: string;
+  exchange?: string | null;
+  plan?: { decision_id?: number | null } | null;
   currency: string;
   qty: number | string | null;
   avg_price: Amount;

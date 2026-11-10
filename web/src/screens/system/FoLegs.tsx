@@ -30,7 +30,7 @@ const legTone = (s: string): "ok" | "fail" | "warn" | "muted" =>
 
 const COLUMNS: Column<FoLeg>[] = [
   {
-    key: "leg", label: "다리", width: "34%", long: true,
+    key: "leg", label: "주문 단계", width: "34%", long: true,
     render: (l) => `#${l.id} ${termLabel(`fo.intent.${l.intent}`)} R${l.round} · ${l.code}${l.order_no ? ` · ${l.order_no}` : ""}`,
   },
   { key: "status", label: "상태", width: "14%", align: "chip", render: (l) => <Chip tone={legTone(l.status)}>{termLabel(`leg.${l.status}`)}</Chip> },
@@ -43,13 +43,13 @@ function AccountLegs({ id }: { id: string }) {
   const res = useResource<FoLeg[]>("/fo/legs", { account_id: id }, ["fo", "orders"]);
   return (
     <div className="fo-legs" data-legs={id}>
-      <h3 className="fo-legs-title">{id} 주문 다리</h3>
+      <h3 className="fo-legs-title">{id} · 계약별 진행</h3>
       {res.error ? (
-        <Empty title="다리를 불러오지 못했습니다">{res.error.message}</Empty>
+        <Empty title="주문 상세 조회에 실패했습니다" onRetry={res.reload} retrying={res.loading} helpHref="/system#health">{res.error.message}</Empty>
       ) : !res.data ? (
         <Empty title="불러오는 중" />
       ) : (
-        <Table columns={COLUMNS} rows={res.data} rowKey={(l) => l.id} empty="오늘 주문 다리 없음" />
+        <Table columns={COLUMNS} rows={res.data} rowKey={(l) => l.id} empty="오늘 주문 진행 기록 없음" />
       )}
     </div>
   );

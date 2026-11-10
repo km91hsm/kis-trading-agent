@@ -5,6 +5,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import { onAuthError, onTokenChange, tokenStore } from "../../lib/api";
 import { resolveLink } from "../../lib/nav";
+import { followHashTarget } from "../../lib/hash-target";
 import { Nav } from "./Nav";
 import { SavetickerOnboarding } from "./SavetickerOnboarding";
 import "../../screens/system/SavetickerStatus.css";
@@ -24,7 +25,8 @@ function useHashScroll(): void {
       navigate({ pathname: path, search, hash: `#${section}` }, { replace: true });
       return;
     }
-    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView?.({ block: "start" });
+    const root = document.getElementById("main-content");
+    if (root) return followHashTarget(hash, root);
   }, [pathname, search, hash, key, navigate]);
 }
 
@@ -49,7 +51,7 @@ export function Shell() {
         <div className="auth-notice" role="alert" data-auth-notice>
           <Icon name="warn" />
           <span>
-            쓰기 토큰이 필요합니다 → <Link to="/system/admin#token">시스템 › 관리 › 쓰기 토큰</Link>
+            쓰기 토큰이 필요합니다 → <Link to="/system/admin#token">설정·운영 › 연결·설정 › 쓰기 토큰</Link>
           </span>
           <button type="button" className="auth-notice-close" aria-label="안내 닫기" onClick={() => setAuthNotice(false)}>
             <Icon name="x" />
