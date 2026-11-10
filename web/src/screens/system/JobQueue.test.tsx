@@ -165,3 +165,26 @@ test("후속 정상 요청은 원문 오류와 후속 시각을 함께 남기고
   expect(root.textContent).toContain("후속 정상 시각");
   expect(root.textContent).toContain("대상 범위 미확인");
 });
+
+test("긴 원문 오류는 기본 접힌 상세를 펼쳐 읽고 후속 시각과 확인 필요 안내를 유지한다", async () => {
+  const longError = `합성 세션 오류: ${"unknown_source_identifier_".repeat(20)}\n추가 합성 원인: 토론 근거를 확인하지 못했습니다.`;
+  const root = await mount([
+    request({ id: 2, status: "error", outcome: "followed_by_success", followup_at: "2026-11-05T12:00:00+09:00", error: longError, scope_confirmed: true }),
+    request({ id: 1, status: "error", outcome: "failed", followup_at: null, error: "합성 범위 확인 오류", scope_confirmed: false }),
+  ]);
+  const rows = Array.from(root.querySelectorAll("table tbody tr"));
+  const failed = rows.find((row) => row.querySelector("td")?.textContent === "1")!;
+  const followed = rows.find((row) => row.querySelector("td")?.textContent === "2")!;
+  const details = followed.querySelector("details") as HTMLDetailsElement | null;
+  expect(details).not.toBeNull();
+  expect(details!.open).toBe(false);
+  const summary = details!.querySelector("summary")!;
+  expect(summary.textContent).toBe("오류 상세 보기");
+  act(() => summary.click());
+  expect(details!.open).toBe(true);
+  expect(details!.querySelector("p")?.textContent).toBe(longError);
+  expect(followed.textContent).toContain("후속 정상 시각");
+  expect(followed.textContent).toContain("후속 정상");
+  expect(failed.textContent).toContain("확인 필요");
+  expect(failed.textContent).toContain("대상 범위 미확인");
+});

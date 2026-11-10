@@ -128,7 +128,12 @@ export function JobQueue() {
       { key: "params", label: "인자", width: "14%" },
       { key: "error", label: "오류", width: "16%", render: (r) => (
         <>
-          {r.error ? <span className="cell-ellipsis" title={r.error}>{r.error}</span> : null}
+          {r.error ? (
+            <details className="job-error-details">
+              <summary>오류 상세 보기</summary>
+              <p className="job-error-text">{r.error}</p>
+            </details>
+          ) : null}
           {r.followup_at ? <small className="data-muted job-followup">후속 정상 시각 {fmtWhen(r.followup_at)}</small> : null}
           {r.scope_confirmed === false && r.tone === "fail" ? <small className="data-muted job-followup">대상 범위 미확인</small> : null}
         </>
