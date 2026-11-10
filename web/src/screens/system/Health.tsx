@@ -94,7 +94,7 @@ export function Health() {
             <Chip tone="muted">{pause.loading ? "자동매매: 확인 중" : "자동매매: 확인하지 못함"}</Chip>
           ) : pause.paused ? (
             <>
-              <Chip tone="warn">자동매매: 전체 일시정지 중 — 새 매수·진입과 승인을 멈춤 · 손절·청산은 계속</Chip>{" "}
+              <Chip tone="warn">자동매매: 전체 일시정지 중 — 신규 진입·판단 매도·승인은 중지 · 위험 청산은 계속</Chip>{" "}
               {pauseWhen(pause) ? <span className="data-muted">{pauseWhen(pause)}</span> : null} <Link to="/accounts">재개</Link>
             </>
           ) : (

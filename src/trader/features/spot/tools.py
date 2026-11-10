@@ -298,8 +298,14 @@ def _regime_context(ctx: ToolContext, market: str) -> dict | None:
         "count": r.get("count"),
         "signals": {k: sig.get(k) for k in ("ma_below", "momentum_weak", "vol_high")},
         "since": r.get("since"),
-        "note": "bear: 게이트가 신규 BUY/ADD 거부·헤지 ETF 보유; neutral: 한도 축소",
+        "note": "자동 정책은 bear 매수 제한·neutral 한도 축소. 수동 정책은 risk_policy를 우선 확인",
     }
+
+
+def _risk_policy_context(ctx: ToolContext, market: str) -> dict | None:
+    """AI 판단 원본과 별개인 실제 현물 매수 정책(헤지가 꺼져 있어도 적용)."""
+    getter = getattr(ctx.ports.get("regime"), "risk_policy", None)
+    return getter(ctx.conn, market, ctx.now()) if getter and ctx.conn is not None else None
 
 
 def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: dict) -> dict:
@@ -317,6 +323,7 @@ def trader_context(ctx: ToolContext, market: str, d: date, ticker: str, inputs: 
         "holding": holding_context(ctx, ticker, market, d),
         "regime": _regime_context(ctx, market),
         "market_view": _market_view_context(ctx, market),
+        "risk_policy": _risk_policy_context(ctx, market),
         "quant": _quant_context(ctx, market, d, ticker),
         **_memory_context(ctx, inputs, market, d),
         "calibration": _calibration_context(ctx, market, d, ticker),

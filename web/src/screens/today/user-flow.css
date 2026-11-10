@@ -1,0 +1,17 @@
+.today-attention { border: 1px solid var(--line); border-radius: var(--radius-card); padding: var(--space-6); margin-block: var(--space-4); background: var(--bg-elev); }
+.section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.section-heading h2 { margin: 0; font-size: var(--text-lg); }
+.attention-items { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.attention-items li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border-left: 3px solid var(--warn); padding-left: var(--space-3); }
+.attention-items li span { min-width: 0; overflow-wrap: anywhere; }
+.attention-items li a { flex: none; display: inline-flex; align-items: center; min-height: var(--touch); }
+.decision-filters { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; margin-bottom: var(--space-4); }
+.decision-filters label { display: grid; gap: var(--space-2); font-size: var(--text-sm); font-weight: 600; min-width: 130px; }
+.decision-filters label:last-of-type { flex: 1; min-width: min(100%, 220px); }
+.decision-filters select, .decision-filters input { width: 100%; min-height: var(--touch); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg); background: var(--bg-elev); font: inherit; }
+.workflow-details > summary, .sys-details > summary { cursor: pointer; min-height: var(--touch); padding-block: var(--space-3); color: var(--accent); }
+.workflow-details[open] > summary { margin-bottom: var(--space-3); }
+.system-intro { margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-6); color: var(--fg-muted); max-width: 75ch; }
+.system-shortcuts { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-6); }
+.system-shortcuts a { padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); min-height: var(--touch); display: inline-flex; align-items: center; text-decoration: none; background: var(--bg-elev); }
+@media (max-width: 600px) { .today-attention { padding: var(--space-4); } .decision-filters label { flex: 1; } }

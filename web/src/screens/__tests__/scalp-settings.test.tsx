@@ -1,11 +1,10 @@
 import { act } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { SettingsPanel } from "../system/SettingsPanel";
+import { ScalpSwitch } from "../system/ScalpSwitch";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
 import { setEventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
-import { fixtureSettings } from "../../test/fixtures/system";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | undefined;
@@ -16,12 +15,6 @@ beforeEach(() => {
 });
 afterEach(() => { ff?.restore(); tokenStore.set(""); document.body.innerHTML = ""; });
 
-const codex = {
-  enabled: false, source: "yaml", model: null, available: true, readiness: "installed",
-  effective_rounds: 2, applies_to: "next_new_research", roles: { bull: "claude", bear: "claude" },
-  usage: { provider: "codex", calls: 0, errors: 0, duration_ms: 0, input_tokens: null, output_tokens: null, cost_usd: null, subscription_utilization: null },
-  last_error: null,
-};
 const scalp = {
   accounts: [
     { id: "paper-main", env: "paper", markets: ["KR"], enabled: true, source: "yaml", effective: true, reason: null },
@@ -34,13 +27,11 @@ const sw = (c: HTMLElement, id: string) => c.querySelector(`[role="switch"][aria
 
 test("renders rows, paper toggle patches without confirm, real enable needs id, reset sends null", async () => {
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
-    "GET /api/settings/codex-debate": codex,
     "GET /api/settings/scalp": scalp,
     "PATCH /api/settings/scalp/paper-main": scalp,
     "PATCH /api/settings/scalp/real-1": scalp,
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<ScalpSwitch />);
   await flush();
   expect(container.textContent).toContain("paper-main");
   expect(container.textContent).toContain("모의");
@@ -74,12 +65,10 @@ test("renders rows, paper toggle patches without confirm, real enable needs id, 
 
 test("shows error on 400", async () => {
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
-    "GET /api/settings/codex-debate": codex,
     "GET /api/settings/scalp": scalp,
     "PATCH /api/settings/scalp/paper-main": () => new Response(JSON.stringify({ detail: "확인 필요" }), { status: 400 }),
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<ScalpSwitch />);
   await flush();
   await act(async () => sw(container, "paper-main").click());
   await flush();
@@ -100,12 +89,10 @@ test("real account ON -> OFF sends enabled:false directly (no confirm); reset hi
     judge: true, max_positions: 3, max_weight_pct: 0.05, default_paper: true,
   };
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
-    "GET /api/settings/codex-debate": codex,
     "GET /api/settings/scalp": live,
     "PATCH /api/settings/scalp/real-1": live,
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<ScalpSwitch />);
   await flush();
   // 기본값으로 버튼은 source === "control" 일 때만
   expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "기본값으로")).toBe(false);
@@ -121,11 +108,9 @@ test("real account ON -> OFF sends enabled:false directly (no confirm); reset hi
 
 test("reason text is shown in the 실효 cell for a switched-off account", async () => {
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
-    "GET /api/settings/codex-debate": codex,
     "GET /api/settings/scalp": scalp,
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<ScalpSwitch />);
   await flush();
   expect(cell(container, "real-1", 3).textContent).toBe("꺼짐");
   expect(cell(container, "real-1", 2).textContent).toBe("꺼짐 · 켜기");
@@ -134,8 +119,6 @@ test("reason text is shown in the 실효 cell for a switched-off account", async
 test("판정자: 켜기는 확인 창 뒤 PATCH /settings/scalp-judge, 화면 설정이면 「판정자 기본값으로」는 null", async () => {
   let cur = { ...scalp, judge: false, judge_source: "yaml", judge_default: false };
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
-    "GET /api/settings/codex-debate": codex,
     "GET /api/settings/scalp": () => cur,
     "PATCH /api/settings/scalp-judge": (_u: URL, init?: RequestInit) => {
       const enabled = (JSON.parse(String(init?.body)) as { enabled: boolean | null }).enabled;
@@ -143,7 +126,7 @@ test("판정자: 켜기는 확인 창 뒤 PATCH /settings/scalp-judge, 화면 �
       return cur;
     },
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<ScalpSwitch />);
   await flush();
   const line = container.querySelector('[aria-label="단타 판정자"]') as HTMLElement;
   expect(line.textContent).toContain("판정자 꺼짐");

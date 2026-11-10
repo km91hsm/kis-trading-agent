@@ -2,7 +2,7 @@
 import type { Tone } from "../../components/Badge";
 import { GLOSSARY } from "../../lib/glossary";
 import { now as clockNow } from "../../lib/clock";
-import { fmtPct, fmtTime } from "../../lib/format";
+import { fmtPct, fmtTime, fmtWhen } from "../../lib/format";
 import { resetsIn, usageLevel, type LimitWindow, type Throttle, type UsageLevel, type UsageResp } from "../../lib/usage";
 
 const DASH = "—";
@@ -238,7 +238,18 @@ export type ControlRow = { id: number; at: string; channel: string; actor: strin
 
 /** 조작 이력 표 행 — 값은 문자열 그대로, 그 밖은 JSON, null 은 —. */
 export function controlRows(log: ControlEntry[]): ControlRow[] {
-  return log.map((e) => ({ id: e.id, at: e.at, channel: e.channel, actor: e.actor ?? DASH, key: e.key, old: val(e.old), new: val(e.new) }));
+  return log.map((e) => {
+    const policy = e.key.startsWith("risk_policy:");
+    const describe = (v: unknown) => {
+      if (!policy) return val(v);
+      if (!v || typeof v !== "object") return "자동";
+      const entry = v as Record<string, unknown>;
+      const mode = { AUTO: "자동", RISK_ON: "제한적 매수", RISK_OFF: "방어" }[String(entry.mode)] ?? "확인 필요";
+      return [mode, typeof entry.reason === "string" ? entry.reason : null, typeof entry.expires_at === "string" ? `만료 ${fmtWhen(entry.expires_at)}` : null].filter(Boolean).join(" · ");
+    };
+    const market = e.key.split(":")[1];
+    return { id: e.id, at: e.at, channel: e.channel, actor: e.actor ?? DASH, key: policy ? `${market === "KR" ? "국내" : market === "US" ? "미국" : market} 현물 매수 정책` : e.key, old: describe(e.old), new: describe(e.new) };
+  });
 }
 
 // ── 데몬 잡 표 ───────────────────────────────────────────────────────────────

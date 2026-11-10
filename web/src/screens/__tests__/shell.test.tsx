@@ -1,5 +1,5 @@
 import { act } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "../../app/App";
 import { Icon, ICON_NAMES } from "../../components/Icon";
@@ -28,6 +28,16 @@ function app(path = "/") {
 
 const ok = { "GET /api/system/health": fixtureHealth(), "GET /api/system/usage": fixtureUsage() };
 
+test("이동한 수집 절의 기존 북마크는 검색 조건을 유지해 새 위치로 이동한다", async () => {
+  const Location = () => { const l = useLocation(); return <output data-current-url>{l.pathname}{l.search}{l.hash}</output>; };
+  fake = installFakeFetch(ok);
+  const { container } = render(<MemoryRouter initialEntries={["/system/features?market=KR#saveticker"]}><App /><Location /></MemoryRouter>);
+  await flush();
+  expect(container.querySelector("[data-current-url]")?.textContent).toBe("/system/admin?market=KR#saveticker");
+  expect(container.querySelector("#saveticker")).not.toBeNull();
+  expect(container.querySelector("h1")?.textContent).toContain("연결·설정");
+});
+
 test("본문 바로가기는 키보드 초점을 주 콘텐츠로 이동한다", async () => {
   fake = installFakeFetch(ok);
   const { container } = app();
@@ -48,6 +58,21 @@ afterEach(() => {
   fake = null;
   noteServerTime(new Date(0).toISOString(), 0);
   vi.useRealTimers();
+});
+
+test("주 메뉴는 목적을 드러내는 다섯 화면이고 설정·운영은 기존 주소로 이동한다", async () => {
+  fake = installFakeFetch(ok);
+  const { container } = app("/system/jobs");
+  await flush();
+  const main = Array.from(container.querySelectorAll<HTMLAnchorElement>("[data-nav-screen]"));
+  expect(main.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["오늘", "/"], ["계좌·보유", "/accounts"], ["성과", "/performance"], ["시장 데이터", "/data"], ["설정·운영", "/system"],
+  ]);
+  const sub = Array.from(container.querySelectorAll<HTMLAnchorElement>("[data-nav-item]"));
+  expect(sub.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["운영 상태", "/system"], ["자동 작업", "/system/jobs"], ["매매 정책", "/system/features"], ["연결·설정", "/system/admin"],
+  ]);
+  expect(sub[1].getAttribute("aria-current")).toBe("page");
 });
 
 test("상태 띠는 health level 과 첫 사유, 사용률 칩 2개를 그린다", async () => {
@@ -195,7 +220,7 @@ describe("왼쪽 메뉴 2단", () => {
     expect(b.container.querySelector("#runs")).not.toBeNull();
     expect(b.container.querySelector("#health")).toBeNull();
     // 페이지 탭(좁은 폭용)도 4개
-    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["상태", "잡", "기능", "관리"]);
+    expect(Array.from(b.container.querySelectorAll(".page-tabs a")).map((e) => e.textContent)).toEqual(["운영 상태", "자동 작업", "매매 정책", "연결·설정"]);
   });
 
   test("하위 목차를 누르면 그 항목이 현재가 되고, 같은 항목을 다시 눌러도 스크롤한다", async () => {
@@ -516,3 +541,16 @@ test("아이콘 14종은 currentColor 인라인 SVG 이고 보조기기에서 �
     expect(svg.childElementCount).toBeGreaterThan(0);
   }
 });
+
+ test.each([
+  ["/accounts", "계좌별 보유·주문·위험을 확인합니다.", "매수 정책 확인", "/system/features#regime"],
+  ["/performance", "계좌·시장·기간을 고른 뒤 수익과 위험을 함께 확인합니다.", "보유·주문 확인", "/accounts"],
+  ["/data/news?market=US", "수집된 뉴스·공시를 확인하고 종목별 판단 근거를 살펴봅니다.", "시장 시세·차트", "/data?market=US"],
+ ])("%s 에서 목적과 다음 확인 위치를 안내한다", async (path, description, label, href) => {
+  fake = installFakeFetch({ ...ok, "GET /api/accounts": fixtureAccounts() });
+  const { container } = app(path);
+  await flush();
+  expect(container.querySelector("main .screen-description")?.textContent).toContain(description);
+  const link = Array.from(container.querySelectorAll<HTMLAnchorElement>("main .screen-actions a")).find((a) => a.textContent === label);
+  expect(link?.getAttribute("href")).toBe(href);
+ });

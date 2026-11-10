@@ -23,6 +23,7 @@ import {
   type FoStatus,
   type FoSummary,
   type Overview,
+  type OverviewGroup,
 } from "./accounts.ts";
 
 /** 계좌 표 — 첫 열의 id 가 계좌별 화면 링크(data-account-row). 숫자 열은 오른쪽 정렬·tabular. */
@@ -43,7 +44,7 @@ const ACCOUNT_COLUMNS: Column<AccountCard>[] = [
     render: (c) => (
       <>
         {c.mode}
-        {c.paused ? <span className="account-mode-note"> (전체 일시정지로 새 매수 멈춤)</span> : null}
+        {c.paused ? <span className="account-mode-note"> (전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)</span> : null}
         {c.modeNote ? <span className="account-mode-note"> · {c.modeNote}</span> : null}
       </>
     ),
@@ -71,9 +72,16 @@ export function Accounts() {
   return (
     <div className="screen" data-screen="accounts">
       <h1 className="screen-title">계좌·보유</h1>
+      <div className="screen-intro">
+        <p className="screen-description">계좌별 보유·주문·위험을 확인합니다. 계좌를 선택하면 해당 계좌의 상세 기록으로 이동합니다.</p>
+        <div className="screen-actions">
+          <Link to="/system/features#regime">매수 정책 확인</Link>
+          <Link to="/performance">계좌별 성과 비교</Link>
+        </div>
+      </div>
 
       <section id="overview" className="screen-section">
-        <h2>통합</h2>
+        <h2>계좌별 자산 현황</h2>
         {overview.error ? (
           <Empty title="합계를 불러오지 못했습니다">{overview.error.message}</Empty>
         ) : overview.data ? (
@@ -150,7 +158,7 @@ function FoAccountCard({ account: a, status }: { account: Account; status?: FoSt
     >
       <p className="account-mode">
         모드 {MODE_LABEL[a.mode] ?? a.mode}
-        {a.paused ? <span className="account-mode-note"> (전체 일시정지로 새 매수 멈춤)</span> : null}
+        {a.paused ? <span className="account-mode-note"> (전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)</span> : null}
         {a.mode_note ? <span className="account-mode-note"> · {a.mode_note}</span> : null}
       </p>
       <Stats cols={2} items={items} />
@@ -161,6 +169,24 @@ function FoAccountCard({ account: a, status }: { account: Account; status?: FoSt
 
 /** 합계 띠 — 한 묶음을 1px 선으로 세 칸(원화·달러·참고). 칸마다 범위(모의 n · 실전 n), 참고 칸은 환율·환산 합계(합계 계산에 쓰지 않음). */
 function TotalsRow({ data, accounts }: { data: Overview; accounts: Account[] | null }) {
+  let groups = Object.entries(data.by_env ?? {}) as [string, OverviewGroup][];
+  if (!data.by_env) {
+    const ids = [...new Set([...data.krw.accounts, ...data.usd.accounts])];
+    const envs = new Set(ids.map((id) => accounts?.find((a) => a.id === id)?.env));
+    if (envs.size > 1 || envs.has(undefined)) {
+      return <Empty title="환경별 합계를 확인할 수 없습니다. 아래 계좌별 자산을 확인하세요." />;
+    }
+    groups = [[envs.values().next().value ?? "", data]];
+  }
+  return <div className="overview-groups">{groups.map(([env, group]) => (
+    <div key={env} data-overview-env={env} className="overview-group">
+      <h3>{env === "paper" ? "모의 계좌" : env === "real" ? "실전 계좌" : "계좌 합계"}</h3>
+      <CurrencyTotals data={group} accounts={accounts} />
+    </div>
+  ))}</div>;
+}
+
+function CurrencyTotals({ data, accounts }: { data: OverviewGroup; accounts: Account[] | null }) {
   const t = totals(data, accounts);
   return (
     <div className="kpi-strip">
@@ -216,7 +242,7 @@ function PauseControl({ paused, confirmId, ready, onDone }: { paused: boolean; c
       <Confirm
         open={open}
         title={paused ? "전체 재개" : "전체 일시정지"}
-        body={paused ? "모든 계좌의 자동 매매를 다시 켭니다." : "모든 계좌의 새 매수·진입과 승인을 멈춥니다(손절·청산은 계속)."}
+        body={paused ? "모든 계좌의 자동 매매를 다시 켭니다." : "모든 계좌의 신규 진입·판단 매도·승인 실행을 멈춥니다. 손절 등 위험 청산은 계속됩니다."}
         live={paused && confirmId ? { accountId: confirmId } : undefined}
         onConfirm={(confirm) => void submit(confirm)}
         onClose={() => setOpen(false)}

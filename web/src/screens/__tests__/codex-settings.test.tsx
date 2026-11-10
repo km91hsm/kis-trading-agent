@@ -1,11 +1,10 @@
 import { act } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { SettingsPanel } from "../system/SettingsPanel";
+import { CodexDebate } from "../system/CodexDebate";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
 import { setEventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
-import { fixtureSettings } from "../../test/fixtures/system";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | undefined;
@@ -27,14 +26,13 @@ const settings = (enabled = false) => ({
 test("Codex participation can be enabled and disabled, persists server result, and explains next research scope", async () => {
   let enabled = false;
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
     "GET /api/settings/codex-debate": () => settings(enabled),
     "PATCH /api/settings/codex-debate": (_url: URL, init?: RequestInit) => {
       enabled = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
       return settings(enabled);
     },
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<CodexDebate />);
   await flush();
   const toggle = () => container.querySelector('[role="switch"][aria-label="Codex 토론 참여"]') as HTMLButtonElement;
   expect(toggle()).not.toBeNull();
@@ -56,10 +54,9 @@ test("Codex participation can be enabled and disabled, persists server result, a
 
 test("shows both lanes when cross debate is on", async () => {
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
     "GET /api/settings/codex-debate": { ...settings(true), lanes: [{ lane: "a", bull: "claude", bear: "codex" }, { lane: "b", bull: "codex", bear: "claude" }], version: 2 },
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<CodexDebate />);
   await flush();
   expect(container.textContent).toContain("1판 Claude 강세 · Codex 약세");
   expect(container.textContent).toContain("2판 Codex 강세 · Claude 약세");
@@ -69,11 +66,10 @@ test("shows both lanes when cross debate is on", async () => {
 
 test("Codex failed save preserves disabled state and displays error without claiming success", async () => {
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
     "GET /api/settings/codex-debate": settings(),
     "PATCH /api/settings/codex-debate": () => new Response(JSON.stringify({ detail: "설정을 저장하지 못했습니다" }), { status: 500 }),
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<CodexDebate />);
   await flush();
   const toggle = container.querySelector('[role="switch"]') as HTMLButtonElement;
   expect(toggle).not.toBeNull();

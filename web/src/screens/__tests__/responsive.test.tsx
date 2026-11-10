@@ -73,6 +73,34 @@ function setWidth(w: number) {
 }
 
 describe("반응형 규칙", () => {
+  test("본문은 16px·보조 14px이며 모든 폭의 기본 조작 영역이 44px 이상이다", () => {
+    const tokens = css("tokens.css");
+    expect(tokens).toMatch(/--text-md:\s*16px/);
+    expect(tokens).toMatch(/--text-sm:\s*14px/);
+    const targets = [...tokens.matchAll(/--touch:\s*(\d+)px/g)].map((m) => Number(m[1]));
+    expect(targets.length).toBeGreaterThan(0);
+    expect(targets.every((v) => v >= 44)).toBe(true);
+    expect(rulesFor(css("shell.css"), /^\.screen$/).join(";")).toMatch(/max-width:\s*1440px/);
+    expect(rulesFor(css("screens.css"), /^\.page-tabs$/).join(";")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rulesFor(css("screens.css"), /^\.page-tabs a$/).join(";")).toMatch(/min-height:\s*var\(--touch\)/);
+  });
+
+  test("목록 이동 링크는 44px 영역이며 확인창은 작은 화면 안에서 끝까지 스크롤할 수 있다", () => {
+    const comp = css("components.css");
+    // 표·행 카드·운영 설명의 링크도 공통 규칙을 받아 클릭 영역이 글자 높이에 그치지 않는다.
+    const link = rulesFor(css("base.css"), /^:where\(a\[href\]\)$/).join(";");
+    expect(link).toMatch(/min-height:\s*var\(--touch\)/);
+    expect(link).toMatch(/min-width:\s*var\(--touch\)/);
+    expect(link).toMatch(/display:\s*inline-flex/);
+    const dialog = rulesFor(comp, /^\.confirm$/).join(";");
+    expect(dialog).toMatch(/max-height:[^;]*100dvh/);
+    expect(dialog).toMatch(/overflow-y:\s*auto/);
+    expect(dialog).toMatch(/overscroll-behavior:\s*contain/);
+    const backdrop = rulesFor(comp, /^\.confirm-backdrop$/).join(";");
+    expect(backdrop).toContain("safe-area-inset-top");
+    expect(backdrop).toContain("safe-area-inset-bottom");
+  });
+
   test("components.css 는 <1024px 에서 table 을 숨기고 행 카드를 쓰며, 전역 overflow-x 는 hidden 이 아니다(열 숨김 금지·가로 스크롤 허용)", () => {
     const comp = css("components.css");
     // 넘치는 표는 가로 스크롤(열을 숨기지 않는다), 행 카드는 좁은 폭에서도 줄어든다.

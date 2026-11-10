@@ -116,6 +116,10 @@ class RegimePort(Protocol):
         """오늘의 시장 판단(없으면 None)."""
         ...
 
+    def risk_policy(self, conn: sqlite3.Connection, market: str, now: datetime) -> dict:
+        """현물 매수 정책과 실효 한도. AI 판단 원본과 독립적이다."""
+        ...
+
     def clamp_weight(self, view: dict | None) -> float:
         """시장 판단으로 정한 비중 상한(clamp) 값."""
         ...

@@ -246,20 +246,24 @@
   border-radius: var(--radius);
 }
 .nav-screen[aria-current="page"] {
-  color: var(--fg);
-  background: var(--bg-sunken);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
   font-weight: 600;
 }
 
 .nav-item {
-  display: block;
-  padding: 5px var(--space-3) 5px calc(var(--space-3) + 1.25em + var(--space-2));
+  display: flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) + 1.25em + var(--space-2));
   border-radius: var(--radius);
   color: var(--fg-muted);
   font-size: var(--text-sm);
 }
+.nav-item[aria-current="page"],
 .nav-item[aria-current="location"] {
   color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
   font-weight: 600;
 }
 .nav-back { color: var(--fg); }
@@ -349,7 +353,8 @@
     gap: 0;
     height: 56px;
     padding: 0;
-    font-size: 0.75rem;
+    font-size: 12px;
+    line-height: 1.3;
   }
   .nav-items,
   .usage-chip[data-usage-chip="7d"],
@@ -378,29 +383,37 @@
   .clock-phase { display: none; }
 }
 
-/* ── 빈 화면 자리 ── */
+/* 본문은 넓은 화면에서도 읽기 길이와 중심을 유지한다. */
+.screen {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+}
+
+/* ── 화면 제목과 구획 ── */
 .screen-title {
   font-size: var(--text-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
+  line-height: 1.3;
 }
 .screen-section {
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-8);
   scroll-margin-top: calc(var(--bar) + var(--space-2));
 }
 .screen-section h2 {
-  font-size: var(--text-md);
-  font-weight: 600;
-  margin-bottom: var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  margin-bottom: var(--space-3);
 }
-/* 빈 상태 — 한 줄(약 38px). 빈 칸이 화면을 차지하지 않게 */
+/* 빈 상태 — 최소 44px로 로딩·자료 없음·오류를 구분한다. */
 .empty {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-2);
-  min-height: 38px;
+  min-height: var(--touch);
   padding: var(--space-2) var(--space-3);
   color: var(--fg-muted);
   font-size: var(--text-sm);

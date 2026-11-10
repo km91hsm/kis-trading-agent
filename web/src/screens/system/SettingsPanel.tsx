@@ -5,8 +5,7 @@ import { GLOSSARY } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 import { CodexDebate } from "./CodexDebate";
-import { FoSwitch } from "./FoSwitch";
-import { ScalpSwitch } from "./ScalpSwitch";
+import { Link } from "react-router-dom";
 
 type SettingsResp = {
   markets: string[];
@@ -31,9 +30,9 @@ export function SettingsPanel() {
       ? (s.risk[key] as number).toLocaleString("ko-KR", { style: "percent", maximumSignificantDigits: 15 }) : "미기록";
     return (
       <>
-        <CodexDebate />
-        <ScalpSwitch />
-        <FoSwitch />
+        <p className="perf-note">매매 조작은 적용 상태를 확인할 수 있는 정책 화면에 모았습니다. 아래 한도는 설정된 기본값이며 시장·계좌별 제한을 함께 따릅니다.</p>
+        <nav className="system-shortcuts" aria-label="매매 설정 바로가기"><Link to="/system/features#regime">현물 매수 정책</Link><Link to="/system/features#scalp">단타 설정·상태</Link><Link to="/system/features#fo">파생 설정·상태</Link><Link to="/accounts">계좌 모드·일시정지</Link></nav>
+        <details className="sys-details"><summary>AI 토론 참여 설정</summary><CodexDebate /></details>
         <h3 className="perf-sub">AI 사용 한도</h3>
         <Stats
           cols={4}

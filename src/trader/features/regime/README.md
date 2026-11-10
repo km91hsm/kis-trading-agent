@@ -34,6 +34,14 @@
 
 - `GET /system/regime?market=`(옛 `system.regime_status`, 토큰 없음): 헤지 설정 요약(enabled·max/min_weight_pct·leverage·bear_min_signals·market_session·instruments) + `regime.summary`(시장별 state·signals·values·오늘 시장 판단 `view`·적중률 `scorecard`, 오늘 = `deps.now()` 의 KST 날짜) + 킬스위치 `{on, reason, source, accounts, at}`(옛 응답에 없던 것). market 을 주면 그 시장만(운영하지 않는 시장은 400). nav `system/regime`(국면). SSE 키는 evaluation 의 `market_views` 가 시장 판단 변화를 알린다(regime 자체 키 없음).
 
+## 현물 매수 정책
+
+- `GET /settings/risk-policy`: 시장별 정량 국면·AI 판단 원본·수동 정책·실효 한도·대상 계좌·최근 이력. 기록 없는 국면은 `unknown`으로 표시한다. 계좌별 일시정지·손실·킬스위치 등 추가 제한은 집행 시 적용한다.
+- `PATCH /settings/risk-policy/{market}`: `mode`(`AUTO|RISK_ON|RISK_OFF`)·필수 `reason`·실전 현물 계좌별 `confirmations` 사전. WRITE 토큰·동일 출처 및 해당 시장의 모든 실전 현물 계좌 id 재입력을 검증한 뒤 `control.risk_policy:<market>`와 `control_log`를 한 트랜잭션으로 쓴다. SSE는 기존 `control`을 사용한다.
+- 수동 정책은 해당 시장 운영일에만 유효하다. KR은 KST, US는 현지 날짜(run_date_for) 기준 다음 자정에 만료하고 조회/판정에서 쓰기 없이 AUTO로 돌아간다. KST 자정을 넘긴 US 장에도 동일 정책을 유지한다.
+- RISK_ON은 일반 현물 BUY/ADD를 종목당 최대 10%·2종목 및 기존 더 작은 한도에서 허용한다. RISK_OFF는 일반 BUY/ADD를 막는다. 헤지·현금 운용·위험 청산·단타·파생은 이 수동 정책 대상이 아니다.
+- `ports.risk_policy`를 분석 입력·일반 현물 게이트·승인 재검사가 공유한다. 승인 시 현재 국면·정책 및 보유·미체결·승인 예약을 합산해 비중/종목수 상한을 재검사한다. AI `view_today` 원본과 확신도는 변경하지 않는다. 저장만으로 과거 HOLD를 재실행하지 않는다.
+
 ## 공개면 (`api.py`)
 
 `HedgeCfg`·`HedgeInstrument`·`BlackoutCfg`·`load`(국면 플래그)·`core_count`·`killswitch_reason`·`blackout_reason`. 시장 세션 산출은 레인이 `ports["regime"]` 로 받는다. fo 레인(M10)이 쓰는 포트 메서드: `load(conn, market)`(저장된 국면 레코드 — `state`)·`view_today(conn, market, today)`(오늘 시장 뷰 — `context.market_view`)·`hedge_tickers(market)`(현물 헤지 종목 — 헤지 보유 읽기)·`killswitch_reason(conn, account_id)`(킬스위치 사유 — 게이트·엔진의 진입 회수).

@@ -3,6 +3,7 @@
 // 파생 성적표 — fo 계좌가 없으면 hidden). 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다.
 // 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목), 절마다 로딩·오류를 따로 보인다.
 import { useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Empty } from "../../components/Empty";
 import { PageTabs } from "../../components/PageTabs";
 import { Stats } from "../../components/Stats";
@@ -105,6 +106,13 @@ export function Performance({ page = "performance" }: { page?: PerformancePage }
   return (
     <div className="screen" data-screen="performance" data-page={page}>
       <h1 className="screen-title">{page === "performance" ? "성과" : `성과 · ${pageLabel}`}</h1>
+      <div className="screen-intro">
+        <p className="screen-description">{page === "memory" ? "과거 판단의 복기 메모를 종목별로 찾아 다음 분석에 참고합니다." : page === "analysis" ? "선택한 계좌·시장의 보정과 비교 분석을 확인합니다. 표본이 부족한 지표는 집계를 기다립니다." : "계좌·시장·기간을 고른 뒤 수익과 위험을 함께 확인합니다. 비교 표도 계좌와 시장을 구분해 보여 줍니다."}</p>
+        <div className="screen-actions">
+          <Link to="/accounts">보유·주문 확인</Link>
+          <Link to="/system/features#regime">현재 매수 정책 확인</Link>
+        </div>
+      </div>
       <PageTabs screen="performance" label="성과 페이지" />
       {/* 섀도·RL 은 계좌·시장에 묶이는데 개요 절(필터 줄)이 다른 페이지에 있으면 고를 수 없다 → 그 페이지 머리에 같은 필터(기간 없이) */}
       {!on("performance-overview") && (on("shadow") || on("rl")) && accounts.data ? (

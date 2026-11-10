@@ -5,7 +5,8 @@ import { fmtDate, fmtMoney, fmtUsd } from "../../lib/format";
 type Amount = string | number | null;
 export type MarketTotal = { nav: Amount; day_pnl: Amount; accounts: string[] };
 export type Fx = { pair: string; rate: Amount; as_of: string | null; converted_total: Amount };
-export type Overview = { krw: MarketTotal; usd: MarketTotal; fx: Fx | null; paused: boolean; at: string };
+export type OverviewGroup = { krw: MarketTotal; usd: MarketTotal; fx: Fx | null; paused: boolean; at: string };
+export type Overview = OverviewGroup & { by_env?: Partial<Record<"paper" | "real", OverviewGroup>> };
 export type Account = {
   id: string;
   env: string;
@@ -110,7 +111,7 @@ function asOfText(asOf: string | null): string {
   return Number.isNaN(new Date(asOf).getTime()) && !/^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : fmtDate(asOf);
 }
 
-export function totals(o: Overview, accounts?: Account[] | null): Totals {
+export function totals(o: OverviewGroup, accounts?: Account[] | null): Totals {
   const krw = (v: Amount) => moneyUnit(v, "KRW");
   const usd = (v: Amount) => moneyUnit(v, "USD");
   return {

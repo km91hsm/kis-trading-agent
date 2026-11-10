@@ -3,7 +3,7 @@
 // 지표·모델 `/data/features`(정렬 표·이력·활성 모델·잡 버튼). 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다.
 // 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목), 절마다 로딩·오류를 따로 보인다.
 import { useCallback, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { PageTabs } from "../../components/PageTabs";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
@@ -88,8 +88,15 @@ export function Data({ page = "quotes" }: { page?: DataPage }) {
   const ids = NAV.data.items.filter((i) => i.page === page).map((i) => i.id as SectionId);
   return (
     <div className="screen" data-screen="data" data-page={page}>
-      <h1 className="screen-title">데이터 · {pageLabel}</h1>
-      <PageTabs screen="data" label="데이터 페이지" search={market === "US" ? "?market=US" : ""} />
+      <h1 className="screen-title">시장 데이터 · {pageLabel}</h1>
+      <div className="screen-intro">
+        <p className="screen-description">{page === "news" ? "수집된 뉴스·공시를 확인하고 종목별 판단 근거를 살펴봅니다." : page === "themes" ? "관심 테마와 감시 종목을 살펴보고 다음 분석 대상을 관리합니다." : page === "features" ? "분석에 쓰는 지표와 모델의 저장 자료·학습 상태를 확인합니다." : "시장을 고른 뒤 주요 지표와 거래 동향을 살펴보고 종목 차트로 이어갑니다."}</p>
+        <div className="screen-actions">
+          {page !== "quotes" ? <Link to={market === "US" ? "/data?market=US" : "/data"}>시장 시세·차트</Link> : <Link to={market === "US" ? "/data/news?market=US" : "/data/news"}>뉴스·공시 확인</Link>}
+          <Link to="/system/admin#saveticker">수집 상태 확인</Link>
+        </div>
+      </div>
+      <PageTabs screen="data" label="시장 데이터 페이지" search={market === "US" ? "?market=US" : ""} />
       <MarketSegment />
       {ids.map((id) => (
         <section key={id} id={id} className="screen-section">

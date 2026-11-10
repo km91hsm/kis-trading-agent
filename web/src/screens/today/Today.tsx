@@ -21,6 +21,9 @@ import { NoticesFeed } from "./NoticesFeed";
 import { OrdersTimeline } from "./OrdersTimeline";
 import { Pipeline } from "./Pipeline";
 import { OperationsSummary } from "./OperationsSummary";
+import { Attention } from "./Attention";
+import { RiskPolicySummary } from "../system/RiskPolicy.tsx";
+import "./user-flow.css";
 import { RiskChecks } from "./RiskChecks";
 import type { MarketToday, RiskCheck } from "./morning.ts";
 import {
@@ -119,14 +122,17 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
       </header>
       <PageTabs screen="today" label="오늘 페이지" search={search} />
       <PauseBanner />
-
-      <OperationsSummary historical={date !== today} />
+      <p className="screen-description">시장별 매수 제한과 확인할 항목을 먼저 살펴보고, 오늘의 판단과 주문 진행을 확인하세요.</p>
+      <RiskPolicySummary historical={date !== today} />
+      <Attention historical={date !== today} />
 
       <section id="approvals" className="screen-section" hidden={!pending.length && !approvals.error}>
         <h2>승인 대기 {pending.length}건</h2>
         {approvals.error ? <Empty title="승인 대기를 불러오지 못했습니다">{approvals.error.message}</Empty> : null}
         <ApprovalsBlock items={pending} accounts={accounts.data ?? []} onDone={approvals.reload} />
       </section>
+
+      <OperationsSummary historical={date !== today} />
 
       <div className="today-summary" aria-label="오늘 요약">
         <Stats
@@ -166,7 +172,7 @@ export function Today({ page = "today" }: { page?: TodayPage }) {
 
       <section id="pipeline" className="screen-section">
         <h2>아침 파이프라인</h2>
-        <Pipeline kr={pipeKr} us={pipeUs} />
+        <details className="workflow-details"><summary>시장별 발굴·분석 진행 내역 보기</summary><Pipeline kr={pipeKr} us={pipeUs} /></details>
       </section>
 
       <section id="decisions" className="screen-section">

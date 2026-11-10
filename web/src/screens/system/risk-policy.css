@@ -1,0 +1,67 @@
+.risk-policy-detail, .risk-policy-summary { color: var(--fg); font-size: var(--text-md); }
+.risk-policy-detail p, .risk-policy-summary p { margin: 0; line-height: 1.65; overflow-wrap: anywhere; }
+.risk-policy-heading, .risk-policy-market-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.risk-policy-heading { margin-bottom: var(--space-4); }
+.risk-policy-heading h2, .risk-policy-market h3, .risk-policy-summary h3 { margin: 0; font-size: var(--text-xl); letter-spacing: -.025em; }
+.risk-policy-heading a { min-height: 44px; display: inline-flex; align-items: center; font-weight: 600; white-space: nowrap; }
+.risk-policy-heading p, .risk-policy-note, .risk-policy-source { color: var(--fg-muted); font-size: var(--text-sm); }
+.risk-policy-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.risk-policy-market, .risk-policy-summary-card { min-width: 0; border: 1px solid var(--line); background: var(--bg-elev); border-radius: var(--radius-card); padding: var(--space-6); }
+.risk-policy-market + .risk-policy-market { margin-top: var(--space-6); }
+.risk-policy-intro { margin-bottom: var(--space-6) !important; max-width: 80ch; }
+.risk-policy-market-heading { margin-bottom: var(--space-4); }
+.risk-policy-market h3 span, .risk-policy-summary h3 span { font-size: var(--text-sm); color: var(--fg-muted); margin-left: var(--space-2); font-weight: 500; }
+.risk-policy-actual { padding: var(--space-4); background: var(--bg-sunken); border-radius: var(--radius); border-left: 3px solid var(--fg-muted); display: grid; gap: var(--space-2); }
+.risk-policy-actual[data-entry="blocked"] { border-left-color: var(--fail); }
+.risk-policy-actual[data-entry="limited"] { border-left-color: var(--warn); }
+.risk-policy-actual[data-entry="standard"] { border-left-color: var(--accent); }
+.risk-policy-eyebrow { color: var(--fg-muted); font-size: var(--text-sm); }
+.risk-policy-entry { font-size: var(--text-xl); letter-spacing: -.02em; }
+.risk-policy-limits { font-weight: 650; }
+.risk-policy-summary-card h3 { margin-bottom: var(--space-4); font-size: var(--text-lg); }
+.risk-policy-summary-card > .risk-policy-note { margin-top: var(--space-3); }
+.risk-policy-meta, .risk-policy-signals, .risk-policy-values { margin: 0; }
+.risk-policy-meta { padding: var(--space-4) 0; display: grid; gap: var(--space-2); }
+.risk-policy-meta > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: var(--space-3); }
+.risk-policy-meta dt, .risk-policy-signals dt, .risk-policy-values dt { color: var(--fg-muted); }
+.risk-policy-meta dd, .risk-policy-signals dd, .risk-policy-values dd { margin: 0; overflow-wrap: anywhere; }
+.risk-policy-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-block: 1px solid var(--line); gap: var(--space-6); padding: var(--space-6) 0; }
+.risk-policy-detail h4 { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
+.risk-policy-evidence section > p + p { margin-top: var(--space-2); }
+.risk-policy-signals { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
+.risk-policy-signals > div, .risk-policy-values > div { display: flex; justify-content: space-between; gap: var(--space-3); }
+.risk-policy-signals dd[data-signal="risk"] { color: var(--fail); font-weight: 600; }
+.risk-policy-values { display: grid; gap: var(--space-2); padding: var(--space-2) 0; }
+.risk-policy-detail summary { min-height: 44px; padding-block: var(--space-3); cursor: pointer; color: var(--fg); font-weight: 600; }
+.risk-policy-editor { padding-top: var(--space-6); }
+.risk-policy-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.risk-policy-choice { appearance: none; border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3); min-height: 80px; background: var(--bg-elev); color: var(--fg); font: inherit; text-align: left; cursor: pointer; display: grid; gap: var(--space-2); }
+.risk-policy-choice strong { font-weight: 600; }
+.risk-policy-choice span { color: var(--fg-muted); font-size: var(--text-sm); line-height: 1.5; }
+.risk-policy-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--bg-sunken); }
+.risk-policy-choice:disabled { opacity: .65; cursor: wait; }
+.risk-policy-form { margin-top: var(--space-4); display: grid; gap: var(--space-3); }
+.risk-policy-form label { font-weight: 600; }
+.risk-policy-form label span { color: var(--fg-muted); font-weight: 400; }
+.risk-policy-form textarea, .risk-policy-form input { min-height: 44px; width: 100%; max-width: 100%; font: inherit; color: var(--fg); background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3); }
+.risk-policy-form textarea { resize: vertical; }
+.risk-policy-form fieldset { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-4); }
+.risk-policy-form legend { padding-inline: var(--space-2); font-weight: 600; }
+.risk-policy-confirm { margin-top: var(--space-3); display: grid; gap: var(--space-2); }
+.risk-policy-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.risk-policy-actions .btn, .risk-policy-empty .btn { min-height: 44px; }
+.risk-policy-error, .risk-policy-success { margin-top: var(--space-3) !important; padding: var(--space-3); border-radius: var(--radius); }
+.risk-policy-error { color: var(--fail); background: var(--fail-bg); }
+.risk-policy-success { color: var(--ok); background: var(--ok-bg); }
+.risk-policy-history { margin-top: var(--space-4); border-top: 1px solid var(--line); }
+.risk-policy-history ol { margin: 0; padding-left: var(--space-6); }
+.risk-policy-history li { padding-bottom: var(--space-4); }
+.risk-policy-empty { padding: var(--space-4); background: var(--bg-sunken); border-radius: var(--radius); }
+.risk-policy-empty .btn { margin-top: var(--space-3); }
+.risk-policy-detail :is(button, input, textarea, summary):focus-visible, .risk-policy-summary a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .risk-policy-summary-grid, .risk-policy-evidence, .risk-policy-choices { grid-template-columns: 1fr; }
+  .risk-policy-market, .risk-policy-summary-card { padding: var(--space-4); }
+  .risk-policy-choice { min-height: 72px; }
+  .risk-policy-meta > div { grid-template-columns: 80px minmax(0, 1fr); }
+}

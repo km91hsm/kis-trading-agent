@@ -49,7 +49,7 @@ afterEach(() => {
 
 // 절 순서 = generated nav.ts 의 system 항목 순서(지금 볼 것 → 기능 → 관리)
 // 페이지 순(상태 → 잡 → 기능 → 관리), 페이지 안은 nav.ts order 순
-const SECTIONS = ["health", "daemon", "usage", "jobs", "runs", "regime", "saveticker", "scalp", "fo", "token", "secrets", "settings", "control-log"];
+const SECTIONS = ["health", "daemon", "usage", "jobs", "runs", "regime", "scalp", "fo", "saveticker", "token", "secrets", "settings", "control-log"];
 
 type Routes = Parameters<typeof installFakeFetch>[0];
 const forbidden = () => new Response(JSON.stringify({ detail: "이 PC 에서 직접 연 화면에서만 할 수 있습니다" }), { status: 403 });
@@ -248,7 +248,7 @@ describe("시스템 화면", () => {
   test("헬스 머리: 전체 일시정지 중 — 경로·재개 링크", async () => {
     await mount(routes({ "GET /api/system/pause": { paused: true, at: "2026-11-09T09:00:00+09:00", by: "tray" } }));
     const h = section("health");
-    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 새 매수·진입과 승인을 멈춤 · 손절·청산은 계속");
+    expect(h.textContent).toContain("자동매매: 전체 일시정지 중 — 신규 진입·판단 매도·승인은 중지 · 위험 청산은 계속");
     expect(h.textContent).toContain("▲ 메뉴");
     expect(Array.from(h.querySelectorAll("a")).find((a) => a.textContent === "재개")?.getAttribute("href")).toBe("/accounts");
   });
@@ -294,8 +294,8 @@ describe("시스템 화면", () => {
     const st = section("settings");
     expect(st.textContent).toContain("Tailscale 호스트");
     // 설정은 세 묶음(AI 사용 한도 · 거래 리스크 · 접속 환경), 역할별 모델은 details 안 표(역할은 한글, role.* 원문 없음)
-    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "단타", "파생", "AI 사용 한도", "거래 리스크", "접속 환경"]);
-    expect(st.querySelector("details summary")?.textContent).toContain("역할별 모델 2");
+    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "AI 사용 한도", "거래 리스크", "접속 환경"]);
+    expect(Array.from(st.querySelectorAll("details summary")).some((e) => e.textContent?.includes("역할별 모델 2"))).toBe(true);
     const models = st.querySelectorAll("details table tbody tr");
     expect(models).toHaveLength(2);
     expect(models[0].textContent).toContain("sonnet");
@@ -593,9 +593,9 @@ describe("시스템 화면", () => {
     );
     await flush();
     await flush();
-    expect(container.querySelector("h1")?.textContent).toBe("시스템 · 잡");
+    expect(container.querySelector("h1")?.textContent).toBe("설정·운영 · 자동 작업");
     expect(Array.from(container.querySelectorAll(".page-tabs a")).map((e) => e.getAttribute("href"))).toEqual(["/system", "/system/jobs", "/system/features", "/system/admin"]);
-    expect(container.querySelector('.page-tabs a[aria-current="page"]')?.textContent).toBe("잡");
+    expect(container.querySelector('.page-tabs a[aria-current="page"]')?.textContent).toBe("자동 작업");
     expect(Array.from(container.querySelectorAll("section.screen-section[id]")).map((e) => e.id)).toEqual(["jobs", "runs"]);
     const r = section("runs");
     expect(r.querySelectorAll("table tbody tr")).toHaveLength(30);

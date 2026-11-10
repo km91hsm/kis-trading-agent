@@ -59,14 +59,14 @@ const bodyOf = (c: { init?: RequestInit }) => JSON.parse(String(c.init!.body));
 const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement;
 
 describe("계좌·보유 통합 화면", () => {
-  test("paused 면 모드 옆 「(전체 일시정지로 새 매수 멈춤)」, 아니면 없음", async () => {
+  test("paused 면 모드 옆 「(전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)」, 아니면 없음", async () => {
     await mount(routes({ "GET /api/accounts": fixtureAccounts().map((a) => ({ ...a, paused: true })) }));
-    expect(document.body.textContent).toContain("(전체 일시정지로 새 매수 멈춤)");
+    expect(document.body.textContent).toContain("(전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)");
   });
 
-  test("paused 아니면 「(전체 일시정지로 새 매수 멈춤)」 없음", async () => {
+  test("paused 아니면 「(전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)」 없음", async () => {
     await mount(routes());
-    expect(document.body.textContent).not.toContain("전체 일시정지로 새 매수 멈춤");
+    expect(document.body.textContent).not.toContain("전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속");
   });
 
   test("섹션 컨테이너는 데이터 전에 있고, 합계·환율 줄을 그린다", async () => {
@@ -80,10 +80,10 @@ describe("계좌·보유 통합 화면", () => {
     expect(section("fo-positions")).not.toBeNull();
     await flush();
     const ov = section("overview");
-    expect(ov.textContent).toContain("13,000,000");
-    expect(ov.textContent).toContain("+75,000");
+    expect(ov.querySelector('[data-overview-env="paper"]')?.textContent).toContain("10,000,000");
+    expect(ov.querySelector('[data-overview-env="paper"]')?.textContent).toContain("+120,000");
     expect(ov.textContent).toContain("2,500.50");
-    expect(ov.textContent).toContain("적용 환율 USD/KRW 1,385.50 (11월 4일 종가) → 환산 합계 16,464,443");
+    expect(ov.textContent).toContain("적용 환율 USD/KRW 1,385.50 (11월 4일 종가) → 환산 합계 13,464,443");
   });
 
   test("fx 가 없으면 「환율 없음」", async () => {
@@ -182,7 +182,7 @@ describe("계좌·보유 통합 화면", () => {
   test("합계 띠는 원화·달러·참고(환율·환산 합계) 세 칸 한 묶음", async () => {
     const { container } = await mount(routes());
     const cells = Array.from(container.querySelectorAll("#overview .kpi-strip [data-kpi]"));
-    expect(cells.map((c) => c.getAttribute("data-kpi"))).toEqual(["krw", "usd", "fx"]);
+    expect(cells.map((c) => c.getAttribute("data-kpi"))).toEqual(["krw", "usd", "fx", "krw", "usd", "fx"]);
     expect(cells[0].textContent).toContain("원화 합계");
     expect(cells[1].textContent).toContain("달러 합계");
     expect(cells[2].textContent).toContain("환율");
@@ -221,11 +221,14 @@ describe("계좌·보유 통합 화면", () => {
     expect(fo.textContent).toContain("현금");
   });
 
-  test("합계 띠 칸마다 범위(모의 n · 실전 n), 값에 통화 단위", async () => {
+  test("환경별 합계 띠 칸마다 범위와 통화 단위를 표시한다", async () => {
     const { container } = await mount(routes());
     const cells = Array.from(container.querySelectorAll("#overview .kpi-strip [data-kpi]"));
-    expect(cells[0].textContent).toContain("모의 1 · 실전 1");
-    expect(cells[0].textContent).toContain("13,000,000원");
+    expect(cells[0].textContent).toContain("모의 1");
+    expect(cells[0].textContent).not.toContain("실전");
+    expect(cells[0].textContent).toContain("10,000,000원");
+    expect(cells[3].textContent).toContain("실전 1");
+    expect(cells[3].textContent).toContain("3,000,000원");
     expect(cells[1].textContent).toContain("모의 1");
     expect(cells[1].textContent).not.toContain("실전");
     expect(cells[1].textContent).toContain("$2,500.50");
@@ -276,3 +279,28 @@ describe("계좌·보유 통합 화면", () => {
     expect(ov.textContent).toContain("db locked");
   });
 });
+
+ test("모의·실전 합계와 환산값은 별도 묶음에만 보이고 혼합 합계는 표시하지 않는다", async () => {
+   const base = fixtureOverview();
+   await mount(routes({ "GET /api/accounts/overview": { ...base, by_env: {
+     paper: { ...base, krw: { nav: "10000000", day_pnl: "120000", accounts: ["paper-1"] }, fx: { ...base.fx, converted_total: "13464442.75" } },
+     real: { ...base, krw: { nav: "3000000", day_pnl: "-45000", accounts: ["real-1"] }, usd: { nav: null, day_pnl: null, accounts: [] }, fx: { ...base.fx, converted_total: "3000000" } },
+   } } }));
+   const paper = document.querySelector('[data-overview-env="paper"]')!;
+   const real = document.querySelector('[data-overview-env="real"]')!;
+   expect(paper?.textContent).toContain("모의 계좌");
+   expect(paper?.textContent).toContain("10,000,000원");
+   expect(paper?.textContent).not.toContain("3,000,000원");
+   expect(real?.textContent).toContain("실전 계좌");
+   expect(real?.textContent).toContain("3,000,000원");
+   expect(real?.textContent).not.toContain("$2,500.50");
+   expect(section("overview").querySelectorAll(".kpi-strip")).toHaveLength(2);
+   expect(Array.from(section("overview").querySelectorAll(".kpi-value")).map((e) => e.textContent)).not.toContain("13,000,000원");
+   expect(section("overview").textContent).not.toContain("16,464,443원");
+ });
+
+ test("이전 응답에서 모의·실전이 섞인 합계는 숨기고 계좌별 확인을 안내한다", async () => {
+   await mount(routes({ "GET /api/accounts/overview": { ...fixtureOverview(), by_env: undefined } }));
+   expect(section("overview").textContent).toContain("환경별 합계를 확인할 수 없습니다. 아래 계좌별 자산을 확인하세요.");
+   expect(section("overview").querySelector(".kpi-strip")).toBeNull();
+ });

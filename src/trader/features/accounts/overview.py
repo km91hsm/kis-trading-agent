@@ -143,19 +143,30 @@ def totals(
     paused: bool,
 ) -> dict:
     """`GET /accounts/overview`: KRW·USD 합계를 따로 두고, 환율이 있으면 원화 환산 합계를 더한다.
-    파생(fo) 계좌는 통화·의미가 달라 합산에서 뺀다."""
+    파생(fo) 계좌는 통화·의미가 달라 합산에서 뺀다. `by_env`는 모의·실전을 분리한다."""
     spot = [a for a in accounts if lane_of(settings, a) != "fo"]
-    krw = _market_total(conn, spot, "KR", now)
-    usd = _market_total(conn, spot, "US", now)
-    fx = None
     quote = fx_rate(settings, conn, FX_PAIR)
-    if quote is not None:
-        rate = Decimal(str(quote["rate"]))
-        total = Decimal(krw["nav"] or 0) + Decimal(usd["nav"] or 0) * rate
-        fx = {
-            "pair": quote.get("pair", FX_PAIR),
-            "rate": str(rate),
-            "as_of": quote.get("as_of"),
-            "converted_total": str(total.quantize(Decimal(1), rounding=ROUND_HALF_UP)),
-        }
-    return {"krw": krw, "usd": usd, "fx": fx, "paused": paused, "at": now.isoformat()}
+
+    def grouped(group: list[Account]) -> dict:
+        krw = _market_total(conn, group, "KR", now)
+        usd = _market_total(conn, group, "US", now)
+        fx = None
+        if quote is not None:
+            rate = Decimal(str(quote["rate"]))
+            total = Decimal(krw["nav"] or 0) + Decimal(usd["nav"] or 0) * rate
+            fx = {
+                "pair": quote.get("pair", FX_PAIR),
+                "rate": str(rate),
+                "as_of": quote.get("as_of"),
+                "converted_total": str(total.quantize(Decimal(1), rounding=ROUND_HALF_UP)),
+            }
+        return {"krw": krw, "usd": usd, "fx": fx, "paused": paused, "at": now.isoformat()}
+
+    # 이전 클라이언트의 최상위 키는 유지한다. 새 화면은 환경별 합계만 표시한다.
+    result = grouped(spot)
+    result["by_env"] = {
+        env: grouped([a for a in spot if a.env == env])
+        for env in ("paper", "real")
+        if any(a.env == env for a in spot)
+    }
+    return result
