@@ -28,14 +28,14 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
     st = read_status(ctx.state, ctx.now, list(ctx.jobs))
     if not st["alive"]:
         text = "데몬이 꺼져 있어요 (daemon.lock 없음·pid 사망)"
-        out.append(Item("jobs.daemon", "critical", text, link="/system"))
+        out.append(Item("jobs.daemon", "critical", text, link="/system#daemon"))
     elif st["stale"]:
         out.append(
             Item(
                 "jobs.stale",
                 "critical",
                 f"데몬이 살아 있지만 하트비트가 {int(st['age_s'] or 0) // 60}분 멈춤",
-                link="/system",
+                link="/system#daemon",
             )
         )
     missed = [j["id"] for j in st["jobs"] if j.get("last_status") == "missed"]
@@ -45,7 +45,7 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
                 "jobs.missed",
                 "warning",
                 f"놓친 잡 {len(missed)}건: {', '.join(missed[:4])}",
-                link="/system",
+                link="/system#daemon",
                 count=len(missed),
             )
         )
@@ -60,7 +60,7 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
                 f"후속 정상 실행 {counts['followed_by_success']}건 · "
                 f"종료 요청 중단 {counts['interrupted']}건"
                 " — 대상 범위 미확인 이력은 확인 필요에 포함, 현재 장애·원인 해결 여부는 별도 확인",
-                link="/system",
+                link="/system#jobs",
                 count=n,
             )
         )
@@ -77,11 +77,13 @@ def check_llm(ctx: OpsContext) -> list[Item]:
                 "llm.cap",
                 "warning",
                 f"오늘 세션 {n}/{cap} — 상한 도달, 남은 분석·재평가는 거부됨",
-                link="/system",
+                link="/system#usage",
             )
         )
     elif cap and n >= cap * LLM_CAP_WATCH:
-        out.append(Item("llm.cap", "watch", f"오늘 세션 {n}/{cap} — 상한 근접", link="/system"))
+        out.append(
+            Item("llm.cap", "watch", f"오늘 세션 {n}/{cap} — 상한 근접", link="/system#usage")
+        )
     # 구독 사용률 감속: soft 면 watch(새 분석 생략), hard 면 warning(세션 전부 중지)
     ok_new, why = usage.session_allowance(ctx.conn, ctx.settings, kind="analyze", now=ctx.now)
     if not ok_new:
@@ -91,7 +93,7 @@ def check_llm(ctx: OpsContext) -> list[Item]:
                 "llm.usage",
                 "watch" if ok_re else "warning",
                 why if ok_re else (why_re or why or "구독 사용률 감속"),
-                link="/system",
+                link="/system#usage",
             )
         )
     row = ctx.conn.execute(
@@ -106,13 +108,13 @@ def check_llm(ctx: OpsContext) -> list[Item]:
                 "llm.errors",
                 "critical",
                 f"24시간 세션 {total}건 중 {err}건 실패 — claude CLI·인증·네트워크 확인",
-                link="/system",
+                link="/system#usage",
                 count=err,
             )
         )
     elif err:
         text = f"24시간 세션 {total}건 중 {err}건 실패"
-        out.append(Item("llm.errors", "watch", text, link="/system", count=err))
+        out.append(Item("llm.errors", "watch", text, link="/system#usage", count=err))
     return out
 
 
@@ -147,7 +149,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 f"KIS 교차 프로세스 레이트리미터 꺼짐({d['env']}, {d['error']}) — 데몬과 "
                 "분석 도구가 초당 한도를 나누지 못해 EGW00201 이 날 수 있음. "
                 "state/kis_rate.db 권한·디스크 확인",
-                link="/system",
+                link="/system#daemon",
             )
         )
     n_unknown = int(
@@ -161,7 +163,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.unknown",
                 "warning",
                 f"응답 없는 주문(unknown) {n_unknown}건 — 체결 동기화가 확정하지 못함, KIS 앱 확인",
-                link="/",
+                link="/#orders-timeline",
                 count=n_unknown,
             )
         )
@@ -172,7 +174,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.stale",
                 "watch",
                 f"마감 뒤에도 정리되지 않은 주문 {stale}건 (체결 동기화·대조 확인)",
-                link="/",
+                link="/#orders-timeline",
                 count=stale,
             )
         )
@@ -188,7 +190,6 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.approvals_expired",
                 "watch",
                 f"24시간 안에 만료된 승인 요청 {n_exp}건 (응답 없이 지나감)",
-                link="/",
                 count=n_exp,
             )
         )
@@ -199,7 +200,7 @@ def check_orders(ctx: OpsContext) -> list[Item]:
                 "orders.approvals_pending",
                 "watch",
                 f"승인 대기 {len(pending)}건 (30분 안에 승인·거부)",
-                link="/",
+                link="/#approvals",
                 count=len(pending),
             )
         )

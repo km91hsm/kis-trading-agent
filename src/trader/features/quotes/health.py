@@ -39,7 +39,7 @@ def check(ctx: OpsContext) -> list[Item]:
             f"{env} 웹소켓 세션을 체결통보 리스너가 쓰는 중 — 실시간 시세 양보"
             f"(until {until.isoformat()})"
         )
-        out.append(Item(f"quotes.session_busy.{env}", "watch", text, link="/system"))
+        out.append(Item(f"quotes.session_busy.{env}", "watch", text, link="/data#quotes"))
     return out
 
 

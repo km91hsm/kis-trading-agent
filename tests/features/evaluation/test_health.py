@@ -25,7 +25,7 @@ def test_calibration_review_flags_at_threshold(conn, project):
     seed_matured(conn, 1, start=datetime(2026, 9, 1).date())
     items = health.check(ctx(conn, project))
     assert [(i.key, i.level, i.count, i.link) for i in items] == [
-        ("evaluation.calibration_review", "watch", 60, "/performance")
+        ("evaluation.calibration_review", "watch", 60, "/performance#calibration")
     ]
     assert "inject" in items[0].text
     (project / "config" / "ml.yaml").write_text(

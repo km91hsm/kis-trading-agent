@@ -86,7 +86,7 @@ def check(ctx: OpsContext) -> list[Item]:
                     f"spot.fill_ambiguous.{m}",
                     "warning",
                     f"{m} 체결 매칭 모호 — unknown 주문 후보가 둘 이상, 사용자 확인 필요",
-                    link="/?status=unknown",
+                    link="/#orders-timeline",
                     extra=amb if isinstance(amb, dict) else {},
                 )
             )
@@ -120,7 +120,7 @@ def check(ctx: OpsContext) -> list[Item]:
                     f"spot.reconcile.{a.id}.{m}",
                     "watch",
                     f"{a.id} {m} 오늘 야간 대조가 아직 돌지 않음",
-                    link="/system",
+                    link="/system#daemon",
                 )
             )
     return out

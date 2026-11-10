@@ -46,7 +46,7 @@ def check(ctx: OpsContext) -> list[Item]:
     ks = killswitch.reason(ctx.conn)
     if ks:
         text = f"킬스위치 켜짐 — 신규 매수 중단: {ks}. 해제는 {_RELEASE} (원인 메모)"
-        out.append(Item("regime.killswitch", "critical", text, link="/system"))
+        out.append(Item("regime.killswitch", "critical", text, link="/system#regime"))
     port = ctx.ports.get("accounts")
     accounts = port.accounts() if port is not None else []
     accounts = [a for a in accounts if getattr(a, "asset", "stock") == "stock"]
