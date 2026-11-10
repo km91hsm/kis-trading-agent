@@ -927,7 +927,28 @@ def test_codex_mid_failure_reruns_once_with_claude(project, conn):
     assert "codex-turn" in prompts[0] and "codex-turn" not in prompts[1]  # 두 번째는 Claude 2인
 
 
-def test_failure_without_codex_mark_is_not_rerun(project, conn):
+def test_incomplete_debate_without_codex_mark_reruns_once(project, conn):
+    """사용자 결정(2026-11-10): Claude 턴 누락 등 Codex 실패 표시가 없는 「필수 토론 미완료」도 같은
+    잡에서 한 번 다시 띄운다(체크포인트가 남아 빠진 턴부터 이어감). 두 번째도 미완료면 그대로 실패 —
+    무한 반복하지 않는다."""
     result, prompts = _cross_run(project, conn, lambda ctx: None)
-    assert len(prompts) == 1
+    assert len(prompts) == 2
+    assert "codex-turn" in prompts[1]  # 표시가 없으니 교차 토론 그대로
     assert not result.ok and "필수 토론 미완료" in result.error
+
+
+def test_other_failures_are_not_rerun(project, conn):
+    """타임아웃 등 토론 미완료가 아닌 실패는 다시 띄우지 않는다."""
+    from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
+    from trader.features.spot.session_kinds import ANALYZE
+
+    ctx = make_ctx(project, conn, llm=_codex_on())
+    calls = []
+
+    def timeout(cmd, **kw):
+        calls.append(1)
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    result = run_session(spec(), ANALYZE, ctx, agents=ag.by_name(SPOT_AGENTS), runner=timeout,
+                         claude_bin=Path("/fake/claude"))  # fmt: skip
+    assert len(calls) == 1 and "타임아웃" in result.error
