@@ -13,6 +13,7 @@ from trader.features.fo.migrations import MIGRATIONS
 from trader.features.fo.routes import RESOURCES, ROUTERS, SSE_KEYS
 from trader.features.fo.session_kinds import AGENTS, FO, FO_RESUME
 from trader.features.fo.settings import SECTIONS
+from trader.features.fo.settings_routes import settings_fo_router
 from trader.features.fo.status import STATUS_SECTION
 from trader.features.fo.system_routes import system_fo_router
 from trader.features.fo.telegram import FO_CMD
@@ -27,7 +28,7 @@ from trader.kernel.registry.types import Feature, NavItem, ToolCommand
 # 옛 control 플래그 키 접두(A4): `fo_verified:<env>:<acct>:<product>:<vehicle>` 등
 CONTROL_NAMESPACES = (
     "fo_verified", "fo_halted", "fo_day_open", "fo_alerts", "fo_ref_iv", "fo_pending_entry",
-    "fo_replace",
+    "fo_replace", "fo_enabled",
 )  # fmt: skip
 
 TOOLS = (
@@ -40,7 +41,8 @@ FEATURE = Feature(
     control_namespaces=CONTROL_NAMESPACES, session_kinds=(FO, FO_RESUME), agents=AGENTS,
     tools=TOOLS, jobs=JOBS, queue_kinds=QUEUE_KINDS, cli=fo_app, telegram_commands=(FO_CMD,),
     status_sections=(STATUS_SECTION,),
-    routes=(*ROUTERS, analytics_fo_router, system_fo_router), resources=RESOURCES,
+    routes=(*ROUTERS, analytics_fo_router, system_fo_router, settings_fo_router),
+    resources=RESOURCES,
     sse_keys=SSE_KEYS, health_areas=(AREA,),
     nav=(NavItem("accounts", "fo-positions", "파생 계좌", 20),
          NavItem("today", "fo-lane", "파생", 30), NavItem("system", "fo", "파생", 60),

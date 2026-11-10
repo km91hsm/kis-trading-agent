@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from trader.features.fo import inputs as inputs_mod
-from trader.features.fo import store
+from trader.features.fo import store, switch
 from trader.features.fo.executor import context_sources
 from trader.features.fo.session_kinds import FO, agents_for_runner
 from trader.features.fo.types import FoExecContext
@@ -97,8 +97,10 @@ def run(
         out["decision"] = existing
         out["skipped"] = f"오늘 {DECISION_STAGE} 결정이 이미 있음(세션 생략)"
         return out
-    if not settings.fo.enabled and not any(store.open_positions(conn, a.id) for a in accounts):
-        out["skipped"] = "fo.enabled=false ∧ 보유 포지션 없음(세션 생략)"
+    if not switch.any_enabled(conn, settings, accounts) and not any(
+        store.open_positions(conn, a.id) for a in accounts
+    ):
+        out["skipped"] = "파생 꺼짐(모든 계좌 스위치·fo.enabled) ∧ 보유 포지션 없음(세션 생략)"
         return out
     try:
         check_cap(settings, conn, now())

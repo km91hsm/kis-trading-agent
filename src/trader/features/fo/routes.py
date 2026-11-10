@@ -22,10 +22,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from trader.features.fo import store, triggers
-from trader.features.fo.executor import VEHICLES, fo_mode, halted_key, verified_key
+from trader.features.fo import store, switch, triggers
+from trader.features.fo.executor import VEHICLES, fo_mode, halted_key, is_verified
 from trader.features.fo.types import FoPositionRow
-from trader.kernel.broker.fo import CONTRACT_VERSION
 from trader.kernel.config import KST
 from trader.kernel.execution import ledger
 from trader.kernel.ledger import control
@@ -264,10 +263,11 @@ def _account_status(conn: sqlite3.Connection, deps: Any, a: Any, today: date) ->
     모드 off) → 진입 일시정지(entries_paused: 전체 일시정지 — 새 진입만 기록,
     위험 청산은 전송) → active."""
     cfg = deps.settings.fo
+    enabled = switch.stored(conn, deps.settings, a)[0]
     mode, note = fo_mode(conn, a, deps.ports)
     paused = bool(deps.ports["accounts"].paused(conn))
     verified = {
-        v: control.get_flag(conn, verified_key(deps.settings, a, v)) == CONTRACT_VERSION
+        v: is_verified(conn, deps.settings, a, v)
         for v in VEHICLES
     }
     halted = control.get_flag(conn, halted_key(a.id)) == today.isoformat()
@@ -290,7 +290,7 @@ def _account_status(conn: sqlite3.Connection, deps: Any, a: Any, today: date) ->
     ]  # fmt: skip
     if a.env != "paper":
         state = "off"
-    elif not cfg.enabled:
+    elif not enabled:
         state = "disabled"
     elif not any(verified[v] for v in cfg.vehicles):
         state = "unverified"
@@ -309,7 +309,7 @@ def _account_status(conn: sqlite3.Connection, deps: Any, a: Any, today: date) ->
     ).fetchall()
     return {
         "id": a.id, "env": a.env, "mode": mode, "mode_note": note, "paused": paused,
-        "state": state, "enabled": cfg.enabled, "vehicles": list(cfg.vehicles),
+        "state": state, "enabled": enabled, "vehicles": list(cfg.vehicles),
         "verified": verified, "halted": halted, "pending_entry": pending,
         "nav_date": nav_row["date"] if nav_row else None, "nav": _s(nav),
         "cash": nav_row["cash"] if nav_row else None, "margin_total": _s(margin),

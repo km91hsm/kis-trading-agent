@@ -5,6 +5,7 @@ import { GLOSSARY } from "../../lib/glossary";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 import { CodexDebate } from "./CodexDebate";
+import { FoSwitch } from "./FoSwitch";
 import { ScalpSwitch } from "./ScalpSwitch";
 
 type SettingsResp = {
@@ -32,6 +33,7 @@ export function SettingsPanel() {
       <>
         <CodexDebate />
         <ScalpSwitch />
+        <FoSwitch />
         <h3 className="perf-sub">AI 사용 한도</h3>
         <Stats
           cols={4}

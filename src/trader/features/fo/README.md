@@ -2,7 +2,7 @@
 
 ## 책임
 
-- 선물옵션 방향성 레인(tier=lane): 코스피200 선물 롱/숏·옵션 콜/풋 매수·매도. **모의 파생 계좌 전용·기본 끔**(`settings.yaml fo.enabled: false`). `enabled` 는 신규 진입만 막고 보유분 감시·축소는 계속한다. 실전 파생 계좌는 항상 `off`(주문·취소 없음, 기록만).
+- 선물옵션 방향성 레인(tier=lane): 코스피200 선물 롱/숏·옵션 콜/풋 매수·매도. **모의 파생 계좌 전용·계좌별 스위치·기본 끔**: control `fo_enabled:<계좌 id>`(`switch.py`, 웹 `GET·PATCH /settings/fo/{id}`, 텔레그램 `/fo <계좌> on|off|기본`). 없으면 모의는 `settings.yaml fo.enabled`, 실전 파생 계좌는 항상 꺼짐(켜기는 400·거부). 스위치는 신규 진입만 막고 보유분 감시·축소는 계속한다 — 게이트(`FoPortfolio.enabled`)·회수 사유·아침 세션(모든 계좌 꺼짐 ∧ 보유 없음이면 생략)·세션 입력 `limits.enabled`·웹 상태가 계좌별 값을 본다. **모의 계좌는 현물처럼 바로 매매한다**: `executor.is_verified` 가 모의면 `fo_verified` 없이 모든 수단을 검증됨으로 본다(보유 행으로만 열리던 `fo verify` 가 첫 진입을 영영 막았다). 실전은 여전히 플래그 필요. 실전 파생 계좌는 항상 `off`(주문·취소 없음, 기록만).
 - 현물 파이프라인과 같은 모양(수집 → 세션 → 파이썬 게이트 → 주문 → 장중 감시·재평가 → 기록)이되, 주문은 **자체 실행기**(`executor.py`)만 낸다. 에이전트는 방향·수단·확신·손절선을 제안하고 수량·가격·허용 여부는 파이썬 게이트(`rules`·`sizing`)가 정한다.
 - 설정: `settings.yaml fo`(`FoCfg` + 하위 모델 6종, 상품 모델은 커널 `broker.models.FoProduct`), `schedule.yaml fo`(`FoSchedule`: `kr.session` 08:20 · `kr.monitor` 08:45~15:45 60s).
 - 원장: 마이그레이션 14 `fo` — `fo_positions`·`fo_order_legs`(`request_id` 포함)·`fo_decisions`·`fo_nav_snapshot`·`fo_positions_snapshot`.
@@ -74,7 +74,7 @@
 
 체크포인트(`state/runs/<date>/KR/`): `_fo_inputs`·`_fo_analyst_<role>`·`_fo_debate_r<n>_<side>`·`_fo_summary`·`_fo_decision`(아침)·`_fo_decision_r<n>_<계좌>`·`_fo_reeval_r<n>_<계좌>`(재평가 요청 정본)·`_fo_risk_check_<계좌>[_r<n>]`·`_fo_order_<계좌>[_r<n>]`(진입, `executor._stage`)·`_fo_order_<계좌>_<intent>_<포지션id>`(`reduce` 기본 stage, intent 는 소문자).
 
-control 네임스페이스(`Feature.control_namespaces`, A4): `fo_verified:<env>:<계좌>:<상품>:<수단>`(= `CONTRACT_VERSION`)·`fo_halted:<계좌>`·`fo_day_open:<계좌>`·`fo_alerts:<계좌>`·`fo_ref_iv:<포지션>`·`fo_pending_entry:<계좌>`·`fo_replace:<계좌>:<포지션>`. 대사 표지 `reconcile:<계좌>:KR:<날짜>` 는 커널 접두다. 어떤 자동 경로도 `fo_verified` 를 끄지 않는다.
+control 네임스페이스(`Feature.control_namespaces`, A4): `fo_verified:<env>:<계좌>:<상품>:<수단>`(= `CONTRACT_VERSION`)·`fo_halted:<계좌>`·`fo_day_open:<계좌>`·`fo_alerts:<계좌>`·`fo_ref_iv:<포지션>`·`fo_pending_entry:<계좌>`·`fo_replace:<계좌>:<포지션>`·`fo_enabled:<계좌>`(계좌별 스위치). 대사 표지 `reconcile:<계좌>:KR:<날짜>` 는 커널 접두다. 어떤 자동 경로도 `fo_verified` 를 끄지 않는다.
 
 ## 모듈 규칙
 
@@ -98,7 +98,7 @@ control 네임스페이스(`Feature.control_namespaces`, A4): `fo_verified:<env>
 - **재평가 `reeval.py`**: 엔진이 `triggers.record` → `request` → 큐 `fo_reevaluate` → `run`(`fo_resume` 세션 1회 → 처리 표지) → 제출 시 `apply`: **늦은 재평가 CAS**(`version == expected_version ∧ status == held` 아니면 `discarded`), 실행은 `run_leg` 하나, HOLD 는 손절 단조 + `tp_pt` 갱신, REPLACE·반대 방향 OPEN 은 청산을 먼저 내고 새 진입 봉투를 `control.fo_replace` 에 두며 `continue_replace` 가 보유 0 ∧ 살아 있는 다리 0 이 되면 운영일 1회 진입.
 - **브로커 계층(커널 `broker/fo.py`·`fo_master.py`·`fo_codes.py`)**: 잔고는 연속조회 완주가 성공 조건이고 수량·방향·종류 세 검증을 모두 지나야 `FoPosition`(하나라도 실패면 `UnverifiedHolding` — 어떤 자동 주문의 대상도 아님). NAV 는 `prsm_dpast_amt` 가 비면 None(항등식 폴백 금지). `get_order_state` 는 원주문 계보에서 `filled/remaining/rejected` 를 필수 정수로 읽고 모순이면 예외. 응답 계약 버전 `CONTRACT_VERSION`(파서가 보는 필드·판정식이 바뀌면 올린다). 지표는 커널 `broker/indicators`(ML·spot·fo 공유), 장 시간은 `config/market_hours`(`is_fo_open` 08:45~15:45·최종거래일 15:20, `index_live`, `fo_close_hm`).
 - **알림 `messages.py`**: 옛 문구 그대로 상수 5종·함수 15종. `reconcile_mismatch` 는 커널 것(`market="KR(파생)"`).
-- **상태·텔레그램**: `/fo`(읽기 전용)와 `/status` 「파생(선물옵션)」 절은 `status.lines`(원장만) 하나를 쓴다.
+- **상태·텔레그램**: `/fo`(인자 없으면 읽기 — 누구나; `/fo <계좌> on|off|기본` 은 신뢰된 발신자만, 커널이 넘기는 `ctx.trusted`)와 `/status` 「파생(선물옵션)」 절은 `status.lines`(원장만) 하나를 쓴다.
 
 ## 웹 (M11, `routes.py`)
 

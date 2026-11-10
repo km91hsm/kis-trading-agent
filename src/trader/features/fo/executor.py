@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from trader.features.fo import messages, positions, rules, sizing, store, triggers
+from trader.features.fo import messages, positions, rules, sizing, store, switch, triggers
 from trader.features.fo.legstore import LegStore, leg_key
 from trader.features.fo.schemas import FoDecisionEnvelope, contract_side_of, kind_of, order_side
 from trader.features.fo.types import (
@@ -74,6 +74,15 @@ VEHICLES = ("FUTURES", "OPTION_BUY", "OPTION_SELL")
 def verified_key(settings: Any, account: Any, vehicle: str) -> str:
     """control `fo_verified:<env>:<계좌>:<상품>:<수단>` 키(`fo verify` 가 쓰고 게이트가 읽는다)."""
     return f"fo_verified:{account.env}:{account.id}:{settings.fo.product}:{vehicle}"
+
+
+def is_verified(conn: Any, settings: Any, account: Any, vehicle: str) -> bool:
+    """그 계좌·수단으로 신규 진입해도 되는가. 모의 계좌는 현물처럼 바로 매매한다(검증 플래그
+    불필요 — 보유 행으로만 열리던 `fo verify` 가 첫 진입을 영영 막았다). 실전은 `fo verify` 가
+    적은 `CONTRACT_VERSION` 이 있어야 한다(실전 파생 계좌는 어차피 off)."""
+    if account.env == "paper":
+        return True
+    return control.get_flag(conn, verified_key(settings, account, vehicle)) == CONTRACT_VERSION
 
 
 def halted_key(account_id: str) -> str:
@@ -251,9 +260,7 @@ def build_portfolio(
     blocking = positions.has_blocking_state(conn, account.id, unverified=unverified)
     if balance is None:
         blocking = blocking or "잔고 조회 실패"
-    verified = {
-        v: control.get_flag(conn, verified_key(s, account, v)) == CONTRACT_VERSION for v in VEHICLES
-    }
+    verified = {v: is_verified(conn, s, account, v) for v in VEHICLES}
     halted = control.get_flag(conn, halted_key(account.id)) == today.isoformat()
     return FoPortfolio(
         account_id=account.id,
@@ -264,6 +271,7 @@ def build_portfolio(
         blocking=blocking,
         halted=halted,
         verified=verified,
+        enabled=switch.stored(conn, s, account)[0],
         realized_today=balance.cash.realized_today if balance is not None else Decimal(0),
         pnl_today=pnl_today(conn, account.id, balance.cash, today) if balance is not None else None,
     )

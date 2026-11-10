@@ -8,11 +8,12 @@ from trader.features.scalp.ports import PORT
 from trader.features.scalp.routes import RESOURCES, ROUTERS, SSE_KEYS
 from trader.features.scalp.settings import SECTIONS
 from trader.features.scalp.status import STATUS_SECTION
+from trader.features.scalp.telegram import SCALP_CMD
 from trader.kernel.registry.types import Feature, NavItem
 
 FEATURE = Feature(
     id="scalp", tier="lane", sections=SECTIONS, agents=(AGENT,), jobs=(SCALP_TICK,),
     ports=(PORT,), cli=scalp_app, status_sections=(STATUS_SECTION,), resources=RESOURCES,
-    routes=ROUTERS, sse_keys=SSE_KEYS,
+    routes=ROUTERS, sse_keys=SSE_KEYS, telegram_commands=(SCALP_CMD,),
     nav=(NavItem("today", "scalp-lane", "단타", 20), NavItem("system", "scalp", "단타", 50)),
 )  # fmt: skip

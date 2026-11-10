@@ -183,20 +183,16 @@ def _nav(conn, acct=ACCT):
 
 
 def test_fo_summary_states_and_balance(project, ledger):
-    """상태 우선순위: 꺼짐(disabled) → 검증 전(unverified) → active → 일일 손실(halted).
+    """상태 우선순위: 꺼짐(disabled) → active → 일일 손실(halted). 모의 계좌는 검증 플래그 없이
+    모든 수단이 검증됨(현물처럼 바로 매매) — 검증 전(unverified)은 실전 전용.
     NAV·증거금 비율은 `fo_nav_snapshot`(accounts 통합 현황은 account_nav 만 읽는다 — T6-R2)."""
     _nav(ledger)
     c = _client(project, [_fo_account()])
     row = c.get("/api/fo/summary").json()["accounts"][0]
     assert row["id"] == ACCT and row["state"] == "disabled" and row["mode"] == "auto"
     assert row["nav"] == "50000000" and row["margin_pct"] == 0.2
-    assert row["verified"] == {"FUTURES": False, "OPTION_BUY": False, "OPTION_SELL": False}
+    assert row["verified"] == {"FUTURES": True, "OPTION_BUY": True, "OPTION_SELL": True}
     c = _client(project, [_fo_account()], enabled=True)
-    assert c.get("/api/fo/summary").json()["accounts"][0]["state"] == "unverified"
-    deps = c.app.state.deps
-    control.set_flag(ledger, executor.verified_key(deps.settings, _fo_account(), "FUTURES"),
-                     CONTRACT_VERSION)  # fmt: skip
-    ledger.commit()
     row = c.get("/api/fo/summary").json()["accounts"][0]
     assert row["state"] == "active" and row["verified"]["FUTURES"] is True
     control.set_flag(ledger, f"fo_halted:{ACCT}", TODAY.isoformat())

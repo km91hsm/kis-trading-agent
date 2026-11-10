@@ -148,7 +148,8 @@ def test_context_has_regime_view_verified(conn):
     assert c["regime"]["state"] == "bear" and c["market_view"]["state"] == "RISK_OFF"
     assert c["market_view"]["stance"] == "RISK_OFF"  # regime 포트 view_today(A8)
     assert c["limits"]["regime_cap"] == 2.0  # leverage_by_regime 미설정 → max_leverage
-    assert c["verified"] == {ACCT: {"FUTURES": True, "OPTION_BUY": False, "OPTION_SELL": False}}
+    # 모의 계좌는 검증 플래그 없이 모든 수단이 검증됨
+    assert c["verified"] == {ACCT: {"FUTURES": True, "OPTION_BUY": True, "OPTION_SELL": True}}
 
 
 # --- 옛 test_review_s3 #5·#6 ---------------------------------------------------------------

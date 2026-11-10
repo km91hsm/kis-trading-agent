@@ -28,11 +28,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from trader.features.fo import rules, store
-from trader.features.fo.executor import VEHICLES, verified_key
+from trader.features.fo import rules, store, switch
+from trader.features.fo.executor import VEHICLES, is_verified
 from trader.features.fo.types import FoExecContext
 from trader.kernel.broker import fo_master, indicators
-from trader.kernel.broker.fo import CONTRACT_VERSION
 from trader.kernel.broker.models import drop_incomplete_tail
 from trader.kernel.config import KST
 from trader.kernel.ledger import control
@@ -320,16 +319,15 @@ def _account_summary(ctx: FoExecContext, a: Any, *, today: date) -> tuple[dict, 
 def _verified(ctx: FoExecContext, accounts: list[Any]) -> dict[str, dict[str, bool]]:
     s = ctx.settings
     return {
-        a.id: {
-            v: control.get_flag(ctx.conn, verified_key(s, a, v)) == CONTRACT_VERSION
-            for v in VEHICLES
-        }
+        a.id: {v: is_verified(ctx.conn, s, a, v) for v in VEHICLES}
         for a in accounts
     }
 
 
 def _limits(ctx: FoExecContext, regime_state: str | None) -> dict[str, Any]:
-    return limits_of(ctx.settings.fo, regime_state)
+    out = limits_of(ctx.settings.fo, regime_state)
+    out["enabled"] = switch.any_enabled(ctx.conn, ctx.settings, ctx.accounts)  # 계좌 스위치 반영
+    return out
 
 
 def limits_of(cfg: Any, regime_state: str | None) -> dict[str, Any]:

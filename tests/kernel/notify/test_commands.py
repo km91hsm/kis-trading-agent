@@ -239,3 +239,17 @@ def test_status_message_isolates_failing_section(conn):
     text = commands.status_message(ctx)
     assert "- a" in text and "- c" in text
     assert "- B: 조회 실패(ZeroDivisionError" in text
+
+
+def test_handler_sees_sender_trust(conn):
+    """읽기 허용(untrusted_ok) 명령이 인자에 따라 쓰기도 할 때 스스로 거르게 신뢰 여부를 넘긴다."""
+    seen = []
+    feat = Feature(id="t", tier="service", telegram_commands=(
+        TelegramCommand("peek", True, "/peek", lambda c, a: seen.append(c.trusted) or "ok"),
+    ))  # fmt: skip
+    ctx = commands.CommandContext(conn=conn, settings=None, state=None,
+                                  now=lambda: datetime(2026, 10, 28, 1, 0, tzinfo=UTC),
+                                  notifier=Sent(), features=[feat])  # fmt: skip
+    commands.poll_once(ctx, Recv(["/peek"], trusted=False))
+    commands.poll_once(ctx, Recv(["/peek"], trusted=True))
+    assert seen == [False, True]

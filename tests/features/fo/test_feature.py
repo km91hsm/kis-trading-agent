@@ -8,7 +8,7 @@ def test_feature_declaration():
     assert [(s.file, s.key) for s in FEATURE.sections] == [("settings", "fo"), ("schedule", "fo")]
     assert FEATURE.control_namespaces == (
         "fo_verified", "fo_halted", "fo_day_open", "fo_alerts", "fo_ref_iv", "fo_pending_entry",
-        "fo_replace",
+        "fo_replace", "fo_enabled",
     )  # fmt: skip
 
 

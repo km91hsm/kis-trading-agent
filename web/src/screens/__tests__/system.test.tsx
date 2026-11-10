@@ -294,7 +294,7 @@ describe("시스템 화면", () => {
     const st = section("settings");
     expect(st.textContent).toContain("Tailscale 호스트");
     // 설정은 세 묶음(AI 사용 한도 · 거래 리스크 · 접속 환경), 역할별 모델은 details 안 표(역할은 한글, role.* 원문 없음)
-    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "단타", "AI 사용 한도", "거래 리스크", "접속 환경"]);
+    expect(Array.from(st.querySelectorAll("h3")).map((e) => e.textContent)).toEqual(["Codex 토론 참여", "단타", "파생", "AI 사용 한도", "거래 리스크", "접속 환경"]);
     expect(st.querySelector("details summary")?.textContent).toContain("역할별 모델 2");
     const models = st.querySelectorAll("details table tbody tr");
     expect(models).toHaveLength(2);
