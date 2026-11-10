@@ -133,3 +133,25 @@ def test_dist_checked_per_request(deps):
 def test_gen_nav_matches_committed_file():
     committed = (REPO / gen.REL_NAV_PATH).read_text(encoding="utf-8")
     assert committed == gen.nav_ts(discover())
+
+
+def test_middleware_swaps_settings_when_watch_reports_change(project):
+    """WebDeps.settings_watch 가 새 설정을 돌려주면 요청 전에 app.state.deps.settings 를 바꾼다."""
+    from types import SimpleNamespace
+
+    from tests.kernel.web.conftest import make_deps
+
+    queue = [None, SimpleNamespace(v=2), None]
+
+    class Watch:
+        def poll(self):
+            return queue.pop(0) if queue else None
+
+    deps = make_deps(project, settings=SimpleNamespace(v=1), settings_watch=Watch())
+    client = make_client(deps)
+    client.get("/api/nope")
+    assert client.app.state.deps.settings.v == 1
+    client.get("/api/nope")
+    assert client.app.state.deps.settings.v == 2
+    client.get("/api/nope")
+    assert client.app.state.deps.settings.v == 2

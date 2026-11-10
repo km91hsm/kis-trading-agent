@@ -215,7 +215,9 @@ def run_turn(
     cancel=None,
     config: dict | None = None,
     validate=None,
+    repair=None,
 ) -> dict:
+    """`repair` 는 검증·해시 전에 출력 턴(dict)을 고쳐 돌려준다(증명 해시는 고친 값 기준)."""
     if os.environ.get("FAKE_CLAUDE") == "1":
         raise CodexError("FAKE_CLAUDE에서는 실제 Codex를 실행할 수 없습니다")
     if conn is None:
@@ -303,6 +305,8 @@ def run_turn(
             if turn.side != side or turn.round != clean["round"]:
                 raise CodexError("Codex 턴 side/round 불일치")
             result = turn.model_dump()
+            if repair is not None:
+                result = DebateTurn.model_validate(repair(result)).model_dump()
             if validate is not None:
                 if error := validate(result):
                     raise CodexError(error)

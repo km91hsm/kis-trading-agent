@@ -142,7 +142,7 @@ def test_enabled_false_recalls_entries(conn):
         update={"fo": ctx.settings.fo.model_copy(update={"enabled": False})}
     )
     out = _tick(ctx)
-    assert out["accounts"][ACCT]["recalled"][0]["reason"] == "fo.enabled=false"
+    assert out["accounts"][ACCT]["recalled"][0]["reason"] == "파생 꺼짐(계좌 스위치·fo.enabled)"
 
 
 def test_force_close_day_0900(conn):

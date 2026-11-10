@@ -940,3 +940,49 @@ def test_turn_error_names_rejected_and_allowed_evidence(conn, tmp_path):
     assert err.startswith("쟁점/반론 evidence는 실제 리포트 source_id를 사용해야 합니다")
     assert "잘못된 값: technical" in err
     assert "사용 가능: " in err and "technical.indicators" in err
+
+
+def _noisy_codex(d):
+    """실제 실패 재현(2026-11-09 PG): Codex 가 evidence 에 유효 source_id 뒤 설명을 덧붙인다
+    (예: `news_macro.events 원문 그대로라고 간주하지 않음`)."""
+    from pathlib import Path
+
+    inner = _codex_fake(d)
+
+    def fake(cmd, **kw):
+        proc = inner(cmd, **kw)
+        out = Path(cmd[cmd.index("--output-last-message") + 1])
+        turn = json.loads(out.read_text(encoding="utf-8"))
+        for key in ("issues", "responses", "replies"):
+            for item in turn.get(key) or []:
+                item["evidence"] = [f"{e} 원문 그대로라고 간주하지 않음" for e in item["evidence"]]
+        out.write_text(json.dumps(turn), encoding="utf-8")
+        return proc
+
+    return fake
+
+
+def test_codex_evidence_with_trailing_note_is_trimmed_to_source_id(conn, tmp_path, monkeypatch):
+    """Codex 가 근거 ID 뒤에 설명을 붙여도 그 ID 로 정규화해 턴을 살린다(증명 해시도 정규화 값)."""
+    from trader.kernel.session import research_policy as p
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    s, d, r, ctx = _cross_setup(conn, tmp_path)
+    _run_cross(conn, s, d, r, ctx, _noisy_codex(d))
+    saved = read_checkpoint(d, r.turn_stage("a", 1, "bear"))["data"]
+    assert saved["issues"][0]["evidence"] == ["technical.indicators"]
+    assert saved["responses"][0]["evidence"] == ["technical.indicators"]
+    assert p.completion_error(conn, s, d, r) is None
+
+
+def test_trim_evidence_only_strips_note_after_known_id():
+    """정규화는 유효 ID + 공백·괄호 뒤 설명일 때만 — 모르는 ID 는 그대로 둬 검증이 거부한다."""
+    from trader.kernel.session import research_policy as p
+
+    allowed = ["a.b", "a.b.c"]
+    assert p.trim_evidence({"evidence": ["a.bX", "x a.b", "a.b"]}, allowed) == {
+        "evidence": ["a.bX", "x a.b", "a.b"]
+    }
+    assert p.trim_evidence(
+        {"issues": [{"evidence": ["a.b (메모)", "a.b.c 설명", "a.b.c"]}]}, allowed
+    ) == {"issues": [{"evidence": ["a.b", "a.b.c", "a.b.c"]}]}

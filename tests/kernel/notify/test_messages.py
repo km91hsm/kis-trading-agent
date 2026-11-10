@@ -222,3 +222,17 @@ def test_reconcile_mismatch_and_fill_ambiguous():
         M.fill_ambiguous(account="a", market="KR", label="L", side="BUY", detail="후보 2건")
         == "[체결 매칭 모호] a · KR L\n매수 — 후보 2건"
     )
+
+
+def test_queue_gate_skipped_groups_counts_with_particle():
+    msg = M.queue_gate_skipped(market="KR", why="장 마감", counts={"종목 분석": 3, "장중 발굴": 1})
+    assert msg == (
+        "[요청 건너뜀] KR 장 마감으로 대기 중이던 요청 4건(종목 분석 3·장중 발굴 1)을 건너뛰었어요"
+    )
+    assert "주말로 " in M.queue_gate_skipped(market="US", why="주말", counts={"재평가": 1})
+    assert "일시정지로 " in M.queue_gate_skipped(market="KR", why="일시정지", counts={"a": 1})
+
+
+def test_settings_reload_failed():
+    msg = M.settings_reload_failed("settings.yaml 검증 실패: a.x: bad")
+    assert msg.startswith("[설정 오류] ") and "이전 설정" in msg and "a.x: bad" in msg

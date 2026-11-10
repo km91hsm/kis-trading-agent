@@ -10,7 +10,6 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +19,13 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from trader.kernel.config import KST
+from trader.kernel.config.reload import SettingsWatcher
 from trader.kernel.daemon import heartbeat as heartbeat_mod
 from trader.kernel.daemon.heartbeat import Heartbeat
 from trader.kernel.daemon.jobs import ScheduledJob, build
 from trader.kernel.daemon.lock import Lock, global_lock, other_root_message
 from trader.kernel.ledger import runs
+from trader.kernel.notify import messages
 from trader.kernel.registry import hooks as hooks_mod
 from trader.kernel.registry.types import Feature
 from trader.kernel.session import calls
@@ -162,6 +163,12 @@ class Daemon:
         self._down = False
         self._signalled = False
         self._old_handlers: dict[int, Any] = {}
+        # settings.yaml 변경 감시(레지스트리가 있을 때만 — 부트가 조립한 데몬). 잡 실행 전에 본다
+        self._settings_watch = (
+            SettingsWatcher(deps.registry, on_error=self._settings_error)
+            if deps.registry is not None
+            else None
+        )
 
     def start(self, *, install_signals: bool = True) -> bool:
         """잡 정의 검증 → 잠금 → bootstrap 훅·큐 복구·stale 정리 → 놓친 cron 따라잡기 →
@@ -208,8 +215,9 @@ class Daemon:
                     max_instances=1, coalesce=True,
                     misfire_grace_time=qj.misfire_grace_for(job.spec), **extra,
                 )  # fmt: skip
-            sched.add_listener(
-                partial(qj.on_scheduler_event, deps, self._hb, {j.id: j for j in self._jobs}),
+            by_id = {j.id: j for j in self._jobs}
+            sched.add_listener(  # 설정 재적재 뒤의 deps 를 쓰도록 호출 때 self.deps 를 읽는다
+                lambda ev: qj.on_scheduler_event(self.deps, self._hb, by_id, ev),
                 aps_events.EVENT_JOB_MISSED | aps_events.EVENT_JOB_MAX_INSTANCES,
             )
             sched.add_job(
@@ -245,8 +253,30 @@ class Daemon:
         aps_job = self._scheduler.get_job(job_id)
         self._hb.set_next(job_id, getattr(aps_job, "next_run_time", None))
 
+    def _settings_error(self, msg: str) -> None:
+        notifier = self.deps.notifier
+        if notifier is not None:
+            notifier.send(messages.settings_reload_failed(msg))
+
+    def reload_settings(self) -> bool:
+        """settings.yaml 이 바뀌었고 검증을 통과하면 `deps.settings` 를 새 설정으로 바꾼다.
+        잡 표(시장·주기·켜짐)와 부트 때 조립한 포트·알림기는 그대로다(재시작 필요)."""
+        watch = self._settings_watch
+        if watch is None:
+            return False
+        try:
+            new = watch.poll()
+        except Exception:  # noqa: BLE001 - 감시 실패가 잡 실행을 막지 않는다
+            logger.exception("settings.yaml 변경 확인 실패")
+            return False
+        if new is None:
+            return False
+        self.deps = replace(self.deps, settings=new)
+        return True
+
     def _tick(self, job: ScheduledJob) -> None:
-        """스케줄러가 부르는 진입점: 하트비트 + 전용 연결로 run_job."""
+        """스케줄러가 부르는 진입점: 설정 변경 반영 → 하트비트 + 전용 연결로 run_job."""
+        self.reload_settings()
         self._hb.job_started(job.id)
         status, error = "error", None
         conn = self.deps.conn_factory()

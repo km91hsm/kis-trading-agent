@@ -31,6 +31,9 @@ from trader.kernel.registry.types import JobSpec, QueueKind
 logger = logging.getLogger("trader.ml")
 
 BOOTSTRAP_RETRY_AGE = timedelta(hours=24)  # 백필이 이 안에 실패했으면 기동 때 다시 넣지 않는다
+# 날짜 파일이 이보다 적으면 과거 이력이 없다고 본다(1년 백필 ≈ 252 거래일). 일일 스냅샷 몇 개만으로
+# 「이미 채워짐」으로 보면 실패한 백필이 다시 들어가지 않아 학습이 계속 데이터 부족으로 끝난다.
+BOOTSTRAP_MIN_DAYS = 200
 
 
 # --- 파라미터 ------------------------------------------------------------------------------
@@ -159,12 +162,17 @@ def features_request_for(action: str):
 
 
 def bootstrap(*, deps, **_) -> dict:
-    """기동 훅: 시세 클라이언트가 있는데 피처 스토어가 비면 백필+학습을 큐에 넣는다. 백필이
+    """기동 훅: 시세 클라이언트가 있는데 피처 스토어의 이력이 짧으면(날짜 파일 <
+    `BOOTSTRAP_MIN_DAYS`, 일일 스냅샷만 있는 경우 포함) 백필+학습을 큐에 넣는다. 백필이
     24시간 안에 실패했으면 다시 넣지 않는다(재기동 루프 방지). 어떤 오류도 올리지 않는다."""
     queued: list[str] = []
     try:
         port = _accounts_port(deps)
-        if port is None or port.market_client() is None or features.has_files(deps.state):
+        if (
+            port is None
+            or port.market_client() is None
+            or features.day_count(deps.state) >= BOOTSTRAP_MIN_DAYS
+        ):
             return {"queued": queued}
         conn = deps.conn_factory()
         try:

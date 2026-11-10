@@ -42,6 +42,8 @@ class CommandContext:
     echo: Callable[[str], None] = lambda s: None
     ports: dict[str, Any] = field(default_factory=dict)  # 기능이 내놓은 포트(이름 → 구현)
     actor: str | None = None  # 명령을 보낸 사람(제어 변경 기록용; poll_once 가 업데이트마다 채운다)
+    # 발신자 신뢰 여부 — 읽기 허용(untrusted_ok) 명령이 인자에 따라 쓰기도 하면 스스로 거른다
+    trusted: bool = True
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
@@ -209,7 +211,8 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
             elif name == RUN:
                 reply = run_message(replace(ctx, actor=_actor(u)), arg)
             else:
-                reply = cmd.handler(replace(ctx, actor=_actor(u)), arg)
+                trusted = bool(getattr(u, "trusted", True))
+                reply = cmd.handler(replace(ctx, actor=_actor(u), trusted=trusted), arg)
             ctx.notifier.send(reply)
             ctx.echo(f"{name} {arg or ''}".strip())
         except Exception as e:  # noqa: BLE001 - 명령 하나의 실패가 나머지·오프셋을 막지 않는다
@@ -230,3 +233,13 @@ def poll_once(ctx: CommandContext, receiver: Any) -> dict:
         set_flag(conn, OFFSET_FLAG, max(ids) + 1)
     ctx.echo(f"수신 {len(updates)}건, 명령 {handled}건" + (f", 실패 {failed}건" if failed else ""))
     return {"received": len(updates), "handled": handled, "failed": failed}
+
+
+_TOGGLE = {"on": True, "켜기": True, "off": False, "끄기": False, "기본": None, "default": None}
+
+
+def parse_toggle(word: str | None) -> tuple[bool, bool | None]:
+    """켜기·끄기 명령 인자 → (인식함, 값). on/켜기 → True, off/끄기 → False, 기본/default → None
+    (저장값을 지워 설정 파일 기본값으로)."""
+    w = (word or "").strip().lower()
+    return w in _TOGGLE, _TOGGLE.get(w)

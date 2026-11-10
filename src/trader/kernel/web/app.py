@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -69,6 +70,21 @@ def _spa_response(dist: Path, rest: str) -> Response:
     return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
+def _reload_settings(app: FastAPI) -> None:
+    """settings.yaml 이 바뀌었고 검증을 통과하면 deps 의 settings 를 바꾼다(실패는 이전 설정)."""
+    deps = app.state.deps
+    watch = getattr(deps, "settings_watch", None)
+    if watch is None:
+        return
+    try:
+        new = watch.poll()
+    except Exception:  # noqa: BLE001 - 감시 실패가 요청을 막지 않는다
+        logger.exception("settings.yaml 변경 확인 실패")
+        return
+    if new is not None:
+        app.state.deps = replace(deps, settings=new)
+
+
 def create_app(deps: WebDeps) -> FastAPI:
     app = FastAPI(title="trader", docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.deps = deps
@@ -77,6 +93,7 @@ def create_app(deps: WebDeps) -> FastAPI:
 
     @app.middleware("http")
     async def shell_gate(request: Request, call_next):
+        _reload_settings(request.app)
         response = _gate(request, allowed, users) or await call_next(request)
         response.headers["X-Server-Time"] = request.app.state.deps.now().isoformat()
         return response
