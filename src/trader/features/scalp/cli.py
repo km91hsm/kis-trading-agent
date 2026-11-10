@@ -10,7 +10,7 @@ from typing import Any
 
 import typer
 
-from trader.features.scalp import engine, signals
+from trader.features.scalp import engine, signals, switch
 from trader.features.scalp.switch import any_enabled
 from trader.kernel.cli.boot import Boot, boot, config_errors
 from trader.kernel.config import ConfigError
@@ -104,7 +104,7 @@ def report(
     _check_market(market)
     b = boot(ports=True, settings=True, conn=True)
     try:
-        cfg = b.settings.scalp
+        cfg = switch.with_judge(b.conn, b.settings).scalp
         port = b.ports.get("accounts")
         enabled = port is not None and any_enabled(b.conn, b.settings, port, market)
         _open_hm, close_hm = _monitor(b, market)

@@ -56,3 +56,25 @@ def any_enabled(
         for a in port.accounts()
         if market is None or market in a.markets
     )
+
+
+# --- 판정자(scalp-judge) 켜기·끄기 -------------------------------------------------------------
+
+JUDGE_FLAG = "scalp_judge"
+
+
+def judge_enabled(conn: sqlite3.Connection | None, settings: Any) -> tuple[bool, str]:
+    """(판정자 켜짐, 출처 'control'|'yaml'). 화면 값(control `scalp_judge`, bool)이 yaml
+    `scalp.judge` 보다 우선."""
+    flag = get_flag(conn, JUDGE_FLAG, None) if conn is not None else None
+    if isinstance(flag, bool):
+        return flag, "control"
+    return bool(settings.scalp.judge), "yaml"
+
+
+def with_judge(conn: sqlite3.Connection | None, settings: Any) -> Any:
+    """`scalp.judge` 를 실효값으로 바꾼 설정 사본(같으면 원본) — 틱·웹·CLI 가 같은 값을 본다."""
+    value, _ = judge_enabled(conn, settings)
+    if value == settings.scalp.judge:
+        return settings
+    return settings.model_copy(update={"scalp": settings.scalp.model_copy(update={"judge": value})})

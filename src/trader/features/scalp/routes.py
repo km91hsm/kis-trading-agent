@@ -20,7 +20,7 @@ from trader.features.scalp.engine import pos_cfg
 from trader.features.scalp.judge import judge_summary
 from trader.features.scalp.state import load_state, state_dir
 from trader.kernel.ledger import names
-from trader.kernel.ledger.control import delete_flag, log_change, set_flag
+from trader.kernel.ledger.control import delete_flag, get_flag, log_change, set_flag
 from trader.kernel.registry.types import ResourcePart, SseKey
 from trader.kernel.session.run_store import run_date_for
 from trader.kernel.web.auth import actor_of, require_confirm, require_same_origin, require_token
@@ -96,10 +96,35 @@ def _settings_view(deps: Any) -> dict:
     cfg = deps.settings.scalp
     with closing(deps.conn_factory()) as conn:
         accounts = _accounts_view(deps, conn)
+        judge, judge_source = switch.judge_enabled(conn, deps.settings)
     return {
-        "accounts": accounts, "judge": cfg.judge, "max_positions": cfg.max_positions,
+        "accounts": accounts, "judge": judge, "judge_source": judge_source,
+        "judge_default": cfg.judge, "max_positions": cfg.max_positions,
         "max_weight_pct": cfg.max_weight_pct, "default_paper": cfg.enabled,
     }  # fmt: skip
+
+
+class JudgeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: StrictBool | None  # None 이면 화면 값을 지워 yaml `scalp.judge` 로
+
+
+@settings_scalp_router.patch("/settings/scalp-judge", dependencies=WRITE)
+def patch_scalp_judge(request: Request, body: JudgeBody) -> dict:
+    """단타 판정자 켜기·끄기(다음 틱부터). 켜면 신호마다 LLM 판정(GO/NO_GO) 뒤에만 진입하고
+    구독 사용량이 늘어난다. 바뀌면 control 이력 `web`."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        old = get_flag(conn, switch.JUDGE_FLAG)
+        if body.enabled is None:
+            delete_flag(conn, switch.JUDGE_FLAG)
+        else:
+            set_flag(conn, switch.JUDGE_FLAG, body.enabled)
+        if old != body.enabled:
+            log_change(conn, channel="web", actor=actor_of(request), key=switch.JUDGE_FLAG,
+                       old=old, new=body.enabled, at=deps.now().isoformat())  # fmt: skip
+    return _settings_view(deps)
 
 
 class ScalpSwitchBody(BaseModel):
@@ -147,7 +172,8 @@ def scalp_status(request: Request, market: str | None = None) -> dict:
     """단타 상태: 설정·시장별 오늘 진입/청산·중단 사유·판정 대기·판정자 사후 비교
     (분봉 조회 없음)."""
     deps = request.app.state.deps
-    cfg = deps.settings.scalp
+    with closing(deps.conn_factory()) as conn:
+        cfg = switch.with_judge(conn, deps.settings).scalp
     if market is not None and market not in deps.settings.markets:
         raise HTTPException(status_code=400, detail=f"운영하지 않는 시장: {market}")
     by = {}

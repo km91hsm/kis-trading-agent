@@ -27,7 +27,7 @@ const scalp = {
     { id: "paper-main", env: "paper", markets: ["KR"], enabled: true, source: "yaml", effective: true, reason: null },
     { id: "real-1", env: "real", markets: ["KR"], enabled: false, source: "control", effective: false, reason: "꺼짐" },
   ],
-  judge: true, max_positions: 3, max_weight_pct: 5, default_paper: true,
+  judge: true, max_positions: 3, max_weight_pct: 0.05, default_paper: true,
 };
 const patches = () => ff!.calls.filter((c) => c.init?.method === "PATCH").map((c) => ({ url: c.url, body: JSON.parse(String(c.init?.body)) }));
 const sw = (c: HTMLElement, id: string) => c.querySelector(`[role="switch"][aria-label="${id} 단타"]`) as HTMLButtonElement;
@@ -46,6 +46,7 @@ test("renders rows, paper toggle patches without confirm, real enable needs id, 
   expect(container.textContent).toContain("모의");
   expect(container.textContent).toContain("실전");
   expect(container.textContent).toContain("동작");
+  expect(container.textContent).toContain("종목당 비중 5%"); // API 는 비율(0.05)
   expect(container.textContent).toContain("꺼짐");
   await act(async () => sw(container, "paper-main").click());
   await flush();
@@ -96,7 +97,7 @@ test("real account ON -> OFF sends enabled:false directly (no confirm); reset hi
       { id: "paper-main", env: "paper", markets: ["KR"], enabled: true, source: "yaml", effective: true, reason: null },
       { id: "real-1", env: "real", markets: ["KR"], enabled: true, source: "default", effective: false, reason: "전체 일시정지" },
     ],
-    judge: true, max_positions: 3, max_weight_pct: 5, default_paper: true,
+    judge: true, max_positions: 3, max_weight_pct: 0.05, default_paper: true,
   };
   ff = installFakeFetch({
     "GET /api/settings": fixtureSettings(),
@@ -128,4 +129,37 @@ test("reason text is shown in the 실효 cell for a switched-off account", async
   await flush();
   expect(cell(container, "real-1", 3).textContent).toBe("꺼짐");
   expect(cell(container, "real-1", 2).textContent).toBe("꺼짐 · 켜기");
+});
+
+test("판정자: 켜기는 확인 창 뒤 PATCH /settings/scalp-judge, 화면 설정이면 「판정자 기본값으로」는 null", async () => {
+  let cur = { ...scalp, judge: false, judge_source: "yaml", judge_default: false };
+  ff = installFakeFetch({
+    "GET /api/settings": fixtureSettings(),
+    "GET /api/settings/codex-debate": codex,
+    "GET /api/settings/scalp": () => cur,
+    "PATCH /api/settings/scalp-judge": (_u: URL, init?: RequestInit) => {
+      const enabled = (JSON.parse(String(init?.body)) as { enabled: boolean | null }).enabled;
+      cur = { ...cur, judge: enabled ?? false, judge_source: enabled === null ? "yaml" : "control" };
+      return cur;
+    },
+  });
+  const { container } = render(<SettingsPanel />);
+  await flush();
+  const line = container.querySelector('[aria-label="단타 판정자"]') as HTMLElement;
+  expect(line.textContent).toContain("판정자 꺼짐");
+  const on = Array.from(line.querySelectorAll("button")).find((b) => b.textContent === "판정자 켜기") as HTMLButtonElement;
+  await act(async () => on.click());
+  expect(patches()).toEqual([]);
+  const dlg = document.querySelector('[role="dialog"]') as HTMLElement;
+  expect(dlg.textContent).toContain("사용량");
+  const ok = Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent?.trim() === "확인") as HTMLButtonElement;
+  await act(async () => ok.click());
+  await flush();
+  expect(patches()).toEqual([{ url: expect.stringContaining("/settings/scalp-judge"), body: { enabled: true } }]);
+  const line2 = container.querySelector('[aria-label="단타 판정자"]') as HTMLElement;
+  expect(line2.textContent).toContain("판정자 켜짐");
+  const reset = Array.from(line2.querySelectorAll("button")).find((b) => b.textContent === "판정자 기본값으로") as HTMLButtonElement;
+  await act(async () => reset.click());
+  await flush();
+  expect(patches()[1].body).toEqual({ enabled: null });
 });

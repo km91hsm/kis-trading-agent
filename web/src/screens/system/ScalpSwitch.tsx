@@ -11,7 +11,10 @@ type ScalpAccount = {
   id: string; env: "paper" | "real"; markets: string[]; enabled: boolean;
   source: "control" | "yaml" | "default"; effective: boolean; reason: string | null;
 };
-type ScalpSettings = { accounts: ScalpAccount[]; judge: boolean; max_positions: number; max_weight_pct: number; default_paper: boolean };
+type ScalpSettings = {
+  accounts: ScalpAccount[]; judge: boolean; judge_source?: "control" | "yaml"; judge_default?: boolean;
+  max_positions: number; max_weight_pct: number; default_paper: boolean;
+};
 
 const SOURCE: Record<string, string> = { control: "화면에서 설정", yaml: "설정 파일 기본값", default: "실전 기본 꺼짐" };
 
@@ -20,12 +23,26 @@ export function ScalpSwitch() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const [judgeConfirm, setJudgeConfirm] = useState(false);
 
   const save = async (id: string, payload: { enabled: boolean | null; confirm?: string }) => {
     setBusy(true);
     setError(null);
     try {
       await patchJson<ScalpSettings>(`/settings/scalp/${encodeURIComponent(id)}`, payload);
+      res.reload();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveJudge = async (enabled: boolean | null) => {
+    setJudgeConfirm(false);
+    setBusy(true);
+    setError(null);
+    try {
+      await patchJson<ScalpSettings>("/settings/scalp-judge", { enabled });
       res.reload();
     } catch (e) {
       setError(errorText(e));
@@ -60,11 +77,23 @@ export function ScalpSwitch() {
       <h3 className="perf-sub">단타</h3>
       {body(res, "단타 설정", (s) => (
         <>
-          <p className="perf-note">계좌마다 단타를 켜고 끕니다. 실전 계좌는 계좌 id 를 입력해 켜고, 그 계좌가 「자동」 모드이고 LIVE 확인이 된 동안만 돕니다. 상한·조건은 모의와 같습니다(판정자 {s.judge ? "켬" : "끔"}, 최대 보유 {s.max_positions}, 종목당 비중 {s.max_weight_pct}%).</p>
+          <p className="perf-note">계좌마다 단타를 켜고 끕니다. 실전 계좌는 계좌 id 를 입력해 켜고, 그 계좌가 「자동」 모드이고 LIVE 확인이 된 동안만 돕니다. 상한·조건은 모의와 같습니다(최대 보유 {s.max_positions}, 종목당 비중 {(s.max_weight_pct * 100).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%).</p>
+          <p className="perf-note" aria-label="단타 판정자">
+            판정자 <b>{s.judge ? "켜짐" : "꺼짐"}</b> · {s.judge_source === "control" ? "화면에서 설정" : "설정 파일"} — 켜면 신호마다 AI 가 GO/NO_GO 를 판정한 뒤에만 진입합니다.{" "}
+            <button type="button" className="btn" disabled={busy} onClick={() => (s.judge ? void saveJudge(false) : setJudgeConfirm(true))}>{s.judge ? "판정자 끄기" : "판정자 켜기"}</button>
+            {s.judge_source === "control" ? <>{" "}<button type="button" className="btn" disabled={busy} onClick={() => void saveJudge(null)}>판정자 기본값으로</button></> : null}
+          </p>
           <Table columns={columns} rows={s.accounts} rowKey={(a) => a.id} empty="계좌 없음" />
         </>
       ))}
       {error ? <p role="alert" className="perf-note">{error}</p> : null}
+      <Confirm
+        open={judgeConfirm}
+        title="단타 판정자 켜기"
+        body="단타 신호마다 AI 판정(GO/NO_GO)을 거친 뒤에만 진입합니다. 신호마다 Claude 호출이 생겨 구독 사용량이 늘고, 사용률이 높으면 감속에 걸려 판정이 늦어질 수 있습니다."
+        onConfirm={() => void saveJudge(true)}
+        onClose={() => setJudgeConfirm(false)}
+      />
       <Confirm
         open={pending !== null}
         title="실전 단타 켜기"

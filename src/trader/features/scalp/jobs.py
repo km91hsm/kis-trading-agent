@@ -67,6 +67,7 @@ def scalp_body(ctx: Any, job: Any) -> dict:
         market_client = acc.market_client()
         if market_client is None:
             return {"skipped": "시세 클라이언트 없음"}
+        settings = switch.with_judge(conn, settings)  # 화면 판정자 켜기·끄기가 yaml 보다 우선
         ms = getattr(ctx.schedule, market.lower()).monitor
         sctx = engine.ScalpContext(
             settings=settings,
