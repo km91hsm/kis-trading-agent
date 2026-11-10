@@ -20,6 +20,9 @@ const market = (over: Record<string, unknown> = {}) => ({
 });
 let ff: FakeFetch;
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-10T10:00:00+09:00"));
+  noteServerTime(new Date(0).toISOString(), 0);
   clearResourceCache(); tokenStore.set("test-token");
   setEventsClient({ subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} });
 });
