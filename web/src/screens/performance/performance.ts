@@ -59,6 +59,28 @@ export function defaultFilters(accounts: FilterAccount[]): Filters {
   return { account_id: a?.id ?? "", market: a?.markets?.[0] ?? "", days: "30" };
 }
 
+/** 계좌 목록이 도착한 뒤 URL 선택을 검증한다. 지원하지 않는 값은 해당 계좌의 첫 시장·30일로 보정한다. */
+export function filtersFromSearch(accounts: FilterAccount[], params: URLSearchParams): Filters {
+  const account = accounts.find((a) => a.id === params.get("account_id")) ?? accounts[0];
+  const markets = account?.markets ?? [];
+  const requested = params.get("market") ?? "";
+  const days = params.get("days");
+  return {
+    account_id: account?.id ?? "",
+    market: markets.includes(requested) ? requested : markets[0] ?? "",
+    days: days === "90" || days === "365" ? days : "30",
+  };
+}
+
+export function filtersSearch(params: URLSearchParams, filters: Filters): URLSearchParams {
+  const next = new URLSearchParams(params);
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) next.set(key, value);
+    else next.delete(key);
+  }
+  return next;
+}
+
 const fixed2 = (v: Num) => (v === null || v === undefined ? "—" : v.toFixed(2));
 const signed2 = (v: Num) => (v === null || v === undefined ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`);
 

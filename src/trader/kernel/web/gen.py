@@ -42,10 +42,9 @@ TODAY_PAGES = (
 # 성과는 개요·계좌 비교 / 복기 / 추가 분석(보정·섀도·RL·파생 성적표) 셋, 데이터는 하위 메뉴마다
 # 한 페이지(시세·차트 / 뉴스·공시 / 테마·감시목록 / 지표·모델) 넷 — 한 페이지에 다 보이지 않게.
 PERFORMANCE_PAGES = (
-    ("performance", "성과", "/performance", ("performance-overview", "compare")),
+    ("performance", "성과", "/performance", ("performance-overview", "compare", "fo-scorecard")),
     ("memory", "복기", "/performance/memory", ("memory",)),
-    ("analysis", "추가 분석", "/performance/analysis",
-     ("calibration", "shadow", "rl", "fo-scorecard")),
+    ("analysis", "고급 분석", "/performance/analysis", ("calibration", "shadow", "rl")),
 )
 DATA_PAGES = (
     ("quotes", "시세·차트", "/data", ("quotes",)),

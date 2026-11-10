@@ -29,7 +29,9 @@ export function useResource<T>(
   const enabled = opts.enabled ?? true;
   const pkey = JSON.stringify(params ?? {});
   const kkey = keys.join(",");
-  const [state, setState] = useState<Omit<Resource<T>, "reload">>({ data: null, error: null, loading: enabled, at: 0 });
+  const identity = JSON.stringify([path, pkey, enabled]);
+  const blank = { data: null, error: null, loading: enabled, at: 0 };
+  const [state, setState] = useState<Omit<Resource<T>, "reload"> & { identity: string }>({ ...blank, identity });
   const [n, setN] = useState(0);
   const force = useRef(false);
   const deferred = useRef(false);
@@ -42,15 +44,15 @@ export function useResource<T>(
 
   useEffect(() => {
     if (!enabled) {
-      setState({ data: null, error: null, loading: false, at: 0 });
+      setState({ data: null, error: null, loading: false, at: 0, identity });
       return;
     }
     let alive = true;
     const req = cachedGet<T>(path, JSON.parse(pkey) as Record<string, string>, force.current);
     force.current = false;
-    setState((s) => (s.loading ? s : { ...s, loading: true }));
+    setState((s) => s.identity !== identity ? { data: null, error: null, loading: true, at: 0, identity } : s.loading ? s : { ...s, loading: true });
     req.promise.then(
-      (data) => alive && setState({ data, error: null, loading: false, at: Date.now() }),
+      (data) => alive && setState({ data, error: null, loading: false, at: Date.now(), identity }),
       (e: unknown) => {
         if (!alive || isAbort(e)) return;
         const error = e instanceof ApiError ? e : new ApiError(0, String((e as Error)?.message ?? e));
@@ -61,7 +63,7 @@ export function useResource<T>(
       alive = false;
       req.release();
     };
-  }, [path, pkey, enabled, n]);
+  }, [path, pkey, enabled, identity, n]);
 
   useEffect(() => {
     if (!enabled || !kkey) return;
@@ -85,7 +87,7 @@ export function useResource<T>(
   }, [enabled, kkey, refetch]);
 
   const reload = refetch;
-  return { ...state, reload };
+  return { ...(state.identity === identity ? state : blank), reload };
 }
 
 /** 서버 보정 시각을 tickMs 마다 준다(시계·'n분 전'). */

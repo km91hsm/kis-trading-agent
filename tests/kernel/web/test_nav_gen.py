@@ -139,7 +139,7 @@ def test_nav_ts_today_pages_split_status_and_log():
 PERFORMANCE_PAGES = [
     {"id": "performance", "label": "성과", "path": "/performance"},
     {"id": "memory", "label": "복기", "path": "/performance/memory"},
-    {"id": "analysis", "label": "추가 분석", "path": "/performance/analysis"},
+    {"id": "analysis", "label": "고급 분석", "path": "/performance/analysis"},
 ]
 DATA_PAGES = [
     {"id": "quotes", "label": "시세·차트", "path": "/data"},
@@ -158,7 +158,8 @@ def test_nav_ts_performance_and_data_pages():
     assert gen.page_of("performance", "performance-overview") == "performance"
     assert gen.page_of("performance", "compare") == "performance"
     assert gen.page_of("performance", "memory") == "memory"
-    for sid in ("calibration", "shadow", "rl", "fo-scorecard"):
+    assert gen.page_of("performance", "fo-scorecard") == "performance"
+    for sid in ("calibration", "shadow", "rl"):
         assert gen.page_of("performance", sid) == "analysis"
     assert gen.page_of("performance", "unknown-section") == "performance"
     for sid, page in (("quotes", "quotes"), ("news", "news"), ("themes", "themes"),
@@ -177,8 +178,8 @@ def test_feature_nav_items_cover_performance_and_data_pages():
     assert perf == {
         "performance-overview": ("성과", "performance"), "compare": ("계좌 비교", "performance"),
         "memory": ("복기", "memory"),
-        "calibration": ("보정", "analysis"), "shadow": ("섀도 기준선", "analysis"),
-        "rl": ("RL", "analysis"), "fo-scorecard": ("파생 성적표", "analysis"),
+        "calibration": ("판정 보정", "analysis"), "shadow": ("기준선 비교", "analysis"),
+        "rl": ("강화학습 분석", "analysis"), "fo-scorecard": ("파생 성적표", "performance"),
     }
     data = {i["id"]: (i["label"], i["page"]) for i in nav["data"]["items"]}
     assert data == {

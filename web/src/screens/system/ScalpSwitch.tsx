@@ -74,7 +74,6 @@ export function ScalpSwitch() {
 
   return (
     <div className="scalp-switch">
-      <h3 className="perf-sub">단타</h3>
       {body(res, "단타 설정", (s) => (
         <>
           <p className="perf-note">계좌마다 단타를 켜고 끕니다. 실전 계좌는 계좌 id 를 입력해 켜고, 그 계좌가 「자동」 모드이고 LIVE 확인이 된 동안만 돕니다. 상한·조건은 모의와 같습니다(최대 보유 {s.max_positions}, 종목당 비중 {(s.max_weight_pct * 100).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%).</p>

@@ -38,6 +38,44 @@ function select(el: HTMLSelectElement, value: string) {
 }
 
 describe("RunJobButton", () => {
+  test("확인창은 전달된 시장·계좌와 주문 가능성·AI 영향의 불확실성을 설명한다", () => {
+    render(<RunJobButton kind="trade" params={{ market: "US", account_id: "paper-1" }} targetAccountId="paper-1" trading realAccounts={[]} />);
+    act(() => button("trade").click());
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("대상 시장: US");
+    expect(dialog.textContent).toContain("대상 계좌: paper-1");
+    expect(dialog.textContent).toContain("주문이 발생할 수 있습니다");
+    expect(dialog.textContent).toContain("AI 호출 여부와 비용은 확인되지 않았습니다");
+    expect(dialog.textContent).toContain("요청 등록은 실행 완료가 아닙니다");
+  });
+
+  test("미지정 대상은 전체로 단정하지 않고 실전 확인 계좌를 실행 대상으로 설명하지 않는다", () => {
+    render(<RunJobButton kind="trade" trading realAccounts={["real-1"]} />);
+    act(() => button("trade").click());
+    const dialog = document.querySelector('[role="dialog"]')!;
+    select(dialog.querySelector("select")!, "real-1");
+    expect(dialog.textContent).toContain("대상 시장: 작업 기본값 사용 (범위 미확인)");
+    expect(dialog.textContent).toContain("대상 계좌: 작업 기본값 사용 (범위 미확인)");
+    expect(dialog.textContent).toContain("실전 확인 계좌 선택은 실행 대상을 변경하지 않습니다");
+    expect(dialog.textContent).not.toContain("대상 계좌: real-1");
+  });
+
+  test("비매매도 AI 호출 없음으로 단정하지 않고 접수 피드백과 요청 기록 이동을 제공한다", async () => {
+    ff = installFakeFetch({ "POST /api/jobs": route() });
+    const { container } = render(<RunJobButton kind="collect" trading={false} realAccounts={[]} />);
+    act(() => button("collect").click());
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("비매매 작업으로 등록되어 있습니다");
+    expect(dialog.textContent).toContain("AI 호출 여부와 비용은 확인되지 않았습니다");
+    act(() => button("확인").click());
+    await flush();
+    const feedback = container.querySelector('[role="status"]')!;
+    expect(feedback.textContent).toContain("요청 #7 접수");
+    expect(feedback.textContent).toContain("실행 완료가 아닙니다");
+    expect(feedback.querySelector("a")?.getAttribute("href")).toBe("/system/jobs#job-requests");
+    expect(bodyOf()).toEqual({ kind: "collect", params: {} });
+  });
+
   test("실전 계좌가 있고 trading kind 이면 고른 계좌 id 를 재입력해야 확인이 켜지고 그 값이 confirm 으로 POST /jobs 에 실린다", async () => {
     ff = installFakeFetch({ "POST /api/jobs": route() });
     const onDone = vi.fn();

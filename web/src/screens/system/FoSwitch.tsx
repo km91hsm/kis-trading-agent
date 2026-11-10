@@ -53,7 +53,6 @@ export function FoSwitch() {
 
   return (
     <div className="scalp-switch" aria-label="파생 계좌별 스위치">
-      <h3 className="perf-sub">파생</h3>
       {body(res, "파생 설정", (s) => (
         <>
           <p className="perf-note">계좌마다 파생(코스피200 {s.product === "mini" ? "미니" : "일반"} 선물·옵션) 신규 진입을 켜고 끕니다. 모의 계좌 전용이며 현물처럼 별도 검증 없이 바로 매매합니다. 끄면 새 진입만 멈추고 보유분 감시·축소는 계속합니다(최대 {s.max_contracts}계약).</p>

@@ -52,6 +52,25 @@ function choose(root: ParentNode, label: string, value: string) {
 }
 
 describe("잡 큐 표시 순서", () => {
+  test("요청 기록이 먼저 보이고 수동 실행은 기본적으로 접혀 있다", async () => {
+    const root = await mount([]);
+    const record = root.querySelector("#job-requests")!;
+    const manual = root.querySelector("details")!;
+    expect(record).not.toBeNull();
+    expect(manual).not.toBeNull();
+    expect(manual.open).toBe(false);
+    expect(manual.querySelector("summary")?.textContent).toContain("수동 실행");
+    expect(record.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("진행 우선 정렬은 오래된 실패도 완료 기록보다 먼저 보여 준다", async () => {
+    const root = await mount([
+      request({ id: 10, status: "ok", finished_at: "2026-11-05T11:00:00+09:00" }),
+      request({ id: 11, status: "error", finished_at: "2026-11-04T11:00:00+09:00" }),
+    ]);
+    expect(ids(root)).toEqual([11, 10]);
+  });
+
   test("입력 순서와 무관하게 실행 중, 우선순위가 높은 대기, 최근 종료 순으로 표시한다", async () => {
     const root = await mount([
       request({ id: 100, status: "ok", finished_at: "2026-11-05T10:00:00+09:00" }),

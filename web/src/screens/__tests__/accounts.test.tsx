@@ -304,3 +304,9 @@ describe("계좌·보유 통합 화면", () => {
    expect(section("overview").textContent).toContain("환경별 합계를 확인할 수 없습니다. 아래 계좌별 자산을 확인하세요.");
    expect(section("overview").querySelector(".kpi-strip")).toBeNull();
  });
+
+
+test("파생 카드에서 해당 계좌 주문 다리로 직접 이동한다", async () => {
+  await mount(routes());
+  expect(section("fo-positions").querySelector('a[href="/accounts/paper-fo#fo-legs"]')?.textContent).toBe("주문 진행");
+});

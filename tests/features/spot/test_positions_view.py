@@ -34,6 +34,22 @@ ROW_KEYS = {
 }  # fmt: skip
 
 
+def test_position_links_keep_known_exchange_without_guessing(client, ledger):
+    _nav(ledger, "paper-main", "1000", "100", market="US")
+    _pos(ledger, "paper-main", "SYN", 1, "100", "110", "110", market="US")
+    ledger.execute(
+        "INSERT INTO ticker_exchanges(market,ticker,exchange,updated_at) VALUES (?,?,?,?)",
+        ("US", "SYN", "NYSE", NOW.isoformat()),
+    )
+    ledger.commit()
+    rows = client.get("/api/accounts/paper-main/positions", params={"market": "US"}).json()["items"]
+    assert rows[0]["exchange"] == "NYSE"
+    ledger.execute("DELETE FROM ticker_exchanges WHERE ticker=?", ("SYN",))
+    ledger.commit()
+    rows = client.get("/api/accounts/paper-main/positions", params={"market": "US"}).json()["items"]
+    assert rows[0]["exchange"] is None
+
+
 @pytest.fixture
 def accounts():
     return [

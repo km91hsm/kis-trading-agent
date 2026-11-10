@@ -5,7 +5,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PageTabs } from "../../components/PageTabs";
-import { FoLegs } from "./FoLegs";
 import { FO_STATE_LABEL } from "../accounts/accounts";
 import { NAV } from "../../generated/nav";
 import { screenPages } from "../../lib/nav";
@@ -63,7 +62,7 @@ const REGIME_COLUMNS: Column<RegimeMarket>[] = [
 ];
 
 const FO_COLUMNS: Column<FoAccount>[] = [
-  { key: "id", label: "계좌", width: "25%", long: true },
+  { key: "id", label: "계좌·보유 상세", width: "25%", long: true, render: (a) => <Link to={`/accounts/${encodeURIComponent(a.id)}`}>{a.id} · 상세 보기</Link> },
   { key: "env", label: "환경", width: "15%", align: "chip", render: (a) => <Chip tone={a.env === "real" ? "live" : "muted"}>{termLabel(`env.${a.env}`)}</Chip> },
   { key: "mode", label: "모드", width: "15%", render: (a) => termLabel(`mode.${a.mode}`) },
   { key: "state", label: "상태", width: "20%", render: (a) => (a.state ? (FO_STATE_LABEL[a.state] ?? a.state) : "—") },
@@ -156,7 +155,7 @@ export function System({ page }: { page: SystemPage }) {
               </p>
             ) : null}
             <Table columns={FO_COLUMNS} rows={f.accounts} rowKey={(a) => a.id} empty="파생 계좌 없음" />
-            <FoLegs accounts={f.accounts} />
+            <p className="perf-note">보유·증거금·만기와 주문 상세는 위 계좌를 선택해 확인하세요.</p>
           </>
         )}
       </FeatureStatus>
@@ -168,6 +167,7 @@ export function System({ page }: { page: SystemPage }) {
       <h1 className="screen-title">설정·운영 · {label}</h1>
       <p className="system-intro">{({ status: "자동 실행과 연결 상태를 확인하고, 문제가 있으면 원인과 해결 경로를 찾습니다.", jobs: "예약된 자동 작업과 실행 결과를 확인합니다. 수동 실행은 작업별 영향을 확인한 뒤 요청하세요.", features: "시장별 일반 현물 매수 정책과 단타·파생의 실제 적용 상태를 확인하고 설정합니다.", admin: "데이터 수집·연결 키·접속 설정을 관리합니다. 매매 허용 범위는 매매 정책에서 확인하세요." })[page]}</p>
       <PageTabs screen="system" label="시스템 페이지" />
+      {page === "features" ? <nav className="system-shortcuts" aria-label="매매 정책 구분"><Link to="#regime">현물 매수 정책</Link><Link to="#scalp">단타</Link><Link to="#fo">파생</Link></nav> : null}
       <nav className="system-shortcuts" aria-label="운영 바로가기"><Link to="/">오늘 상태 보기</Link><Link to="/system/features#regime">시장별 매수 정책</Link><Link to="/system/admin#saveticker">연결·수집 점검</Link></nav>
       {sections.map((s) => (
         <section key={s.id} id={s.id} className="screen-section">

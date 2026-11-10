@@ -244,3 +244,13 @@ export function chartLines(positions: LevelRow[], ticker: string): ChartLine[] {
   add(p.target, "목표", "--ok");
   return out;
 }
+
+/** 잔고·주문의 거래소 코드를 시세 API 코드로 바꾼다. 확인한 동일 거래소 별칭만 허용한다. */
+export function quoteExchange(exchange: string | null): string | null {
+  switch (exchange) {
+    case "NAS": case "NASD": return "NAS";
+    case "NYS": case "NYSE": return "NYS";
+    case "AMS": case "AMEX": return "AMS";
+    default: return null;
+  }
+}

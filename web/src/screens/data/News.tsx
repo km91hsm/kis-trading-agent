@@ -44,6 +44,7 @@ export function News() {
         const next = new URLSearchParams(prev);
         if (t) next.set("ticker", t);
         else next.delete("ticker");
+        if (t !== prev.get("ticker")) next.delete("exchange");
         next.delete("page");
         return next;
       },
@@ -77,7 +78,10 @@ export function News() {
   const sameChips = rows.length > 0 && rows.every((r) => r.chips.join("|") === rows[0].chips.join("|")) && rows[0].chips.length > 0 && !rows[0].chips.includes(USED_CHIP) ? rows[0].chips : null;
   const hasChips = !sameChips && rows.some((r) => r.chips.length);
   const filterName = filterTicker ? (names.data?.[`${market}:${filterTicker}`] ?? rows.flatMap((r) => r.tickers).find((t) => t.ticker === filterTicker)?.name ?? null) : null;
-  const chartHref = filterTicker ? (market === "US" ? `/data?ticker=${filterTicker}&market=US` : `/data?ticker=${filterTicker}`) : null;
+  const chartParams = new URLSearchParams({ market, ticker: filterTicker });
+  const exchange = sp.get("exchange");
+  if (exchange) chartParams.set("exchange", exchange);
+  const chartHref = filterTicker ? `/data?${chartParams}#stock-chart` : null;
   const columns: Column<NewsRow>[] = [
     { key: "at", label: "시각", width: "12%", render: (r) => fmtWhen(r.at) },
     { key: "title", label: "제목", width: "auto", long: true, render: (r) => (r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a> : r.title) },
@@ -167,9 +171,9 @@ export function News() {
       ) : null}
       {body(news, "뉴스", () => (
         <>
-          {labels.error ? failed("뉴스 라벨", labels.error) : null}
-          {names.error ? failed("종목 이름", names.error) : null}
-          {refs.error ? failed("판정 참조", refs.error) : null}
+          {labels.error ? failed("뉴스 라벨", labels.error, labels.reload, labels.loading) : null}
+          {names.error ? failed("종목 이름", names.error, names.reload, names.loading) : null}
+          {refs.error ? failed("판정 참조", refs.error, refs.reload, refs.loading) : null}
           <Table columns={columns} rows={paged.rows} rowKey={(r) => r.id} empty="최근 뉴스 없음" />
           <Pager {...paged} />
         </>
@@ -254,7 +258,7 @@ function ManualForm({ market }: { market: Market }) {
           </p>
         )
       ) : null}
-      {recent.error ? failed("수동 입력", recent.error) : recent.data?.items.length ? (
+      {recent.error ? failed("수동 입력", recent.error, recent.reload, recent.loading) : recent.data?.items.length ? (
         <Table columns={MANUAL_COLUMNS} rows={recent.data.items.slice(0, 5)} rowKey={(m) => `${m.received_at}-${m.title}`} />
       ) : null}
     </>
