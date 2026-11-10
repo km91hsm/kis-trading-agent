@@ -102,7 +102,7 @@ def check(ctx: OpsContext) -> list[Item]:
                 "fo.orders_stale",
                 "watch",
                 f"파생 마감({close}) 뒤에도 정리되지 않은 주문 {stale}건 (체결 동기화·대조 확인)",
-                link="/",
+                link="/#orders-timeline",
                 count=stale,
             )
         )

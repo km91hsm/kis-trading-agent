@@ -61,7 +61,7 @@ def test_loss_area_levels_and_killswitch(conn, project, monkeypatch):
     monkeypatch.setattr(health, "realized_pnl_5d", lambda c, a, d, market=None: pnl[a])
     by = {i.key: i for i in health.check(ctx(conn, project, *accts))}
     ks = by.pop("regime.killswitch")
-    assert ks.level == "critical" and ks.link == "/system" and "수동 정지" in ks.text
+    assert ks.level == "critical" and ks.link == "/system#regime" and "수동 정지" in ks.text
     assert {k: i.level for k, i in by.items()} == {
         "regime.loss.paper-1.KR": "watch",
         "regime.loss.paper-2.KR": "warning",

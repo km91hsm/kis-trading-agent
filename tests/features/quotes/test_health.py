@@ -43,7 +43,7 @@ def test_session_busy_watch_only_when_until_future(conn, project):
     set_flag(conn, "ws_session_busy:naive", {"until": "2026-10-27T01:00:30"})  # tz 없음 → UTC
     items = health.check(ctx(conn, project))
     assert [(i.key, i.level, i.link) for i in items] == [
-        ("quotes.session_busy.naive", "watch", "/system"),
-        ("quotes.session_busy.real", "watch", "/system"),
+        ("quotes.session_busy.naive", "watch", "/data#quotes"),
+        ("quotes.session_busy.real", "watch", "/data#quotes"),
     ]
     assert "real" in items[1].text and future in items[1].text

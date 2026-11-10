@@ -25,7 +25,7 @@ def check(ctx: OpsContext) -> list[Item]:
             f"만기 결정 {n}건 — 보정 재검토 시점. L12 개선(벤치마크 대비 부호·Wilson 하한·"
             "수축, 역할·이웃 표본 수 조건) 뒤 `ml.yaml calibration.inject` 를 켠다 "
             "(`trader evaluation calibration build` 로 리포트 확인)",
-            link="/performance",
+            link="/performance#calibration",
             count=n,
         )
     ]

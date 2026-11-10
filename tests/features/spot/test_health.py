@@ -58,7 +58,7 @@ def test_fill_ambiguous_and_reconcile_mismatch_warning(conn, project):
     by = {i.key: i for i in health.check(ctx(conn, project, acct("paper-main")))}
     assert set(by) == {"spot.fill_ambiguous.KR", "spot.reconcile.paper-main.KR"}
     fa = by["spot.fill_ambiguous.KR"]
-    assert fa.level == "warning" and fa.link == "/?status=unknown" and fa.extra == amb
+    assert fa.level == "warning" and fa.link == "/#orders-timeline" and fa.extra == amb
     rc = by["spot.reconcile.paper-main.KR"]
     assert rc.level == "warning" and rc.count == 2 and rc.link == "/accounts/paper-main"
 
@@ -68,7 +68,7 @@ def test_reconcile_watch_after_due_plus_grace(conn, project):
     assert health.check(ctx(conn, project, acct("paper-main"), now=early)) == []
     items = health.check(ctx(conn, project, acct("paper-main")))
     assert [(i.key, i.level, i.link) for i in items] == [
-        ("spot.reconcile.paper-main.KR", "watch", "/system")
+        ("spot.reconcile.paper-main.KR", "watch", "/system#daemon")
     ]
     weekend = datetime(2026, 10, 24, 8, 30, tzinfo=UTC)  # 토 17:30 KST
     assert health.check(ctx(conn, project, acct("paper-main"), now=weekend)) == []

@@ -105,7 +105,7 @@ def test_health_fo_stale_orders_use_fo_clock(conn, project):
     c = ctx(conn, project, SPOT, FO, now=after)
     items = health.check(c)
     assert [(i.key, i.level, i.count, i.link) for i in items] == [
-        ("fo.orders_stale", "watch", 2, "/")
+        ("fo.orders_stale", "watch", 2, "/#orders-timeline")
     ]
     # 커널 현물 orders 영역은 파생 주문을 세지 않는다(unknown·마감 뒤 미정리 모두)
     keys = {i.key for i in areas.check_orders(c)}
