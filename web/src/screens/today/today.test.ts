@@ -15,6 +15,14 @@ import {
 } from "../../test/fixtures/today";
 
 describe("today 순수 함수", () => {
+  test("HOLD의 blocked는 주문 없음으로 설명하고 매수 차단과 구분한다", () => {
+    const rows = decisionRows([
+      fixtureSpotDecision({ action: "HOLD", side: null, status: "blocked" }),
+      fixtureSpotDecision({ action: "BUY", side: "BUY", status: "blocked" }),
+    ]);
+    expect(rows.map((row) => row.status)).toEqual(["주문 없음", "거절"]);
+    expect(rows.map((row) => row.raw)).toEqual(["blocked", "blocked"]);
+  });
   test("laneCards: fo 계좌 없으면 fo 카드 없음; spot 결정 매수2 매도1 보류1, 주문 3 체결 2 미체결 1", () => {
     const accounts = [fixtureAccount(), fixtureAccount({ id: "paper-2", lane: "scalp" })];
     const decisions = [

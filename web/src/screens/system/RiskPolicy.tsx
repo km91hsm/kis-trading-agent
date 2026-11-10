@@ -53,7 +53,7 @@ function PolicyUnavailable({ resource }: { resource: Resource<RiskPolicyResponse
 
 function ActualPolicy({ item }: { item: RiskMarket }) {
   const label = marketName(item.market);
-  const limits = policyLimits(item.effective);
+  const limits = ["standard", "limited"].includes(item.effective.entry) ? policyLimits(item.effective) : null;
   return <div className="risk-policy-actual" aria-label={`${label} 실제 매수 정책`} data-entry={item.effective.entry}>
     <span className="risk-policy-eyebrow">실제 적용되는 일반 현물 매수 정책</span>
     <strong className="risk-policy-entry">{entryName(item.effective.entry)}</strong>

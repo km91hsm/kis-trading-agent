@@ -25,6 +25,12 @@ beforeEach(() => {
 });
 afterEach(() => { ff?.restore(); tokenStore.set(""); vi.useRealTimers(); noteServerTime(new Date(0).toISOString(), 0); });
 const patches = () => ff.calls.filter((c) => c.init?.method === "PATCH");
+test.each(["blocked", "unknown"])("%s 정책에서는 설정 한도를 매수 허용 범위처럼 표시하지 않는다", async (entry) => {
+  ff = installFakeFetch({ "GET /api/settings/risk-policy": { markets: [market({ effective: { stance: "RISK_OFF", entry, reason: "신규 매수 불가", max_position_pct: 0.25, max_positions: 5 } })] } });
+  const { container } = render(<RiskPolicySummary />); await flush();
+  expect(container.textContent).toContain("신규 매수 불가");
+  expect(container.querySelector(".risk-policy-limits")).toBeNull();
+});
 const button = (c: ParentNode, text: string) => Array.from(c.querySelectorAll("button")).find((b) => b.textContent?.includes(text))!;
 async function input(c: ParentNode, label: string, value: string) {
   const node = c.querySelector(`[aria-label="${label}"]`) as HTMLInputElement | HTMLTextAreaElement;

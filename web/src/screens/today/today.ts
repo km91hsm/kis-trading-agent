@@ -169,7 +169,7 @@ export function decisionRows(decisions: Decision[]): DecisionRow[] {
       side: SIDE_LABEL[sideOf(d)],
       qty: d.qty ?? null,
       account_id: d.account_id ?? null,
-      status: statusLabel(d.status),
+      status: d.status === "blocked" && d.action === "HOLD" ? "주문 없음" : statusLabel(d.status),
       raw: d.status ?? null,
       href: decisionHref(d),
       kind: d.source === "hedge" ? "방어용 헤지" : d.source === "cash_park" ? "현금 운용" : d.lane === "spot" ? "일반 종목" : LANE_LABEL[d.lane as Lane] ?? d.lane,

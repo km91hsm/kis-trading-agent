@@ -105,7 +105,7 @@
 .index-stale { color: var(--warn); font-weight: 600; }
 
 /* 좁은 폭의 「더 보기」 — 지수·사용률 칩을 접는다 */
-.statusbar-more { position: relative; }
+.statusbar-more { position: relative; flex: none; }
 .statusbar-more > summary {
   list-style: none;
   cursor: pointer;
@@ -115,6 +115,7 @@
   display: inline-flex;
   align-items: center;
   padding: 0 var(--space-2);
+  white-space: nowrap;
 }
 .statusbar-more > summary::-webkit-details-marker { display: none; }
 .statusbar-more-body {
@@ -364,12 +365,15 @@
   }
 }
 
-@media (max-width: 1023px) {
-  /* <1024(하단 탭 폭): 첫 줄 건강 요약 + 테마 토글, 다음 줄: 지수·사용률·시계(들어가면 한 줄). 본문과 같은 16px 가장자리. */
+@media (max-width: 1279px) {
+  /* 아이콘 레일 폭까지: 첫 줄 상태·테마, 다음 줄 지수·사용률·시계. 정보가 겹치기 전에 줄을 나눈다. */
   .statusbar { flex-wrap: wrap; row-gap: var(--space-1); padding-left: var(--space-4); padding-right: var(--space-4); }
   .statusbar > * { order: 2; }
   .statusbar-health { order: 0; flex-basis: calc(100% - var(--touch) - var(--space-4)); }
   .statusbar > .theme-toggle { order: 1; }
+  .theme-toggle-label,
+  .clock-et,
+  .usage-chip[data-usage-chip="7d"] { display: none; }
 }
 
 @media (max-width: 767px) {

@@ -73,6 +73,12 @@ function setWidth(w: number) {
 }
 
 describe("반응형 규칙", () => {
+  test("1024px 상태바도 두 줄로 배치하고 모바일 더보기는 줄바꿈하지 않는다", () => {
+    const shell = css("shell.css");
+    const compact = mediaBlocks(shell, /^\(max-width:\s*1279px\)\s*$/).join(";");
+    expect(rulesFor(compact, /^\.statusbar$/).join(";")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rulesFor(shell, /^\.statusbar-more > summary$/).join(";")).toMatch(/white-space:\s*nowrap/);
+  });
   test("본문은 16px·보조 14px이며 모든 폭의 기본 조작 영역이 44px 이상이다", () => {
     const tokens = css("tokens.css");
     expect(tokens).toMatch(/--text-md:\s*16px/);
