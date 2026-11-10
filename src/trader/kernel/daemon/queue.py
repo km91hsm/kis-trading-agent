@@ -188,6 +188,23 @@ def cancel(
     return True
 
 
+def queued(conn: sqlite3.Connection) -> list[dict]:
+    """대기 중(queued) 요청 전부, id 순."""
+    rows = conn.execute("SELECT * FROM job_requests WHERE status='queued' ORDER BY id")
+    return [_hydrate(r) for r in rows.fetchall()]
+
+
+def skip_queued(conn: sqlite3.Connection, req_id: int, *, result: dict, now: datetime) -> bool:
+    """대기 중인 요청을 실행 없이 skipped 로 닫는다(다른 레인이 먼저 꺼냈으면 False)."""
+    cur = conn.execute(
+        "UPDATE job_requests SET status='skipped', finished_at=?, result=? "
+        "WHERE id=? AND status='queued'",
+        (_iso(now), json.dumps(result, ensure_ascii=False, default=str), req_id),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
 def _after_cancel(conn: sqlite3.Connection, req_id: int, kinds: Kinds) -> None:
     row = conn.execute("SELECT kind, params FROM job_requests WHERE id=?", (req_id,)).fetchone()
     spec = kinds.get(row[0]) if row is not None else None

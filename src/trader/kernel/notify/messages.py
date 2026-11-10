@@ -176,6 +176,32 @@ def throttle_skip(*, market: str, why: str) -> str:
     )
 
 
+def _euro(word: str) -> str:
+    """조사 '으로/로': 받침이 없거나 ㄹ 받침이면 '로'."""
+    last = word[-1:] if word else ""
+    if "가" <= last <= "힣":
+        jong = (ord(last) - 0xAC00) % 28
+        return "로" if jong in (0, 8) else "으로"
+    return "(으)로"
+
+
+def queue_gate_skipped(*, market: str | None, why: str, counts: dict[str, int]) -> str:
+    """대기 중이던 자동 요청을 시장 게이트(장 마감·휴장 등)로 건너뛰었다(시장·사유·날짜당 1번).
+    counts 는 화면 이름 → 건수."""
+    total = sum(counts.values())
+    detail = "·".join(f"{label} {n}" for label, n in counts.items())
+    where = f"{market} " if market else ""
+    return render(
+        "요청 건너뜀",
+        f"{where}{why}{_euro(why)} 대기 중이던 요청 {total}건({detail})을 건너뛰었어요",
+    )
+
+
+def settings_reload_failed(err: str) -> str:
+    """실행 중 settings.yaml 다시 읽기 실패(같은 오류는 1번). 이전 설정으로 계속 돈다."""
+    return render("설정 오류", "settings.yaml 을 다시 읽지 못해 이전 설정을 그대로 써요", (err,))
+
+
 def _order_line(side: str, qty: Any, price: Any, market: str | None) -> str:
     where = f"@{money(price, market)}" if price is not None else "시장가"
     return f"{SIDE.get(str(side), str(side))} {qty}주 {where}"

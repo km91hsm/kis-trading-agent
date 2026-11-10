@@ -25,6 +25,7 @@ from trader.kernel.cli.dev import dev_app
 from trader.kernel.cli.jobs_cmd import build_jobs_app
 from trader.kernel.cli.tool_cmd import build_tool_app
 from trader.kernel.config import KST, load_secrets
+from trader.kernel.config.reload import SettingsWatcher
 from trader.kernel.config.secrets import ensure_web_token
 from trader.kernel.daemon.runner import Daemon, DaemonDeps
 from trader.kernel.ledger import db
@@ -137,6 +138,7 @@ def build_web_deps(boot_: Boot) -> WebDeps:
         public_base=boot_.settings.web.public_base,
         features=boot_.features,
         ports=web_ports(boot_.ports),
+        settings_watch=SettingsWatcher(boot_.registry) if boot_.registry is not None else None,
     )
 
 
