@@ -150,6 +150,15 @@ def _theme_rejections(
     return out
 
 
+def _zero_qty_reason(nav: Decimal) -> str:
+    """매수 수량이 0 인데 다른 거부 사유가 없을 때의 사유. NAV 0(잔고 없음·조회 비어 있음)이면
+    그렇게 적는다 — 헤지는 시장의 모든 계좌에 판정을 남겨 빈 계좌에서 「가능금액 부족」이 오해를
+    불렀다."""
+    if nav <= 0:
+        return "계좌 평가금액 0(잔고 없음 또는 잔고 조회가 비어 있음) — 매수 불가"
+    return "가능금액 부족으로 주문 수량 0"
+
+
 def evaluate(
     decision: Decision,
     portfolio: Portfolio,
@@ -301,7 +310,7 @@ def evaluate(
     # --- 거부 규칙 (전부 수집) ---------------------------------------------------------
     if side == "BUY" and is_hedge:
         if qty <= 0 and not rejected:
-            rejected.append("가능금액 부족으로 주문 수량 0")
+            rejected.append(_zero_qty_reason(nav))
     elif side == "BUY":
         if killswitch:
             rejected.append(f"킬스위치(신규 매수 중단): {killswitch}")
@@ -382,7 +391,7 @@ def evaluate(
                         f"왕복비용 {cost:.2%} 미만"
                     )
         if qty <= 0 and not rejected:
-            rejected.append("가능금액 부족으로 주문 수량 0")
+            rejected.append(_zero_qty_reason(nav))
     else:
         since = portfolio.held_since.get(ticker)
         if since is not None and not is_stop_loss and not is_hedge and not is_scalp:

@@ -623,3 +623,14 @@ def test_pending_buys_do_not_reduce_cash_again():
     p = _portfolio(pending_buys={"000660": Decimal("9000000")})
     v = _eval(ok_decision(target_weight=0.1), p)
     assert v.approved and not any("가능금액" in r for r in v.reasons)
+
+
+def test_zero_nav_says_account_value_is_zero_not_cash_shortage():
+    """평가금액(NAV) 0 인 계좌(잔고 없음·조회 비어 있음)는 「가능금액 부족」이 아니라 NAV 0 을
+    사유로 남긴다 — 헤지 매수가 모든 계좌에 판정을 남겨 빈 계좌에서 오해를 부르던 문구."""
+    empty = _portfolio(nav=Decimal(0), cash_available=Decimal(0))
+    for kw in ({}, {"is_hedge": True, "hedge_max_weight": 0.20}):
+        v = _eval(ok_decision(target_weight=0.2), empty, **kw)
+        assert v.approved is False and v.adjusted_qty == 0
+        assert any("평가금액 0" in r for r in v.reasons), v.reasons
+        assert not any("가능금액 부족" in r for r in v.reasons), v.reasons
