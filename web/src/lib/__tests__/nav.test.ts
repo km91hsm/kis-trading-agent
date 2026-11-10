@@ -16,6 +16,8 @@ describe("nav 페이지", () => {
     expect(pagePathOf("system", "runs")).toBe("/system/jobs");
     expect(pagePathOf("system", "regime")).toBe("/system/features");
     expect(pagePathOf("system", "health")).toBe("/system");
+    expect(pagePathOf("system", "saveticker")).toBe("/system/admin");
+    expect(resolveLink("/system#saveticker")).toBe("/system/admin#saveticker");
     expect(pagePathOf("data", "news")).toBe("/data/news");
     expect(pagePathOf("data", "watchlist")).toBe("/data/themes");
     expect(pagePathOf("performance", "shadow")).toBe("/performance/analysis");

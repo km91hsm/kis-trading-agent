@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from trader.features.regime import blackout, killswitch, market_view, messages, regime
+from trader.features.regime import blackout, killswitch, market_view, messages, policy, regime
 from trader.features.regime.settings import HedgeCfg, HedgeInstrument, hedge_tickers
 from trader.kernel.registry.types import Port
 
@@ -39,6 +39,10 @@ class RegimePortImpl:
     def view_today(self, conn: sqlite3.Connection, market: str, today: date) -> dict | None:
         """오늘 제출된 시장 판단(없거나 다른 날짜 것이면 None)."""
         return market_view.load_view(conn, market, today)
+
+    def risk_policy(self, conn: sqlite3.Connection, market: str, now: datetime) -> dict:
+        """현물에만 적용하는 독립 정책. 원본 AI 판단은 변경하지 않는다."""
+        return policy.context(conn, market, now, self._settings)
 
     def clamp_weight(self, view: dict | None) -> float:
         """제안 비중을 [min_weight_pct, max_weight_pct] 로 자른다. 제안이 없으면 max."""

@@ -48,4 +48,4 @@ def test_regime_endpoint_states_view_and_killswitch(client, conn):
 
 
 def test_regime_nav_item():
-    assert NavItem("system", "regime", "국면", 30) in FEATURE.nav
+    assert NavItem("system", "regime", "시장 국면·매수 정책", 30) in FEATURE.nav

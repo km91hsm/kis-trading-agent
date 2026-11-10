@@ -3,6 +3,7 @@
 // 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다. 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목),
 // 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { PageTabs } from "../../components/PageTabs";
 import { FoLegs } from "./FoLegs";
 import { FO_STATE_LABEL } from "../accounts/accounts";
@@ -24,6 +25,10 @@ import { SettingsPanel } from "./SettingsPanel";
 import { TokenPanel } from "./TokenPanel";
 import { Usage } from "./Usage";
 import { SavetickerStatus } from "./SavetickerStatus";
+import { RiskPolicy } from "./RiskPolicy.tsx";
+import { ScalpSwitch } from "./ScalpSwitch";
+import { FoSwitch } from "./FoSwitch";
+import "../today/user-flow.css";
 import type { FoAccount, FoResp, RegimeMarket, RegimeResp, SavetickerResp, ScalpResp } from "./system.ts";
 
 const SECTIONS = [
@@ -80,7 +85,7 @@ export function System({ page }: { page: SystemPage }) {
   const pages = screenPages("system");
   const label = pages.find((p) => p.id === page)?.label ?? "";
   // 절 순서는 nav.ts 항목 순(order) — 페이지 안에서도 메뉴 생성기가 정한 순서를 따른다
-  const sections = NAV.system.items.filter((i) => i.page === page).flatMap((i) => SECTIONS.filter((s) => s.id === i.id));
+  const sections = NAV.system.items.filter((i) => i.page === page).flatMap((i) => SECTIONS.filter((s) => s.id === i.id).map((s) => ({ ...s, label: i.label })));
   const [tokenKey, setTokenKey] = useState(0);
   const content: Record<(typeof SECTIONS)[number]["id"], ReactNode> = {
     usage: <Usage />,
@@ -92,7 +97,9 @@ export function System({ page }: { page: SystemPage }) {
     secrets: <Secrets tokenKey={tokenKey} />,
     token: <TokenPanel onChange={() => setTokenKey((x) => x + 1)} />,
     "control-log": <ControlLog />,
-    regime: (
+    regime: (<>
+      <RiskPolicy />
+      <details className="sys-details"><summary>자동 헤지 설정과 시장 상태 기록</summary>
       <FeatureStatus<RegimeResp> path="/system/regime" keys={["market_views", "control"]} what="국면">
         {(r) => (
           <>
@@ -105,7 +112,8 @@ export function System({ page }: { page: SystemPage }) {
           </>
         )}
       </FeatureStatus>
-    ),
+      </details>
+    </>),
     saveticker: (
       <FeatureStatus<SavetickerResp> path="/system/saveticker" keys={["daemon"]} what="데이터 수집">
         {(s) => <SavetickerStatus s={s} />}
@@ -115,6 +123,7 @@ export function System({ page }: { page: SystemPage }) {
       <FeatureStatus<ScalpResp> path="/system/scalp" keys={["scalp"]} what="단타">
         {(s) => (
           <>
+            <ScalpSwitch />
             <Stats
               cols={4}
               items={[
@@ -138,6 +147,7 @@ export function System({ page }: { page: SystemPage }) {
       <FeatureStatus<FoResp> path="/system/fo" keys={["fo", "triggers"]} what="파생">
         {(f) => (
           <>
+            <FoSwitch />
             {f.context ? (
               <p className="sys-head">
                 <span className="data-muted">KR 국면</span> {regimeChip(f.context.regime?.state)}
@@ -155,8 +165,10 @@ export function System({ page }: { page: SystemPage }) {
 
   return (
     <div className="screen" data-screen="system" data-page={page}>
-      <h1 className="screen-title">시스템 · {label}</h1>
+      <h1 className="screen-title">설정·운영 · {label}</h1>
+      <p className="system-intro">{({ status: "자동 실행과 연결 상태를 확인하고, 문제가 있으면 원인과 해결 경로를 찾습니다.", jobs: "예약된 자동 작업과 실행 결과를 확인합니다. 수동 실행은 작업별 영향을 확인한 뒤 요청하세요.", features: "시장별 일반 현물 매수 정책과 단타·파생의 실제 적용 상태를 확인하고 설정합니다.", admin: "데이터 수집·연결 키·접속 설정을 관리합니다. 매매 허용 범위는 매매 정책에서 확인하세요." })[page]}</p>
       <PageTabs screen="system" label="시스템 페이지" />
+      <nav className="system-shortcuts" aria-label="운영 바로가기"><Link to="/">오늘 상태 보기</Link><Link to="/system/features#regime">시장별 매수 정책</Link><Link to="/system/admin#saveticker">연결·수집 점검</Link></nav>
       {sections.map((s) => (
         <section key={s.id} id={s.id} className="screen-section">
           <h2>{s.label}</h2>

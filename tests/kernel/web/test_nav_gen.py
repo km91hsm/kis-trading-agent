@@ -65,7 +65,8 @@ def test_nav_ts_kernel_system_sections_order_and_without_features():
     items = nav["system"]["items"]
     assert [i["id"] for i in items] == KERNEL_SYSTEM_IDS
     assert [i["label"] for i in items] == [
-        "헬스", "데몬", "잡 큐", "실행 기록", "사용량", "쓰기 토큰", "연결 키", "설정", "조작 이력",
+        "운영 점검", "자동매매 서비스", "작업 대기열", "실행 기록", "AI 사용량",
+        "쓰기 토큰", "연결 키", "설정", "조작 이력",
     ]
     assert all(i["order"] < 30 for i in items[:5])
     assert all(i["order"] > 60 for i in items[5:])
@@ -80,16 +81,16 @@ def test_nav_ts_screens_constant():
         ("today", "오늘", "/"),
         ("accounts", "계좌·보유", "/accounts"),
         ("performance", "성과", "/performance"),
-        ("data", "데이터", "/data"),
-        ("system", "시스템", "/system"),
+        ("data", "시장 데이터", "/data"),
+        ("system", "설정·운영", "/system"),
     )
 
 
 SYSTEM_PAGES = [
-    {"id": "status", "label": "상태", "path": "/system"},
-    {"id": "jobs", "label": "잡", "path": "/system/jobs"},
-    {"id": "features", "label": "기능", "path": "/system/features"},
-    {"id": "admin", "label": "관리", "path": "/system/admin"},
+    {"id": "status", "label": "운영 상태", "path": "/system"},
+    {"id": "jobs", "label": "자동 작업", "path": "/system/jobs"},
+    {"id": "features", "label": "매매 정책", "path": "/system/features"},
+    {"id": "admin", "label": "연결·설정", "path": "/system/admin"},
 ]
 
 
@@ -185,3 +186,17 @@ def test_feature_nav_items_cover_performance_and_data_pages():
         "themes": ("테마", "themes"), "watchlist": ("감시목록", "themes"),
         "features": ("지표·모델", "features"),
     }
+
+
+def test_collection_status_belongs_to_connection_settings_with_stable_id():
+    """수집은 연결·설정에서 찾고 기존 절 id와 다른 매매 절 주소는 보존한다."""
+    from trader.kernel.registry import discover
+
+    nav = _nav_obj(gen.nav_ts(discover()))
+    items = {item["id"]: item for item in nav["system"]["items"]}
+    assert items["saveticker"]["page"] == "admin"
+    assert items["regime"]["page"] == "features"
+    assert items["regime"]["label"] == "시장 국면·매수 정책"
+    assert [page["path"] for page in nav["system"]["pages"]] == [
+        "/system", "/system/jobs", "/system/features", "/system/admin",
+    ]

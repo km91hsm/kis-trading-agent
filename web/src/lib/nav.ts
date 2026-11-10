@@ -20,7 +20,7 @@ export function pagePathOf(screen: Screen, sectionId: string): string | null {
 export function resolveLink(link: string): string {
   const m = /^(\/[^#?]*)#([^#]+)$/.exec(link);
   if (!m) return link;
-  const screen = (Object.keys(NAV) as Screen[]).find((s) => NAV[s].path === m[1]);
+  const screen = (Object.keys(NAV) as Screen[]).find((s) => NAV[s].path === m[1] || screenPages(s).some((page) => page.path === m[1]));
   if (!screen) return link;
   const path = pagePathOf(screen, m[2]);
   return path ? `${path}#${m[2]}` : link;

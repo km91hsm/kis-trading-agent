@@ -1,9 +1,10 @@
 // 앱 셸 — 상단 상태 띠 + 쓰기 토큰 안내 + 2단 메뉴 + 화면(<Outlet/>).
 // AuthError(401·403·토큰 없음)는 api.ts 의 onAuthError 로 한곳에서 받아 띠 아래 안내를 띄운다(닫기 가능).
 import { useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/Icon";
 import { onAuthError, onTokenChange, tokenStore } from "../../lib/api";
+import { resolveLink } from "../../lib/nav";
 import { Nav } from "./Nav";
 import { SavetickerOnboarding } from "./SavetickerOnboarding";
 import "../../screens/system/SavetickerStatus.css";
@@ -13,11 +14,18 @@ import "../../styles/shell.css";
 /** 주소의 #<id> 로 이동할 때마다 그 섹션으로 스크롤한다(하위 목차 클릭·새로 고침).
  *  같은 항목을 다시 눌러도 location.key 는 새로 나오므로 다시 스크롤한다. */
 function useHashScroll(): void {
-  const { hash, key } = useLocation();
+  const { pathname, search, hash, key } = useLocation();
+  const navigate = useNavigate();
   useEffect(() => {
     if (!hash) return;
+    const resolved = resolveLink(`${pathname}${hash}`);
+    if (resolved !== `${pathname}${hash}`) {
+      const [path, section] = resolved.split("#");
+      navigate({ pathname: path, search, hash: `#${section}` }, { replace: true });
+      return;
+    }
     document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView?.({ block: "start" });
-  }, [hash, key]);
+  }, [pathname, search, hash, key, navigate]);
 }
 
 export function Shell() {

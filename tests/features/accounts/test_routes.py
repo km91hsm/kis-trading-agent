@@ -211,12 +211,14 @@ def test_overview_without_fx_keeps_two_totals(web_client_no_fx):
     body = r.json()
     assert body["fx"] is None
     assert body["krw"]["nav"] == "1500000" and body["usd"]["nav"] == "1000.50"
+    assert all(group["fx"] is None for group in body["by_env"].values())
 
 
 def test_overview_excludes_fo_accounts(web_client, fixtures):
     _nav(fixtures, "fo-paper", "2026-11-04", "KR", "7", "7", "2026-11-04T05:00:00+00:00")
     body = web_client.get("/api/accounts/overview").json()
     assert "fo-paper" not in body["krw"]["accounts"] and body["krw"]["nav"] == "1500000"
+    assert "fo-paper" not in body["by_env"]["paper"]["krw"]["accounts"]
 
 
 # --- PATCH /accounts/{id} (옛 test_control_sse 모드 2건) ------------------------------------
@@ -589,3 +591,31 @@ def test_sse_probes_change_with_modes_positions_and_approvals(web_client, ledger
     ledger.execute("UPDATE approvals SET status='rejected'")
     ledger.commit()
     assert snapshot(deps)["approvals"] != fifth["approvals"]
+
+
+def test_overview_separates_paper_real_and_each_currency(web_client_with_fx):
+    body = web_client_with_fx.get("/api/accounts/overview").json()
+    assert set(body["by_env"]) == {"paper", "real"}
+    paper, real = body["by_env"]["paper"], body["by_env"]["real"]
+    assert paper["krw"]["nav"] == "1000000"
+    assert paper["krw"]["accounts"] == ["paper-main"]
+    assert real["krw"]["nav"] == "500000"
+    assert real["krw"]["accounts"] == ["real-main"]
+    assert paper["usd"]["nav"] == "1000.50"
+    assert real["usd"]["nav"] is None and real["usd"]["accounts"] == []
+    assert paper["fx"]["converted_total"] == "2393196"
+    assert real["fx"]["converted_total"] == "500000"
+    assert paper["paused"] is False and paper["at"] == NOW.isoformat()
+    assert body["krw"]["nav"] == "1500000"  # 이전 클라이언트 응답 계약 보존
+
+
+def test_overview_by_env_only_contains_existing_spot_environments(
+    web_client_with_fx, fixtures, accounts
+):
+    settings = web_client_with_fx.app.state.deps.settings
+    paper = [a for a in accounts if a.env == "paper"]
+    body = overview.totals(fixtures, settings, paper, now=NOW, paused=True)
+    assert set(body["by_env"]) == {"paper"}
+    assert body["by_env"]["paper"]["paused"] is True
+    empty = overview.totals(fixtures, settings, [], now=NOW, paused=False)
+    assert empty["by_env"] == {}

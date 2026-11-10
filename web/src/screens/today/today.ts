@@ -25,6 +25,7 @@ export type Decision = {
   action?: string | null;
   /** 최종 의견 요약(30_decision rationale). 단타·파생은 없다. */
   summary?: string | null;
+  source?: string | null;
   intent?: string | null;
   direction?: string | null;
   vehicle?: string | null;
@@ -61,6 +62,7 @@ export type LaneCard = {
   open: number;
   state: "done" | "waiting" | "paused";
   capText: string | null;
+  hedgeDecisions?: number;
 };
 
 /** 레인 → 하루 세션 상한(`GET /system/usage caps_by_kind`)의 kind. 단타는 LLM 세션이 없다. */
@@ -85,7 +87,8 @@ export function laneCards(accounts: Account[], decisions: Decision[], orders: Or
   return LANES.filter((lane) => accounts.some((a) => a.lane === lane)).map((lane) => {
     const accts = accounts.filter((a) => a.lane === lane);
     const counts = { buy: 0, sell: 0, hold: 0 };
-    for (const d of decisions) if (d.lane === lane) counts[sideOf(d)] += 1;
+    const hedgeDecisions = decisions.filter((d) => d.lane === lane && d.source === "hedge").length;
+    for (const d of decisions) if (d.lane === lane && d.source !== "hedge") counts[sideOf(d)] += 1;
     const mine = orders.filter((o) => o.lane === lane);
     const fills = mine.filter((o) => o.status === "filled" || (o.filled_qty ?? 0) > 0).length;
     const open = mine.filter((o) => OPEN.has(o.status)).length;
@@ -94,7 +97,7 @@ export function laneCards(accounts: Account[], decisions: Decision[], orders: Or
     const kind = CAP_KIND[lane];
     const cap = kind ? caps.find((c) => c.kind === kind) : undefined;
     const capText = cap && cap.cap !== null ? `오늘 ${cap.kind} ${cap.used}/${cap.cap}` : null;
-    return { lane, decisions: counts, orders: mine.length, fills, open, state, capText };
+    return { lane, decisions: counts, hedgeDecisions, orders: mine.length, fills, open, state, capText };
   });
 }
 
@@ -143,6 +146,7 @@ export type DecisionRow = {
   status: string;
   raw: string | null;
   href: string | null;
+  kind: string;
 };
 
 const SIDE_LABEL = { buy: "매수", sell: "매도", hold: "보류" } as const;
@@ -165,9 +169,10 @@ export function decisionRows(decisions: Decision[]): DecisionRow[] {
       side: SIDE_LABEL[sideOf(d)],
       qty: d.qty ?? null,
       account_id: d.account_id ?? null,
-      status: statusLabel(d.status),
+      status: d.status === "blocked" && d.action === "HOLD" ? "주문 없음" : statusLabel(d.status),
       raw: d.status ?? null,
       href: decisionHref(d),
+      kind: d.source === "hedge" ? "방어용 헤지" : d.source === "cash_park" ? "현금 운용" : d.lane === "spot" ? "일반 종목" : LANE_LABEL[d.lane as Lane] ?? d.lane,
     }));
 }
 

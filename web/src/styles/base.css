@@ -16,7 +16,7 @@ body {
   margin: 0;
   font-family: var(--font);
   font-size: var(--text-md);
-  line-height: 1.5;
+  line-height: 1.65;
   color: var(--fg);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -37,8 +37,25 @@ button {
   cursor: pointer;
 }
 
+/* 링크·접기 조작도 글자만 누르게 하지 않고 버튼과 같은 최소 영역을 쓴다. */
+:where(a[href]) {
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  max-width: 100%;
+}
+:where(summary) {
+  min-height: var(--touch);
+  align-content: center;
+  cursor: pointer;
+}
+
+
 /* 클래스 없는 폼 컨트롤도 브라우저 기본 회색 대신 토큰 색을 쓴다(:where 로 특이도 0 — 부품 규칙이 이긴다). */
 :where(button) {
+  min-width: var(--touch);
+  min-height: var(--touch);
   background-color: transparent;
 }
 :where(input:not([type="checkbox"], [type="radio"], [type="range"]), select, textarea) {

@@ -1545,3 +1545,20 @@ def test_summarize_single_lane_equals_research_summary(ctx, project, monkeypatch
     )
     assert expected["convergence"] == "justified"  # evidence_ids 가 실제로 쓰이는 경우
     assert read_checkpoint(d, "25_research_summary")["data"] == expected
+
+
+def test_trader_context_manual_policy_is_independent_of_original_ai(ctx, ports):
+    from datetime import timedelta
+
+    from trader.kernel.ledger import control
+    ctx.ports = ports
+    ai = {"date": D.isoformat(), "stance": "RISK_OFF", "confidence": 0.4,
+          "rationale": "원본 판단", "hedge_weight": 0.1}
+    control.set_flag(ctx.conn, "market_view:KR", ai)
+    control.set_flag(ctx.conn, "risk_policy:KR", {"mode": "RISK_ON", "date": D.isoformat(),
+                     "reason": "수동 검토", "expires_at": (T0 + timedelta(hours=14)).isoformat()})
+    got = tools.trader_context(ctx, "KR", D, "005930", {})
+    assert got["risk_policy"]["policy"]["mode"] == "RISK_ON"
+    assert got["risk_policy"]["effective"]["max_position_pct"] == 0.1
+    assert got["market_view"]["stance"] == "RISK_OFF" and got["market_view"]["confidence"] == 0.4
+    assert control.get_flag(ctx.conn, "market_view:KR") == ai

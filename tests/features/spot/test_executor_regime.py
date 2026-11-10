@@ -264,3 +264,165 @@ def test_excluded_tickers_union_of_hedge_and_cash_park(settings, ports):
     off = settings.model_copy(update={"cash_park": CashParkCfg(ticker="423160")})
     assert excluded_tickers(off, port, "KR") == frozenset({"114800", "252670"})
     assert excluded_tickers(s, None, "KR") == frozenset({"423160"})
+
+
+def _manual(conn, mode):
+    control.set_flag(conn, "risk_policy:KR", {"mode": mode, "date": D.isoformat(),
+                     "expires_at": (T0 + timedelta(hours=14)).isoformat(), "reason": "수동 검토"})
+
+
+@pytest.mark.parametrize("state", ["bull", "neutral", "bear"])
+def test_manual_on_caps_all_regimes_without_replacing_ai(project, conn, settings, ports, state):
+    s = _with_hedge(ports, settings)
+    ctx = _ctx(ports, s, conn)
+    _set_regime(conn, state)
+    ai = {"date": D.isoformat(), "stance": "RISK_OFF", "confidence": 0.2}
+    control.set_flag(conn, "market_view:KR", ai)
+    _manual(conn, "RISK_ON")
+    dec = Decision(**ok_decision(target_weight=0.25))
+    res = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert _paper(res)["approved"] and _paper(res)["qty"] == 14
+    assert control.get_flag(conn, "market_view:KR") == ai
+
+
+def test_manual_off_blocks_add_and_approval_but_leaves_hedge(project, conn, settings, ports):
+    ctx = _ctx(ports, settings, conn)
+    aid = _pending_approval(ctx, conn)
+    _manual(conn, "RISK_OFF")
+    r = executor.approve(ctx, aid)
+    assert not r["ok"] and "수동 RISK_OFF" in r["error"]
+    assert ctx.brokers["paper-main"].orders == []
+    dec = Decision(**ok_decision(ticker="000660", action="ADD"))
+    res = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert not _paper(res)["approved"] and any("수동 RISK_OFF" in r for r in _paper(res)["reasons"])
+    hedge = Decision(**ok_decision(ticker="114800", limit_price=5000.0, stop_loss=None,
+                                  take_profit=None))
+    res = executor.execute(ctx, hedge, date=D, market="KR", price=Decimal("5000"),
+                           dry_run=True, is_hedge=True)
+    assert _paper(res)["approved"]
+
+
+def test_manual_on_approval_rechecks_reduced_position_limit(project, conn, settings, ports):
+    ctx = _ctx(ports, settings, conn)
+    modes.set_account_mode(conn, ctx.accounts[0], "approve")
+    dec = Decision(**ok_decision(target_weight=0.2))
+    _ingest(conn, dec)
+    res = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=False)
+    aid = _paper(res)["approval_id"]
+    _manual(conn, "RISK_ON")
+    r = executor.approve(ctx, aid)
+    assert not r["ok"] and "한도" in r["error"]
+    assert ctx.brokers["paper-main"].orders == []
+
+
+def test_approval_recheck_counts_order_after_operating_day_changes(project, conn, settings, ports):
+    ctx = _ctx(ports, settings, conn)
+    aid = _pending_approval(ctx, conn)
+    a = xledger.get_approval(conn, aid)
+    ctx.now = lambda: T0 + timedelta(days=1)
+    ctx.settings = ctx.settings.model_copy(update={"risk": ctx.settings.risk.model_copy(
+        update={"max_position_pct": 0.05})})
+    why = executor._approval_recheck(ctx)(a, a["order"])
+    assert isinstance(why, str) and "한도" in why
+
+
+def test_manual_on_keeps_pause_and_smaller_existing_limit(project, conn, settings, ports):
+    risk = settings.risk.model_copy(update={"max_position_pct": 0.05, "max_positions": 1})
+    s = _with_hedge(ports, settings.model_copy(update={"risk": risk}))
+    ctx = _ctx(ports, s, conn)
+    _set_regime(conn, "bear")
+    _manual(conn, "RISK_ON")
+    dec = Decision(**ok_decision(target_weight=0.25))
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert _paper(got)["approved"] and _paper(got)["qty"] == 7
+    control.set_flag(conn, "paused", True)
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=False)
+    assert _paper(got)["order"] is None and ctx.brokers["paper-main"].orders == []
+
+
+def test_manual_on_expires_without_allowing_next_day_bear(project, conn, settings, ports):
+    ctx = _ctx(ports, _with_hedge(ports, settings), conn)
+    _set_regime(conn, "bear")
+    _manual(conn, "RISK_ON")
+    ctx.now = lambda: T0 + timedelta(days=1)
+    dec = Decision(**ok_decision())
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert not _paper(got)["approved"] and any("bear" in r for r in _paper(got)["reasons"])
+
+
+def test_manual_on_respects_two_equity_position_cap(project, conn, settings, ports):
+    positions = [Position(ticker=t, market="KR", qty=1, avg_price=Decimal("70000"),
+                          current_price=Decimal("70000"), eval_amount=Decimal("70000"),
+                          pnl_pct=0.0) for t in ("000660", "035420")]
+    ctx = _ctx(ports, _with_hedge(ports, settings), conn, positions=positions)
+    _manual(conn, "RISK_ON")
+    dec = Decision(**ok_decision())
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert not _paper(got)["approved"] and any("종목 수" in r for r in _paper(got)["reasons"])
+
+
+@pytest.mark.parametrize("origin", ["park", "scalp"])
+def test_manual_policy_does_not_remove_existing_other_lane_approval_checks(
+    project, conn, settings, ports, origin
+):
+    ctx = _ctx(ports, settings, conn)
+    aid = _pending_approval(ctx, conn)
+    a = xledger.get_approval(conn, aid)
+    _manual(conn, "RISK_ON")
+    control.set_flag(conn, "killswitch", {"on": True, "reason": "기존 보호", "accounts": None})
+    order = {**a["order"], "origin": origin}
+    assert "킬스위치" in executor._approval_recheck(ctx)(a, order)
+
+
+def _three_positions_ctx(ports, settings, conn):
+    positions = [Position(ticker=t, market="KR", qty=1, avg_price=Decimal("70000"),
+                          current_price=Decimal("70000"), eval_amount=Decimal("70000"),
+                          pnl_pct=0.0) for t in ("005930", "000660", "035420")]
+    s = _with_hedge(ports, settings.model_copy(update={
+        "risk": settings.risk.model_copy(update={"max_positions": 2})}))
+    ctx = _ctx(ports, s, conn, positions=positions)
+    for broker in ctx.brokers.values():
+        broker.cash["KR"] = Cash(currency="KRW", available=Decimal("9790000"),
+                                  total=Decimal("9790000"))
+    return ctx
+
+
+def test_auto_add_to_existing_over_count_portfolio_keeps_approval_allowed(
+    project, conn, settings, ports
+):
+    ctx = _three_positions_ctx(ports, settings, conn)
+    modes.set_account_mode(conn, ctx.accounts[0], "approve")
+    dec = Decision(**ok_decision(action="ADD", target_weight=0.08))
+    _ingest(conn, dec)
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=False)
+    paper = _paper(got)
+    assert paper["approved"] and paper["approval_id"]
+    result = executor.approve(ctx, paper["approval_id"])
+    assert result["ok"] and len(ctx.brokers["paper-main"].orders) == 1
+
+
+def test_manual_on_existing_over_count_add_is_blocked_by_first_gate(
+    project, conn, settings, ports
+):
+    ctx = _three_positions_ctx(ports, settings, conn)
+    _manual(conn, "RISK_ON")
+    dec = Decision(**ok_decision(action="ADD", target_weight=0.08))
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=True)
+    assert not _paper(got)["approved"]
+    assert any("종목 수" in reason for reason in _paper(got)["reasons"])
+
+
+def test_manual_on_existing_over_count_add_is_blocked_at_approval(
+    project, conn, settings, ports
+):
+    ctx = _three_positions_ctx(ports, settings, conn)
+    modes.set_account_mode(conn, ctx.accounts[0], "approve")
+    dec = Decision(**ok_decision(action="ADD", target_weight=0.08))
+    _ingest(conn, dec)
+    got = executor.execute(ctx, dec, date=D, market="KR", price=Decimal("70000"), dry_run=False)
+    paper = _paper(got)
+    assert paper["approved"] and paper["approval_id"]
+    _manual(conn, "RISK_ON")
+    result = executor.approve(ctx, paper["approval_id"])
+    assert not result["ok"] and "종목 수" in result["error"]
+    assert ctx.brokers["paper-main"].orders == []

@@ -128,6 +128,13 @@ export function Account() {
     <Screen>
       <BackLink />
       <h1 className="screen-title">계좌 {id}</h1>
+      <div className="screen-intro">
+        <p className="screen-description">이 계좌의 주문·보유·위험을 확인합니다. 통화와 시장은 각 항목의 표시 기준을 따릅니다.</p>
+        <div className="screen-actions">
+          <Link to="/system/features#regime">시장별 매수 정책 확인</Link>
+          <Link to="/log">전체 주문·체결 기록</Link>
+        </div>
+      </div>
       {account ? <Header account={account} at={accounts.at} now={now} onDone={accounts.reload} /> : <Empty title="불러오는 중" />}
 
       <section id="orders" className="screen-section">
@@ -248,7 +255,7 @@ function Header({ account: a, at, now, onDone }: { account: AccountRow; at: numb
             ...(settled ? [{ id: "cash_available", label: "주문 가능", value: fmtMoney(a.cash_available ?? null, c) }] : []),
           ]}
         />
-        {a.paused ? <p className="mode-note">(전체 일시정지로 새 매수 멈춤)</p> : null}
+        {a.paused ? <p className="mode-note">(전체 일시정지로 신규 진입·판단 매도·승인 중지, 위험 청산 계속)</p> : null}
         <ModeSwitch key={`${a.id}:${a.mode}`} id={a.id} env={a.env} mode={a.mode} modeNote={a.mode_note} onDone={onDone} />
       </Card>
     </div>

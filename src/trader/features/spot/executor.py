@@ -651,6 +651,12 @@ def _agent_tilt(port: Any, conn: sqlite3.Connection, market: str, today: date) -
     return stance.tilt_of(view, min_confidence=cfg.agent_min_confidence)
 
 
+def _risk_policy(ctx: ExecContext, market: str) -> dict:
+    """수동 현물 정책은 별도 포트로 읽는다. 기존 포트는 AUTO 그대로 유지한다."""
+    getter = getattr(ctx.ports.get("regime"), "risk_policy", None)
+    return getter(ctx.conn, market, ctx.now()) if getter else {"policy": {"mode": "AUTO"}}
+
+
 def _theme_of(
     ctx: ExecContext, market: str, today: date
 ) -> Callable[[str], list[str] | None] | None:
@@ -1030,25 +1036,44 @@ def _execute_account(
         kill = port.killswitch_reason(ctx.conn, account.id) if port is not None else None
 
         def gate(pf: rules.Portfolio) -> rules.RiskVerdict:
-            return rules.evaluate(
+            ordinary_buy = (sized.action in ("BUY", "ADD") and not is_hedge
+                            and origin.origin not in ("scalp", "stop"))
+            current = _risk_policy(ctx, market) if ordinary_buy else {"policy": {"mode": "AUTO"}}
+            risk_mode = current["policy"]["mode"]
+            lim = ctx.settings.risk
+            if risk_mode == "RISK_ON":
+                lim = lim.model_copy(update={"max_position_pct": min(lim.max_position_pct, 0.1),
+                                             "max_positions": min(lim.max_positions, 2)})
+            verdict = rules.evaluate(
                 sized,
                 pf,
-                limits=ctx.settings.risk,
+                limits=lim,
                 stance=st,
                 market=market,
                 price=price,
                 today=date,
                 is_stop_loss=is_stop_loss,
                 holidays=hol,
-                regime=gates.regime,
+                regime="bull" if risk_mode == "RISK_ON" else gates.regime,
                 is_hedge=is_hedge,
                 hedge_max_weight=hedge_weight,
-                agent_tilt=gates.agent_tilt,
+                agent_tilt=0 if risk_mode == "RISK_ON" else gates.agent_tilt,
                 is_scalp=origin.origin == "scalp",
                 change_pct=change_pct,
                 killswitch=kill,
                 trade_block=trade_block,
             )
+            if risk_mode == "RISK_OFF":
+                return verdict.model_copy(update={"approved": False, "adjusted_qty": 0,
+                    "reasons": verdict.reasons + [current["effective"]["reason"]]})
+            if risk_mode == "RISK_ON":
+                if len(pf.exposure()) > lim.max_positions:
+                    return verdict.model_copy(update={"approved": False, "adjusted_qty": 0,
+                        "reasons": verdict.reasons
+                        + [f"수동 RISK_ON: 종목 수 한도 {lim.max_positions} 초과"]})
+                return verdict.model_copy(update={"reasons": verdict.reasons
+                                                  + [current["effective"]["reason"]]})
+            return verdict
 
         verdict = gate(portfolio)
     except (KisApiError, ValueError) as e:
@@ -1272,7 +1297,7 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
     승인으로 우회하지 않게), bear 로 바뀌었거나(전략가 RISK_ON 기울기 없이), 일일 손실 한도에
     닿았으면 사유(→ 만료). 킬스위치·국면은 `ports["regime"]` 가 있을 때만 본다.
     잔고를 못 읽으면 `KeepPending("balance")` — 판정할 수 없으니 실행하지도 만료시키지도 않는다.
-    수량은 다시 계산하지 않는다."""
+    일반 현물 BUY는 현재 정책·비중·종목 수 상한도 재검사한다. 수량은 다시 계산하지 않는다."""
 
     def recheck(a: dict, order: dict) -> str | KeepPending | None:
         if order.get("side") != "BUY" or order.get("origin") == "hedge":
@@ -1284,12 +1309,17 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
         broker = ctx.brokers.get(a["account_id"])
         today = run_date_for(market, ctx.now())
         port = ctx.ports.get("regime")
+        ordinary = order.get("origin") not in ("park", "scalp", "stop")
+        current = _risk_policy(ctx, market) if ordinary else {"policy": {"mode": "AUTO"}}
+        risk_mode = current["policy"]["mode"]
+        if risk_mode == "RISK_OFF":
+            return current["effective"]["reason"]
         if port is not None:
             ks = port.killswitch_reason(ctx.conn, a["account_id"])
             if ks:
                 return f"킬스위치(신규 매수 중단): {ks}"
             if (
-                port.state(ctx.conn, market) == "bear"
+                risk_mode != "RISK_ON" and port.state(ctx.conn, market) == "bear"
                 and _agent_tilt(port, ctx.conn, market, today) <= 0
             ):
                 return "국면 bear: 신규 매수 중단"
@@ -1298,6 +1328,47 @@ def _approval_recheck(ctx: ExecContext) -> Callable[[dict, dict], str | KeepPend
         except (KisApiError, ValueError, AttributeError) as e:
             logger.warning("승인 재판정 잔고 조회 실패 #%s %s: %s", a["id"], a["account_id"], e)
             return KeepPending("balance")
+        if ordinary:
+            lim = stance.limits_for(stance.decide(xledger.realized_pnl_5d(
+                ctx.conn, a["account_id"], today, market=market)), ctx.settings.risk)
+            if risk_mode == "RISK_ON":
+                lim = lim.model_copy(update={"max_position_pct": min(lim.max_position_pct, 0.1),
+                                             "max_positions": min(lim.max_positions, 2)})
+            elif port is not None:
+                lim = stance.limits_for_regime(port.state(ctx.conn, market), lim,
+                                              _agent_tilt(port, ctx.conn, market, today))
+            excluded = excluded_tickers(ctx.settings, port, market)
+            exposure = {p.ticker: p.eval_amount for p in pos_list if p.ticker not in excluded}
+            pending = xledger.pending_buy_amounts(ctx.conn, a["account_id"], today, market=market,
+                                                 now=ctx.now().isoformat())
+            lo, hi = xledger.day_bounds(today, market)
+            ticker = str(order.get("ticker"))
+            price = order.get("price")
+            if price is None:
+                price = a.get("quote_price")
+            if price is None:
+                return KeepPending("price")
+            own_amount = Decimal(int(order["qty"])) * Decimal(str(price))
+            included = lo <= a["requested_at"] < hi
+            # 자기 승인 예약은 기존 노출에서 뺀다. AUTO의 기존 종목 ADD 규칙을 유지한다.
+            existing = ticker in exposure or pending.get(ticker, Decimal(0)) > (
+                own_amount if included else Decimal(0)
+            )
+            if not included:
+                pending[ticker] = pending.get(ticker, Decimal(0)) + own_amount
+            for ticker, value in pending.items():
+                if ticker not in excluded:
+                    exposure[ticker] = exposure.get(ticker, Decimal(0)) + value
+            nav = spot_ledger.nav_of(pos_list, cash)
+            account = _account(ctx, a["account_id"])
+            cap = (getattr(account, "capital_cap", None) or {}).get(market)
+            if cap is not None:
+                nav = min(nav, Decimal(cap))
+            position_value = exposure.get(str(order.get("ticker")), Decimal(0))
+            if position_value > nav * Decimal(str(lim.max_position_pct)):
+                return f"승인 재검사: 종목 비중 한도 {lim.max_position_pct:.0%} 초과"
+            if len(exposure) > lim.max_positions and (risk_mode == "RISK_ON" or not existing):
+                return f"승인 재검사: 종목 수 한도 {lim.max_positions} 초과"
         prev = xledger.latest_nav_before(ctx.conn, a["account_id"], today, market=market)
         if prev:
             pnl = float(spot_ledger.nav_of(pos_list, cash) / prev - 1)

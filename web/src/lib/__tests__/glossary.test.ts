@@ -64,3 +64,14 @@ describe("용어 충돌 (전체 검토 W12)", () => {
     expect(sideLabel(null)).toBe("");
   });
 });
+
+it("하락 국면 설명은 AI 지표와 실효 매수 정책을 구분한다", () => {
+  expect(termHelp("regime.bear")).toContain("시장 지표");
+  expect(termHelp("regime.bear")).toContain("매수 정책");
+  expect(termHelp("regime.bear")).not.toContain("헤지한다");
+});
+
+it("일시정지는 판단 매도를 포함하고 위험 청산은 계속됨을 알린다", () => {
+  expect(termHelp("paused")).toContain("신규 진입·판단 매도·승인 실행");
+  expect(termHelp("paused")).toContain("위험 청산은 계속");
+});

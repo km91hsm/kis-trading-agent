@@ -9,12 +9,12 @@ import { fmtWhen } from "../../lib/format";
 import { LANE_LABEL, type FoLaneInfo, type LaneCard } from "./today.ts";
 
 const STATE: Record<LaneCard["state"], { tone: Tone; text: string }> = {
-  done: { tone: "ok", text: "처리 완료" },
-  waiting: { tone: "warn", text: "진행 중" },
+  done: { tone: "muted", text: "현재 주문 대기 없음" },
+  waiting: { tone: "warn", text: "주문·승인 대기" },
   paused: { tone: "fail", text: "일시정지" },
 };
 
-const PAUSED_HELP = "전체 자동매매 일시정지 — 새 매수만 멈춤, 계좌 모드와 별개";
+const PAUSED_HELP = "전체 자동매매 일시정지 — 신규 진입·판단 매도·승인은 중지, 위험 청산은 계속 · 계좌 모드와 별개";
 
 /** 결정·주문 조회가 끝나지 않았거나(loading) 실패하면(error) 집계 대신 그 상태만 보인다(빈 목록을 「완료」로 오인하지 않게). */
 export type LaneFetch = "ready" | "loading" | "error";
@@ -56,11 +56,13 @@ export function LaneCardView({
       <Stats
         cols={3}
         items={[
-          { id: "decisions", label: "결정", value: buy + sell + hold, sub: `매수 ${buy} · 매도 ${sell} · 보류 ${hold}` },
+          { id: "decisions", label: "결정", value: buy + sell + hold + (card.hedgeDecisions ?? 0), sub: `${card.lane === "spot" ? "일반 종목 " : ""}매수 ${buy} · 매도 ${sell} · 보류 ${hold}` },
           { id: "orders", label: "주문", value: card.orders, sub: `체결 ${card.fills} · 미체결 ${card.open}` },
           { id: "next", label: "다음 예정", value: nextAt ? fmtWhen(nextAt) : "—" },
         ]}
       />
+      {card.hedgeDecisions ? <p className="lane-note">방어용 헤지 {card.hedgeDecisions}건 · 일반 종목 판단과 별도</p> : null}
+      <p className="lane-note">주문 집계 상태입니다. 신규 매수 제한과 계좌 모드는 별도로 확인하세요.</p>
       {card.capText ? <Chip>{card.capText}</Chip> : null}
       {extra}
     </Card>

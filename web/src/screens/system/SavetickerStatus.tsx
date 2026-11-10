@@ -96,6 +96,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
       {summary.unconfirmed ? <Chip>대상 미확정 {summary.unconfirmed}</Chip> : null}
     </p> : null}
     {summary?.note ? <p className="data-muted">{summary.note}</p> : null}
+    <details className="sys-details" data-streams><summary>수집 항목별 상세 기록 {s.streams?.length ?? 0}개 보기</summary>
     <Table columns={COLUMNS} rows={s.streams ?? []} rowKey={(r) => r.id} empty="수집 기록 없음 · 첫 수집을 기다립니다" expand={(r) => <div className="collection-detail">
       {r.scope && r.scope !== "active" ? <p>{r.scope === "historical" ? "과거 월의 저장 기록입니다." : "현재 수집 대상으로 지정되었는지 저장 기록으로 확인할 수 없습니다."} 현재 전체 수집 상태에는 반영하지 않습니다.</p> : null}
       <p>{r.error ?? (r.state === "empty" ? "최근 응답은 0건입니다. 이전 유효 자료가 남아 있을 수 있습니다." : r.state === "delayed" ? "목표 주기보다 수집 시도가 늦습니다. 값 변화 여부와는 별개입니다." : r.state === "partial" ? "일부 자료만 수집되었습니다." : "최근 수집 요청의 오류 기록은 없습니다.")}</p>
@@ -103,6 +104,7 @@ export function SavetickerStatus({ s }: { s: SavetickerResp }) {
       <p>{s.recovery?.text ?? "복구 상태 미기록"}</p>
       <span className="data-muted">항목 ID: {r.id}</span>
     </div>} />
+    </details>
     <details className="collection-guide">
       <summary>시각과 상태 읽는 법</summary>
       <p>응답 성공과 값 변화는 다릅니다. 최근 응답은 부분·0건 응답을 포함하고, 유효 자료는 1건 이상 저장된 마지막 수집입니다.</p>

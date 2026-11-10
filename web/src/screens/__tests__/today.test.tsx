@@ -81,7 +81,7 @@ describe("오늘 화면", () => {
     const b = document.querySelector(".pause-banner") as HTMLElement;
     expect(b.textContent).toContain("자동매매 전체 일시정지 중 · ");
     expect(b.textContent).toContain("텔레그램");
-    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 새 매수·진입만 멈춤(손절·청산은 계속)");
+    expect(b.textContent).toContain("계좌 모드(자동/승인)는 그대로, 신규 진입·판단 매도·승인은 중지, 위험 청산은 계속");
     expect(b.querySelector("a")?.getAttribute("href")).toBe("/accounts");
   });
 
@@ -101,8 +101,8 @@ describe("오늘 화면", () => {
   test("레인 카드 paused 배지에 「계좌 모드와 별개」 설명", async () => {
     await mount(routes({ "GET /api/accounts": [fixtureAccount({ paused: true })] }));
     const lane = section("spot-lane");
-    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 새 매수만 멈춤, 계좌 모드와 별개");
-    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 새 매수만 멈춤, 계좌 모드와 별개");
+    expect(lane.textContent).toContain("전체 자동매매 일시정지 — 신규 진입·판단 매도·승인은 중지, 위험 청산은 계속 · 계좌 모드와 별개");
+    expect(lane.querySelector(".lane-note")?.textContent).toBe("전체 자동매매 일시정지 — 신규 진입·판단 매도·승인은 중지, 위험 청산은 계속 · 계좌 모드와 별개");
     expect(lane.querySelector("[title]")).toBeNull(); // 보이는 줄만 — title 중복 없음
   });
 
@@ -405,14 +405,14 @@ describe("배치", () => {
     expect(kpi.compareDocumentPosition(section("spot-lane")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  test("레인 카드는 Stats 격자(결정·주문·다음 예정) — 다음 예정은 데몬 사용자 잡의 next_at, 「완료」 대신 「처리 완료」", async () => {
+  test("레인 카드는 Stats 격자(결정·주문·다음 예정) — 다음 예정은 데몬 사용자 잡의 next_at, 주문 집계와 매매 허용 분리", async () => {
     await mount(routes({ "GET /api/system/daemon": fixtureDaemon([fixtureJob({ id: "kr_scan_analyze", kind: "scan_analyze", next_at: "2026-11-05T22:30:00+00:00" })]) }));
     const spot = section("spot-lane");
     expect(spot.querySelector("dl.stats")).not.toBeNull();
     expect(spot.querySelector("dl.lane-stats")).toBeNull();
     expect(spot.querySelector('[data-stat="next"] dd')?.textContent).toContain("07:30");
-    expect(spot.textContent).toContain("처리 완료");
-    expect(spot.textContent!.replace(/처리 완료/g, "")).not.toContain("완료");
+    expect(spot.textContent).toContain("현재 주문 대기 없음");
+    expect(spot.textContent).not.toContain("처리 완료");
   });
 
   test("결정 0건이면 CSV 링크를 숨긴다", async () => {

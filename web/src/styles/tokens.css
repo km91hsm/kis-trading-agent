@@ -1,7 +1,7 @@
 /* 디자인 토큰 — hex 는 이 파일에만 적고 컴포넌트는 변수만 쓴다(web/DESIGN.md).
    글자색 대비는 두 테마 모두 --bg·--bg-elev 위 4.5:1 이상(값은 DESIGN.md 표).
    등락은 한국 관례: 상승 --up(적), 하락 --down(청). 실전 표식은 --live(주황).
-   글자 스케일은 운영 대시보드 밀도(본문 14 · 보조 13 · 라벨 12 · 큰 숫자 22). */
+   글자 스케일은 운영 대시보드 밀도(본문 16 · 보조 14 · 라벨 14 · 큰 숫자 28). */
 
 :root {
   color-scheme: light;
@@ -36,12 +36,12 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 20px;
-  --text-kpi: 22px;
+  --text-xs: 14px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 28px;
+  --text-kpi: 28px;
 
   --radius: 8px;
   --radius-card: 14px;
@@ -53,13 +53,6 @@
   --motion: 150ms;
   --z-sticky: 10;
   --z-overlay: 100;
-}
-
-/* 마우스 폭(≥1024)은 컨트롤 높이를 36px 로 줄여 밀도를 올린다. 휴대폰은 44px 유지. */
-@media (min-width: 1024px) {
-  :root {
-    --touch: 36px;
-  }
 }
 
 [data-theme="dark"] {
@@ -95,12 +88,12 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 20px;
-  --text-kpi: 22px;
+  --text-xs: 14px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 28px;
+  --text-kpi: 28px;
 
   --radius: 8px;
   --radius-card: 14px;

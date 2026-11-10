@@ -1,12 +1,11 @@
-// 설정 화면 「파생」 계좌별 스위치 — 모의는 확인 창 뒤 켜기(자동 주문 시작), 끄기·기본값은 바로, 실전은 버튼 없음.
+// 매매 정책 「파생」 계좌별 스위치 — 모의는 확인 창 뒤 켜기(자동 주문 시작), 끄기·기본값은 바로, 실전은 버튼 없음.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { SettingsPanel } from "../system/SettingsPanel";
+import { FoSwitch } from "../system/FoSwitch";
 import { tokenStore } from "../../lib/api";
 import { clearResourceCache } from "../../lib/cache";
 import { setEventsClient } from "../../lib/sse";
 import { installFakeFetch, type FakeFetch } from "../../test/fakeFetch";
-import { fixtureSettings } from "../../test/fixtures/system";
 import { flush, render } from "../../test/render";
 
 let ff: FakeFetch | undefined;
@@ -32,11 +31,10 @@ test("파생 스위치: 모의 켜기는 확인 뒤 PATCH, 실전은 스위치 �
   let cur = fo;
   const on = { ...fo, accounts: [{ ...fo.accounts[0], enabled: true, source: "control", effective: true, reason: null }, fo.accounts[1]] };
   ff = installFakeFetch({
-    "GET /api/settings": fixtureSettings(),
     "GET /api/settings/fo": () => cur,
     "PATCH /api/settings/fo/paper-fo": () => { cur = on; return on; },
   });
-  const { container } = render(<SettingsPanel />);
+  const { container } = render(<FoSwitch />);
   await flush();
   const sec = container.querySelector('[aria-label="파생 계좌별 스위치"]') as HTMLElement;
   expect(sec.textContent).toContain("paper-fo");

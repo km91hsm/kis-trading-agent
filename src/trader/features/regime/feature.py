@@ -27,6 +27,6 @@ FEATURE = Feature(
     agents=AGENTS,
     session_kinds=(MARKET,),
     routes=ROUTERS,
-    nav=(NavItem("system", "regime", "국면", 30),),
+    nav=(NavItem("system", "regime", "시장 국면·매수 정책", 30),),
     health_areas=(HEALTH,),
 )

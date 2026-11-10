@@ -42,6 +42,20 @@ export function fixtureOverview(over: Over = {}) {
     fx: { pair: "USD/KRW", rate: "1385.50", as_of: "11월 4일 종가", converted_total: "16464442.75" },
     paused: false,
     at: "2026-11-05T01:00:00+00:00",
+    by_env: {
+      paper: {
+        krw: { nav: "10000000", day_pnl: "120000", accounts: ["paper-1"] },
+        usd: { nav: "2500.5", day_pnl: "-12.25", accounts: ["paper-1"] },
+        fx: over.fx === null ? null : { pair: "USD/KRW", rate: "1385.50", as_of: "11월 4일 종가", converted_total: "13464442.75" },
+        paused: false, at: "2026-11-05T01:00:00+00:00",
+      },
+      real: {
+        krw: { nav: "3000000", day_pnl: "-45000", accounts: ["real-1"] },
+        usd: { nav: null, day_pnl: null, accounts: [] },
+        fx: over.fx === null ? null : { pair: "USD/KRW", rate: "1385.50", as_of: "11월 4일 종가", converted_total: "3000000" },
+        paused: false, at: "2026-11-05T01:00:00+00:00",
+      },
+    },
     ...over,
   };
 }

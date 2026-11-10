@@ -111,13 +111,10 @@
 }
 .notice-filter {
   cursor: pointer;
-  min-height: 28px;
+  min-height: var(--touch);
   padding: 0 var(--space-3);
   font: inherit;
   font-size: var(--text-sm);
-}
-@media (max-width: 1023px) {
-  .notice-filter { min-height: 36px; }
 }
 .notice-filter[aria-pressed="true"] {
   color: var(--accent-fg);
@@ -327,13 +324,13 @@
 .data-manual-details { margin: var(--space-3) 0; }
 .data-manual-details > summary { cursor: pointer; font-weight: 600; min-height: var(--touch); display: flex; align-items: center; }
 .data-manual-details .data-manual { margin-top: var(--space-2); }
-.data-themes { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
-.segment { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-pill); overflow: hidden; margin-bottom: var(--space-3); }
+.data-themes { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); }
+.segment { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: var(--space-3); }
 .segment-btn { border: 0; background: none; color: var(--fg-muted); font: inherit; font-weight: 600; padding: 0 var(--space-3); min-height: var(--touch); cursor: pointer; }
 .segment-btn + .segment-btn { border-left: 1px solid var(--line); }
-.segment-btn[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.segment-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
 .data-watchlist { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
-.data-chip-x { margin-left: var(--space-1); border: 0; background: none; color: inherit; cursor: pointer; min-width: var(--space-6); }
+.data-chip-x { margin-left: var(--space-1); border: 0; background: none; color: inherit; cursor: pointer; min-width: var(--touch); min-height: var(--touch); }
 .data-feature-table { table-layout: auto; width: max-content; min-width: 100%; }
 .data-feature-table th, .data-feature-table td { white-space: nowrap; }
 .data-feature-row { cursor: pointer; }
@@ -392,7 +389,7 @@
 .sys-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .sys-head .btn { margin-left: auto; }
 .sys-details { margin-top: var(--space-3); }
-.sys-details > summary { cursor: pointer; color: var(--fg-muted); font-size: var(--text-sm); padding: var(--space-1) 0; }
+.sys-details > summary { min-height: var(--touch); display: flex; align-items: center; cursor: pointer; color: var(--fg-muted); font-size: var(--text-sm); padding: var(--space-1) 0; }
 .sys-details[open] > summary { margin-bottom: var(--space-2); }
 .job-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-3); }
 .job-lane h4 { font-size: var(--text-sm); font-weight: 600; color: var(--fg-muted); margin-bottom: var(--space-2); }
@@ -407,7 +404,10 @@
 
 /* 시스템 페이지 탭(상태·잡·기능·관리) — 왼쪽 메뉴가 없는 폭(<1280)에서만. 알약 여러 개가 아니라 한 덩어리 세그먼트. */
 .page-tabs {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
   margin: calc(-1 * var(--space-2)) 0 var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -417,7 +417,7 @@
 .page-tabs a {
   display: inline-flex;
   align-items: center;
-  min-height: calc(var(--touch) - 4px);
+  min-height: var(--touch);
   padding: 0 var(--space-3);
   border-radius: calc(var(--radius) - 2px);
   color: var(--fg-muted);
@@ -433,3 +433,14 @@
 .cap-editor input[type="number"] { width: 7em; }
 .pause-banner { margin: var(--space-2) 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--warn, currentColor); border-radius: var(--radius-sm, 4px); }
 .sys-trade { margin: 0 0 var(--space-3); }
+
+/* 화면의 목적과 다음 확인 위치를 한 묶음으로 제시한다. */
+.screen-intro { margin-bottom: var(--space-6); max-width: 80ch; }
+.screen-description { color: var(--fg-muted); font-size: var(--text-md); line-height: 1.65; }
+.screen-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
+.screen-actions a { display: inline-flex; align-items: center; min-height: var(--touch); color: var(--accent); font-size: var(--text-sm); font-weight: 600; text-underline-offset: 3px; }
+
+.overview-groups { display: grid; gap: var(--space-4); margin-bottom: var(--space-4); }
+.overview-group { min-width: 0; }
+.overview-group > h3 { margin-bottom: var(--space-2); font-size: var(--text-md); }
+.overview-group .kpi-strip { margin-bottom: 0; }

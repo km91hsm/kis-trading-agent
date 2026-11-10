@@ -16,8 +16,8 @@ SCREENS = (
     ("today", "오늘", "/"),
     ("accounts", "계좌·보유", "/accounts"),
     ("performance", "성과", "/performance"),
-    ("data", "데이터", "/data"),
-    ("system", "시스템", "/system"),
+    ("data", "시장 데이터", "/data"),
+    ("system", "설정·운영", "/system"),
 )
 
 # 시스템 화면의 커널 절(웹 `/system/*` 커널 라우트·ops).
@@ -29,10 +29,11 @@ SCREENS = (
 # 절이 표에 없으면 절 목록이 빈 페이지(시스템 「기능」 — 기능이 보탠 국면·저장소·단타·파생 절이
 # 여기로)로, 그런 페이지가 없으면 첫 페이지(오늘 현황)로 간다.
 SYSTEM_PAGES = (
-    ("status", "상태", "/system", ("health", "daemon", "usage")),
-    ("jobs", "잡", "/system/jobs", ("jobs", "runs")),
-    ("features", "기능", "/system/features", ()),
-    ("admin", "관리", "/system/admin", ("token", "secrets", "settings", "control-log")),
+    ("status", "운영 상태", "/system", ("health", "daemon", "usage")),
+    ("jobs", "자동 작업", "/system/jobs", ("jobs", "runs")),
+    ("features", "매매 정책", "/system/features", ()),
+    ("admin", "연결·설정", "/system/admin",
+     ("token", "secrets", "saveticker", "settings", "control-log")),
 )
 TODAY_PAGES = (
     ("today", "현황", "/", ("approvals", "pipeline", "decisions", "risk-checks")),
@@ -82,11 +83,11 @@ KERNEL_NAV = (
     NavItem("today", "orders-timeline", "주문·체결", 50),
     NavItem("today", "next-jobs", "다음 할 일", 60),
     NavItem("today", "notices", "알림", 70),
-    NavItem("system", "health", "헬스", 0),
-    NavItem("system", "daemon", "데몬", 1),
-    NavItem("system", "jobs", "잡 큐", 2),
+    NavItem("system", "health", "운영 점검", 0),
+    NavItem("system", "daemon", "자동매매 서비스", 1),
+    NavItem("system", "jobs", "작업 대기열", 2),
     NavItem("system", "runs", "실행 기록", 3),
-    NavItem("system", "usage", "사용량", 4),
+    NavItem("system", "usage", "AI 사용량", 4),
     NavItem("system", "token", "쓰기 토큰", 70),
     NavItem("system", "secrets", "연결 키", 71),
     NavItem("system", "settings", "설정", 72),
