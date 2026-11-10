@@ -740,3 +740,46 @@ def test_enqueue_from_job_passes_priority(env, conn):
     assert rid is not None
     row = conn.execute("SELECT priority FROM job_requests WHERE id=?", (rid,)).fetchone()
     assert row[0] == 5
+
+
+def test_gate_skipped_auto_requests_are_swept_and_alerted_once(project):
+    """장 마감 뒤 꺼낸 자동 trading 요청이 게이트에 걸리면 같은 시장·같은 사유로 대기 중인 자동
+    요청을 그 틱에서 함께 닫고 알림 한 건으로 묶는다. 사람 요청·다른 시장·trading 아닌 kind 는
+    남긴다."""
+    after = datetime(2026, 10, 27, 6, 31, tzinfo=UTC)  # 15:31 KST, 장 마감 뒤
+    env = make_env(project, after, markets=("KR", "US"))
+    conn = env.deps.conn_factory()
+    first = enqueue(env, conn, "heavy_scan", {"market": "KR", "ticker": "1"}, source="news",
+                    now=after)  # fmt: skip
+    enqueue(env, conn, "heavy_scan", {"market": "KR", "ticker": "2"}, source="news", now=after)
+    enqueue(env, conn, "reeval", {"market": "KR", "ticker": "3"}, source="daemon", now=after)
+    manual = enqueue(env, conn, "heavy_scan", {"market": "KR", "ticker": "4"}, source="web",
+                     now=after)  # fmt: skip
+    us = enqueue(env, conn, "reeval", {"market": "US", "ticker": "5"}, source="news", now=after)
+    other = enqueue(env, conn, "sync", {}, source="daemon", now=after)
+
+    assert env.tick("slow") == {"request": first, "kind": "heavy_scan"}
+    by_id = {r["id"]: r for r in jobq.list_recent(conn, limit=20)}
+    skipped = [i for i, r in by_id.items() if r["status"] == "skipped"]
+    assert sorted(skipped) == [first, first + 1, first + 2]
+    assert all(by_id[i]["result"] == {"skipped": "장 마감"} for i in skipped)
+    assert by_id[manual]["status"] == "queued" and by_id[other]["status"] == "queued"
+    assert by_id[us]["status"] == "queued"  # 미국은 아직 장 전 — 게이트에 걸리지 않음
+    assert env.ran == []
+    (msg,) = env.deps.notifier.msgs
+    assert "KR" in msg and "장 마감" in msg and "3건" in msg
+    assert "heavy_scan 작업 2" in msg and "reeval 작업 1" in msg
+    conn.close()
+
+
+def test_gate_skip_alert_once_per_market_reason_day(project):
+    """같은 날 같은 시장·사유로 나중에 또 버려지면 다시 알리지 않는다(폭주 방지)."""
+    after = datetime(2026, 10, 27, 6, 31, tzinfo=UTC)
+    env = make_env(project, after)
+    conn = env.deps.conn_factory()
+    enqueue(env, conn, "reeval", {"market": "KR", "ticker": "1"}, source="news", now=after)
+    env.tick("reeval")
+    enqueue(env, conn, "reeval", {"market": "KR", "ticker": "2"}, source="news", now=after)
+    env.tick("reeval")
+    assert len(env.deps.notifier.msgs) == 1
+    conn.close()

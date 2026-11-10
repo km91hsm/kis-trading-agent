@@ -442,3 +442,69 @@ def test_daemon_refuses_when_other_root_holds_global_lock(project, tmp_path):
     finally:
         daemon2.shutdown(wait=False)
     assert daemon2._global.held() is False
+
+
+def _settings_registry():
+    from pydantic import BaseModel, ConfigDict
+
+    from trader.kernel.config.sections import Section, SectionRegistry
+
+    class A(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        x: int = 0
+
+    r = SectionRegistry()
+    r.register(Section("settings", "a", A, A))
+    return r
+
+
+def _touch(p: Path, text: str) -> None:
+    import os
+
+    old = p.stat().st_mtime_ns if p.exists() else 0
+    p.write_text(text, encoding="utf-8")
+    st = p.stat()
+    os.utime(p, ns=(st.st_atime_ns, max(st.st_mtime_ns, old) + 1_000_000))
+
+
+class _Sent:
+    def __init__(self) -> None:
+        self.msgs: list[str] = []
+
+    def send(self, text, *, escape=True):
+        self.msgs.append(text)
+        return True
+
+
+def test_tick_reloads_changed_settings_before_running_job(project, monkeypatch):
+    """settings.yaml 이 바뀌면 다음 잡 실행 전에 다시 읽어 deps.settings 를 바꾼다. 검증 실패면
+    이전 설정을 유지하고 같은 오류는 한 번만 알린다."""
+    p = project / "config" / "settings.yaml"
+    _touch(p, "a: {x: 1}\n")
+    sent = _Sent()
+    d = make_deps(project, registry=_settings_registry(), notifier=sent)
+    seen: list = []
+    job = job_of(d, body=lambda ctx, job: seen.append(ctx.settings) or {})
+    daemon = Daemon([], d)
+    monkeypatch.setattr(daemon, "_sync_next", lambda i: None)
+
+    daemon._tick(job)
+    assert seen[-1] is d.settings  # 바뀌지 않았으면 그대로
+
+    _touch(p, "a: {x: 7}\n")
+    daemon._tick(job)
+    assert seen[-1].a.x == 7 and daemon.deps.settings.a.x == 7
+
+    _touch(p, "a: {x: nope}\n")
+    daemon._tick(job)
+    _touch(p, "a: {x: nope}\n")
+    daemon._tick(job)
+    assert seen[-1].a.x == 7  # 이전 설정 유지
+    assert len(sent.msgs) == 1 and "settings.yaml" in sent.msgs[0]
+
+
+def test_daemon_without_registry_does_not_reload(project, monkeypatch):
+    d = make_deps(project)  # registry 없음(테스트·부분 조립) → 감시하지 않는다
+    daemon = Daemon([], d)
+    assert daemon._settings_watch is None

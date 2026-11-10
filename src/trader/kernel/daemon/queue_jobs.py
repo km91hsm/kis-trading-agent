@@ -89,6 +89,9 @@ class QueueState:
     heavy_wanted: HeavyWanted = field(default_factory=HeavyWanted)
     heavy_owner: int | None = None
     heartbeat: Any = None
+    # 게이트로 버린 자동 요청 알림을 이미 보낸 (시장, 운영일, 사유) — 하루 1번
+    gate_alerted: set[tuple] = field(default_factory=set)
+    gate_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _send(deps: Any, text: str) -> None:
@@ -198,9 +201,54 @@ def queued_job_body(deps: Any, req: dict, progress: Callable[[str], None]) -> di
         raise ValueError(f"알 수 없는 작업: {req['kind']}")
     why = auto_gate(deps, req)
     if why:
+        try:
+            sweep_gated(deps, req, why)
+        except Exception:  # noqa: BLE001 - 정리·알림 실패가 이 요청의 skipped 기록을 막지 않는다
+            logger.exception("게이트로 건너뛴 요청 정리 실패")
         return {"skipped": why}
     raw = spec.body(deps, req["params"], progress)
     return raw if isinstance(raw, dict) else {"result": raw}
+
+
+def sweep_gated(deps: Any, req: dict, why: str) -> list[dict]:
+    """꺼낸 자동 요청이 시장 게이트에 걸렸다: 같은 시장에서 같은 사유로 걸릴 대기 중 자동 요청을
+    이 틱에서 함께 skipped 로 닫고(한 건씩 틱을 기다리며 알림이 흩어지지 않게), 시장·운영일·사유당
+    한 번 텔레그램으로 묶어 알린다. 닫은 요청(꺼낸 것 포함) 목록을 돌려준다."""
+    market = (req.get("params") or {}).get("market")
+    closed = [req]
+    conn = deps.conn_factory()
+    try:
+        for r in jobq.queued(conn):
+            if r["id"] == req["id"] or (r.get("params") or {}).get("market") != market:
+                continue
+            if auto_gate(deps, r) != why:
+                continue
+            if jobq.skip_queued(conn, int(r["id"]), result={"skipped": why}, now=deps.now()):
+                closed.append(r)
+    finally:
+        conn.close()
+    _alert_gated(deps, market, why, closed)
+    return closed
+
+
+def _alert_gated(deps: Any, market: str | None, why: str, closed: list[dict]) -> None:
+    q: QueueState = deps.queue
+    now = deps.now()
+    day = run_date_for(market, now) if market in MARKET_TZ else now.date()
+    key = (market, day, why)
+    logger.info(
+        "자동 요청 %d건 건너뜀 (%s %s): %s",
+        len(closed), market or "-", why, ", ".join(f"{r['kind']}#{r['id']}" for r in closed),
+    )  # fmt: skip
+    with q.gate_lock:
+        if key in q.gate_alerted:
+            return
+        q.gate_alerted.add(key)
+    counts: dict[str, int] = {}
+    for r in closed:
+        label = jobq.label(q.kinds, r["kind"])
+        counts[label] = counts.get(label, 0) + 1
+    _send(deps, messages.queue_gate_skipped(market=market, why=why, counts=counts))
 
 
 def _progress_writer(deps: Any, req_id: int) -> Callable[[str], None]:
