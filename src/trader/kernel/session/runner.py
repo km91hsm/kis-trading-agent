@@ -438,23 +438,32 @@ def run_session(
     cancel: threading.Event | None = None,
     checkpoint_names: Sequence[str] = (),
 ) -> SessionResult:
-    """LLM 세션(`_run_session_once`) + Codex 도중 실패면 같은 잡에서 한 번 다시 띄운다(스펙 §5-1,
-    사용자 결정 A — 재시작의 `research_policy.start` 가 토론을 보관하고 Claude 2인으로 바꿔 그날
-    판단이 빠지지 않게). 재실행이 상한·감속 등으로 거부되면 첫 실패 결과를 그대로 돌려준다."""
+    """LLM 세션(`_run_session_once`) + 토론 때문에 실패하면 같은 잡에서 한 번 다시 띄운다.
+
+    - Codex 도중 실패(스펙 §5-1, 사용자 결정 A): 재시작의 `research_policy.start` 가 토론을 보관하고
+      Claude 2인으로 바꾼다.
+    - 그 밖의 「필수 토론 미완료」(Claude 턴 누락 등, 2026-11-10 사용자 결정): 체크포인트가
+      남아 있어 빠진 턴부터 이어간다.
+    재실행은 한 번뿐이고, 상한·감속 등으로 거부되면 첫 실패 결과를 그대로 돌려준다. 타임아웃 등
+    토론과 무관한 실패는 다시 띄우지 않는다."""
     kw = dict(agents=agents, runner=runner, claude_bin=claude_bin, cancel=cancel,
               checkpoint_names=checkpoint_names)  # fmt: skip
     result = _run_session_once(spec, kind, ctx, **kw)
     if result.ok or (cancel is not None and cancel.is_set()):
         return result
     failed = _codex_failed_research(ctx, spec, kind)
-    if not failed:
+    incomplete = research_policy.INCOMPLETE in (result.error or "")
+    if not failed and not incomplete:
         return result
-    logger.warning("Codex 도중 실패(%s) — Claude 강세·약세로 한 번 다시 띄웁니다: %s",
-                   ", ".join(failed), result.error)  # fmt: skip
+    if failed:
+        logger.warning("Codex 도중 실패(%s) — Claude 강세·약세로 한 번 다시 띄웁니다: %s",
+                       ", ".join(failed), result.error)  # fmt: skip
+    else:
+        logger.warning("토론이 비어 한 번 다시 띄웁니다(빠진 턴부터): %s", result.error)
     try:
         return _run_session_once(spec, kind, ctx, **kw)
     except PipelineError as e:
-        logger.warning("Codex 실패 뒤 재실행 생략: %s", e)
+        logger.warning("토론 실패 뒤 재실행 생략: %s", e)
         return result
 
 

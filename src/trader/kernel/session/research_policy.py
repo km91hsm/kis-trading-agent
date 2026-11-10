@@ -24,6 +24,8 @@ from trader.kernel.session.schemas import DebateTurn
 FLAG = "codex_debate_enabled"
 # 설정 화면 값(없으면 yaml `llm.codex_debate.usage_throttle`·`daily_call_cap`)
 CODEX_THROTTLE_FLAG = "codex_usage_throttle"
+# 필수 토론이 비었을 때의 오류 머리말 — 커널 러너가 이 문구로 같은 잡 재실행을 판단한다
+INCOMPLETE = "필수 토론 미완료"
 CODEX_CAP_FLAG = "codex_daily_call_cap"
 CODEX_CAP_RANGE = (1, 10000)
 POLICY_EXCLUDED = frozenset({"usage_throttle", "hard_pct"})
@@ -663,7 +665,7 @@ def completion_error(conn, settings, d, scope) -> str | None:
                 for side in ("bull", "bear"):
                     if read_checkpoint(d, scope.turn_stage(item["lane"], rnd, side)) is None:
                         who = "Codex" if item[side] == "codex" else "Claude"
-                        return f"필수 토론 미완료: {label}r{rnd}_{side} ({who})"
+                        return f"{INCOMPLETE}: {label}r{rnd}_{side} ({who})"
         if policy.get("context_hash") != _context_hash(d, scope):
             return "Codex 입력/리포트 증명 불일치: 새 연구로 재분석하세요"
         for item in plan:
