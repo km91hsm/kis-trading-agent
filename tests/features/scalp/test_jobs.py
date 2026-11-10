@@ -224,3 +224,17 @@ def test_has_scalp_state_fails_safe_on_corrupt_file(make_deps, settings, project
     assert scalp_jobs.has_scalp_state(state, "KR", day) is True
     monkeypatch.setattr(scalp_jobs.engine, "tick", lambda *a, **k: {"ran": True})
     assert scalp_jobs.scalp_body(deps, _job(deps)) == {"ran": True}  # 건너뛰지 않고 틱으로
+
+
+def test_scalp_body_uses_screen_judge_switch(make_deps, conn, monkeypatch):
+    """화면 판정자 켜기(control `scalp_judge`)가 yaml `scalp.judge` 꺼짐보다 우선해 틱이 판정자
+    풀을 쓴다 — 끄면 다시 쓰지 않는다."""
+    seen = []
+    monkeypatch.setattr(scalp_jobs, "judge_for", lambda ctx: seen.append(ctx) or object())
+    deps = make_deps()  # conftest 기본은 judge 꺼짐
+    assert deps.settings.scalp.judge is False
+    scalp_jobs.scalp_body(deps, _job(deps))
+    assert seen == []
+    set_flag(conn, switch.JUDGE_FLAG, True)
+    scalp_jobs.scalp_body(deps, _job(deps))
+    assert len(seen) == 1
