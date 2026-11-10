@@ -7,10 +7,20 @@ const BASE = "/api";
 const TOKEN_KEY = "trader.webToken";
 const tokenListeners = new Set<() => void>();
 
-/** 저장 완료 신호만 전달한다. 토큰 값은 이벤트에 싣지 않는다. */
+/** 같은 탭의 저장·다른 탭의 저장/삭제 신호만 전달한다. 토큰 값은 이벤트에 싣지 않는다. */
 export function onTokenChange(listener: () => void): () => void {
   tokenListeners.add(listener);
-  return () => { tokenListeners.delete(listener); };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== TOKEN_KEY && event.key !== null) return;
+    try {
+      if (event.storageArea === window.localStorage) listener();
+    } catch { /* 저장소 접근·화면 갱신 실패를 다른 구독에 전파하지 않는다 */ }
+  };
+  if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
+  return () => {
+    tokenListeners.delete(listener);
+    if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+  };
 }
 
 export class ApiError extends Error {
@@ -23,7 +33,7 @@ export class ApiError extends Error {
 
 /** 401(토큰 없음·틀림)·403(이 PC 에서만 등) */
 export class AuthError extends ApiError {
-  constructor(status: 401 | 403 = 401, message = "쓰기 토큰이 필요합니다") {
+  constructor(status: 401 | 403 = 401, message = "설정 변경 인증이 필요합니다") {
     super(status, message);
   }
 }

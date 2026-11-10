@@ -176,3 +176,18 @@ describe("RunJobButton", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });
+
+
+test("인증이 없으면 요청 전에 설정 링크를 제공하고 저장 신호로 요청 버튼을 연다", async () => {
+  tokenStore.set("");
+  ff = installFakeFetch({ "POST /api/jobs": route() });
+  const { container } = render(<RunJobButton kind="collect" trading={false} realAccounts={[]} />);
+  expect(button("collect").disabled).toBe(true);
+  expect(container.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  act(() => button("collect").click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(ff.calls).toHaveLength(0);
+  act(() => tokenStore.set("saved-fixture"));
+  expect(button("collect").disabled).toBe(false);
+  expect(container.textContent).not.toContain("saved-fixture");
+});

@@ -369,3 +369,57 @@ def test_codex_rejects_non_string_side(conn, monkeypatch, side):
             runner=_runner_emitting({}, "bear"),
             bin_path=Path("/fake/codex"),
         )
+
+
+@pytest.mark.parametrize("failure", ["실행", "출력 스키마 검증", "근거 정규화", "토론 규칙 검증"])
+def test_codex_failure_records_stage_without_provider_payload(conn, monkeypatch, failure):
+    """같은 예외형이라도 실패 경계를 구분하고 공급자 출력·예외 원문은 기록하지 않는다."""
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    launches = []
+
+    def fail(value):
+        raise ValueError("synthetic-private-provider-payload")
+
+    def fake(cmd, **kw):
+        launches.append(1)
+        if failure == "실행":
+            fail(None)
+        out = Path(cmd[cmd.index("--output-last-message") + 1])
+        value = (
+            {"synthetic-private-provider-payload": 1}
+            if failure == "출력 스키마 검증"
+            else ok_turn("bear", 0)
+        )
+        out.write_text(json.dumps(value), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, "", "synthetic-private-provider-payload")
+
+    with pytest.raises(codex.CodexError) as caught:
+        codex.run_turn(
+            conn, settings=enabled_settings(), policy_hash="p", data=_side_data("bear"),
+            now=NOW, runner=fake, bin_path=Path("/fake/codex"),
+            repair=fail if failure == "근거 정규화" else None,
+            validate=fail if failure == "토론 규칙 검증" else None,
+        )
+    row = conn.execute("SELECT status,error,counts_toward_cap FROM research_calls").fetchone()
+    assert row["status"] == "error"
+    assert failure in row["error"] and "synthetic-private-provider-payload" not in row["error"]
+    assert str(caught.value) == row["error"]
+    assert launches == [1] and row["counts_toward_cap"] == 1
+
+
+def test_codex_rule_rejection_does_not_record_untrusted_evidence(conn, monkeypatch):
+    """검증기가 돌려준 잘못된 source_id도 공급자 원문이므로 원장 오류에는 남기지 않는다."""
+    from trader.kernel.session import codex
+
+    monkeypatch.delenv("FAKE_CLAUDE", raising=False)
+    with pytest.raises(codex.CodexError) as caught:
+        codex.run_turn(
+            conn, settings=enabled_settings(), policy_hash="p", data=_side_data("bear"),
+            now=NOW, runner=_runner_emitting({}, "bear"), bin_path=Path("/fake/codex"),
+            validate=lambda turn: "잘못된 값: synthetic-private-evidence",
+        )
+    error = conn.execute("SELECT error FROM research_calls").fetchone()[0]
+    assert "토론 규칙 검증" in error
+    assert "synthetic-private-evidence" not in error and str(caught.value) == error

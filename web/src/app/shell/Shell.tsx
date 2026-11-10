@@ -1,9 +1,9 @@
-// 앱 셸 — 상단 상태 띠 + 쓰기 토큰 안내 + 2단 메뉴 + 화면(<Outlet/>).
+// 앱 셸 — 상단 상태 띠 + 설정 변경 인증 안내 + 2단 메뉴 + 화면(<Outlet/>).
 // AuthError(401·403·토큰 없음)는 api.ts 의 onAuthError 로 한곳에서 받아 띠 아래 안내를 띄운다(닫기 가능).
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../../components/Icon";
-import { onAuthError, onTokenChange, tokenStore } from "../../lib/api";
+import { AuthError, errorText, onAuthError, onTokenChange, tokenStore } from "../../lib/api";
 import { resolveLink } from "../../lib/nav";
 import { followHashTarget } from "../../lib/hash-target";
 import { Nav } from "./Nav";
@@ -31,10 +31,10 @@ function useHashScroll(): void {
 }
 
 export function Shell() {
-  const [authNotice, setAuthNotice] = useState(false);
-  useEffect(() => onAuthError(() => setAuthNotice(true)), []);
+  const [authNotice, setAuthNotice] = useState<{ error: AuthError; hadToken: boolean } | null>(null);
+  useEffect(() => onAuthError((error) => setAuthNotice({ error, hadToken: !!tokenStore.get() })), []);
   useEffect(() => onTokenChange(() => {
-    if (tokenStore.get()) setAuthNotice(false);
+    if (tokenStore.get()) setAuthNotice((previous) => previous?.error.status === 403 ? previous : null);
   }), []);
   useHashScroll();
 
@@ -51,9 +51,14 @@ export function Shell() {
         <div className="auth-notice" role="alert" data-auth-notice>
           <Icon name="warn" />
           <span>
-            쓰기 토큰이 필요합니다 → <Link to="/system/admin#token">설정·운영 › 연결·설정 › 쓰기 토큰</Link>
+            {authNotice.error.status === 403
+              ? <>접속 제한: {errorText(authNotice.error)}. 인증 키를 저장해도 같은 출처·직접 로컬 접속 제한은 해제되지 않습니다. </>
+              : authNotice.hadToken
+                ? <>저장된 인증 키가 서버에서 거부되었습니다. 현재 서버의 키로 교체하세요. </>
+                : <>설정 변경 인증이 필요합니다. 이 브라우저에 현재 서버의 인증 키를 저장하세요. </>}
+            <Link to="/system/admin#token">설정·운영 › 연결·설정 › 설정 변경 인증</Link>
           </span>
-          <button type="button" className="auth-notice-close" aria-label="안내 닫기" onClick={() => setAuthNotice(false)}>
+          <button type="button" className="auth-notice-close" aria-label="안내 닫기" onClick={() => setAuthNotice(null)}>
             <Icon name="x" />
           </button>
         </div>

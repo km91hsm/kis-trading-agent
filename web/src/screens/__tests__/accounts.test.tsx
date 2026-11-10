@@ -310,3 +310,21 @@ test("파생 카드에서 해당 계좌 주문 다리로 직접 이동한다", a
   await mount(routes());
   expect(section("fo-positions").querySelector('a[href="/accounts/paper-fo#fo-legs"]')?.textContent).toBe("주문 진행");
 });
+
+
+test.each([false, true])("인증이 없으면 전체 제어를 안내하고 막는다 (paused=%s)", async (paused) => {
+  tokenStore.set("");
+  const { container } = await mount(routes({
+    "GET /api/accounts": fixtureAccounts().map((a) => ({ ...a, paused })),
+    "GET /api/accounts/overview": fixtureOverview({ paused }),
+  }));
+  const control = container.querySelector(".pause-control")!;
+  const action = control.querySelector("button")!;
+  expect(action.disabled).toBe(true);
+  expect(control.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  act(() => action.click());
+  expect(dialog()).toBeNull();
+  expect(patches()).toHaveLength(0);
+  act(() => tokenStore.set("saved-fixture"));
+  expect(action.disabled).toBe(false);
+});

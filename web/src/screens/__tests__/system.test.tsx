@@ -69,6 +69,11 @@ function routes(over: Routes = {}): Routes {
     "GET /api/system/status": fixtureStatus(),
     "GET /api/system/daemon": fixtureDaemon(),
     "GET /api/jobs": fixtureJobs(),
+    "GET /api/jobs/activity": {
+      checked_at: "2026-11-05T12:00:00+09:00", since: "2026-11-04T12:00:00+09:00",
+      running_runs: [], queued_requests: 0, running_requests: 0,
+      recent_errors: { total: 0, failed: 0, interrupted: 0, followed_by_success: 0 },
+    },
     "GET /api/jobs/requests": fixtureRequests(),
     "DELETE /api/jobs/8": () => new Response(null, { status: 204 }),
     "GET /api/runs": fixtureRuns(),
@@ -332,7 +337,8 @@ describe("시스템 화면", () => {
     expect(button(grid, "지표 스냅샷")).toBeTruthy();
     expect(Array.from(j.querySelectorAll("h3")).map((e) => e.textContent)).not.toContain("일정");
     // 실행 상태를 먼저 보고 수동 실행은 필요할 때 펼친다.
-    expect(j.querySelector("h3")?.textContent).toBe("요청 기록");
+    expect(j.querySelector("h3")?.textContent).toBe("자동 작업 현황");
+    expect(j.querySelector("#job-requests")?.textContent).toBe("요청 큐 기록");
     expect(j.querySelector("table")!.compareDocumentPosition(j.querySelector("details")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(j.querySelector("details")?.open).toBe(false);
     expect(j.textContent).toContain("데몬"); // 일정은 데몬 절로
@@ -374,15 +380,15 @@ describe("시스템 화면", () => {
     await mount(routes());
     const t = section("token");
     expect(t.textContent).not.toContain("설정됨");
-    const input = t.querySelector('input[aria-label="쓰기 토큰"]') as HTMLInputElement;
+    const input = t.querySelector('input[aria-label="설정 변경 인증 키"]') as HTMLInputElement;
     type(input, "manual-tok");
     act(() => button(t, "저장").click());
     expect(tokenStore.get()).toBe("manual-tok");
     expect(t.querySelector("form")).toBeNull();
-    expect(t.textContent).toContain("설정됨");
+    expect(t.textContent).toContain("저장됨");
     expect(t.textContent).not.toContain("manual-tok");
 
-    act(() => button(t, "토큰 설정 열기").click());
+    act(() => button(t, "설정 변경 인증 열기").click());
     expect((t.querySelector("input") as HTMLInputElement).value).toBe("");
     await act(async () => button(t, "이 PC 에서 받기").click());
     await flush();

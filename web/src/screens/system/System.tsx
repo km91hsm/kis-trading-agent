@@ -1,5 +1,5 @@
 // 「시스템」 화면 — 페이지 4개(generated nav.ts 의 system.pages): 상태 `/system`(헬스·데몬·사용량) · 잡 `/system/jobs`(잡 큐·실행 기록)
-// · 기능 `/system/features`(국면·데이터 수집·단타·파생) · 관리 `/system/admin`(설정·연결 키·쓰기 토큰·조작 이력).
+// · 기능 `/system/features`(국면·단타·파생) · 관리 `/system/admin`(수집·연결 키·설정 변경 인증·조작 이력).
 // 절이 어느 페이지에 가는지는 nav.ts 항목의 `page` 가 정한다. 절 컨테이너는 데이터 전에 바로 그리고(절 id = nav.ts 항목),
 // 절마다 로딩·오류를 따로 보인다. 왼쪽 메뉴(≥1280)가 페이지 링크를 맡고, 그보다 좁으면 화면 위 `.page-tabs` 가 맡는다.
 import { useState, type ReactNode } from "react";
@@ -42,7 +42,7 @@ const SECTIONS = [
   { id: "fo", label: "파생" },
   { id: "settings", label: "설정" },
   { id: "secrets", label: "연결 키" },
-  { id: "token", label: "쓰기 토큰" },
+  { id: "token", label: "설정 변경 인증" },
   { id: "control-log", label: "조작 이력" },
 ] as const;
 

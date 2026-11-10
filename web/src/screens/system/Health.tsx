@@ -13,6 +13,7 @@ import { resolveLink } from "../../lib/nav";
 import { useResource } from "../../lib/hooks";
 import { body } from "../performance/ResourceView";
 
+
 type Status = { text: string; paused: boolean | null; flags: string[] };
 
 const toneOf = (level: string | null | undefined) => (level === "info" ? "muted" : healthDot(level));
@@ -101,6 +102,7 @@ export function Health() {
             <Chip tone="ok">자동매매: 동작 중</Chip>
           )}
         </p>
+        <p className="data-muted">작업 오류 건수는 최근 24시간 이력입니다. 종료 요청 중단·후속 정상 실행·확인 필요를 구분하며, 현재 실행 단계는 아래 데몬과 작업 화면에서 확인합니다.</p>
         {error ? (
           <p className="data-error" role="alert">
             {error}

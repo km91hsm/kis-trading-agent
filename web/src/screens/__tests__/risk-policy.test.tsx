@@ -20,10 +20,13 @@ const market = (over: Record<string, unknown> = {}) => ({
 });
 let ff: FakeFetch;
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-10T10:00:00+09:00"));
+  noteServerTime(new Date(0).toISOString(), 0);
   clearResourceCache(); tokenStore.set("test-token");
   setEventsClient({ subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} });
 });
-afterEach(() => { ff?.restore(); tokenStore.set(""); vi.useRealTimers(); noteServerTime(new Date(0).toISOString(), 0); });
+afterEach(() => { ff?.restore(); act(() => tokenStore.set("")); vi.useRealTimers(); noteServerTime(new Date(0).toISOString(), 0); });
 const patches = () => ff.calls.filter((c) => c.init?.method === "PATCH");
 test.each(["blocked", "unknown"])("%s 정책에서는 설정 한도를 매수 허용 범위처럼 표시하지 않는다", async (entry) => {
   ff = installFakeFetch({ "GET /api/settings/risk-policy": { markets: [market({ effective: { stance: "RISK_OFF", entry, reason: "신규 매수 불가", max_position_pct: 0.25, max_positions: 5 } })] } });
@@ -60,7 +63,7 @@ test("정책 버튼은 선택만 하고 사유를 채워 명시적으로 저장�
   const data = { markets: [market()] };
   ff = installFakeFetch({ "GET /api/settings/risk-policy": data, "PATCH /api/settings/risk-policy/KR": data });
   const { container } = render(<RiskPolicy />); await flush();
-  await act(async () => button(container, "방어 · 신규 매수 차단").click());
+  await act(async () => button(container, "리스크 OFF — 신규 매수 차단").click());
   expect(patches()).toHaveLength(0);
   expect(button(container, "국내 정책 저장").disabled).toBe(true);
   await input(container, "국내 변경 사유", "  위험 노출 축소  ");
@@ -74,7 +77,7 @@ test("모든 실전 계좌를 각각 확인해야 자동 복귀도 저장할 수
   const data = { markets: [market({ accounts: [{ id: "real-a", env: "real" }, { id: "real-b", env: "real" }] })] };
   ff = installFakeFetch({ "GET /api/settings/risk-policy": data, "PATCH /api/settings/risk-policy/KR": data });
   const { container } = render(<RiskPolicy />); await flush();
-  await act(async () => button(container, "자동 · 시장 판단 따르기").click());
+  await act(async () => button(container, "자동 — 시장 판단 따르기").click());
   await input(container, "국내 변경 사유", "자동 복귀");
   await input(container, "real-a 확인", "real-a");
   expect(button(container, "국내 정책 저장").disabled).toBe(true);
@@ -88,7 +91,7 @@ test("모든 실전 계좌를 각각 확인해야 자동 복귀도 저장할 수
 test("저장 오류를 알리고 사유를 보존해 재시도할 수 있다", async () => {
   ff = installFakeFetch({ "GET /api/settings/risk-policy": { markets: [market()] }, "PATCH /api/settings/risk-policy/KR": () => new Response(JSON.stringify({ detail: "확인 정보가 변경되었습니다" }), { status: 400 }) });
   const { container } = render(<RiskPolicy />); await flush();
-  await act(async () => button(container, "방어 · 신규 매수 차단").click());
+  await act(async () => button(container, "리스크 OFF — 신규 매수 차단").click());
   await input(container, "국내 변경 사유", "방어 전환");
   await act(async () => button(container, "국내 정책 저장").click()); await flush();
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("확인 정보가 변경되었습니다");
@@ -131,7 +134,7 @@ test("미국 정책 만료는 ET로 표시하고 원본 확신도 0과 자료 �
 test("정책 선택을 취소하면 선택 버튼으로 포커스를 되돌린다", async () => {
   ff = installFakeFetch({ "GET /api/settings/risk-policy": { markets: [market()] } });
   const { container } = render(<RiskPolicy />); await flush();
-  const choice = button(container, "방어 · 신규 매수 차단");
+  const choice = button(container, "리스크 OFF — 신규 매수 차단");
   await act(async () => choice.click());
   await act(async () => button(container, "취소").click());
   expect(document.activeElement).toBe(choice);
@@ -208,4 +211,23 @@ test("장기 만료를 timeout 정수 범위 안에서 예약해 즉시 재조�
 
 test.each([[0.1, "10%"], [0.0075, "0.75%"], [0.0025, "0.25%"]] as const)("실효 비중 %s를 반올림하거나 0을 덧붙이지 않고 %s로 표시한다", (weight, text) => {
   expect(policyLimits({ stance: "RISK_ON", entry: "limited", reason: "설정 한도", max_position_pct: weight, max_positions: 2 })).toBe(`종목당 최대 ${text} · 최대 2종목`);
+});
+
+
+test("인증 없는 정책 변경은 안내 링크를 제공하고 저장 후에만 선택할 수 있다", async () => {
+  act(() => tokenStore.set(""));
+  ff = installFakeFetch({ "GET /api/settings/risk-policy": { markets: [market()] } });
+  const { container } = render(<RiskPolicy />); await flush();
+  const choice = button(container, "제한적 매수");
+  expect(choice.disabled).toBe(true);
+  expect(container.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  expect(container.textContent).toContain("종목당 10%·최대 2종목");
+  expect(container.textContent).toContain("단타·파생은 별도");
+  await act(async () => choice.click());
+  expect(container.querySelector("textarea")).toBeNull();
+  expect(patches()).toHaveLength(0);
+  await act(async () => tokenStore.set("saved-fixture"));
+  expect(choice.disabled).toBe(false);
+  await act(async () => choice.click());
+  expect(container.querySelector("textarea")).not.toBeNull();
 });

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from trader.kernel.daemon import queue as jobq
+from trader.kernel.daemon.activity import outcome_for
 from trader.kernel.daemon.heartbeat import read_status
 from trader.kernel.execution.ledger import day_bounds
 from trader.kernel.ledger.control import delete_flag, get_flag, log_change, set_flag
@@ -139,6 +140,7 @@ def daemon_view(request: Request) -> dict:
         rec = by_id.get(r["id"]) or {}
         r["next_at"] = rec.get("next_run")
         r.update({k: rec.get(k) for k in keep})
+        r["last_outcome"] = outcome_for(rec.get("last_status"), rec.get("last_error"))
     return {**status, "jobs": table}
 
 

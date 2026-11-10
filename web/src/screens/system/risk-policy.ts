@@ -14,7 +14,7 @@ export type RiskMarket = {
   history: { at: string; mode: PolicyMode; reason: string; actor: string | null; expires_at: string | null }[];
 };
 export type RiskPolicyResponse = { markets: RiskMarket[] };
-export const policyNames: Record<PolicyMode, string> = { AUTO: "자동", RISK_ON: "제한적 매수", RISK_OFF: "방어" };
+export const policyNames: Record<PolicyMode, string> = { AUTO: "자동 — 시장 판단 따르기", RISK_ON: "리스크 ON — 제한적 매수", RISK_OFF: "리스크 OFF — 신규 매수 차단" };
 export const marketName = (market: string) => market === "KR" ? "국내" : market === "US" ? "미국" : market;
 export const stanceName = (stance: string | null | undefined) => ({ RISK_ON: "매수 지향", RISK_OFF: "방어", NEUTRAL: "중립" }[stance ?? ""] ?? "판단 자료 없음");
 export const entryName = (entry: RiskMarket["effective"]["entry"]) => ({ blocked: "신규 매수 차단", limited: "제한적 매수", standard: "일반 매수 정책", unknown: "매수 허용 여부 확인 필요" }[entry] ?? "매수 허용 여부 확인 필요");

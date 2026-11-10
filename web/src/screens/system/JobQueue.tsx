@@ -16,6 +16,7 @@ import { pagePathOf } from "../../lib/nav";
 import { PAGE_SIZE, usePaged, usePageReset } from "../../lib/usePaged";
 import { body } from "../performance/ResourceView";
 import { jobRows, requestRows, type JobRequest, type JobsResp, type KindRow, type RequestRow, type RequestsResp } from "./system.ts";
+import { JobActivity } from "./JobActivity";
 import "./JobQueue.css";
 
 const REQ_PARAMS = { limit: "200" };
@@ -43,8 +44,8 @@ function timestamp(value: string | null): number {
 
 /** 표시 순서만 바꾼다. 대기는 큐 저장소와 같은 priority DESC, id ASC. */
 function sortedRequests(requests: JobRequest[], sort: RequestSort, status: string): JobRequest[] {
-  const rank = (request: JobRequest) => request.status === "running" ? 0 : request.status === "queued" ? 1 : request.status === "error" ? 2 : 3;
-  return requests.filter((request) => !status || request.status === status).sort((a, b) => {
+  const rank = (request: JobRequest) => request.status === "running" ? 0 : request.status === "queued" ? 1 : request.status === "error" && request.outcome !== "interrupted" && request.outcome !== "followed_by_success" ? 2 : 3;
+  return requests.filter((request) => !status || (["failed", "interrupted", "followed_by_success"].includes(status) ? request.outcome === status : request.status === status)).sort((a, b) => {
     if (sort === "recent") return timestamp(b.requested_at) - timestamp(a.requested_at) || b.id - a.id;
     const group = rank(a) - rank(b);
     if (group) return group;
@@ -77,14 +78,17 @@ function PagedRequests({ requests, columns }: { requests: JobRequest[]; columns:
             <option value="running">실행 중</option>
             <option value="queued">대기</option>
             <option value="ok">완료</option>
-            <option value="error">오류</option>
+            <option value="failed">확인 필요</option>
+            <option value="interrupted">종료 요청 중단</option>
+            <option value="followed_by_success">후속 정상 실행</option>
+            <option value="error">원장 오류 전체</option>
             <option value="skipped">건너뜀</option>
           </select>
         </label>
         <span className="data-muted" aria-live="polite">{rows.length} / {requests.length}건</span>
       </div>
       <p className="data-muted job-request-guide">
-        {sort === "active" ? "실행 중 → 대기(우선순위·접수 순) → 오류 → 나머지 종료(종료 시각 최신순)" : "요청 시각이 최신인 순서"}
+        {sort === "active" ? "실행 중 → 대기(우선순위·접수 순) → 확인 필요 → 나머지 종료(종료 시각 최신순)" : "요청 시각이 최신인 순서"}
         <br />화면 정렬은 실제 실행 순서를 변경하지 않습니다. 실제 실행은 작업 종류와 데몬 상태에 따라 달라집니다.
       </p>
       <Table columns={columns} rows={paged.rows} rowKey={(x) => x.id} empty={status ? "선택한 상태의 요청 없음" : "최근 요청 없음"} />
@@ -122,7 +126,18 @@ export function JobQueue() {
       { key: "requested_at", label: "요청", width: "12%", align: "num", render: (r) => fmtWhen(r.requested_at) },
       { key: "finished_at", label: "끝", width: "12%", align: "num", render: (r) => fmtWhen(r.finished_at) },
       { key: "params", label: "인자", width: "14%" },
-      { key: "error", label: "오류", width: "16%", render: (r) => (r.error ? <span className="cell-ellipsis" title={r.error}>{r.error}</span> : "") },
+      { key: "error", label: "오류", width: "16%", render: (r) => (
+        <>
+          {r.error ? (
+            <details className="job-error-details">
+              <summary>오류 상세 보기</summary>
+              <p className="job-error-text">{r.error}</p>
+            </details>
+          ) : null}
+          {r.followup_at ? <small className="data-muted job-followup">후속 정상 시각 {fmtWhen(r.followup_at)}</small> : null}
+          {r.scope_confirmed === false && r.tone === "fail" ? <small className="data-muted job-followup">대상 범위 미확인</small> : null}
+        </>
+      ) },
       {
         key: "cancel",
         label: "",
@@ -141,12 +156,13 @@ export function JobQueue() {
 
   return (
     <div className="job-queue">
-      <h3 className="perf-sub" id="job-requests" tabIndex={-1}>요청 기록</h3>
+      <JobActivity />
+      <h3 className="perf-sub" id="job-requests" tabIndex={-1}>요청 큐 기록</h3>
       {body(requests, "잡 요청", (r) => (
         <>
           <p className="data-muted job-request-summary">
-            {r.alive ? "데몬 동작 중" : "데몬 꺼짐"} · 진행 중 {r.active}
-            <br />최근 요청 200건 기준으로 조회하며, 실행 중·대기 요청은 모두 포함합니다.
+            {r.alive ? "데몬 동작 중" : "데몬 꺼짐"} · 요청 대기·실행 중 {r.active}건
+            <br />수동 요청·자동 등록 요청을 포함한 최근 200건 기준이며, 실행 중·대기 요청은 모두 포함합니다. 예약 작업의 직접 실행은 위의 실행 단계에서 확인합니다.
           </p>
           <PagedRequests requests={r.requests} columns={reqColumns} />
           {error ? (

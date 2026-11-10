@@ -13,7 +13,7 @@ beforeEach(() => {
   tokenStore.set("test-token");
   setEventsClient({ subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} });
 });
-afterEach(() => { ff?.restore(); tokenStore.set(""); document.body.innerHTML = ""; });
+afterEach(() => { ff?.restore(); act(() => tokenStore.set("")); });
 
 const scalp = {
   accounts: [
@@ -145,4 +145,20 @@ test("판정자: 켜기는 확인 창 뒤 PATCH /settings/scalp-judge, 화면 �
   await act(async () => reset.click());
   await flush();
   expect(patches()[1].body).toEqual({ enabled: null });
+});
+
+
+test("인증이 없으면 변경 전에 설정 링크를 보여주고 모든 변경 버튼을 막는다", async () => {
+  act(() => tokenStore.set(""));
+  ff = installFakeFetch({ "GET /api/settings/scalp": scalp });
+  const { container } = render(<ScalpSwitch />); await flush();
+  expect(container.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  const controls = Array.from(container.querySelectorAll("button"));
+  expect(controls.length).toBeGreaterThan(0);
+  expect(controls.every((b) => b.disabled)).toBe(true);
+  await act(async () => controls[0].click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(patches()).toHaveLength(0);
+  await act(async () => tokenStore.set("saved-fixture"));
+  expect(controls.some((b) => !b.disabled)).toBe(true);
 });

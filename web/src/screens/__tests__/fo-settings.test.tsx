@@ -14,7 +14,7 @@ beforeEach(() => {
   tokenStore.set("test-token");
   setEventsClient({ subscribe: () => () => {}, status: () => ({ connected: true, since: 0 }), close() {} });
 });
-afterEach(() => { ff?.restore(); tokenStore.set(""); document.body.innerHTML = ""; });
+afterEach(() => { ff?.restore(); act(() => tokenStore.set("")); });
 
 type Row = { id: string; env: string; enabled: boolean; source: string; effective: boolean; reason: string | null };
 const fo: { accounts: Row[]; default_paper: boolean; product: string; vehicles: string[]; max_contracts: number } = {
@@ -52,4 +52,33 @@ test("파생 스위치: 모의 켜기는 확인 뒤 PATCH, 실전은 스위치 �
   await act(async () => reset.click());
   await flush();
   expect(patches()[1].body).toEqual({ enabled: null });
+});
+
+
+test("인증이 없으면 변경 전에 설정 링크를 보여주고 모든 변경 버튼을 막는다", async () => {
+  act(() => tokenStore.set(""));
+  ff = installFakeFetch({ "GET /api/settings/fo": fo });
+  const { container } = render(<FoSwitch />); await flush();
+  expect(container.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
+  const controls = Array.from(container.querySelectorAll("button"));
+  expect(controls.length).toBeGreaterThan(0);
+  expect(controls.every((b) => b.disabled)).toBe(true);
+  await act(async () => controls[0].click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(patches()).toHaveLength(0);
+  await act(async () => tokenStore.set("saved-fixture"));
+  expect(controls.some((b) => !b.disabled)).toBe(true);
+});
+
+
+test("확인창을 연 뒤 인증 키가 제거되면 실행 확인을 막는다", async () => {
+  ff = installFakeFetch({ "GET /api/settings/fo": fo });
+  const { container } = render(<FoSwitch />); await flush();
+  await act(async () => sw(container, "paper-fo")!.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  await act(async () => tokenStore.set(""));
+  const confirm = Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === "확인")!;
+  expect(confirm.disabled).toBe(true);
+  await act(async () => confirm.click());
+  expect(patches()).toHaveLength(0);
 });

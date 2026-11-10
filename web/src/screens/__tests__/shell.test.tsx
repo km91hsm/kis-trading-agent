@@ -420,7 +420,7 @@ test("오래된 지수와 환율은 읽을 수 있는 값과 지연 글자로 �
   expect(container.querySelector('[data-index-chip="USDKRW"]')?.textContent).toContain("지연");
 });
 
-test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", async () => {
+test("401 인증 오류는 설정 변경 인증으로 안내하고 닫을 수 있다", async () => {
   fake = installFakeFetch({
     "GET /api/system/health": () => new Response(JSON.stringify({ detail: "토큰" }), { status: 401 }),
     "GET /api/system/usage": fixtureUsage(),
@@ -428,9 +428,9 @@ test("AuthError 가 나면 '쓰기 토큰' 안내가 뜨고 닫을 수 있다", 
   const { container } = app();
   await flush();
   const notice = container.querySelector("[data-auth-notice]");
-  expect(notice?.textContent).toContain("쓰기 토큰이 필요합니다");
+  expect(notice?.textContent).toContain("설정 변경 인증이 필요합니다");
   expect(notice?.querySelector("a")?.getAttribute("href")).toBe("/system/admin#token"); // 토큰 절로 바로
-  expect(notice?.querySelector("a")?.textContent).toBe("설정·운영 › 연결·설정 › 쓰기 토큰");
+  expect(notice?.querySelector("a")?.textContent).toBe("설정·운영 › 연결·설정 › 설정 변경 인증");
   act(() => (notice!.querySelector("button") as HTMLButtonElement).click());
   expect(container.querySelector("[data-auth-notice]")).toBeNull();
 });
@@ -578,3 +578,30 @@ test("아이콘 14종은 currentColor 인라인 SVG 이고 보조기기에서 �
   const link = Array.from(container.querySelectorAll<HTMLAnchorElement>("main .screen-actions a")).find((a) => a.textContent === label);
   expect(link?.getAttribute("href")).toBe(href);
  });
+
+
+test("403 접속 제한은 인증 키 부재로 안내하지 않고 저장 후에도 제한 사유를 유지한다", async () => {
+  fake = installFakeFetch({
+    "GET /api/system/health": () => new Response(JSON.stringify({ detail: "직접 로컬 접속에서만 허용됩니다" }), { status: 403 }),
+    "GET /api/system/usage": fixtureUsage(),
+  });
+  const { container } = app(); await flush();
+  const notice = () => container.querySelector("[data-auth-notice]");
+  expect(notice()?.textContent).toContain("직접 로컬 접속에서만 허용됩니다");
+  expect(notice()?.textContent).not.toContain("인증이 필요합니다");
+  act(() => tokenStore.set("fixture-local"));
+  expect(notice()?.textContent).toContain("접속 제한");
+  expect(container.textContent).not.toContain("fixture-local");
+});
+
+
+test("저장된 키로 401이 나면 미설정 대신 서버가 거부한 키의 교체를 안내한다", async () => {
+  tokenStore.set("rejected-fixture");
+  fake = installFakeFetch({
+    "GET /api/system/health": () => new Response(JSON.stringify({ detail: "잘못된 토큰" }), { status: 401 }),
+    "GET /api/system/usage": fixtureUsage(),
+  });
+  const { container } = app(); await flush();
+  expect(container.querySelector("[data-auth-notice]")?.textContent).toContain("저장된 인증 키가 서버에서 거부되었습니다");
+  expect(container.textContent).not.toContain("rejected-fixture");
+});

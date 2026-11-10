@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { WriteAuthNotice, useWriteAuth } from "../../components/WriteAuthNotice";
 import { ApiError, errorText, patchJson } from "../../lib/api";
 import { now as serverNow } from "../../lib/clock";
 import { fmtPct } from "../../lib/format";
@@ -77,13 +78,14 @@ export function RiskPolicySummary({ historical = false, compact = false }: { his
 }
 
 const MODES: { mode: PolicyMode; label: string; help: string }[] = [
-  { mode: "AUTO", label: "자동 · 시장 판단 따르기", help: "정량 국면과 AI 판단에 따른 기본 정책" },
-  { mode: "RISK_OFF", label: "방어 · 신규 매수 차단", help: "일반 현물 신규·추가 매수 중단" },
-  { mode: "RISK_ON", label: "제한적 매수 · 10%·2종목 이내", help: "기존 한도가 더 작으면 그 한도를 적용" },
+  { mode: "AUTO", label: "자동 — 시장 판단 따르기", help: "정량 국면과 AI 판단에 따른 기본 정책" },
+  { mode: "RISK_OFF", label: "리스크 OFF — 신규 매수 차단", help: "일반 현물 신규·추가 매수 중단" },
+  { mode: "RISK_ON", label: "리스크 ON — 제한적 매수", help: "종목당 10%·최대 2종목, 기존 한도가 더 작으면 그 한도 적용" },
 ];
 
 function PolicyEditor({ item, reload }: { item: RiskMarket; reload(): void }) {
   const label = marketName(item.market);
+  const hasAuth = useWriteAuth();
   const id = useId();
   const [selected, setSelected] = useState<PolicyMode | null>(null);
   const [reason, setReason] = useState("");
@@ -94,7 +96,7 @@ function PolicyEditor({ item, reload }: { item: RiskMarket; reload(): void }) {
   const messageRef = useRef<HTMLParagraphElement>(null);
   const choicesRef = useRef<Partial<Record<PolicyMode, HTMLButtonElement | null>>>({});
   const realAccounts = item.accounts.filter((account) => account.env === "real");
-  const ready = selected !== null && !!reason.trim() && realAccounts.every((account) => confirmations[account.id] === account.id);
+  const ready = hasAuth && selected !== null && !!reason.trim() && realAccounts.every((account) => confirmations[account.id] === account.id);
   useEffect(() => { if (error || success) messageRef.current?.focus(); }, [error, success]);
   const save = async () => {
     if (!ready || busy || selected === null) return;
@@ -111,10 +113,11 @@ function PolicyEditor({ item, reload }: { item: RiskMarket; reload(): void }) {
   };
   return <div className="risk-policy-editor" aria-label={`${label} 정책 변경`} aria-busy={busy}>
     <h4>일반 현물 매수 정책 변경</h4>
-    <div className="risk-policy-choices" role="group" aria-label={`${label} 정책 선택`}>{MODES.map(({ mode, label: option, help }) => <button key={mode} ref={(node) => { choicesRef.current[mode] = node; }} type="button" className="risk-policy-choice" aria-pressed={selected === mode} disabled={busy} onClick={() => { setSelected(mode); setError(null); setSuccess(null); }}><strong>{option}</strong><span>{help}</span></button>)}</div>
+    <WriteAuthNotice available={hasAuth} />
+    <div className="risk-policy-choices" role="group" aria-label={`${label} 정책 선택`}>{MODES.map(({ mode, label: option, help }) => <button key={mode} ref={(node) => { choicesRef.current[mode] = node; }} type="button" className="risk-policy-choice" aria-pressed={selected === mode} disabled={busy || !hasAuth} onClick={() => { setSelected(mode); setError(null); setSuccess(null); }}><strong>{option}</strong><span>{help}</span></button>)}</div>
     {selected && <div className="risk-policy-form">
       <p className="risk-policy-change">{policyNames[item.policy.mode]} → <strong>{policyNames[selected]}</strong></p>
-      <p className="risk-policy-note">수동 정책은 해당 시장의 운영일에만 적용되며 다음 운영일에 자동으로 복귀합니다. 저장해도 과거 HOLD 판단을 다시 실행하거나 즉시 주문하지 않습니다.</p>
+      <p className="risk-policy-note">수동 정책은 해당 시장 현지 시각의 다음 자정에 만료되고 자동 정책으로 복귀합니다. 국내는 KST, 미국은 ET 기준입니다. 저장해도 과거 HOLD 판단을 다시 실행하거나 즉시 주문하지 않습니다.</p>
       <label htmlFor={`${id}-reason`}>변경 사유 <span>(필수)</span></label>
       <textarea id={`${id}-reason`} aria-label={`${label} 변경 사유`} value={reason} onChange={(event) => setReason(event.target.value)} disabled={busy} rows={2} required />
       {realAccounts.length > 0 && <fieldset><legend>영향을 받는 실전 계좌 확인</legend><p className="risk-policy-note">각 계좌 id를 그대로 입력하세요. 자동 복귀를 포함한 모든 변경에 필요합니다.</p>{realAccounts.map((account, index) => <div className="risk-policy-confirm" key={account.id}><label htmlFor={`${id}-account-${index}`}><code>{account.id}</code> 확인</label><input id={`${id}-account-${index}`} aria-label={`${account.id} 확인`} value={confirmations[account.id] ?? ""} onChange={(event) => setConfirmations((previous) => ({ ...previous, [account.id]: event.target.value }))} autoComplete="off" spellCheck={false} disabled={busy} /></div>)}</fieldset>}
@@ -140,7 +143,7 @@ function MarketEvidence({ item }: { item: RiskMarket }) {
 export function RiskPolicy() {
   const resource = useRiskPolicy();
   return <div className="risk-policy-detail">
-    <p className="risk-policy-intro">시장의 원본 판단을 확인하고, 일반 현물 신규·추가 매수 범위를 시장별로 정합니다. 위험 청산·인버스 헤지·현금 운용·단타·파생 정책은 각각 따릅니다.</p>
+    <p className="risk-policy-intro">시장의 원본 판단을 확인하고, 일반 현물 신규·추가 매수 범위를 시장별로 정합니다. 리스크 ON은 종목당 10%·최대 2종목 이내이며 기존 한도가 더 작으면 그 한도를 적용합니다. 리스크 OFF는 일반 현물 신규·추가 매수를 차단합니다. 위험 청산·인버스 헤지·현금 운용은 기존 정책을 따르고 단타·파생은 별도 설정으로 제어합니다.</p>
     <PolicyUnavailable resource={resource} />
     {!resource.error && resource.data?.markets?.map((item) => <article className="risk-policy-market" key={item.market}>
       <header className="risk-policy-market-heading"><h3>{marketName(item.market)} 시장 <span>{item.market}</span></h3><span className="risk-policy-source">{item.policy.source === "manual" ? "수동 운영 정책" : "자동 정책"} · {policyNames[item.policy.mode]}</span></header>

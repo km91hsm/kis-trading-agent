@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from trader.kernel.config import KST
+from trader.kernel.daemon.activity import annotate
 from trader.kernel.session import calls as calls_mod
 from trader.kernel.web.csv import csv_response
 
@@ -54,6 +55,8 @@ def runs(
     sql = "SELECT * FROM runs" + (" WHERE " + " AND ".join(where) if where else "")
     with closing(deps.conn_factory()) as conn:
         rows, cols = _select(conn, sql + " ORDER BY id DESC LIMIT ?", [*args, limit])
+        rows = annotate(conn, rows, source="runs")
+        cols = [*cols, "outcome", "followup_at", "scope_confirmed"]
     if format == "csv":
         return csv_response(rows, "runs.csv", cols)
     return rows

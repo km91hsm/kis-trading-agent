@@ -10,7 +10,7 @@ beforeEach(() => { localStorage.clear(); ff = installFakeFetch({}); });
 afterEach(() => { ff.restore(); localStorage.clear(); });
 const toggle = (root: HTMLElement) => act(() => (root.querySelector("button[aria-expanded]") as HTMLButtonElement).click());
 function type(root: HTMLElement, value: string) {
-  const input = root.querySelector('input[aria-label="쓰기 토큰"]') as HTMLInputElement;
+  const input = root.querySelector('input[type="password"]') as HTMLInputElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -79,4 +79,17 @@ test("브라우저 저장 실패를 성공으로 표시하거나 입력을 숨�
     expect((container.querySelector("input") as HTMLInputElement).value).toBe("cannot-save");
     expect(tokenStore.get()).toBeNull();
   } finally { spy.mockRestore(); }
+});
+
+
+test("저장 상태와 서버 검증을 구분하고 로컬·원격 주소별 저장 차이를 설명한다", () => {
+  tokenStore.set("fixture-key");
+  const { container } = render(<TokenPanel onChange={() => {}} />);
+  expect(container.textContent).toContain("저장됨");
+  expect(container.textContent).toContain("서버 인증 성공을 뜻하지 않습니다");
+  toggle(container);
+  expect(container.textContent).toContain("localhost");
+  expect(container.textContent).toContain("원격 주소");
+  expect(container.textContent).toContain("주소별로 따로");
+  expect(ff.calls).toHaveLength(0);
 });

@@ -443,7 +443,7 @@ describe("데이터 화면", () => {
     expect(recent.textContent).toContain("지난 수동 기사");
   });
 
-  test("감시목록 PATCH 는 토큰이 필요하다 — 없으면 오류 줄, 있으면 {tickers}", async () => {
+  test("감시목록 저장은 인증 사전 안내, 인증키 저장 뒤 기존 tickers 본문을 전송한다", async () => {
     await mount(routes(), "themes");
     const wl = section("watchlist");
     expect(wl.textContent).toContain("005930");
@@ -452,12 +452,11 @@ describe("데이터 화면", () => {
     // 추가 즉시 임시 칩(저장 전 표시)
     const draft = Array.from(wl.querySelectorAll(".chip")).find((c) => c.textContent?.startsWith("AAPL")) as HTMLElement;
     expect(draft.getAttribute("data-draft")).toBe("true");
-    await act(async () => button(wl, "저장").click());
-    await confirmDialog();
+    expect(button(wl, "저장").disabled).toBe(true);
+    expect(wl.querySelector('a[href="/system/admin#token"]')).not.toBeNull();
     expect(callsTo("/settings/watchlist", "PATCH")).toHaveLength(0);
-    expect(wl.querySelector('[role="alert"]')?.textContent).toContain("쓰기 토큰이 필요합니다");
 
-    tokenStore.set("tok");
+    act(() => tokenStore.set("tok"));
     act(() => (wl.querySelector('button[aria-label="000660 빼기"]') as HTMLButtonElement).click());
     await act(async () => button(wl, "저장").click());
     expect(document.querySelector('[role="dialog"]')!.textContent).toContain("2종목");

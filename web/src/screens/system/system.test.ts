@@ -15,6 +15,7 @@ import {
   type CallsResp,
   type ControlEntry,
   type JobsResp,
+  type JobRequest,
   type RequestsResp,
   type Run,
   type SecretsResp,
@@ -142,5 +143,24 @@ describe("시스템 순수 함수", () => {
       [false, false],
       [true, true],
     ]);
+  });
+});
+
+test("실패 원문을 보존하면서 중단과 후속 정상 실행을 별도 표시한다", () => {
+  const base = fixtureRuns()[1] as Run;
+  expect(runRows([{ ...base, outcome: "interrupted", followup_at: null }])[0])
+    .toMatchObject({ status: "중단", tone: "muted", error: "브로커 오류" });
+  expect(runRows([{ ...base, outcome: "followed_by_success", followup_at: "2026-11-05T12:00:00+09:00" }])[0])
+    .toMatchObject({ status: "후속 정상", tone: "muted", followup_at: "2026-11-05T12:00:00+09:00", error: "브로커 오류" });
+  expect(requestRows([{ ...fixtureRequests().requests[2], outcome: "failed", followup_at: null } as JobRequest])[0])
+    .toMatchObject({ status: "확인 필요", tone: "fail", error: "타임아웃" });
+});
+
+test("데몬 표도 원문 오류를 남기고 서버가 분류한 종료 요청 중단을 사용한다", () => {
+  const jobs = [{ id: "usage_probe", kind: "usage_probe", trigger: "interval", interval_s: 60,
+    schedule_key: null, next_at: null, last_start: null, last_end: null,
+    last_status: "error", last_error: "데몬 종료 요청으로 중단", last_outcome: "interrupted" as const }];
+  expect(daemonRows(jobs, new Map()).internal[0]).toMatchObject({
+    status: "중단", tone: "muted", error: "데몬 종료 요청으로 중단",
   });
 });

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from trader.kernel.daemon import activity
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.catalog import with_kernel
 from trader.kernel.daemon.heartbeat import read_status
@@ -161,7 +162,16 @@ def list_requests(request: Request, limit: int = Query(30, ge=1, le=200)) -> dic
     with closing(deps.conn_factory()) as conn:
         rows = jobq.list_recent(conn, limit=limit)
         active = jobq.active_count(conn)
+        rows = activity.annotate(conn, rows, source="job_requests")
     return {"alive": daemon_alive(deps), "active": active, "requests": _labelled(kinds(deps), rows)}
+
+
+@router.get("/jobs/activity")
+def job_activity(request: Request) -> dict:
+    """자동 실행 단계·요청 큐·24시간 오류 이력을 별도로 조회한다."""
+    deps = request.app.state.deps
+    with closing(deps.conn_factory()) as conn:
+        return activity.snapshot(conn, deps.now())
 
 
 @router.post("/jobs", dependencies=WRITE)
