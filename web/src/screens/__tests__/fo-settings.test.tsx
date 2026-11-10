@@ -17,7 +17,8 @@ beforeEach(() => {
 });
 afterEach(() => { ff?.restore(); tokenStore.set(""); document.body.innerHTML = ""; });
 
-const fo = {
+type Row = { id: string; env: string; enabled: boolean; source: string; effective: boolean; reason: string | null };
+const fo: { accounts: Row[]; default_paper: boolean; product: string; vehicles: string[]; max_contracts: number } = {
   accounts: [
     { id: "paper-fo", env: "paper", enabled: false, source: "yaml", effective: false, reason: "꺼짐" },
     { id: "real-fo", env: "real", enabled: false, source: "default", effective: false, reason: "실전 파생은 항상 꺼짐" },
