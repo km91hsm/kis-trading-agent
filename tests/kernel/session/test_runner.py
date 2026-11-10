@@ -887,3 +887,47 @@ def test_nested_codex_group_is_terminated_when_tool_parent_receives_sigterm(tmp_
                 os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def _cross_run(project, conn, first):
+    """교차 토론 세션 — 첫 실행은 `first(ctx)` 를 부르고 성공처럼 끝나며(필수 토론 미완료로 실패),
+    이후 실행은 그대로 성공. (결과, 실행별 프롬프트 목록)."""
+    from trader.features.spot.session_kinds import AGENTS as SPOT_AGENTS
+    from trader.features.spot.session_kinds import ANALYZE
+
+    ctx = make_ctx(project, conn, llm=_codex_on())
+    ctx.settings.debate_rounds = 1
+    prompts = []
+
+    def fake(cmd, **kw):
+        prompts.append(cmd[cmd.index("--append-system-prompt") + 1])
+        if len(prompts) == 1:
+            first(ctx)
+        return _ok_result()
+
+    result = run_session(spec(), ANALYZE, ctx, agents=ag.by_name(SPOT_AGENTS), runner=fake,
+                         claude_bin=Path("/fake/claude"))  # fmt: skip
+    return result, prompts
+
+
+def test_codex_mid_failure_reruns_once_with_claude(project, conn):
+    """스펙 §5-1 + 사용자 결정 A: Codex 턴이 도중 실패해 세션이 실패하면 같은 잡에서 한 번 다시
+    띄운다 — 재시작의 `start()` 가 토론을 보관하고 Claude 2인으로 바꿔 그날 판단이 빠지지 않는다."""
+    from trader.features.spot.research import RESEARCH
+    from trader.kernel.session import research_policy
+    from trader.kernel.session.run_store import run_dir
+
+    def mark(ctx):
+        d = run_dir(D, "KR", "005930", ctx.state)
+        research_policy.mark_codex_failed(conn, d, RESEARCH, reason="턴 거부", now=T0)
+
+    result, prompts = _cross_run(project, conn, mark)
+    assert len(prompts) == 2
+    assert result.ok
+    assert "codex-turn" in prompts[0] and "codex-turn" not in prompts[1]  # 두 번째는 Claude 2인
+
+
+def test_failure_without_codex_mark_is_not_rerun(project, conn):
+    result, prompts = _cross_run(project, conn, lambda ctx: None)
+    assert len(prompts) == 1
+    assert not result.ok and "필수 토론 미완료" in result.error

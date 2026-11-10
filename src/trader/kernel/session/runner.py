@@ -412,7 +412,53 @@ def bash_timeout_ms(settings: Any, policies: list[dict]) -> int:
     return (max(candidates) + 60) * 1000
 
 
+def _codex_failed_research(ctx: Any, spec: SessionSpec, kind: SessionKind) -> list[str]:
+    """이 세션의 연구 중 「Codex 도중 실패」 표시가 남은 것(연구 폴더 이름). 조회 실패는 빈 목록."""
+    if kind.research_targets is None:
+        return []
+    try:
+        return [
+            directory.name
+            for directory, scope in kind.research_targets(ctx, spec)
+            if research_policy._failure(ctx.conn, directory, scope) is not None
+        ]
+    except Exception:  # noqa: BLE001 - 재실행 판단 실패가 원래 결과를 가리지 않게
+        logger.warning("Codex 도중 실패 표시 조회 실패", exc_info=True)
+        return []
+
+
 def run_session(
+    spec: SessionSpec,
+    kind: SessionKind,
+    ctx: Any,
+    *,
+    agents: Mapping[str, AgentDef],
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+    claude_bin: Path | None = None,
+    cancel: threading.Event | None = None,
+    checkpoint_names: Sequence[str] = (),
+) -> SessionResult:
+    """LLM 세션(`_run_session_once`) + Codex 도중 실패면 같은 잡에서 한 번 다시 띄운다(스펙 §5-1,
+    사용자 결정 A — 재시작의 `research_policy.start` 가 토론을 보관하고 Claude 2인으로 바꿔 그날
+    판단이 빠지지 않게). 재실행이 상한·감속 등으로 거부되면 첫 실패 결과를 그대로 돌려준다."""
+    kw = dict(agents=agents, runner=runner, claude_bin=claude_bin, cancel=cancel,
+              checkpoint_names=checkpoint_names)  # fmt: skip
+    result = _run_session_once(spec, kind, ctx, **kw)
+    if result.ok or (cancel is not None and cancel.is_set()):
+        return result
+    failed = _codex_failed_research(ctx, spec, kind)
+    if not failed:
+        return result
+    logger.warning("Codex 도중 실패(%s) — Claude 강세·약세로 한 번 다시 띄웁니다: %s",
+                   ", ".join(failed), result.error)  # fmt: skip
+    try:
+        return _run_session_once(spec, kind, ctx, **kw)
+    except PipelineError as e:
+        logger.warning("Codex 실패 뒤 재실행 생략: %s", e)
+        return result
+
+
+def _run_session_once(
     spec: SessionSpec,
     kind: SessionKind,
     ctx: Any,

@@ -32,3 +32,7 @@ class WebDeps:
     # 기능이 내놓은 포트(이름 → 구현, `DaemonDeps.ports` 와 같은 모양).
     # 라우터는 커널 Protocol 로만 쓴다
     ports: Mapping[str, Any] = field(default_factory=dict)
+    # settings.yaml 변경 감시(`config.reload.SettingsWatcher`, `poll() -> 새 설정|None`).
+    # 있으면 요청마다 보고 바뀌었으면 `app.state.deps` 의 settings 를 바꾼다.
+    # Host 허용 목록은 기동 때 값 그대로다
+    settings_watch: Any = None
