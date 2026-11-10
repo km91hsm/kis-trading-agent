@@ -337,5 +337,7 @@ def test_record_failure_gives_up_quickly_when_database_is_locked(tmp_path):
     finally:
         holder.rollback()
         holder.close()
-    assert elapsed < 2.5
+    # 잠금 대기 1초가 연결(PRAGMA)·쓰기에서 두 번 걸릴 수 있어 정상이어도 2초 남짓 — 느린 CI(macOS
+    # arm64)에선 2.5초를 넘었다(v0.3.11·v0.3.13 빌드). 막으려는 것은 기본 30초 대기라 10초로 본다.
+    assert elapsed < 10
     assert (tmp_path / "status.json").read_text(encoding="utf-8") == before
