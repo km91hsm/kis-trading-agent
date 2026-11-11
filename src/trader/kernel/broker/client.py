@@ -1,4 +1,4 @@
-"""KIS HTTP 클라이언트: 공통 헤더, 레이트리밋(토큰 버킷), 오류 통일, 초당 한도 재시도."""
+"""KIS HTTP 클라이언트: 공통 헤더, 레이트리밋, 오류 통일, 한도·조회 통신 오류 재시도."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ TOKEN_ERROR_CODES = frozenset({"EGW00123", "EGW00121"})  # 만료·유효하지 
 RETRY_WAIT_S = 0.5
 MAX_PAGES = 20  # 연속조회 상한(잔고·체결)
 RETRY_MAX = 3  # 0.5 → 1.0 → 2.0 초
+READ_RETRY_MAX = 2  # GET 통신 오류만 0.5 → 1.0 초, 전체 RETRY_MAX 예산 안에서
 # 요청이 서버에 닿은 뒤 응답을 못 받은 실패 → UNKNOWN_RESPONSE_CODE (ConnectError 는 NETWORK)
 _SENT_BUT_NO_RESPONSE = (
     httpx.ReadTimeout,
@@ -175,20 +176,36 @@ class KisClient:
     ) -> tuple[dict, httpx.Headers]:
         """초당 한도(`RETRY_CODES`)는 0.5·1.0·2.0초로 최대 RETRY_MAX 회 물러나 재시도하고
         (백필처럼 연속 호출에선 한 번으로 모자랐다), 토큰 오류는 캐시를 지우고
-        1회 재발급 뒤 재시도한다."""
+        1회 재발급 뒤 재시도한다. GET 통신 오류는 최대 두 번 재시도하되 같은 전체 예산을 쓴다.
+        주문·취소 POST 무응답은 중복 전송하지 않는다."""
         tr = tr_id(tr_name, self.env)
         wait = RETRY_WAIT_S
         token_retried = False
+        read_retries = 0
         for attempt in range(RETRY_MAX + 1):
             try:
                 return self._once(method, path, tr, **kw)
             except KisApiError as e:
+                if (
+                    method == "GET"
+                    and e.msg_cd in {"NETWORK", UNKNOWN_RESPONSE_CODE}
+                    and read_retries < READ_RETRY_MAX
+                    and attempt < RETRY_MAX
+                ):
+                    read_wait = RETRY_WAIT_S * 2**read_retries
+                    read_retries += 1
+                    logger.warning(
+                        "KIS 조회 통신 오류 %s(%s), %.1f초 후 재시도 (%d/%d)",
+                        e.msg_cd, tr, read_wait, read_retries, READ_RETRY_MAX,
+                    )
+                    self._sleep(read_wait)
+                    continue
                 if e.msg_cd in RETRY_CODES and attempt < RETRY_MAX:
                     logger.warning("KIS 초당 한도 초과(%s), %.1f초 후 재시도", tr, wait)
                     self._sleep(wait)
                     wait *= 2
                     continue
-                if e.msg_cd in TOKEN_ERROR_CODES and not token_retried:
+                if e.msg_cd in TOKEN_ERROR_CODES and not token_retried and attempt < RETRY_MAX:
                     logger.warning("KIS 토큰 오류 %s(%s), 캐시 무효화 후 재발급", e.msg_cd, tr)
                     self._auth.invalidate()
                     token_retried = True

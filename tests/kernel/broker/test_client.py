@@ -294,3 +294,78 @@ def test_post_gateway_5xx_or_non_json_is_unknown_not_failure(paper_client, respx
     with pytest.raises(KisApiError) as e:
         paper_client.post("/uapi/domestic-stock/v1/trading/order-cash", "DOM_ORDER_BUY", {})
     assert e.value.msg_cd == "APBK0013"
+
+
+@pytest.mark.parametrize(
+    "error", [httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError]
+)
+@pytest.mark.parametrize("failures", [1, 2])
+def test_balance_read_recovers_after_transient_transport_error(
+    paper_client, respx_mock, monkeypatch, error, failures
+):
+    """잔고 조회의 일시 통신 오류는 물러나 다시 읽고, 최종 응답을 반환한다."""
+    slept = []
+    monkeypatch.setattr(paper_client, "_sleep", slept.append)
+    bal = "/uapi/domestic-stock/v1/trading/inquire-balance"
+    route = respx_mock.get(PAPER + bal).mock(
+        side_effect=[error("합성 지연") for _ in range(failures)] + [ok({"x": "1"})]
+    )
+    assert paper_client.get(bal, "DOM_BALANCE", {})["output"] == {"x": "1"}
+    assert route.call_count == failures + 1 and slept == [0.5, 1.0][:failures]
+
+
+def test_balance_read_gives_up_after_two_transport_retries(paper_client, respx_mock, monkeypatch):
+    """최초 조회와 추가 두 번까지 실패하면 잔고를 추측하지 않고 원래 오류를 올린다."""
+    slept = []
+    monkeypatch.setattr(paper_client, "_sleep", slept.append)
+    bal = "/uapi/domestic-stock/v1/trading/inquire-balance"
+    route = respx_mock.get(PAPER + bal).mock(side_effect=httpx.ReadTimeout("합성 지연"))
+    with pytest.raises(KisApiError) as exc:
+        paper_client.get(bal, "DOM_BALANCE", {})
+    assert (exc.value.msg_cd, exc.value.tr_id) == ("NETWORK_UNKNOWN", "VTTC8434R")
+    assert route.call_count == 3 and slept == [0.5, 1.0]
+
+
+def test_transport_retry_does_not_reset_total_attempt_budget(paper_client, respx_mock, monkeypatch):
+    """한도 오류와 타임아웃이 섞여도 전체 HTTP 시도 네 번을 넘기지 않는다."""
+    slept = []
+    monkeypatch.setattr(paper_client, "_sleep", slept.append)
+    bal = "/uapi/domestic-stock/v1/trading/inquire-balance"
+    limited = httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "합성 한도"})
+    route = respx_mock.get(PAPER + bal).mock(
+        side_effect=[
+            limited, limited, httpx.ReadTimeout("합성 지연"), httpx.ReadTimeout("합성 지연")
+        ]
+    )
+    with pytest.raises(KisApiError) as exc:
+        paper_client.get(bal, "DOM_BALANCE", {})
+    assert exc.value.msg_cd == "NETWORK_UNKNOWN"
+    assert route.call_count == 4 and slept == [0.5, 1.0, 0.5]
+
+
+def test_token_error_on_last_attempt_stays_a_broker_error(paper_client, respx_mock, monkeypatch):
+    """마지막 시도의 인증 오류도 AssertionError 대신 실제 KIS 코드로 남긴다."""
+    monkeypatch.setattr(paper_client, "_sleep", lambda _: None)
+    bal = "/uapi/domestic-stock/v1/trading/inquire-balance"
+    limited = httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "합성 한도"})
+    expired = httpx.Response(500, json={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "합성 만료"})
+    route = respx_mock.get(PAPER + bal).mock(side_effect=[limited, limited, limited, expired])
+    with pytest.raises(KisApiError) as exc:
+        paper_client.get(bal, "DOM_BALANCE", {})
+    assert exc.value.msg_cd == "EGW00123" and route.call_count == 4
+
+
+@pytest.mark.parametrize("tr_name", ["DOM_ORDER_BUY", "DOM_ORDER_CANCEL"])
+def test_order_or_cancel_transport_timeout_is_never_retried(
+    paper_client, respx_mock, monkeypatch, tr_name
+):
+    """주문·취소 무응답은 전송 여부가 불명확하므로 한 번만 보내고 UNKNOWN을 보존한다."""
+    slept = []
+    monkeypatch.setattr(paper_client, "_sleep", slept.append)
+    route = respx_mock.post(PAPER + "/synthetic-order").mock(
+        side_effect=httpx.ReadTimeout("합성 지연")
+    )
+    with pytest.raises(KisApiError) as exc:
+        paper_client.post("/synthetic-order", tr_name, {})
+    assert exc.value.msg_cd == "NETWORK_UNKNOWN"
+    assert route.call_count == 1 and slept == []
