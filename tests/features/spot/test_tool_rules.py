@@ -162,3 +162,41 @@ def test_submit_decision_cli_refuses_ticker_outside_session_and_foreign_tools(pr
     r = CliRunner().invoke(app, view)
     out = json.loads(r.stdout)
     assert r.exit_code == 1 and "submit-market-view" in out["error"]
+
+
+def test_session_scope_binds_every_spot_tool_not_just_submit(project, monkeypatch):
+    """종목 범위는 제출 도구뿐 아니라 수집·체크포인트 쓰기에도 걸린다 — 다른 종목의 리포트를
+    미리 써 두면 그 종목의 정상 세션이 오염된 자료로 결정한다. 시장·날짜도 세션 것만, 새 분석
+    세션은 재평가 단계(`--stage`)를 낼 수 없다."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from tests.features.spot.helpers import ok_decision
+    from trader.features.spot.session_kinds import ANALYZE
+    from trader.kernel.cli.main import app
+
+    sid = str(uuid.uuid4())
+    scope.open_scope(
+        project / "state", sid, kind="analyze", tools=ANALYZE.tools, dry_run=True, market="KR",
+        tickers=["005930"], date="2026-10-09",
+    )  # fmt: skip
+    monkeypatch.setenv(scope.ENV_ID, sid)
+
+    def refused(*args):
+        r = CliRunner().invoke(app, ["tool", *args])
+        out = json.loads(r.stdout)
+        assert r.exit_code == 1 and out["ok"] is False, out
+        return out["error"]
+
+    assert "배정되지 않은 종목" in refused("collect", "--ticker", "000660", "--market", "KR")
+    assert "배정되지 않은 종목" in refused(
+        "checkpoint", "list", "--ticker", "000660", "--market", "KR", "--date", "2026-10-09"
+    )
+    assert "시장" in refused("collect", "--ticker", "005930", "--market", "US")
+    dec = json.dumps(ok_decision())
+    base = ["submit-decision", "--ticker", "005930", "--market", "KR"]
+    assert "운영일" in refused(*base, "--date", "2026-10-08", "--json", dec)
+    assert "--stage" in refused(
+        *base, "--date", "2026-10-09", "--json", dec, "--stage", "31_decision_r1"
+    )

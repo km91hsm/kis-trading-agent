@@ -903,7 +903,7 @@ def _fo_tool_run(fn: Callable[..., dict], *, market: str, **kwargs: Any) -> None
             if conn is not None:
                 conn.close()
 
-    run_tool(go)
+    run_tool(go, args={"market": market, **kwargs})
 
 
 @fo_tool_app.command("bundle")

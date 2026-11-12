@@ -18,8 +18,14 @@ def emit(payload: dict) -> None:
         raise typer.Exit(code=1)
 
 
-def run_tool(fn: Callable[[], dict]) -> None:
-    """fn 결과를 emit 한다. 예외는 {"ok": False, "error": "<Type>: <msg>"} 로 바꾼다."""
+def run_tool(fn: Callable[[], dict], *, args: dict | None = None) -> None:
+    """fn 결과를 emit 한다. 예외는 {"ok": False, "error": "<Type>: <msg>"} 로 바꾼다.
+
+    `args` 는 도구 인자(`ticker`·`market`·`date` …) — 세션 범위 밖이면 fn 을 돌리지 않고 거부한다
+    (`scope.args_error`). 기능의 실행 헬퍼는 받은 인자를 그대로 넘긴다."""
+    if args is not None and (err := scope.args_error(args, scope.current())):
+        emit({"ok": False, "error": err})
+        return
     try:
         payload = fn()
     except typer.Exit:

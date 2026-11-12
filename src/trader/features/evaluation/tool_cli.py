@@ -40,7 +40,7 @@ def submit_reflection_cmd(
             if b.conn is not None:
                 b.conn.close()
 
-    run_tool(go)
+    run_tool(go, args={"market": market, "date": date})
 
 
 TOOLS = (ToolCommand("submit-reflection", submit_reflection_cmd, ()),)

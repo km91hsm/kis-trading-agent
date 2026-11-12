@@ -587,13 +587,15 @@ def _run_session_once(
             checkpoint_names=checkpoint_names,
         )
         if codex_required:
-            prompt += codex_section(research, cross=cross)
+            # 비신뢰 입력 규칙은 어떤 절이 붙어도 프롬프트의 마지막에 둔다
+            rule = agents_mod.UNTRUSTED_INPUT_RULE
+            prompt = prompt.removesuffix(rule) + codex_section(research, cross=cross) + rule
         session_id = str(uuid.uuid4())
         # 이 세션이 해도 되는 일(허용 도구·dry-run·배정 종목)을 도구 프로세스가 읽을 파일로 남긴다.
         # 도구는 env 가 아니라 이 파일을 믿는다(`scope.py`)
         session_scope.open_scope(
             paths.state_dir(), session_id, kind=kind.kind, tools=kind.tools,
-            dry_run=spec.dry_run, market=spec.market,
+            dry_run=spec.dry_run, market=spec.market, date=spec.date.isoformat(),
             tickers=[str(t["ticker"]) for t in spec.tickers if t.get("ticker")],
         )  # fmt: skip
         scope_id = session_id

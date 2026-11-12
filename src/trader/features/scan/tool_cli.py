@@ -35,7 +35,7 @@ def _run(fn, **kwargs) -> None:
             if b.conn is not None:
                 b.conn.close()
 
-    run_tool(go)
+    run_tool(go, args=dict(kwargs))
 
 
 def _payload(json_text: str | None) -> dict:

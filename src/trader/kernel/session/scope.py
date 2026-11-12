@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ def open_scope(
     dry_run: bool,
     market: str | None,
     tickers: Iterable[str],
+    date: str | None = None,
 ) -> Path:
     """세션 시작 전에 범위 파일을 쓴다. tools 가 None 이면 도구 제한 없음(dry-run·종목 범위만),
     빈 목록이면 그 세션은 어떤 도구도 부를 수 없다."""
@@ -59,6 +61,7 @@ def open_scope(
         "tools": None if tools is None else sorted(set(tools)),
         "dry_run": bool(dry_run),
         "market": market,
+        "date": date,  # 세션 운영일(ISO) — 다른 날짜 폴더에 쓰지 못하게
         "tickers": sorted({str(t) for t in tickers}),
     }
     tmp = path.with_suffix(".json.tmp")
@@ -115,11 +118,54 @@ def dry_run(state: Path | None = None) -> bool:
 
 
 def ticker_error(ticker: str, scope: dict[str, Any] | None) -> str | None:
-    """배정 종목이 있는 세션이 다른 종목에 결정을 내려 하면 사유. 범위가 없거나(러너 밖) 종목을
-    배정하지 않는 세션이면 None."""
-    if scope is None or scope.get("unknown"):
+    """배정 종목이 있는 세션이 다른 종목을 다루려 하면 사유. 범위가 없거나(러너 밖) 종목을
+    배정하지 않는 세션이면 None. 범위를 확인할 수 없으면 거부한다."""
+    if scope is None:
         return None
+    if scope.get("unknown"):
+        return "세션 범위를 확인할 수 없어 도구를 실행하지 않습니다"
     assigned = scope.get("tickers") or []
     if assigned and ticker not in assigned:
         return f"이 세션에 배정되지 않은 종목입니다: {ticker} (배정: {', '.join(assigned)})"
     return None
+
+
+def args_error(args: dict[str, Any], scope: dict[str, Any] | None) -> str | None:
+    """도구 인자(`ticker`·`market`·`date`)가 세션 범위 밖이면 사유. 도구 실행 헬퍼가 본문을 돌리기
+    전에 부른다(`cli/tool_cmd.run_tool(args=)`) — 제출 도구뿐 아니라 체크포인트 쓰기·수집에도
+    걸려, 종목 A 세션이 종목 B 의 리포트를 쓰거나 KR 세션이 US 시장 판단을 낼 수 없다."""
+    if scope is None:
+        return None
+    if scope.get("unknown"):
+        return "세션 범위를 확인할 수 없어 도구를 실행하지 않습니다"
+    ticker = args.get("ticker")
+    if isinstance(ticker, str) and (err := ticker_error(ticker, scope)):
+        return err
+    market = args.get("market")
+    if isinstance(market, str) and scope.get("market") and market != scope["market"]:
+        return f"이 세션의 시장({scope['market']})이 아닙니다: {market}"
+    day = args.get("date")
+    day = day.isoformat() if hasattr(day, "isoformat") else day
+    if isinstance(day, str) and scope.get("date") and day != scope["date"]:
+        return f"이 세션의 운영일({scope['date']})이 아닙니다: {day}"
+    return None
+
+
+STALE_AFTER_S = 86400  # 이보다 오래된 범위 파일은 끝난 세션의 것이다(가장 긴 세션도 수 시간)
+
+
+def purge_stale(state: Path, *, older_than_s: float = STALE_AFTER_S) -> int:
+    """오래된 범위 파일을 지운다(데몬 기동 정리 — 강제 종료로 남은 파일). 지운 개수."""
+    folder = state / DIR_NAME
+    if not folder.is_dir():
+        return 0
+    cutoff = time.time() - older_than_s
+    removed = 0
+    for path in folder.glob("*.json"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed

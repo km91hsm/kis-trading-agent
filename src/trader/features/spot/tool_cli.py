@@ -37,7 +37,7 @@ def _run(fn, **kwargs) -> None:
             if b.conn is not None:
                 b.conn.close()
 
-    run_tool(go)
+    run_tool(go, args=dict(kwargs))
 
 
 def _payload(json_text: str | None) -> dict:
@@ -199,9 +199,11 @@ def submit_cmd(
     """결정 제출 → 계좌별 리스크 판정·실행(주문은 executor 코어에서만). JSON 1줄."""
 
     def go(ctx: tools.ToolContext, **kw) -> dict:
-        # 세션이 배정받은 종목에만 결정을 낼 수 있다(환각·인젝션으로 고른 다른 종목 차단)
-        if err := scope.ticker_error(ticker, scope.current()):
-            return {"ok": False, "error": err}
+        # 종목·시장·날짜 범위는 `_run` 의 공통 검사가 본다. 여기서는 세션 종류: 새 분석 세션은
+        # 재평가 단계(`31_decision_r<n>`)를 낼 수 없다 — 회차마다 새 실행이 되어 주문이 반복된다
+        sc = scope.current()
+        if stage and sc is not None and sc.get("kind") == "analyze":
+            return {"ok": False, "error": "analyze 세션은 --stage(재평가 단계)를 쓸 수 없습니다"}
         return tools.submit_decision(ctx, payload=_payload(json_text), **kw)
 
     _run(go, ticker=ticker, market=market, date=date, stage=stage)

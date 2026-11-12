@@ -35,12 +35,10 @@ def _forbidden(detail: str) -> JSONResponse:
     return JSONResponse({"detail": detail}, status_code=403)
 
 
-# tailscale 이 기기에 주는 주소 대역(CGNAT·ULA)
-_TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
-
-
-def _tailnet_peer(request: Request) -> bool:
-    """요청을 보낸 상대(TCP peer)가 루프백이거나 tailnet 주소인가. 주소를 알 수 없으면(유닉스
+def _loopback_peer(request: Request) -> bool:
+    """요청을 보낸 상대(TCP peer)가 루프백인가. `Tailscale-User-Login` 을 붙이는 것은 이 PC 의
+    `tailscale serve` 프록시뿐이라 그 요청은 루프백에서 온다 — tailnet 주소에서 직접 붙은 요청은
+    같은 tailnet 의 다른 사용자가 헤더를 지어낼 수 있어 믿지 않는다. 주소를 알 수 없으면(유닉스
     소켓·테스트 클라이언트) 막지 않는다 — 실제 서버(uvicorn TCP)는 항상 IP 를 준다."""
     peer = request.client.host if request.client else ""
     try:
@@ -49,7 +47,7 @@ def _tailnet_peer(request: Request) -> bool:
         return True
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return ip.is_loopback or any(ip in net for net in _TAILNET_NETS)
+    return ip.is_loopback
 
 
 def _gate(request: Request, allowed: set[str], users: set[str]) -> Response | None:
@@ -63,10 +61,10 @@ def _gate(request: Request, allowed: set[str], users: set[str]) -> Response | No
     if "@" in raw or host not in allowed:
         return _forbidden("허용되지 않은 Host 입니다 (로컬·tailnet 전용)")
     if host not in LOOPBACK_HOSTS and users:
-        # 로그인 헤더는 tailscale serve(루프백 프록시)·tailnet 주소에서 온 요청에서만 믿는다 —
-        # 0.0.0.0 으로 열린 서버에 LAN 의 다른 기기가 Host 와 헤더를 지어내 붙지 못하게
-        if not _tailnet_peer(request):
-            return _forbidden("tailnet 밖에서 온 요청입니다 (로컬·tailnet 전용)")
+        # 로그인 헤더는 tailscale serve(루프백 프록시)가 붙인 것만 믿는다 — 루프백 밖으로 열린
+        # 서버에 다른 기기가 Host 와 헤더를 지어내 붙지 못하게
+        if not _loopback_peer(request):
+            return _forbidden("tailscale serve 를 거치지 않은 요청입니다 (tailnet 접속은 serve 로)")
         login = (request.headers.get(LOGIN_HEADER) or "").strip().lower()
         if login not in users:
             return _forbidden("허용되지 않은 tailnet 사용자입니다")

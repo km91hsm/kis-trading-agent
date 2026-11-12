@@ -156,19 +156,19 @@ def test_require_confirm_only_for_real_accounts():
         assert e.value.detail == "실전 계좌 동작은 confirm 에 계좌 id 를 적어야 합니다"
 
 
-def test_tailnet_login_header_is_trusted_only_from_loopback_or_tailnet_peers(project):
-    """`Tailscale-User-Login` 은 tailscale serve(루프백 프록시)나 tailnet 주소(100.64.0.0/10)에서
-    온 요청에서만 믿는다 — 서버를 0.0.0.0 으로 열어 둔 경우 LAN 의 다른 기기가 Host 와 헤더를
-    지어내 조회 API 를 읽지 못하게."""
+def test_tailnet_login_header_is_trusted_only_from_the_loopback_proxy(project):
+    """`Tailscale-User-Login` 을 붙이는 것은 이 PC 의 `tailscale serve` 뿐이라 그 요청은 루프백에서
+    온다. 루프백 밖(LAN·tailnet 주소에서 직접)에서 온 요청은 Host 와 헤더를 지어낼 수 있어
+    믿지 않는다."""
     deps = make_deps(project, extra_hosts=(TAILNET,), tailscale_users=("me@example.com",))
     headers = {"host": TAILNET, "tailscale-user-login": "me@example.com"}
-    for peer in ("127.0.0.1", "::1", "100.101.102.103", "fd7a:115c:a1e0::1"):
+    for peer in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
         c = make_client(deps, client=(peer, 50000))
         assert c.get("/api/system/health", headers=headers).status_code == 200, peer
-    for peer in ("192.168.0.5", "10.0.0.7", "8.8.8.8"):
+    for peer in ("192.168.0.5", "10.0.0.7", "8.8.8.8", "100.101.102.103", "fd7a:115c:a1e0::1"):
         c = make_client(deps, client=(peer, 50000))
         r = c.get("/api/system/health", headers=headers)
-        assert r.status_code == 403 and "tailnet" in r.json()["detail"], peer
+        assert r.status_code == 403 and "tailscale serve" in r.json()["detail"], peer
     # 루프백 Host(이 PC 화면)는 예전 그대로
     c = make_client(deps, client=("127.0.0.1", 50000))
     assert c.get("/api/system/health").status_code == 200

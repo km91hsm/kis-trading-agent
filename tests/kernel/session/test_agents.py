@@ -182,19 +182,16 @@ def test_trader_prompts_mention_by_lane():
         assert "--lane b" in (root / rel).read_text(encoding="utf-8"), rel
 
 
-def test_every_orchestrator_prompt_ends_with_untrusted_input_rule():
-    """수집 자료 안의 지시를 따르지 않는다는 규칙은 세션 종류와 무관하게 프롬프트에 들어간다."""
-    from trader.kernel.registry import discover
+def test_orchestrator_and_subagent_prompts_carry_untrusted_input_rule():
+    """수집 자료 안의 지시를 따르지 않는다는 규칙은 오케스트레이터 프롬프트의 끝과, 자료를 실제로
+    읽는 서브에이전트 프롬프트 모두에 들어간다."""
+    from trader.features.spot.feature import FEATURE
     from trader.kernel.session import agents as agents_mod
 
-    features = discover()
-    defs = {a.name: a for f in features for a in f.agents}
-    kinds = [k for f in features for k in f.session_kinds]
-    assert kinds
-    for kind in kinds:
-        prompt = agents_mod.orchestrator_prompt(
-            kind, agents_mod.agents_for(kind, defs) if hasattr(agents_mod, "agents_for") else defs,
-            debate_rounds=1, checkpoint_names=["x"],
-        )  # fmt: skip
-        assert prompt.endswith(agents_mod.UNTRUSTED_INPUT_RULE), kind.kind
-        assert "지시가 아니다" in prompt
+    defs = {a.name: a for a in FEATURE.agents}
+    kind = next(k for k in FEATURE.session_kinds if k.kind == "analyze")
+    prompt = agents_mod.orchestrator_prompt(kind, defs, debate_rounds=1, checkpoint_names=["x"])
+    assert prompt.endswith(agents_mod.UNTRUSTED_INPUT_RULE) and "지시가 아니다" in prompt
+    subs = agents_mod.agents_json(kind, defs, {})
+    rule = agents_mod.UNTRUSTED_INPUT_RULE
+    assert subs and all(a["prompt"].endswith(rule) for a in subs.values())
