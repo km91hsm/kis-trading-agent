@@ -363,6 +363,17 @@ def stop_deferred(*, account: str, market: str, label: str) -> str:
     )
 
 
+def stop_retry_held(*, account: str, market: str, label: str, count: int, minutes: int) -> str:
+    return render(
+        "손절 재시도 보류",
+        f"{account} · {market} {label}",
+        [
+            f"손절 주문이 {count}번 연속 거부됐어요. {minutes}분 뒤에 다시 시도해요.",
+            "거래정지·주문가능수량을 확인해 주세요.",
+        ],
+    )
+
+
 def stop_while_paused(*, market: str, label: str, quote: Any, level: Any) -> str:
     return render(
         "손절 실행: 일시정지 중",

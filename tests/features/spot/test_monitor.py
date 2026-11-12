@@ -29,7 +29,7 @@ from trader.features.spot.schemas import Decision
 from trader.features.spot.settings import CashParkCfg
 from trader.kernel.broker.errors import KisApiError
 from trader.kernel.broker.fake import FakeBroker, FakeMarket
-from trader.kernel.broker.models import Cash, Fill, Position
+from trader.kernel.broker.models import Cash, Fill, OrderResult, Position
 from trader.kernel.config import Secrets
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as repo
@@ -1038,3 +1038,29 @@ def test_scalp_open_tickers_are_not_checked_by_spot_monitor(conn, settings):
     out = monitor.monitor_once(ctx, market="KR", today=D)
     assert out["stop_loss_orders"] == 0 and out["skipped_excluded"] == len(accounts)
     assert all(b.orders == [] for b in brokers.values())
+
+
+class _RejectingBroker(FakeBroker):
+    def place_order(self, request):
+        self._record("place_order")
+        self.orders.append(request)
+        return OrderResult(order_no=None, accepted=False, message="거래정지 종목")
+
+
+def test_rejected_stop_loss_backs_off_instead_of_retrying_every_tick(conn, settings):
+    """손절이 구조적 이유로 거부되면(거래정지 등) 매 분 다시 내지 않는다 — 3번 거부되면 10분
+    쉬고, 쉬는 동안은 주문도 알림도 없다. 쉬기 시작할 때 한 번 알린다."""
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    orig = ctx.exec.brokers["paper-main"]
+    b = _RejectingBroker(orig.account, positions=[_pos(cur="63000")], cash=orig.cash)
+    ctx.exec.brokers["paper-main"] = b
+    for i in range(6):
+        ctx.exec.now = lambda i=i: NOW + timedelta(minutes=i)
+        monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 3  # 3번 뒤로는 쉰다
+    held = [m for m in ctx.exec.notifier.msgs if "손절 재시도 보류" in m]
+    assert len(held) == 1
+    ctx.exec.now = lambda: NOW + timedelta(minutes=14)  # 3번째 거부(2분) + 10분 뒤
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 4

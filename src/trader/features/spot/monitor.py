@@ -49,6 +49,8 @@ logger = logging.getLogger("trader.spot")
 
 REEVAL_INTERVAL = timedelta(minutes=30)
 STOP_LOSS_LIMIT_DISCOUNT = Decimal("0.03")  # US 손절은 현재가 3% 아래 지정가(체결 가능 지정가)
+SL_REJECT_LIMIT = 3  # 손절이 이만큼 연속 거부되면 쉰다
+SL_REJECT_COOLDOWN_MIN = 10
 CLOSE_LOOKBACK = timedelta(days=45)  # `close` 무효화 조건용 종가표 창
 
 CloseTable = Callable[[str, date, date], Mapping[str, Mapping[date, float | None]]]
@@ -596,6 +598,10 @@ def _sell_now(
     recorded = f"sl_recorded:{account.id}:{market}:{pos.ticker}:{local_day.isoformat()}:{state}"
     if control.get_flag(ex.conn, recorded):
         return 0  # dry-run·off 계좌의 손절은 기록만 하므로 하루 1회면 충분하다(매 분 반복 금지)
+    rejects = f"sl_rejects:{account.id}:{market}:{pos.ticker}:{local_day.isoformat()}"
+    held = control.get_flag(ex.conn, rejects) or {}
+    if held.get("until") and ex.now() < datetime.fromisoformat(held["until"]):
+        return 0  # 연속 거부로 쉬는 중 — 매 분 같은 주문·알림을 반복하지 않는다
     dec = _stop_loss_decision(pos.ticker, market, quote, sig)
     try:
         results = executor.execute(
@@ -645,5 +651,21 @@ def _sell_now(
                         level=sig.detail.get("level"),
                     ),
                 )
+        if held:
+            control.set_flag(ex.conn, rejects, {})
         return 1
+    if order and live and order.get("status") in ("rejected", "failed"):
+        # 거부·실패는 실행 키가 풀려 다음 틱에 또 나간다 — 연속 SL_REJECT_LIMIT 번이면 쉰다
+        count = int(held.get("count") or 0) + 1
+        nxt: dict[str, Any] = {"count": count}
+        if count % SL_REJECT_LIMIT == 0:
+            nxt["until"] = (ex.now() + timedelta(minutes=SL_REJECT_COOLDOWN_MIN)).isoformat()
+            core.notify_quietly(
+                ex.notifier,
+                messages.stop_retry_held(
+                    account=account.id, market=market, label=_label(ctx, market, pos.ticker),
+                    count=count, minutes=SL_REJECT_COOLDOWN_MIN,
+                ),
+            )  # fmt: skip
+        control.set_flag(ex.conn, rejects, nxt)
     return 0
