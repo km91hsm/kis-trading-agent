@@ -440,8 +440,28 @@ def bootstrap_queue(deps: Any) -> dict:
                 "SELECT * FROM job_requests WHERE status='running' ORDER BY id"
             ).fetchall()
         ]
+        cutoff = now - QUEUED_MAX_AGE
+        dropped = [
+            jobq._hydrate(r)
+            for r in conn.execute(
+                "SELECT * FROM job_requests WHERE status='queued' AND requested_at < ? ORDER BY id",
+                (cutoff.astimezone(UTC).isoformat(),),
+            ).fetchall()
+        ]
         stale = jobq.mark_stale_running(conn, now=now, reason="데몬 재시작")
-        expired = jobq.expire_queued(conn, older_than=now - QUEUED_MAX_AGE)
+        expired = jobq.expire_queued(conn, older_than=cutoff)
+        for r in interrupted + dropped:
+            # 실행되지 않고 닫힌 요청은 취소와 같다 — kind 의 뒷정리(승인 선점 해제 등)를 부른다.
+            # 다시 넣는 kind 는 아래에서 이어 가므로 빼고, 훅은 스스로 멱등이어야 한다
+            spec = q.kinds.get(r["kind"])
+            if spec is None or spec.on_cancel is None:
+                continue
+            if spec.restart_requeue and r["status"] == "running":
+                continue
+            try:
+                spec.on_cancel(conn, r["params"])
+            except Exception as e:  # noqa: BLE001 - 훅 실패가 기동을 막지 않는다
+                logger.warning("기동 정리 훅 실패 %s #%s: %s", r["kind"], r["id"], e)
         for r in interrupted:
             spec = q.kinds.get(r["kind"])
             if spec is None or not spec.restart_requeue:

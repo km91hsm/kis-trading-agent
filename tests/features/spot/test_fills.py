@@ -10,7 +10,7 @@ from tests.features.accounts.conftest import make_account
 from trader.features.accounts.settings import to_broker_account
 from trader.features.spot import fills as fills_mod
 from trader.kernel.broker.fake import FakeBroker
-from trader.kernel.broker.models import Fill
+from trader.kernel.broker.models import Fill, OrderSeen
 from trader.kernel.config.market_hours import MARKET_CLOSE, market_close
 from trader.kernel.execution import ledger as repo
 from trader.kernel.ledger import control
@@ -378,3 +378,122 @@ def test_duplicate_fill_does_not_double_count_and_fetch_failure_does_not_expire(
     assert r["failed_markets"] == ["KR"] and r["expired"] == 0
     row = conn.execute("SELECT status, filled_qty FROM orders WHERE id=?", (oid,)).fetchone()
     assert (row["status"], row["filled_qty"]) == ("partial", 2)
+
+
+# --- 응답 없는(unknown) 주문을 당일 주문 목록으로 확정 ---------------------------------------
+
+
+class _Notes:
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, text, **kw):
+        self.msgs.append(text)
+        return True
+
+
+def _unknown_sell(conn, created_at="2026-10-09T00:10:00+00:00", origin="stop", side="SELL"):
+    """응답 없는 주문. 기본은 손절 매도(origin=stop) — 미접수 확정 대상은 이것뿐이다."""
+    return repo.insert_order(
+        conn, decision_id=None, account_id="paper-main", ticker="005930", market="KR",
+        side=side, qty=3, order_type="MARKET", price=None, status="unknown", order_no=None,
+        message="NETWORK_UNKNOWN", mode="auto", created_at=created_at, origin=origin,
+    )  # fmt: skip
+
+
+def _seen(order_no, qty=3, filled=0, side="SELL", ticker="005930"):
+    return OrderSeen(
+        order_no=order_no, ticker=ticker, market="KR", side=side, qty=qty, filled_qty=filled,
+        ordered_at=datetime(2026, 10, 9, 0, 10, 5, tzinfo=UTC),
+    )  # fmt: skip
+
+
+def _at(minutes):
+    return lambda: datetime(2026, 10, 9, 0, 10, tzinfo=UTC) + timedelta(minutes=minutes)
+
+
+def test_unknown_order_found_in_broker_list_gets_its_order_no(conn):
+    """KIS 가 받았지만 아직 체결되지 않은 주문: 주문번호를 붙여 accepted 로 확정한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001")]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(1))
+    row = conn.execute("SELECT status, order_no FROM orders WHERE id=?", (oid,)).fetchone()
+    assert (row["status"], row["order_no"]) == ("accepted", "0000200001")
+
+
+def test_unknown_order_absent_from_broker_list_is_failed_after_grace(conn):
+    """KIS 당일 주문 목록에 없으면 접수되지 않은 것 — 유예(2분) 뒤 failed 로 확정해 손절 재시도를
+    풀고 한 번 알린다. 유예 안에서는 KIS 반영 지연일 수 있어 그대로 둔다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    notes = _Notes()
+    broker = _fb(acct)
+
+    def status():
+        return conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0]
+
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(1), notifier=notes)
+    assert status() == "unknown" and notes.msgs == []
+    # 유예 뒤 첫 부재는 의심으로만 적는다 — 목록 한 번의 누락으로 살아 있는 주문을 죽이지 않게
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(3), notifier=notes)
+    assert status() == "unknown" and notes.msgs == []
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(4), notifier=notes)
+    assert status() == "failed"
+    assert len(notes.msgs) == 1 and "접수되지 않" in notes.msgs[0]
+
+
+def test_only_stop_sells_are_ever_confirmed_as_not_accepted(conn):
+    """매수·판단 매도의 unknown 은 목록에 없어도 failed 로 확정하지 않는다 — failed 가 되면 실행
+    키가 넘어가 같은 매수가 다시 나갈 수 있다(초과 매도와 달리 KIS 가 막아 주지 않는다).
+    마감 뒤 만료(expired)까지 살아 있는 주문으로 남는다."""
+    acct = make_account("paper-main", "paper", "auto")
+    buy = _unknown_sell(conn, origin=None, side="BUY")
+    trim = _unknown_sell(conn, origin=None, side="SELL")
+    for minutes in (3, 4, 5):
+        fills_mod.sync_fills(conn, _fb(acct), acct, D, now=_at(minutes))
+    st = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM orders")}
+    assert st == {buy: "unknown", trim: "unknown"}
+
+
+def test_second_absence_clears_suspicion_when_order_shows_up(conn):
+    """의심으로 적힌 뒤 목록에 나타나면(반영 지연) 주문번호를 붙여 접수로 확정한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    fills_mod.sync_fills(conn, _fb(acct), acct, D, now=_at(3))
+    late = _fb(acct, seen_orders={("KR", D): [_seen("0000200009")]})
+    fills_mod.sync_fills(conn, late, acct, D, now=_at(4))
+    row = conn.execute("SELECT status, order_no FROM orders WHERE id=?", (oid,)).fetchone()
+    assert (row["status"], row["order_no"]) == ("accepted", "0000200009")
+
+
+def test_unknown_order_is_left_alone_when_candidates_are_ambiguous_or_query_fails(conn):
+    """같은 종목·방향의 낯선 주문이 있는데 수량이 다르거나 여럿이면 붙이지도 죽이지도 않는다.
+    주문 목록 조회가 실패해도 마찬가지 — 체결 동기화는 계속한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001", qty=5)]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(5))
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "unknown"
+
+    class _Broken(FakeBroker):
+        def get_orders(self, market, d):
+            raise RuntimeError("조회 실패")
+
+    r = fills_mod.sync_fills(conn, _Broken(to_broker_account(acct)), acct, D, now=_at(5))
+    assert r["failed_markets"] == []
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "unknown"
+
+
+def test_known_order_numbers_are_not_candidates_for_unknown_orders(conn):
+    """이미 원장에 주문번호가 있는 주문은 unknown 의 후보가 아니다 — 그 주문만 있으면 미접수."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    _order_with(
+        conn, status="accepted", order_no="0000200001", created_at="2026-10-09T00:05:00+00:00",
+        side="SELL",
+    )  # fmt: skip
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001")]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(5))
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(6))
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "failed"

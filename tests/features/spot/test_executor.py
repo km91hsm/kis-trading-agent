@@ -5,6 +5,7 @@
 `exec_locks`·`buy_reservations`. 메모리 브레이커(M8)·RL(M7)·손절 origin(M5)·국면/킬스위치(M6)
 테스트는 이연."""
 
+import sqlite3
 import threading
 from datetime import date, timedelta
 from decimal import Decimal
@@ -25,6 +26,7 @@ from trader.kernel.broker.fake import FakeBroker
 from trader.kernel.broker.models import Cash, Position
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as repo
+from trader.kernel.execution.idem import ExecKeyStore
 from trader.kernel.ledger import control, db
 from trader.kernel.session.run_store import read_checkpoint, run_dir
 
@@ -464,6 +466,18 @@ def test_paused_blocks_approve(ectx):
     assert executor.approve(ectx, aid)["ok"]
 
 
+def test_dry_run_context_does_not_execute_approval(ectx):
+    """dry-run 데몬에서 승인해도 주문이 나가지 않고 요청은 pending 으로 남는다."""
+    aid = _pending(ectx)
+    ectx.dry_run = True
+    r = executor.approve(ectx, aid)
+    assert r["ok"] is False and r["reason"] == "dry_run"
+    assert repo.get_approval(ectx.conn, aid)["status"] == "pending"
+    assert ectx.conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    ectx.dry_run = False
+    assert executor.approve(ectx, aid)["ok"]
+
+
 def test_executor_passes_holiday_fn_to_rules(ectx):
     """보유 1거래일(10/8 매수) 인데 10/9 가 휴장이면 is_holiday 가 거래일 계산에 반영된다."""
     ectx.brokers["paper-main"].positions = [_pos()]
@@ -568,6 +582,36 @@ def test_approve_bookkeeping_failure_marks_failed_not_stuck(ectx, monkeypatch):
     r = executor.approve(ectx, aid)
     assert r["ok"] is False and "FAKE-1" in r["error"]
     assert repo.get_approval(ectx.conn, aid)["status"] == "failed"
+
+
+def test_approve_failure_before_send_is_not_left_approved(ectx, monkeypatch):
+    """approved 로 바꾼 뒤 전송 준비(실행 키 표시)가 원장 잠금으로 끊기면 주문 없는 "승인됨" 이
+    굳는다 — failed 로 남기고 예외는 그대로 올린다(브로커 호출 전이라 주문은 없다)."""
+    aid = _pending(ectx)
+
+    def boom(self, key, *, sent_at):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ExecKeyStore, "mark_sent", boom)
+    with pytest.raises(sqlite3.OperationalError):
+        executor.approve(ectx, aid)
+    assert repo.get_approval(ectx.conn, aid)["status"] == "failed"
+    assert ectx.brokers["paper-main"].orders == []
+
+
+def test_approve_failure_after_send_stays_approved_and_warns(ectx, monkeypatch):
+    """브로커로 보낸 뒤(실행 키에 sent 표시) 예상 밖 예외가 나면 주문은 KIS 에 있을 수 있다 —
+    승인을 "실패" 로 적으면 사람이 다시 주문한다. approved 로 두고 확인하라고 알린다."""
+    aid = _pending(ectx)
+
+    def boom(self, request):
+        raise TypeError("응답 해석 실패")
+
+    monkeypatch.setattr(FakeBroker, "place_order", boom)
+    with pytest.raises(TypeError):
+        executor.approve(ectx, aid)
+    assert repo.get_approval(ectx.conn, aid)["status"] == "approved"
+    assert any("미확인" in m for m in ectx.notifier.sent)
 
 
 def test_unknown_network_result_is_recorded_as_unknown_and_counts_as_live(ectx):

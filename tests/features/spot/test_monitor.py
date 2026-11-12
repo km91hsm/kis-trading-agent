@@ -27,9 +27,9 @@ from trader.features.spot import ledger as spot_ledger
 from trader.features.spot.monitor_rules import Signal, rule_hit
 from trader.features.spot.schemas import Decision
 from trader.features.spot.settings import CashParkCfg
-from trader.kernel.broker.errors import KisApiError
+from trader.kernel.broker.errors import UNKNOWN_RESPONSE_CODE, KisApiError
 from trader.kernel.broker.fake import FakeBroker, FakeMarket
-from trader.kernel.broker.models import Cash, Fill, Position
+from trader.kernel.broker.models import Cash, Fill, OrderResult, Position
 from trader.kernel.config import Secrets
 from trader.kernel.execution import core
 from trader.kernel.execution import ledger as repo
@@ -999,3 +999,212 @@ def test_us_subdollar_stop_limit(price, expected):
     dec = monitor._stop_loss_decision("LOW", "US", q, Signal("stop_loss", q, {}))
     assert dec.limit_price == expected
     assert 0 < Decimal(str(dec.limit_price)) <= q
+
+
+def test_stop_price_of_decision_before_holding_is_not_applied_to_new_lot(conn, settings):
+    """청산 뒤 결정 없이 다시 보유하게 된 종목(수동 매수 등)에 옛 결정의 손절가(65000)를 쓰면
+    새 보유분이 첫 틱에 팔린다 — 보유 시작 전 결정의 손절가는 버리고 기본 −15% 만 본다.
+    (평단 70000·현재 63000: 59500 은 안 닿는다)"""
+    old = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D - timedelta(days=30), "KR", "005930", "30_decision", {"data": old.model_dump()}
+    )
+    _filled_buy(conn, None, NOW.isoformat())  # 보유 시작 = 오늘, 결정 없음
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0
+    assert all(b.orders == [] for b in ctx.exec.brokers.values())
+    # 기본 손절선 아래로 내려가면 그대로 손절한다
+    ctx2 = _ctx(conn, settings, positions=[_pos(cur="59000")], price="59000")
+    assert monitor.monitor_once(ctx2, market="KR", today=D)["stop_loss_orders"] == 1
+
+
+def test_scalp_legs_are_not_checked_by_spot_monitor_but_spot_holdings_are(conn, settings):
+    """단타가 든 수량만큼만 현물 점검에서 뺀다(계좌별). 같은 종목을 현물로도 든 계좌(보유가 단타
+    수량보다 많다)나 단타 다리가 없는 다른 계좌의 손절은 그대로 본다."""
+
+    class _Scalp:
+        def __init__(self, legs):
+            self.legs = legs
+
+        def open_legs(self, state, market, today):
+            return self.legs
+
+    def run(legs, paper_qty):
+        accounts = [
+            make_account("paper-main", "paper", "auto", markets=["KR"]),
+            make_account("paper-two", "paper", "auto", markets=["KR"]),
+        ]
+        cash = {"KR": Cash(currency="KRW", available=Decimal("9000000"), total=Decimal("9000000"))}
+        brokers = {
+            "paper-main": FakeBroker(
+                to_broker_account(accounts[0]), positions=[_pos(qty=paper_qty)], cash=cash
+            ),
+            "paper-two": FakeBroker(to_broker_account(accounts[1]), positions=[_pos()], cash=cash),
+        }
+        ctx = _monitor_ctx(
+            settings, conn, accounts, brokers, FakeMarket(prices={"005930": Decimal("63000")}),
+            ports={"scalp": _Scalp(legs)},
+        )  # fmt: skip
+        out = monitor.monitor_once(ctx, market="KR", today=D)
+        return out, {k: len(b.orders) for k, b in brokers.items()}
+
+    _old_decision(conn, stop_loss=65000.0)
+    out, orders = run({("paper-main", "005930"): 10}, paper_qty=10)
+    assert out.get("skipped_excluded") == 1  # 단타 다리뿐인 계좌만 건너뛴다
+    assert orders == {"paper-main": 0, "paper-two": 1}
+
+
+def test_spot_holding_on_top_of_scalp_leg_keeps_its_stop(conn, settings):
+    class _Scalp:
+        def open_legs(self, state, market, today):
+            return {("paper-main", "005930"): 4}
+
+    _old_decision(conn, stop_loss=65000.0)
+    accounts = [make_account("paper-main", "paper", "auto", markets=["KR"])]
+    cash = {"KR": Cash(currency="KRW", available=Decimal("9000000"), total=Decimal("9000000"))}
+    brokers = {
+        "paper-main": FakeBroker(to_broker_account(accounts[0]), positions=[_pos()], cash=cash)
+    }
+    ctx = _monitor_ctx(
+        settings, conn, accounts, brokers, FakeMarket(prices={"005930": Decimal("63000")}),
+        ports={"scalp": _Scalp()},
+    )  # fmt: skip
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert "skipped_excluded" not in out and out["stop_loss_orders"] == 1  # 보유 10 > 단타 4
+
+
+def test_old_stop_price_is_dropped_before_new_lot_fill_is_synced(conn, settings):
+    """지난 보유분이 체결로 닫혀 있고 새 매수는 아직 체결 동기화 전(접수만)이면 보유 시작일을 알 수
+    없다 — 그래도 최신 결정이 지난 보유분이 닫히기 전 날짜면 그 손절가는 지난 보유분의 것이다."""
+    old_day = D - timedelta(days=30)
+    old = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, old_day, "KR", "005930", "30_decision", {"data": old.model_dump()}
+    )
+    for side, days in (("BUY", 30), ("SELL", 20)):  # 지난 보유분: 30일 전 매수 → 20일 전 전량 매도
+        at = (NOW - timedelta(days=days)).isoformat()
+        oid = repo.insert_order(
+            conn, decision_id=None, account_id="paper-main", ticker="005930", market="KR",
+            side=side, qty=10, order_type="LIMIT", price=Decimal("70000"), status="filled",
+            order_no=f"P{days}", message=None, mode="auto", created_at=at,
+        )  # fmt: skip
+        repo.insert_fill(
+            conn, order_id=oid, account_id="paper-main", market="KR", ticker="005930", side=side,
+            qty=10, price=Decimal("70000"), filled_at=at, order_no=f"P{days}",
+        )  # fmt: skip
+    conn.commit()
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0  # 기본 −15%(59500)는 안 닿는다
+
+
+class _FlakyBroker(FakeBroker):
+    """주문 서버가 흔들린다(전송 실패) — 종목의 문제가 아니다."""
+
+    def place_order(self, request):
+        self._record("place_order")
+        self.orders.append(request)
+        raise KisApiError("NETWORK", "연결 실패")
+
+
+def test_transport_failures_do_not_start_the_stop_cooldown(conn, settings):
+    """주문 서버 일시 장애(연결 실패·초당 한도)는 거부가 아니다 — 쉬지 않고 매 틱 다시 시도한다
+    (복구 직후 손절이 10분 늦어지면 안 된다)."""
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    orig = ctx.exec.brokers["paper-main"]
+    b = _FlakyBroker(orig.account, positions=[_pos(cur="63000")], cash=orig.cash)
+    ctx.exec.brokers["paper-main"] = b
+    for i in range(5):
+        ctx.exec.now = lambda i=i: NOW + timedelta(minutes=i)
+        monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 5
+    assert not [m for m in ctx.exec.notifier.msgs if "손절 재시도 보류" in m]
+
+
+class _RejectingBroker(FakeBroker):
+    def place_order(self, request):
+        self._record("place_order")
+        self.orders.append(request)
+        return OrderResult(order_no=None, accepted=False, message="거래정지 종목")
+
+
+def test_rejected_stop_loss_backs_off_instead_of_retrying_every_tick(conn, settings):
+    """손절이 구조적 이유로 거부되면(거래정지 등) 매 분 다시 내지 않는다 — 3번 거부되면 10분
+    쉬고, 쉬는 동안은 주문도 알림도 없다. 쉬기 시작할 때 한 번 알린다."""
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    orig = ctx.exec.brokers["paper-main"]
+    b = _RejectingBroker(orig.account, positions=[_pos(cur="63000")], cash=orig.cash)
+    ctx.exec.brokers["paper-main"] = b
+    for i in range(6):
+        ctx.exec.now = lambda i=i: NOW + timedelta(minutes=i)
+        monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 3  # 3번 뒤로는 쉰다
+    held = [m for m in ctx.exec.notifier.msgs if "손절 재시도 보류" in m]
+    assert len(held) == 1
+    ctx.exec.now = lambda: NOW + timedelta(minutes=14)  # 3번째 거부(2분) + 10분 뒤
+    monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 4
+
+
+class _SilentBroker(FakeBroker):
+    """첫 주문은 응답 없음(KIS 에는 접수되지 않음), 그 뒤로는 정상 접수."""
+
+    def place_order(self, request):
+        if not self.orders:
+            self._record("place_order")
+            self.orders.append(request)
+            raise KisApiError(UNKNOWN_RESPONSE_CODE, "응답 없음")
+        return super().place_order(request)
+
+
+def test_unanswered_stop_loss_does_not_block_stops_for_the_rest_of_the_day(conn, settings):
+    """손절 SELL 이 응답 없이 끝났고 KIS 에도 접수되지 않았으면, 유예 뒤 미접수로 확정하고
+    손절을 다시 낸다 — unknown 주문이 마감까지 손절을 막으면 안 된다."""
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    orig = ctx.exec.brokers["paper-main"]
+    b = _SilentBroker(orig.account, positions=[_pos(cur="63000")], cash=orig.cash)
+    ctx.exec.brokers["paper-main"] = b
+    assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 0
+    ctx.exec.now = lambda: NOW + timedelta(minutes=1)  # 유예 안: 아직 막힌 채
+    assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 0
+    assert len(b.orders) == 1
+    ctx.exec.now = lambda: NOW + timedelta(minutes=3)  # 유예 뒤 첫 부재: 의심만
+    assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 0
+    ctx.exec.now = lambda: NOW + timedelta(minutes=4)  # 다시 없으면 미접수 확정 → 재전송
+    assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 1
+    assert len(b.orders) == 2
+    st = [r[0] for r in conn.execute("SELECT status FROM orders WHERE side='SELL' ORDER BY id")]
+    assert st == ["failed", "accepted"]
+
+
+def test_repeated_blind_ticks_are_flagged_and_notified_once(conn, settings):
+    """시세·보유 조회가 계속 실패하면 손절 감시가 사실상 꺼진다 — 잡은 ok 로 끝나도 연속 5틱이면
+    한 번 알리고 control 플래그(운영 점검이 읽는다)에 남긴다. 회복하면 지운다."""
+    _decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")])
+    ok_market = ctx.market_client
+    ctx.market_client = FakeMarket(prices={}, fail={"get_price_kr"})
+    for _ in range(4):
+        r = monitor.monitor_once(ctx, market="KR", today=D)
+    blind = ["paper-main 005930", "real-main 005930"]
+    assert r["unchecked"] == blind
+    assert not [m for m in ctx.exec.notifier.msgs if "손절 감시 공백" in m]
+    for _ in range(3):
+        monitor.monitor_once(ctx, market="KR", today=D)
+    assert len([m for m in ctx.exec.notifier.msgs if "손절 감시 공백" in m]) == 1
+    flag = control.get_flag(conn, "monitor_blind:KR")
+    assert flag["count"] == 7 and flag["what"] == blind
+    ctx.market_client = ok_market
+    assert "unchecked" not in monitor.monitor_once(ctx, market="KR", today=D)
+    assert not control.get_flag(conn, "monitor_blind:KR")
+
+
+def test_position_query_failure_counts_as_blind(conn, settings):
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")])
+    ctx.exec.brokers["paper-main"].fail = {"get_positions"}
+    r = monitor.monitor_once(ctx, market="KR", today=D)
+    assert r["unchecked"] == ["paper-main 보유 조회 실패"]  # 다른 계좌는 정상 점검

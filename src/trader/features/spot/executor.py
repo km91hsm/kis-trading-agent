@@ -155,6 +155,8 @@ class ExecContext:
     record_portfolio: bool = True
     market_client: Any | None = None
     ports: Mapping[str, Any] = field(default_factory=dict)
+    # 데몬이 --dry-run 으로 떠 있으면 True — 승인 집행처럼 정책을 여기서 만드는 경로가 본다
+    dry_run: bool = False
 
 
 def exec_ctx_from(
@@ -167,6 +169,7 @@ def exec_ctx_from(
     *,
     record_portfolio: bool = True,
     ports: Mapping[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> ExecContext:
     """ExecContext 단일 조립 경로(CLI·텔레그램 공용). 계좌 포트가 없으면 계좌 없음(fail-closed:
     정책 없음 → 모든 계좌 off). `ports` 는 게이트가 볼 regime·scan 포트(없으면 빈 dict)."""
@@ -196,6 +199,7 @@ def exec_ctx_from(
         record_portfolio=record_portfolio,
         market_client=market_client,
         ports=dict(ports or {}),
+        dry_run=dry_run,
         **kw,
     )
 
@@ -1405,7 +1409,9 @@ def approve(ctx: ExecContext, approval_id: int) -> dict:
         if account is None:
             return None
         mode, note = ctx.policy(ctx.conn, account)
-        return ExecPolicy(mode=mode, note=note, paused=bool(ctx.paused(ctx.conn)), dry_run=False)
+        return ExecPolicy(
+            mode=mode, note=note, paused=bool(ctx.paused(ctx.conn)), dry_run=ctx.dry_run
+        )
 
     def run_dir_of(a: dict) -> Path:
         o = a["order"]
