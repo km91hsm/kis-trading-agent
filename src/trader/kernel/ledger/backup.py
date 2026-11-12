@@ -73,9 +73,14 @@ def prune(
     weekly = sorted({d for d, _ in files if d < recent_from and d.weekday() == 0}, reverse=True)[
         :keep_weekly
     ]
+    # 같은 날 여러 번 뜬 백업(업데이트 설치 등)은 마지막 1개만 남긴다. 단 오늘·어제 것은 전부
+    # 둔다 — 되돌리기용이고, 파일 이름의 날짜는 UTC 라 KST 오전의 "오늘" 백업은 어제 날짜다
+    keep_all_from = today - timedelta(days=1)
+    last_of_day = {d: max(p.name for dd, p in files if dd == d) for d in {d for d, _ in files}}
     removed = 0
     for d, p in files:
-        if d >= recent_from or d in weekly:
+        duplicate = d < keep_all_from and p.name != last_of_day[d]
+        if not duplicate and (d >= recent_from or d in weekly):
             continue
         try:
             p.unlink()

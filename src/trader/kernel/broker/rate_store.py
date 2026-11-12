@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from trader.kernel.broker.client import RateLimitBusy, RateLimiter
+from trader.kernel.broker.client import RATE_WINDOW_S, RateLimitBusy, RateLimiter
 
 logger = logging.getLogger("trader.broker")
 
@@ -128,14 +128,16 @@ class SharedRateLimiter(RateLimiter):
         conn.execute("BEGIN IMMEDIATE")
         try:
             now = self._clock()
-            conn.execute("DELETE FROM calls WHERE env=? AND ts <= ?", (self._env, now - 1.0))
+            conn.execute(
+                "DELETE FROM calls WHERE env=? AND ts <= ?", (self._env, now - RATE_WINDOW_S)
+            )
             row = conn.execute(
                 "SELECT COUNT(*) AS n, MIN(ts) AS oldest FROM calls WHERE env=?", (self._env,)
             ).fetchone()
             if int(row[0]) < self._rate:
                 conn.execute("INSERT INTO calls(env, ts) VALUES (?, ?)", (self._env, now))
                 return None
-            return max(1.0 - (now - float(row[1])), 0.001)
+            return max(RATE_WINDOW_S - (now - float(row[1])), 0.001)
         finally:
             conn.execute("COMMIT")
 

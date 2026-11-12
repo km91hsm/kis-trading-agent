@@ -46,6 +46,12 @@ def build_market_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
     return _build_day_gate(boot, deps, check_paused=True)
 
 
+def build_session_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
+    """주말·휴장만 본다(일시정지는 보지 않음) — 주문 없이 조회만 하는 잡(야간 대사)용. 일시정지
+    중에도 위험 청산은 나가므로 그동안의 원장·잔고 대조를 거르지 않는다."""
+    return _build_day_gate(boot, deps, check_paused=False)
+
+
 def build_monitor_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
     """주말·휴장(일시정지는 보지 않음) + 시장 현지 시각이 schedule `<시장>.monitor.start/end` 창
     안인지."""
@@ -66,4 +72,8 @@ def build_monitor_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
     return gate
 
 
-GATES = (GateSpec("market", build_market_gate), GateSpec("monitor", build_monitor_gate))
+GATES = (
+    GateSpec("market", build_market_gate),
+    GateSpec("monitor", build_monitor_gate),
+    GateSpec("session", build_session_gate),
+)

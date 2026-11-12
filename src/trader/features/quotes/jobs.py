@@ -17,9 +17,11 @@ import logging
 import sqlite3
 from typing import Any
 
+from trader.features.quotes import activity_move
 from trader.kernel.config import KST
 from trader.kernel.ledger import control
 from trader.kernel.ledger.db import now_iso
+from trader.kernel.notify import messages
 from trader.kernel.registry.types import JobSpec
 
 logger = logging.getLogger("trader.quotes")
@@ -206,6 +208,42 @@ def market_activity_body(deps: Any, job: Any = None) -> dict:
         finally:
             conn.close()
     return out
+
+
+def reclaim_ledger(*, deps, **_) -> dict:
+    """기동 훅: 원장에 남은 순위 관측을 보관소로 옮기고(`activity_move.move_out`) 옮긴 것이 있으면
+    VACUUM 으로 원장 파일을 줄인다. 데몬 잠금을 쥔 뒤·스케줄러가 돌기 전이라 다른 잡과 겹치지
+    않는다. 실패하면 원장을 그대로 두고 다음 기동에 다시 한다 — 어떤 오류도 올리지 않는다."""
+    conn = deps.conn_factory()
+    try:
+        out = activity_move.move_out(conn)
+        if out["moved"]:
+            conn.execute("VACUUM")
+            logger.info("순위 관측 %d건 분리·원장 빈 공간 회수 완료", out["moved"])
+        return {**out, "vacuumed": bool(out["moved"])}
+    except Exception as e:  # noqa: BLE001 - 이전 실패가 기동을 막지 않는다
+        logger.warning("순위 관측 분리 실패(원장 그대로, 다음 기동에 다시): %s", e)
+        _notify_move_failure(deps, e)
+        err = f"{type(e).__name__}: {e}"
+        return {"moved": 0, "dropped": False, "vacuumed": False, "error": err}
+    finally:
+        conn.close()
+
+
+def _notify_move_failure(deps, e: Exception) -> None:
+    notifier = getattr(deps, "notifier", None)
+    if notifier is None:
+        return
+    try:
+        notifier.send(
+            messages.event(
+                "순위 관측 분리 실패",
+                "원장에 남은 시장 순위 원본을 보관소로 옮기지 못했어요 (매매에는 영향 없음)",
+                f"{type(e).__name__}: {e}"[:200],
+            )
+        )
+    except Exception:  # noqa: BLE001 - 알림 실패는 무시
+        logger.debug("알림 실패", exc_info=True)
 
 
 MARKET_ACTIVITY = JobSpec(

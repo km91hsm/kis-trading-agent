@@ -86,3 +86,19 @@ def test_hook_tolerates_non_utf8_status(tmp_path: Path) -> None:
     out = _hook().main(root=tmp_path)
     assert "## 운영 점검" in out and "pid 7" in out
     assert "열린 일 하나" in out
+
+
+def test_hook_marks_old_status_as_stale(tmp_path: Path) -> None:
+    """STATUS.md 는 `trader status` 를 돌릴 때만 갱신된다 — 며칠 전 파일의 "데몬 실행 중" 을 지금
+    상태처럼 보여 주면 안 된다. 1시간 넘은 파일은 얼마나 묵었는지 맨 위에 적는다."""
+    import os
+    import time
+
+    path = tmp_path / "state" / "STATUS.md"
+    _write(path, STATUS)
+    assert "지난 상태" not in _hook().main(root=tmp_path)
+    old = time.time() - 3 * 86400 - 600
+    os.utime(path, (old, old))
+    out = _hook().main(root=tmp_path)
+    assert "3일 전에 만든 지난 상태" in out and "uv run trader status" in out
+    assert out.index("지난 상태") < out.index("## 운영 점검")

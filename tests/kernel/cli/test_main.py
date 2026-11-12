@@ -97,7 +97,7 @@ def test_build_daemon_deps(project):
         deps = main_mod.build_daemon_deps(b, dry_run=True)
         assert deps.dry_run is True
         assert deps.markets == ["KR", "US"]
-        assert set(deps.gates) == {"market", "monitor"}
+        assert set(deps.gates) == {"market", "monitor", "session"}
         assert deps.ports is b.ports and "accounts" in deps.ports
         assert isinstance(deps.stop_event, threading.Event)
         assert deps.state == project.resolve() / "state"
