@@ -423,5 +423,7 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
 - [ ] 실기(사용자 확인 대기): 번들 zip(`v0.2.1` 태그 `build.yml`; `v0.2.0` 은 기능 README 누락으로 스모크 실패)을 풀어 더블클릭 → 웹 UI → `./trader accounts ping` (macOS `xattr`/우클릭 열기·Windows SmartScreen 1회; Windows `install` 로그온 등록 확인 포함) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
+- [ ] 실기(사용자 확인 대기, 모의): 응답 없는 주문 확정에 쓰는 당일 주문 목록 — KR `inquire-daily-ccld` 를 `CCLD_DVSN=00`(전체)로 조회했을 때 미체결 주문 행이 `odno`·`ord_qty`·`tot_ccld_qty` 와 함께 오는지, US `inquire-ccnl` 미체결 행의 `ft_ord_qty`. 모의 계좌로 지정가(현재가 −10%) 1주 접수 뒤 `trader spot fills sync` 로그 확인 (`spot/fills.py::resolve_unknown`, 2026-11 전체 검토 PR1)
+- [ ] 실기(사용자 확인 대기): KR 체결 조회에 `EXCG_ID_DVSN_CD` 가 없어 NXT·SOR 로 낸 수동 주문 체결이 빠지는지, US 부분 체결 주문 취소 시 `ORD_QTY` 가 실제 잔량보다 크면 KIS 가 거부하는지 (2026-11 전체 검토에서 추정으로 남긴 항목)
 - [ ] 사용자 확인 대기: `channels.naver_blog` 기본값 — 옛 기본 `ranto28` 복원 여부 결정 (M3)
 - [ ] 사용자 확인 대기: `EDGAR_USER_AGENT` 시크릿 입력 (M3 ingest, EDGAR 수집)

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -31,6 +31,9 @@ logger = logging.getLogger("trader.spot")
 # 8일 넘게 꺼져 있던 뒤의 접수·unknown 주문도 다시 조회해 마감 뒤 expired 로 정리한다.
 # 상한 밖 날짜는 앞의 주문이 정리된 다음 실행이 이어 본다
 STALE_QUERY_CAP = 10
+# 응답 없는 주문이 KIS 당일 주문 목록에 없을 때 "접수 안 됨" 으로 확정하기까지 기다리는 시간
+# (KIS 반영 지연을 미접수로 오판하지 않게)
+UNKNOWN_GRACE = timedelta(minutes=2)
 
 
 def _day_for(market: str, d: date | datetime) -> date:
@@ -92,6 +95,103 @@ def _order_id_for(
         asset="stock",
         origin="external",
     )
+
+
+def resolve_unknown(
+    conn: sqlite3.Connection,
+    broker: Any,
+    account_id: str,
+    market: str,
+    day: date,
+    *,
+    now: datetime,
+    notifier: Any | None = None,
+) -> dict:
+    """응답을 못 받아 unknown(주문번호 없음)으로 남은 day 의 주문을 KIS 당일 주문 목록으로 확정한다.
+
+    체결 조회만으로는 "접수됐지만 미체결" 과 "접수 안 됨" 을 가를 수 없어 unknown 손절 SELL 이
+    마감까지 다음 손절을 막는다. 같은 종목·방향의 **낯선 주문**(원장에 그 주문번호가 없는 주문)을
+    후보로 본다:
+    - 후보 1건·unknown 1건·수량 같음 → 주문번호를 붙여 accepted (이후 체결은 주문번호로 붙는다)
+    - 후보 없음·주문 뒤 `UNKNOWN_GRACE` 지남 → 접수 안 됨: failed (죽은 주문 — 실행 키는 다음
+      선점이 넘겨받는다) + 알림
+    - 그 밖(후보 여럿·수량 다름·유예 안) → 그대로 둔다
+    주문 목록 조회를 지원하지 않는 브로커·조회 실패는 아무것도 바꾸지 않는다."""
+    out = {"accepted": 0, "failed": 0}
+    lo, hi = xledger.day_bounds(day, market)
+    unknown = conn.execute(
+        "SELECT id, ticker, side, qty, created_at FROM orders WHERE account_id=? AND market=? "
+        "AND status='unknown' AND order_no IS NULL AND created_at >= ? AND created_at < ? "
+        "ORDER BY id",
+        (account_id, market, lo, hi),
+    ).fetchall()
+    get_orders = getattr(broker, "get_orders", None)
+    if not unknown or get_orders is None:
+        return out
+    try:
+        seen = get_orders(market, day)
+    except Exception as e:  # noqa: BLE001 - 확정하지 못하면 unknown 그대로(보수적)
+        logger.warning("당일 주문 목록 조회 실패 %s %s: %s", account_id, market, e)
+        return out
+    known: set[str] = set()
+    external: set[str] = set()  # 체결 동기화가 만든 행 — unknown 주문의 체결일 수도 있다(모호)
+    for r in conn.execute(
+        "SELECT order_no, mode FROM orders WHERE account_id=? AND market=? "
+        "AND order_no IS NOT NULL AND created_at >= ? AND created_at < ?",
+        (account_id, market, lo, hi),
+    ):
+        known.add(r["order_no"])
+        if r["mode"] == "external":
+            external.add(r["order_no"])
+    groups: dict[tuple[str, str], list[Any]] = {}
+    for r in unknown:
+        groups.setdefault((r["ticker"], r["side"]), []).append(r)
+    for (ticker, side), rows in groups.items():
+        cands = [
+            o for o in seen if o.ticker == ticker and o.side == side and o.order_no not in known
+        ]
+        if len(cands) == 1 and len(rows) == 1 and cands[0].qty == int(rows[0]["qty"]):
+            conn.execute(
+                "UPDATE orders SET order_no=?, status='accepted' WHERE id=?",
+                (cands[0].order_no, rows[0]["id"]),
+            )
+            conn.commit()
+            out["accepted"] += 1
+            logger.info(
+                "미확인 주문 접수 확정 %s %s %s → 접수번호 %s",
+                account_id, ticker, side, cands[0].order_no,
+            )  # fmt: skip
+            continue
+        if cands or any(
+            o.ticker == ticker and o.side == side and o.order_no in external for o in seen
+        ):
+            continue  # 어느 주문인지 가를 수 없다 — 체결이 오면 기존 모호 처리(`_flag_ambiguous`)
+        for r in rows:
+            if now - datetime.fromisoformat(r["created_at"]) < UNKNOWN_GRACE:
+                continue
+            conn.execute(
+                "UPDATE orders SET status='failed', message=? WHERE id=? AND status='unknown'",
+                ("미접수 확정: KIS 당일 주문 목록에 없음", r["id"]),
+            )
+            conn.commit()
+            out["failed"] += 1
+            logger.warning(
+                "미확인 주문 미접수 확정 %s %s %s #%s", account_id, ticker, side, r["id"]
+            )
+            if notifier is not None:
+                try:
+                    notifier.send(
+                        messages.order_not_accepted(
+                            account=account_id,
+                            market=market,
+                            label=labels.label(ticker, labels.resolve(conn, market, ticker)),
+                            side=side,
+                            qty=r["qty"],
+                        )
+                    )
+                except Exception as e:  # noqa: BLE001 - 알림 실패가 동기화를 막지 않는다
+                    logger.warning("미접수 확정 알림 실패: %s", e)
+    return out
 
 
 def _refresh_status(conn: sqlite3.Connection, order_id: int) -> bool:
@@ -229,6 +329,9 @@ def sync_fills(
     failed: list[str] = []  # 조회 실패 시장(호출자가 '체결 확인됨' 으로 보지 않게)
     days = {m: _day_for(m, d) for m in account.markets}
     for market in account.markets:
+        resolve_unknown(
+            conn, broker, account.id, market, days[market], now=now(), notifier=notifier
+        )
         try:
             fills = broker.get_fills(market, days[market])
         except Exception as e:  # noqa: BLE001 - 한 시장 실패가 다른 시장을 막지 않는다

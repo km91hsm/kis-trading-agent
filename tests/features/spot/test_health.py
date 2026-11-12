@@ -118,3 +118,15 @@ def test_holiday_fn_returning_none_falls_back(conn, project):
         ("spot.fill_ambiguous.KR", "warning"),
         ("spot.reconcile.paper-main.KR", "watch"),
     }
+
+
+def test_monitor_blind_flag_becomes_warning_after_threshold(conn, project):
+    """손절 감시가 연속으로 종목을 점검하지 못하면(시세·보유 조회 실패) 운영 점검에 올린다."""
+    set_flag(conn, "monitor_blind:KR", {"count": 2, "what": ["paper-main 005930"]})
+    assert "spot.monitor_blind.KR" not in {
+        i.key for i in health.check(ctx(conn, project, acct("paper-main")))
+    }
+    set_flag(conn, "monitor_blind:KR", {"count": 6, "what": ["paper-main 005930"]})
+    by = {i.key: i for i in health.check(ctx(conn, project, acct("paper-main")))}
+    assert by["spot.monitor_blind.KR"].level == "warning"
+    assert "005930" in by["spot.monitor_blind.KR"].text

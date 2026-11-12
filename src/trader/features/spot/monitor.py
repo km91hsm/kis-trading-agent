@@ -49,6 +49,8 @@ logger = logging.getLogger("trader.spot")
 
 REEVAL_INTERVAL = timedelta(minutes=30)
 STOP_LOSS_LIMIT_DISCOUNT = Decimal("0.03")  # US 손절은 현재가 3% 아래 지정가(체결 가능 지정가)
+BLIND_TICKS = 5  # 점검 못 한 종목이 이만큼 연속 틱이면 알린다(운영 점검도 같은 기준)
+BLIND_FLAG = "monitor_blind:"  # + 시장
 SL_REJECT_LIMIT = 3  # 손절이 이만큼 연속 거부되면 쉰다
 SL_REJECT_COOLDOWN_MIN = 10
 CLOSE_LOOKBACK = timedelta(days=45)  # `close` 무효화 조건용 종가표 창
@@ -229,6 +231,7 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
             positions = broker.get_positions(market)
         except (KisApiError, ValueError) as e:
             logger.warning("보유 조회 실패 %s: %s", account.id, e)
+            result.setdefault("unchecked", []).append(f"{account.id} 보유 조회 실패")
             continue
         for pos in positions:
             if pos.ticker in excluded:
@@ -242,8 +245,32 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
                 result.setdefault("errors", []).append(
                     f"{account.id} {market} {pos.ticker}: {type(e).__name__}: {e}"[:200]
                 )
+    _track_blind(ctx, market, result.get("unchecked") or [])
     _handle_triggers(ctx, market, today, pending, result)
     return result
+
+
+def _track_blind(ctx: MonitorContext, market: str, unchecked: list[str]) -> None:
+    """점검하지 못한 보유 종목(시세·보유 조회 실패)이 연속 틱으로 이어지면 손절 감시가 비어
+    있다 — 잡 결과는 ok 라 드러나지 않으므로 control 플래그로 세고 `BLIND_TICKS` 째에 한 번
+    알린다(운영 점검 `spot.monitor_blind.<시장>` 이 같은 플래그를 읽는다). 회복하면 지운다."""
+    ex = ctx.exec
+    key = BLIND_FLAG + market
+    cur = control.get_flag(ex.conn, key) or {}
+    if not unchecked:
+        if cur:
+            control.set_flag(ex.conn, key, {})
+        return
+    count = int(cur.get("count") or 0) + 1
+    control.set_flag(
+        ex.conn,
+        key,
+        {"count": count, "since": cur.get("since") or ex.now().isoformat(), "what": unchecked},
+    )
+    if count == BLIND_TICKS:
+        core.notify_quietly(
+            ex.notifier, messages.monitor_blind(market=market, what=unchecked, ticks=count)
+        )
 
 
 def _check_one(
@@ -260,6 +287,7 @@ def _check_one(
     ex = ctx.exec
     quote = _cached_quote(ctx, market, pos, quotes)
     if quote is None:
+        result.setdefault("unchecked", []).append(f"{account.id} {pos.ticker}")
         return
     result["checked"] += 1
     latest = spot_ledger.latest_decision(ex.conn, market, pos.ticker)

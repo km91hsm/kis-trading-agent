@@ -10,7 +10,7 @@ from tests.features.accounts.conftest import make_account
 from trader.features.accounts.settings import to_broker_account
 from trader.features.spot import fills as fills_mod
 from trader.kernel.broker.fake import FakeBroker
-from trader.kernel.broker.models import Fill
+from trader.kernel.broker.models import Fill, OrderSeen
 from trader.kernel.config.market_hours import MARKET_CLOSE, market_close
 from trader.kernel.execution import ledger as repo
 from trader.kernel.ledger import control
@@ -256,9 +256,10 @@ def test_sync_after_close_expires_unfilled_orders_of_that_day(conn):
     after_close = datetime(2026, 10, 9, 7, 0, tzinfo=UTC)  # 16:00 KST
     r = fills_mod.sync_fills(conn, broker, acct, D, now=lambda: after_close)
     st = {row["id"]: row["status"] for row in conn.execute("SELECT id, status FROM orders")}
-    assert st[o_acc] == "expired" and st[o_unk] == "expired"
+    # unknown 은 KIS 당일 주문 목록에 없어 만료가 아니라 "미접수 확정"(failed)으로 닫힌다
+    assert st[o_acc] == "expired" and st[o_unk] == "failed"
     assert st[o_fill] == "filled" and st[o_old] == "accepted" and st[o_us] == "accepted"
-    assert r["expired"] == 2
+    assert r["expired"] == 1
     # 만료된 주문은 살아 있는 주문이 아니다
     assert not repo.open_orders_today(conn, "paper-main", "005930", "BUY", D, market="KR")
     assert "005930" not in repo.today_buy_tickers(conn, "paper-main", D, market="KR")
@@ -378,3 +379,93 @@ def test_duplicate_fill_does_not_double_count_and_fetch_failure_does_not_expire(
     assert r["failed_markets"] == ["KR"] and r["expired"] == 0
     row = conn.execute("SELECT status, filled_qty FROM orders WHERE id=?", (oid,)).fetchone()
     assert (row["status"], row["filled_qty"]) == ("partial", 2)
+
+
+# --- 응답 없는(unknown) 주문을 당일 주문 목록으로 확정 ---------------------------------------
+
+
+class _Notes:
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, text, **kw):
+        self.msgs.append(text)
+        return True
+
+
+def _unknown_sell(conn, created_at="2026-10-09T00:10:00+00:00"):
+    return repo.insert_order(
+        conn, decision_id=None, account_id="paper-main", ticker="005930", market="KR",
+        side="SELL", qty=3, order_type="MARKET", price=None, status="unknown", order_no=None,
+        message="NETWORK_UNKNOWN", mode="auto", created_at=created_at,
+    )  # fmt: skip
+
+
+def _seen(order_no, qty=3, filled=0, side="SELL", ticker="005930"):
+    return OrderSeen(
+        order_no=order_no, ticker=ticker, market="KR", side=side, qty=qty, filled_qty=filled,
+        ordered_at=datetime(2026, 10, 9, 0, 10, 5, tzinfo=UTC),
+    )  # fmt: skip
+
+
+def _at(minutes):
+    return lambda: datetime(2026, 10, 9, 0, 10, tzinfo=UTC) + timedelta(minutes=minutes)
+
+
+def test_unknown_order_found_in_broker_list_gets_its_order_no(conn):
+    """KIS 가 받았지만 아직 체결되지 않은 주문: 주문번호를 붙여 accepted 로 확정한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001")]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(1))
+    row = conn.execute("SELECT status, order_no FROM orders WHERE id=?", (oid,)).fetchone()
+    assert (row["status"], row["order_no"]) == ("accepted", "0000200001")
+
+
+def test_unknown_order_absent_from_broker_list_is_failed_after_grace(conn):
+    """KIS 당일 주문 목록에 없으면 접수되지 않은 것 — 유예(2분) 뒤 failed 로 확정해 손절 재시도를
+    풀고 한 번 알린다. 유예 안에서는 KIS 반영 지연일 수 있어 그대로 둔다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    notes = _Notes()
+    broker = _fb(acct)
+
+    def status():
+        return conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0]
+
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(1), notifier=notes)
+    assert status() == "unknown" and notes.msgs == []
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(3), notifier=notes)
+    assert status() == "failed"
+    assert len(notes.msgs) == 1 and "접수되지 않" in notes.msgs[0]
+
+
+def test_unknown_order_is_left_alone_when_candidates_are_ambiguous_or_query_fails(conn):
+    """같은 종목·방향의 낯선 주문이 있는데 수량이 다르거나 여럿이면 붙이지도 죽이지도 않는다.
+    주문 목록 조회가 실패해도 마찬가지 — 체결 동기화는 계속한다."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001", qty=5)]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(5))
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "unknown"
+
+    class _Broken(FakeBroker):
+        def get_orders(self, market, d):
+            raise RuntimeError("조회 실패")
+
+    r = fills_mod.sync_fills(conn, _Broken(to_broker_account(acct)), acct, D, now=_at(5))
+    assert r["failed_markets"] == []
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "unknown"
+
+
+def test_known_order_numbers_are_not_candidates_for_unknown_orders(conn):
+    """이미 원장에 주문번호가 있는 주문은 unknown 의 후보가 아니다 — 그 주문만 있으면 미접수."""
+    acct = make_account("paper-main", "paper", "auto")
+    oid = _unknown_sell(conn)
+    _order_with(
+        conn, status="accepted", order_no="0000200001", created_at="2026-10-09T00:05:00+00:00",
+        side="SELL",
+    )  # fmt: skip
+    broker = _fb(acct, seen_orders={("KR", D): [_seen("0000200001")]})
+    fills_mod.sync_fills(conn, broker, acct, D, now=_at(5))
+    assert conn.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0] == "failed"

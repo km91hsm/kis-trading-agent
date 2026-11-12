@@ -175,6 +175,21 @@ class Fill(BaseModel):
     filled_at: datetime
 
 
+class OrderSeen(BaseModel):
+    """당일 주문 목록의 주문 1건(체결·미체결 모두). 응답을 못 받은 주문이 KIS 에 접수됐는지
+    확정하는 데 쓴다. ordered_at 은 UTC."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    order_no: str
+    ticker: str
+    market: Market
+    side: Literal["BUY", "SELL"]
+    qty: int
+    filled_qty: int
+    ordered_at: datetime
+
+
 class OrderResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

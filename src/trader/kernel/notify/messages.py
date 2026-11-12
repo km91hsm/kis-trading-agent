@@ -255,6 +255,17 @@ def order_unknown(*, account: str, market: str, label: str, side: str, qty: Any,
     )
 
 
+def order_not_accepted(*, account: str, market: str, label: str, side: str, qty: Any) -> str:
+    return render(
+        "주문 미접수 확정",
+        f"{account} · {market} {label}",
+        [
+            f"{SIDE.get(side, side)} {qty}주 — 응답이 없던 주문은 KIS 에 접수되지 않았어요.",
+            "손절·재주문이 다시 나갈 수 있어요.",
+        ],
+    )
+
+
 def bookkeeping_failure(
     *, account: str, label: str, side: str, qty: Any, order_no: str | None, status: str, err: Any
 ) -> str:
@@ -360,6 +371,18 @@ def stop_deferred(*, account: str, market: str, label: str) -> str:
         "손절 보류",
         f"{account} · {label}",
         ["당일 미체결 매도를 취소하지 못해 손절을 내지 않았어요. 다음 점검에서 다시 해요."],
+    )
+
+
+def monitor_blind(*, market: str, what: list[str], ticks: int) -> str:
+    shown = ", ".join(what[:5]) + (f" 외 {len(what) - 5}건" if len(what) > 5 else "")
+    return render(
+        "손절 감시 공백",
+        f"{market} · {ticks}회 연속",
+        [
+            f"점검하지 못한 보유: {shown}",
+            "시세·잔고 조회가 계속 실패해 이 종목들의 손절을 판정하지 못하고 있어요.",
+        ],
     )
 
 

@@ -645,8 +645,14 @@ def approve(
         )  # fmt: skip
     try:
         result = transmit(deps, intent, run_dir=run_dir, mode="approve", broker=broker)
-    except OrderBookkeepingError:  # 접수 뒤 기록 실패: approved 로 굳지 않게 failed 로 남긴다
-        decide_approval(deps.conn, approval_id, "failed", expect="approved")
+    except Exception:
+        # 접수 뒤 기록 실패(OrderBookkeepingError)든 전송 전 예외(원장 잠금 등)든 approved 로
+        # 굳지 않게 failed 로 남긴다 — 주문 없는 "승인됨" 은 사용자가 알아챌 길이 없다. 실행 키는
+        # 풀지 않는다(보냈을 수도 있는 키는 수동 대조 대상).
+        try:
+            decide_approval(deps.conn, approval_id, "failed", expect="approved")
+        except Exception as e:  # noqa: BLE001 - 원래 예외를 가리지 않는다
+            logger.error("승인 #%s 실패 기록 실패: %s", approval_id, e)
         raise
     accepted = bool(result["result"]["accepted"])
     status = "approved"
