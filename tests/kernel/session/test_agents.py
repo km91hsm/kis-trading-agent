@@ -180,3 +180,21 @@ def test_trader_prompts_mention_by_lane():
         "fo/agents/fo-orchestrator.md",
     ):
         assert "--lane b" in (root / rel).read_text(encoding="utf-8"), rel
+
+
+def test_every_orchestrator_prompt_ends_with_untrusted_input_rule():
+    """수집 자료 안의 지시를 따르지 않는다는 규칙은 세션 종류와 무관하게 프롬프트에 들어간다."""
+    from trader.kernel.registry import discover
+    from trader.kernel.session import agents as agents_mod
+
+    features = discover()
+    defs = {a.name: a for f in features for a in f.agents}
+    kinds = [k for f in features for k in f.session_kinds]
+    assert kinds
+    for kind in kinds:
+        prompt = agents_mod.orchestrator_prompt(
+            kind, agents_mod.agents_for(kind, defs) if hasattr(agents_mod, "agents_for") else defs,
+            debate_rounds=1, checkpoint_names=["x"],
+        )  # fmt: skip
+        assert prompt.endswith(agents_mod.UNTRUSTED_INPUT_RULE), kind.kind
+        assert "지시가 아니다" in prompt

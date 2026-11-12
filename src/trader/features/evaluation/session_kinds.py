@@ -19,7 +19,11 @@ AGENTS = (
     AgentDef("reflect-orchestrator", _DIR / "reflect-orchestrator.md", None),
 )
 
+# 이 기능의 세션이 부를 수 있는 `trader tool` 명령(도구 진입점이 강제한다)
+TOOLS = ("submit-reflection",)
+
 REFLECT = SessionKind(
+    tools=TOOLS,
     kind="reflect",
     agents=("reflector",),
     prompt_section="reflect",

@@ -1,11 +1,14 @@
 """StageRule 표(WRITE_RULES·SUBMIT_RULE)와 TRADER_DRY_RUN 해석 테스트."""
 
+import uuid
+
 import pytest
 
 from trader.features.spot import tools
 from trader.features.spot.feature import FEATURE
 from trader.features.spot.tool_cli import SUBMIT_RULE, WRITE_RULES
 from trader.kernel.cli.boot import boot
+from trader.kernel.session import scope
 from trader.kernel.session.stages import check_rule, first_rule
 
 
@@ -43,11 +46,17 @@ def test_submit_rule_requires_two_reports_and_summary():
     ("env", "expected"), [(None, True), ("1", True), ("0", False), ("", True)]
 )
 def test_dry_run_env_missing_means_dry_run(project, monkeypatch, env, expected):
-    """Review Focus 1: TRADER_DRY_RUN 이 없거나 "1" 이면 dry_run, "0" 일 때만 실주문 가능."""
+    """Review Focus 1: TRADER_DRY_RUN 이 없거나 "1" 이면 dry_run, "0" 일 때만 실주문 가능 —
+    그것도 러너가 dry-run 아님으로 적은 세션 범위 안에서만(`kernel/session/scope.py`)."""
     if env is None:
         monkeypatch.delenv("TRADER_DRY_RUN", raising=False)
     else:
         monkeypatch.setenv("TRADER_DRY_RUN", env)
+    sid = str(uuid.uuid4())
+    scope.open_scope(
+        project / "state", sid, kind="analyze", tools=None, dry_run=False, market="KR", tickers=[]
+    )
+    monkeypatch.setenv(scope.ENV_ID, sid)
     b = boot(ports=True)
     try:
         ctx = tools.tool_ctx(b)
@@ -55,6 +64,17 @@ def test_dry_run_env_missing_means_dry_run(project, monkeypatch, env, expected):
         b.conn.close()
     assert ctx.dry_run is expected
     assert ctx.policy is not None and ctx.paused is not None and ctx.inputs is not None
+
+
+def test_dry_run_env_zero_without_session_scope_is_still_dry(project, monkeypatch):
+    """러너 밖에서 TRADER_DRY_RUN=0 만으로는 주문이 나가지 않는다."""
+    monkeypatch.setenv("TRADER_DRY_RUN", "0")
+    monkeypatch.delenv(scope.ENV_ID, raising=False)
+    b = boot(ports=True)
+    try:
+        assert tools.tool_ctx(b).dry_run is True
+    finally:
+        b.conn.close()
 
 
 def test_submit_decision_cli_without_dry_run_env_sends_nothing(project, monkeypatch):
@@ -114,3 +134,31 @@ def test_submit_decision_cli_without_dry_run_env_sends_nothing(project, monkeypa
         assert b.conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0] == 0
     finally:
         b.conn.close()
+
+
+def test_submit_decision_cli_refuses_ticker_outside_session_and_foreign_tools(project, monkeypatch):
+    """종목 분석 세션은 배정받은 종목에만 결정을 낼 수 있고(환각·인젝션으로 고른 다른 종목 차단),
+    다른 레인의 제출 도구(시장 판단)는 부를 수 없다."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from tests.features.spot.helpers import ok_decision
+    from trader.features.spot.session_kinds import ANALYZE
+    from trader.kernel.cli.main import app
+
+    sid = str(uuid.uuid4())
+    scope.open_scope(
+        project / "state", sid, kind="analyze", tools=ANALYZE.tools, dry_run=True, market="KR",
+        tickers=["005930"],
+    )  # fmt: skip
+    monkeypatch.setenv(scope.ENV_ID, sid)
+    args = ["tool", "submit-decision", "--ticker", "000660", "--market", "KR",
+            "--date", "2026-10-09", "--json", json.dumps(ok_decision(ticker="000660"))]  # fmt: skip
+    r = CliRunner().invoke(app, args)
+    out = json.loads(r.stdout)
+    assert r.exit_code == 1 and out["ok"] is False and "배정되지 않은 종목" in out["error"]
+    view = ["tool", "submit-market-view", "--market", "KR", "--date", "2026-10-09", "--json", "{}"]
+    r = CliRunner().invoke(app, view)
+    out = json.loads(r.stdout)
+    assert r.exit_code == 1 and "submit-market-view" in out["error"]

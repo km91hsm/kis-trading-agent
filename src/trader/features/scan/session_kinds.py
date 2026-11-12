@@ -23,7 +23,11 @@ AGENTS = (
     AgentDef("scan-orchestrator", _ORCH_MD),
 )
 
+# 이 기능의 세션이 부를 수 있는 `trader tool` 명령(도구 진입점이 강제한다)
+TOOLS = ("scan", "submit-discovery", "submit-screen")
+
 SCREEN = SessionKind(
+    tools=TOOLS,
     kind="screen",
     agents=AGENT_NAMES,
     prompt_section="screen",
@@ -40,6 +44,7 @@ SCREEN = SessionKind(
 )
 
 DISCOVER = SessionKind(
+    tools=TOOLS,
     kind="discover",
     agents=("scout",),
     prompt_section="discover",

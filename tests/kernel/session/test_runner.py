@@ -960,3 +960,24 @@ def test_other_failures_are_not_rerun(project, conn):
     result = run_session(spec(), ANALYZE, ctx, agents=ag.by_name(SPOT_AGENTS), runner=timeout,
                          claude_bin=Path("/fake/claude"))  # fmt: skip
     assert len(calls) == 1 and "타임아웃" in result.error
+
+
+def test_run_session_opens_scope_file_for_the_session_and_closes_it(project, conn):
+    """러너는 세션마다 범위 파일(허용 도구·dry-run·배정 종목)을 쓰고 env 로 가리킨다. 세션이
+    끝나면 지운다 — 도구 프로세스는 env 가 아니라 이 파일로 판단한다."""
+    from trader.kernel.session import scope
+
+    seen = {}
+
+    def fake_runner(cmd, **kw):
+        sid = kw["env"][scope.ENV_ID]
+        path = project / "state" / scope.DIR_NAME / f"{sid}.json"
+        seen["scope"] = json.loads(path.read_text(encoding="utf-8"))
+        seen["path"] = path
+        return _ok_result()
+
+    assert _run(spec(dry_run=False), make_ctx(project, conn), runner=fake_runner).ok
+    sc = seen["scope"]
+    assert sc["kind"] == KIND.kind and sc["dry_run"] is False
+    assert sc["market"] == "KR" and sc["tickers"] == ["005930"]
+    assert not seen["path"].exists()

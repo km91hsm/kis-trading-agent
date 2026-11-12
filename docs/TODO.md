@@ -423,5 +423,7 @@ health·watchdog·status·retention, CLI 전체 점검, 번들(`packaging/build.
 - [ ] 실기(사용자 확인 대기): 번들 zip(`v0.2.1` 태그 `build.yml`; `v0.2.0` 은 기능 README 누락으로 스모크 실패)을 풀어 더블클릭 → 웹 UI → `./trader accounts ping` (macOS `xattr`/우클릭 열기·Windows SmartScreen 1회; Windows `install` 로그온 등록 확인 포함) (M12 이후)
 - [ ] 실기(사용자 확인 대기): `Trader.app` 더블클릭 → 메뉴바 아이콘·브라우저 → 메뉴에서 일시정지/재개·로그 폴더·종료(실행 중 세션 대기 후 잠금 해제). Windows 는 `TraderApp.exe` 작업표시줄 아이콘·콘솔 창 없음 확인 (M12 이후)
 - [ ] 실기(사용자 확인 대기, 모의): KR 잔고 응답 `output2.tot_evlu_amt`·`nass_amt`·종목 `ord_psbl_qty` 필드 존재, US 잔고·체결이 NASD·NYSE·AMEX 3회 조회로 합쳐지는지, 재부팅 뒤 `daemon.lock` 이 stale 로 넘겨지는지 (M5 이후)
+- [ ] 실기(사용자 확인 대기): 실제 세션 1회(`trader spot analyze --dry-run` 등)로 세션 범위가 도구 호출을 막지 않는지 확인 — 세션 중 `state/sessions/<id>.json` 이 생겼다 지워지고 체크포인트가 평소대로 쌓이면 정상 (2026-11 전체 검토 PR4)
+- [ ] 사용자 결정 대기: LLM 세션의 Bash 는 `cat` 같은 읽기 전용 명령을 허용 규칙과 무관하게 실행할 수 있다(Claude Code 권한 문서). 세션은 `--setting-sources ""` 로 떠 프로젝트 deny 규칙이 적용되지 않으므로 `kernel/session/runner.py::build_command` 에 `--disallowedTools "Read(<secrets 경로>/**)"` 를 더하는 방안 — 플래그가 실제 `claude` 에서 의도대로 동작하는지 실기 확인이 필요해 이번에 넣지 않았다 (PR4)
 - [ ] 사용자 확인 대기: `channels.naver_blog` 기본값 — 옛 기본 `ranto28` 복원 여부 결정 (M3)
 - [ ] 사용자 확인 대기: `EDGAR_USER_AGENT` 시크릿 입력 (M3 ingest, EDGAR 수집)

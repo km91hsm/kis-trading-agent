@@ -16,7 +16,7 @@ from trader.features.spot.tools import SUBMIT_RULE, WRITE_RULES, ToolError
 from trader.kernel.cli.boot import boot
 from trader.kernel.cli.tool_cmd import run_tool
 from trader.kernel.registry.types import ToolCommand
-from trader.kernel.session import run_store
+from trader.kernel.session import run_store, scope
 
 __all__ = ["SUBMIT_RULE", "TOOLS", "WRITE_RULES", "checkpoint_app"]
 
@@ -199,6 +199,9 @@ def submit_cmd(
     """결정 제출 → 계좌별 리스크 판정·실행(주문은 executor 코어에서만). JSON 1줄."""
 
     def go(ctx: tools.ToolContext, **kw) -> dict:
+        # 세션이 배정받은 종목에만 결정을 낼 수 있다(환각·인젝션으로 고른 다른 종목 차단)
+        if err := scope.ticker_error(ticker, scope.current()):
+            return {"ok": False, "error": err}
         return tools.submit_decision(ctx, payload=_payload(json_text), **kw)
 
     _run(go, ticker=ticker, market=market, date=date, stage=stage)

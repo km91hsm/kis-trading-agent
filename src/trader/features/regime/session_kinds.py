@@ -39,7 +39,11 @@ AGENTS = (
     AgentDef("market-orchestrator", _ORCH_MD),
 )
 
+# 이 기능의 세션이 부를 수 있는 `trader tool` 명령(도구 진입점이 강제한다)
+TOOLS = ("market", "submit-market-view")
+
 MARKET = SessionKind(
+    tools=TOOLS,
     kind="market",
     research_targets=lambda ctx, spec: [(market_dir(spec.date, spec.market, ctx.state), RESEARCH)],
     agents=MARKET_AGENTS,

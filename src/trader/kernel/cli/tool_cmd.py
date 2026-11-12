@@ -8,6 +8,7 @@ from collections.abc import Callable
 import typer
 
 from trader.kernel.registry.types import Feature, RegistryError
+from trader.kernel.session import scope
 
 
 def emit(payload: dict) -> None:
@@ -31,6 +32,17 @@ def run_tool(fn: Callable[[], dict]) -> None:
 def build_tool_app(features: list[Feature]) -> typer.Typer:
     """기능이 선언한 ToolCommand 를 모은 그룹. 이름 중복은 RegistryError."""
     tool = typer.Typer(help="LLM 도구 명령 (JSON 1줄 출력)", no_args_is_help=True)
+
+    @tool.callback()
+    def _guard(ctx: typer.Context) -> None:
+        """하위 명령을 돌리기 전에 세션 범위(`kernel/session/scope.py`)를 본다 — 러너가 띄운
+        세션은 그 세션 종류에 허용된 도구만 부를 수 있다(러너 밖 호출은 제한 없음)."""
+        if ctx.resilient_parsing or ctx.invoked_subcommand is None:
+            return
+        err = scope.tool_error(ctx.invoked_subcommand, scope.current())
+        if err:
+            emit({"ok": False, "error": err})
+
     seen: set[str] = set()
     for f in features:
         for tc in f.tools:
