@@ -63,6 +63,7 @@
   - 일일 세션 상한 초과는 `PipelineError`. 모든 단계 파일은 `run_store` 함수로만 읽고 쓴다.
   - 마이그레이션 `SESSION` 은 `ledger.migrations.KERNEL` 이 아니라 `contracts.KERNEL_MODULES` 로 합쳐진다(`KERNEL` 만 쓰는 커널 테스트가 깨지지 않게).
   - M10: `tooling`(도구 공용 `schema_error`·`validate_payload`·`summarize_turns`, regime·fo 가 공유)·`fake`(`fake_call`·`ensure_ok`·`FakeSessionError`·`fake_report`·`fake_turn` — spot·regime·scan·evaluation·fo 가 공유). fo 의 세션 종류 `fo`·`fo_resume`(`SessionKind`, `extra_cap_key=None`)는 일일 상한을 커널이 모르는 설정(`fo.session_cap`)에 두기 위해 fo `session.run` 이 세션 앞에서 오늘 `runs.kind='fo'` 건수를 검사한다(원자적 예약 없음). `usage.RESUME_KINDS` 에 `fo_resume` 이 들어 80% 감속에서도 보유 재평가는 통과한다. 세션 상한 초과는 fo 에서만 `session.run` 밖으로 `PipelineError` 가 나가고 잡·큐 본문이 `skipped` 로 바꾼다.
+- 세션 범위(`session/scope.py`): 러너가 세션마다 `state/sessions/<session_id>.json`(종류·허용 도구 `SessionKind.tools`·dry-run·배정 종목)을 쓰고 env `TRADER_SESSION_ID` 로 가리킨다. `trader tool` 진입점(`cli/tool_cmd.py`)이 그 파일로 하위 명령을 거르고, 도구의 dry-run 은 `scope.dry_run()` 으로만 정한다 — 실제 주문은 `TRADER_DRY_RUN=0` 이고 범위 파일도 dry-run 이 아닐 때만(러너 밖 호출은 항상 dry-run). 기능의 도구 실행 헬퍼는 받은 인자를 `run_tool(go, args=…)` 로 넘겨 `ticker`·`market`·`date` 가 세션 범위 밖이면 본문을 돌리지 않는다(제출뿐 아니라 수집·체크포인트 쓰기에도 걸린다). 세션이 끝나면 파일을 지워 끝난 세션의 id 로는 도구를 부를 수 없고, 강제 종료로 남은 파일은 데몬 기동 때 지운다. 세션 종류를 더하면 `tools` 를 반드시 선언한다(`contracts.check`).
 - 테스트: `tests/kernel/session/`
 
 ## execution

@@ -227,3 +227,43 @@ def test_contracts_reject_kernel_reserved_area_key():
     clash = replace(alpha, id="orders", health_areas=(HealthArea("orders", f),))
     msgs = contracts.check([clash, beta], roots=[OK_ROOT])
     assert "기능 orders 의 health 영역 key 'orders' 는 커널 예약 key 입니다" in msgs
+
+
+def test_every_session_kind_declares_only_its_own_lane_tools():
+    """세션 종류 × 도구 허용 표(2026-11 전체 검토 PR4). 종목 분석 세션이 시장 판단·파생 결정·스캔
+    결과를 제출할 수 없어야 한다 — 표가 바뀌면 이 테스트를 함께 고친다."""
+    from trader.kernel.registry import discover
+
+    features = discover()
+    assert not [m for m in contracts.check(features) if "세션" in m]
+    table = {k.kind: set(k.tools) for f in features for k in f.session_kinds}
+    spot = {"status", "collect", "checkpoint", "submit-decision"}
+    assert table == {
+        "analyze": spot,
+        "resume": spot,
+        "market": {"market", "submit-market-view"},
+        "screen": {"scan", "submit-discovery", "submit-screen"},
+        "discover": {"scan", "submit-discovery", "submit-screen"},
+        "fo": {"fo", "submit-fo-decision"},
+        "fo_resume": {"fo", "submit-fo-decision"},
+        "reflect": {"submit-reflection"},
+    }
+
+
+def test_session_kind_without_tools_or_with_unknown_tool_is_a_contract_violation():
+    from trader.kernel.registry.types import SessionKind
+
+    alpha, beta = _ok()
+
+    def kind(tools):
+        return SessionKind(
+            kind="k", agents=(), prompt_section="", schemas=(), timeout_key="session",
+            runs_kind="k", extra_cap_key=None, throttle="hard", fake=lambda *a, **k: None,
+            tools=tools,
+        )  # fmt: skip
+
+    msgs = contracts.check([replace(alpha, session_kinds=(kind(None),)), beta], roots=[OK_ROOT])
+    assert any("허용 도구" in m for m in msgs)
+    bad = replace(alpha, session_kinds=(kind(("nope",)),))
+    msgs = contracts.check([bad, beta], roots=[OK_ROOT])
+    assert any("등록되지 않은 도구 nope" in m for m in msgs)

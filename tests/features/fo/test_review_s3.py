@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -48,7 +49,7 @@ from trader.kernel.config import KST
 from trader.kernel.execution.types import OrderBookkeepingError
 from trader.kernel.lane.types import LaneContext
 from trader.kernel.ledger import control
-from trader.kernel.session import tooling
+from trader.kernel.session import scope, tooling
 from trader.kernel.session.agents import load_agent, orchestrator_prompt
 from trader.kernel.session.run_store import list_checkpoints, market_dir, read_checkpoint
 from trader.kernel.session.runner import SessionSpec, run_session
@@ -72,6 +73,11 @@ def test_fo_tool_ctx_wires_regime_view_and_ports(project, conn, monkeypatch):
     control.set_flag(conn, "market_view:KR", {"date": today, "stance": "RISK_OFF",
                                               "confidence": 0.8})  # fmt: skip
     monkeypatch.setenv("TRADER_DRY_RUN", "0")
+    sid = str(uuid.uuid4())  # 실주문은 러너가 dry-run 아님으로 적은 세션 범위 안에서만
+    scope.open_scope(
+        project / "state", sid, kind="fo", tools=None, dry_run=False, market="KR", tickers=[]
+    )
+    monkeypatch.setenv(scope.ENV_ID, sid)
     b = _boot(conn)
     ctx = tools.tool_ctx(b)
     fo = ctx.fo

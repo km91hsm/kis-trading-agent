@@ -30,6 +30,7 @@ from trader.kernel.notify import messages
 from trader.kernel.registry import hooks as hooks_mod
 from trader.kernel.registry.types import Feature
 from trader.kernel.session import calls
+from trader.kernel.session import scope as session_scope
 
 logger = logging.getLogger("trader.daemon")
 
@@ -205,6 +206,7 @@ class Daemon:
             # 만료된 queued 를 먼저 정리한 뒤 훅이 enqueue 해야 중복으로 빠지지 않는다
             hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
             conn = deps.conn_factory()
+            session_scope.purge_stale(deps.state)  # 강제 종료로 남은 세션 범위 파일
             try:  # 재기동 전에 남은 running 세션 행(1시간 초과)을 error 로 닫는다
                 calls.close_stale(conn, now=deps.now())
                 n = runs.close_running(conn, reason="데몬 재시작으로 중단")

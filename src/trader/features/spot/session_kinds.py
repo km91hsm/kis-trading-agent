@@ -36,7 +36,11 @@ AGENTS = (
     AgentDef("orchestrator", _DIR / "orchestrator.md", None),
 )
 
+# 이 기능의 세션이 부를 수 있는 `trader tool` 명령(도구 진입점이 강제한다)
+TOOLS = ("status", "collect", "checkpoint", "submit-decision")
+
 ANALYZE = SessionKind(
+    tools=TOOLS,
     kind="analyze",
     agents=AGENT_NAMES,
     prompt_section="",
@@ -54,6 +58,7 @@ ANALYZE = SessionKind(
 )
 
 RESUME = SessionKind(
+    tools=TOOLS,
     kind="resume",
     agents=AGENT_NAMES,
     prompt_section="resume",

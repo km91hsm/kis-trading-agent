@@ -56,7 +56,7 @@
 - **설정 섹션**: yaml 키는 `config` 의 섹션 레지스트리에 등록한 pydantic 모델(`extra="forbid"`)로만 읽는다. yaml 키를 더하면 모델과 `templates/config/*.yaml` 을 같이 바꾼다(`tests/kernel/config/test_templates.py` 가 강제).
 - **생성 파일**: `web/src/generated/sse-keys.ts`·`nav.ts` 는 생성 파일이다. 손으로 고치지 말고 `dev gen-sse-keys`·`dev gen-nav` 로 만든다. CI 게이트는 `tests/kernel/web/test_app.py::test_gen_sse_keys_matches_committed_file`·`test_gen_nav_matches_committed_file` 이고 `--check` 는 그 로컬 등가물이다.
 - **데몬 잡 설정**: 잡 시각은 `schedule.yaml` 의 점 경로 키(`JobSpec.schedule_key`)로 가리킨다. 시각을 코드에 박지 않는다.
-- **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. (스펙 §2.3)
+- **LLM 은 도구만**: LLM 은 주문·원장·파일을 직접 건드리지 않고 `trader tool` 명령(전제조건 표 `StageRule`)만 쓴다. 허용 목록은 `tool_command()` 와 일치해야 한다. 세션 종류마다 부를 수 있는 도구(`SessionKind.tools`)·dry-run·배정 종목은 러너가 쓴 세션 범위 파일로 강제한다(env 가 아니다). (스펙 §2.3, `kernel/session/scope.py`)
 - **주문은 executor 코어에서만**: 모든 주문은 `kernel/execution` 의 코어를 지난다(게이트·멱등 claim·승인·기록). 기능이 KIS 주문 API 를 직접 부르지 않는다. 예외 둘: 파생(fo)은 다리 상태·`orders` 한 트랜잭션 때문에 자체 실행기(`features/fo/executor.py`, `LegStore`)를 쓰고, 모의 전용 연결 점검 `features/accounts/order_test.py`(`accounts order-test`, 원장 기록 없음)는 브로커로 직접 접수·취소한다. (스펙 §2.1, `features/fo/README.md` A1, `tests/kernel/registry/test_order_paths.py` `ALLOWED`)
 - **`dry_run` 은 env**: 주문 전송 차단 여부는 `--dry-run` 이 정하는 환경변수 하나로 하위 프로세스(LLM 세션 포함)까지 전달하고, 코드 경로마다 따로 두지 않는다. (스펙 §2.6)
 - **실전 auto 는 LIVE 확인**: 실전 계좌를 `auto` 로 두려면 LIVE 확인이 선행돼야 한다. (스펙 §2.1 `features/accounts`)

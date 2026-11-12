@@ -34,6 +34,7 @@ from trader.kernel.platform import claude_bin as claude_bin_mod
 from trader.kernel.registry.types import AgentDef, SessionKind
 from trader.kernel.session import agents as agents_mod
 from trader.kernel.session import calls, research_policy, usage
+from trader.kernel.session import scope as session_scope
 
 logger = logging.getLogger("trader.session")
 
@@ -564,6 +565,7 @@ def _run_session_once(
         )
 
     cwd: Path | None = None
+    scope_id: str | None = None
     try:
         # 호출자가 경로를 넘기면(테스트·dry-run) 그대로 쓰고, 아니면 settings/PATH 에서 찾는다
         bin_path = claude_bin if claude_bin else claude_bin_mod.find_claude(settings.claude_bin)
@@ -585,8 +587,18 @@ def _run_session_once(
             checkpoint_names=checkpoint_names,
         )
         if codex_required:
-            prompt += codex_section(research, cross=cross)
+            # 비신뢰 입력 규칙은 어떤 절이 붙어도 프롬프트의 마지막에 둔다
+            rule = agents_mod.UNTRUSTED_INPUT_RULE
+            prompt = prompt.removesuffix(rule) + codex_section(research, cross=cross) + rule
         session_id = str(uuid.uuid4())
+        # 이 세션이 해도 되는 일(허용 도구·dry-run·배정 종목)을 도구 프로세스가 읽을 파일로 남긴다.
+        # 도구는 env 가 아니라 이 파일을 믿는다(`scope.py`)
+        session_scope.open_scope(
+            paths.state_dir(), session_id, kind=kind.kind, tools=kind.tools,
+            dry_run=spec.dry_run, market=spec.market, date=spec.date.isoformat(),
+            tickers=[str(t["ticker"]) for t in spec.tickers if t.get("ticker")],
+        )  # fmt: skip
+        scope_id = session_id
         cmd = build_command(
             spec, kind, settings, bin_path, agents_file, session_id=session_id, prompt=prompt
         )
@@ -597,6 +609,7 @@ def _run_session_once(
             "CLAUDE_CODE_RETRY_WATCHDOG": "1",
             # tool 서브프로세스가 상속한다. "0" 일 때만 실제 주문·승인 요청 (LLM 인자 의존 없음)
             "TRADER_DRY_RUN": "1" if spec.dry_run else "0",
+            session_scope.ENV_ID: session_id,
             "TRADER_HOME": str(paths.project_root()),
             "PATH": str(bundle.tool_bin_dir()) + os.pathsep + claude_bin_mod.child_path(bin_path),
             # 최대치는 Claude Code 기본 최대(10분) 아래로 낮추지 않는다
@@ -623,6 +636,8 @@ def _run_session_once(
         # 구분한다)
         if cwd is not None:
             shutil.rmtree(cwd, ignore_errors=True)
+        if scope_id is not None:
+            session_scope.close_scope(paths.state_dir(), scope_id)
         try:
             runs.finish(conn, run_id, "error", error=f"세션 준비 실패: {type(e).__name__}: {e}")
         except Exception:  # noqa: BLE001 - 원 예외를 가리지 않는다
@@ -666,6 +681,8 @@ def _run_session_once(
         raise
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
+        # 끝난 세션의 id 로는 도구를 못 부른다
+        session_scope.close_scope(paths.state_dir(), session_id)
     try:
         data, rate = parse_stream(proc.stdout)
     except PipelineError as e:
