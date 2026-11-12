@@ -49,6 +49,10 @@ logger = logging.getLogger("trader.spot")
 
 REEVAL_INTERVAL = timedelta(minutes=30)
 STOP_LOSS_LIMIT_DISCOUNT = Decimal("0.03")  # US 손절은 현재가 3% 아래 지정가(체결 가능 지정가)
+BLIND_TICKS = 5  # 점검 못 한 종목이 이만큼 연속 틱이면 알린다(운영 점검도 같은 기준)
+BLIND_FLAG = "monitor_blind:"  # + 시장
+SL_REJECT_LIMIT = 3  # 손절이 이만큼 연속 거부되면 쉰다
+SL_REJECT_COOLDOWN_MIN = 10
 CLOSE_LOOKBACK = timedelta(days=45)  # `close` 무효화 조건용 종가표 창
 
 CloseTable = Callable[[str, date, date], Mapping[str, Mapping[date, float | None]]]
@@ -185,14 +189,25 @@ def _closes_if_needed(
 
 
 def _floor_data(
-    ctx: MonitorContext, account: Any, market: str, pos: Position, data: dict | None
+    ctx: MonitorContext, account: Any, market: str, pos: Position, latest: dict | None
 ) -> dict | None:
     """보유 묶음 시작일 이후 날짜의 결정들의 손절 바닥으로 손절선을 단조 유지한다(전체 검토
     L5·2-O1). 기준은 결정 날짜다(결정 id 순서가 아니다 — 과거 asof 결정을 나중에 적재해도 현재
-    보유분의 바닥을 올리지 않는다). 보유 기록이 없으면 바닥 없음."""
+    보유분의 바닥을 올리지 않는다). 보유 기록이 없으면 바닥 없음.
+
+    최신 결정이 보유 시작일 **이전** 날짜면 그 손절가는 지난 보유분의 것이다 — 버린다(청산 뒤
+    결정 없이 다시 보유한 종목이 옛 손절가로 첫 틱에 팔리지 않게). 손절은 기본 손절률로 본다."""
+    data = (latest or {}).get("data")
     since = xledger.held_since(ctx.exec.conn, account.id, [pos.ticker]).get(pos.ticker)
     if since is None:
+        # 새 매수의 체결이 아직 원장에 없으면 보유 시작일을 모른다. 그래도 최신 결정이 지난
+        # 보유분이 닫힌 날보다 앞이면 그 손절가는 지난 보유분의 것이다
+        flat = xledger.last_flat_day(ctx.exec.conn, account.id, pos.ticker)
+        if data and latest and flat and date.fromisoformat(str(latest["date"])) < flat:
+            data = {**data, "stop_loss": None}
         return data
+    if data and latest and date.fromisoformat(str(latest["date"])) < since:
+        data = {**data, "stop_loss": None}
     best = spot_ledger.max_stop_since(ctx.exec.conn, market, pos.ticker, None, since_date=since)
     return monotone_stop(data, best)
 
@@ -210,6 +225,10 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
     quotes: dict[str, Decimal | None] = {}
     pending: list[tuple[Any, Position, list[Signal], dict | None]] = []
     excluded = excluded_tickers(ex.settings, ctx.ports.get("regime"), market)
+    # 단타가 든 수량은 단타 청산 규칙이 맡는다 — 그 계좌의 보유가 단타 수량 이하일 때만 뺀다
+    # (같은 종목을 현물로도 들었거나 다른 계좌가 든 것은 그대로 손절을 본다)
+    scalp = ctx.ports.get("scalp")
+    scalp_legs = scalp.open_legs(ex.state, market, today) if scalp is not None else {}
     for account in ex.accounts:
         broker = ex.brokers.get(account.id)
         if market not in account.markets or broker is None:
@@ -218,9 +237,11 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
             positions = broker.get_positions(market)
         except (KisApiError, ValueError) as e:
             logger.warning("보유 조회 실패 %s: %s", account.id, e)
+            result.setdefault("unchecked", []).append(f"{account.id} 보유 조회 실패")
             continue
         for pos in positions:
-            if pos.ticker in excluded:
+            leg_qty = scalp_legs.get((account.id, pos.ticker), 0)
+            if pos.ticker in excluded or (leg_qty > 0 and pos.qty <= leg_qty):
                 # 헤지·현금 운용 ETF 는 국면 해제·현금 운용 규칙으로만 판다(손절·트리거 대상 아님)
                 result["skipped_excluded"] = result.get("skipped_excluded", 0) + 1
                 continue
@@ -231,8 +252,32 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
                 result.setdefault("errors", []).append(
                     f"{account.id} {market} {pos.ticker}: {type(e).__name__}: {e}"[:200]
                 )
+    _track_blind(ctx, market, result.get("unchecked") or [])
     _handle_triggers(ctx, market, today, pending, result)
     return result
+
+
+def _track_blind(ctx: MonitorContext, market: str, unchecked: list[str]) -> None:
+    """점검하지 못한 보유 종목(시세·보유 조회 실패)이 연속 틱으로 이어지면 손절 감시가 비어
+    있다 — 잡 결과는 ok 라 드러나지 않으므로 control 플래그로 세고 `BLIND_TICKS` 째에 한 번
+    알린다(운영 점검 `spot.monitor_blind.<시장>` 이 같은 플래그를 읽는다). 회복하면 지운다."""
+    ex = ctx.exec
+    key = BLIND_FLAG + market
+    cur = control.get_flag(ex.conn, key) or {}
+    if not unchecked:
+        if cur:
+            control.set_flag(ex.conn, key, {})
+        return
+    count = int(cur.get("count") or 0) + 1
+    control.set_flag(
+        ex.conn,
+        key,
+        {"count": count, "since": cur.get("since") or ex.now().isoformat(), "what": unchecked},
+    )
+    if count == BLIND_TICKS:
+        core.notify_quietly(
+            ex.notifier, messages.monitor_blind(market=market, what=unchecked, ticks=count)
+        )
 
 
 def _check_one(
@@ -249,10 +294,11 @@ def _check_one(
     ex = ctx.exec
     quote = _cached_quote(ctx, market, pos, quotes)
     if quote is None:
+        result.setdefault("unchecked", []).append(f"{account.id} {pos.ticker}")
         return
     result["checked"] += 1
     latest = spot_ledger.latest_decision(ex.conn, market, pos.ticker)
-    dec_data = _floor_data(ctx, account, market, pos, (latest or {}).get("data"))
+    dec_data = _floor_data(ctx, account, market, pos, latest)
     _, profile = horizon.of_decision(ex.settings.risk, dec_data)
     _warn_close_rule_unchecked(ctx, market, today, dec_data)
     signals = check_position(
@@ -543,6 +589,16 @@ def _cancel_open_buys(
     return done
 
 
+# 주문 서버·통신 쪽 실패(종목의 문제가 아니다): 연결 실패·HTTP 오류·KIS 게이트웨이(초당 한도·토큰)
+_TRANSPORT_CODES = ("NETWORK", "HTTP", "EGW")
+
+
+def _transport_failure(message: Any) -> bool:
+    """주문 결과 문구(`<msg_cd>: <msg1>`)가 통신·게이트웨이 실패인가 — 손절 쿨다운에 세지 않는다
+    (일시 장애가 풀린 직후 손절이 늦어지면 안 된다)."""
+    return str(message or "").startswith(_TRANSPORT_CODES)
+
+
 def _sell_now(
     ctx: MonitorContext,
     account: Any,
@@ -587,6 +643,10 @@ def _sell_now(
     recorded = f"sl_recorded:{account.id}:{market}:{pos.ticker}:{local_day.isoformat()}:{state}"
     if control.get_flag(ex.conn, recorded):
         return 0  # dry-run·off 계좌의 손절은 기록만 하므로 하루 1회면 충분하다(매 분 반복 금지)
+    rejects = f"sl_rejects:{account.id}:{market}:{pos.ticker}:{local_day.isoformat()}"
+    held = control.get_flag(ex.conn, rejects) or {}
+    if held.get("until") and ex.now() < datetime.fromisoformat(held["until"]):
+        return 0  # 연속 거부로 쉬는 중 — 매 분 같은 주문·알림을 반복하지 않는다
     dec = _stop_loss_decision(pos.ticker, market, quote, sig)
     try:
         results = executor.execute(
@@ -636,5 +696,26 @@ def _sell_now(
                         level=sig.detail.get("level"),
                     ),
                 )
+        if held:
+            control.set_flag(ex.conn, rejects, {})
         return 1
+    if (
+        order
+        and live
+        and order.get("status") in ("rejected", "failed")
+        and not _transport_failure(order.get("message"))
+    ):
+        # 거부·실패는 실행 키가 풀려 다음 틱에 또 나간다 — 연속 SL_REJECT_LIMIT 번이면 쉰다
+        count = int(held.get("count") or 0) + 1
+        nxt: dict[str, Any] = {"count": count}
+        if count % SL_REJECT_LIMIT == 0:
+            nxt["until"] = (ex.now() + timedelta(minutes=SL_REJECT_COOLDOWN_MIN)).isoformat()
+            core.notify_quietly(
+                ex.notifier,
+                messages.stop_retry_held(
+                    account=account.id, market=market, label=_label(ctx, market, pos.ticker),
+                    count=count, minutes=SL_REJECT_COOLDOWN_MIN,
+                ),
+            )  # fmt: skip
+        control.set_flag(ex.conn, rejects, nxt)
     return 0

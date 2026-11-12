@@ -564,7 +564,7 @@ def approve_execute_body(deps, params: dict, progress) -> dict:
         progress(f"승인 #{aid} 집행")  # 종료 중이면 여기서 JobCancelled — 주문 전에 멈춘다
         ectx = executor.exec_ctx_from(
             deps.settings, conn, port, deps.notifier or NullNotifier(), deps.now, deps.state,
-            ports=deps.ports,
+            ports=deps.ports, dry_run=bool(deps.dry_run),
         )  # fmt: skip
         return approvals.execute(ectx, aid)
     finally:

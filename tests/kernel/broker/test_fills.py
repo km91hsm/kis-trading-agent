@@ -44,3 +44,29 @@ def test_get_fills_us_parse(paper_client, respx_mock):
     assert p["ORD_STRT_DT"] == "20261008" and p["OVRS_EXCG_CD"] == "NASD"
     assert len(fills) == 1 and fills[0].ticker == "AAPL" and fills[0].price == Decimal("200.4500")
     assert fills[0].filled_at == datetime(2026, 10, 8, 13, 31, 1, tzinfo=UTC)  # 09:31:01 ET
+
+
+def test_get_orders_kr_lists_unfilled_orders_too(paper_client, respx_mock):
+    """당일 주문 전체(미체결 포함) — 응답을 못 받은 주문이 접수됐는지 확정하는 데 쓴다."""
+    route = respx_mock.get(PAPER + "/uapi/domestic-stock/v1/trading/inquire-daily-ccld").mock(
+        return_value=httpx.Response(200, json=load("ccld_kr.json"))
+    )
+    broker = KisBroker(make_account("paper-main", "paper"), paper_client)
+    seen = broker.get_orders("KR", date(2026, 10, 9))
+    assert route.calls[0].request.url.params["CCLD_DVSN"] == "00"  # 전체(체결 + 미체결)
+    assert [(o.order_no, o.ticker, o.side, o.qty, o.filled_qty) for o in seen] == [
+        ("0000117057", "005930", "BUY", 3, 3),
+        ("0000117058", "000660", "SELL", 2, 0),
+    ]
+
+
+def test_get_orders_us_lists_unfilled_orders_too(paper_client, respx_mock):
+    respx_mock.get(PAPER + "/uapi/overseas-stock/v1/trading/inquire-ccnl").mock(
+        return_value=httpx.Response(200, json=load("ccld_us.json"))
+    )
+    broker = KisBroker(make_account("paper-main", "paper", ["KR", "US"]), paper_client)
+    seen = broker.get_orders("US", date(2026, 10, 8))
+    assert [(o.order_no, o.ticker, o.side, o.qty, o.filled_qty) for o in seen] == [
+        ("0030038931", "AAPL", "BUY", 1, 1),
+        ("0030038932", "MSFT", "SELL", 1, 0),
+    ]

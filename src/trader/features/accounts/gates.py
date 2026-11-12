@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from trader.features.accounts import api
-from trader.kernel.config.market_hours import in_window
+from trader.kernel.config.market_hours import close_hm, in_window, us_early_closes
 from trader.kernel.config.time import KST, MARKET_TZ
 from trader.kernel.daemon.gates import should_skip
 from trader.kernel.registry.types import GateSpec
@@ -63,7 +63,11 @@ def build_monitor_gate(boot: Any, deps: Any) -> Callable[[Any], str | None]:
             return reason
         window = getattr(deps.schedule, job.market.lower()).monitor
         local = deps.now().astimezone(MARKET_TZ.get(job.market, KST))
-        return None if in_window(local.time(), window.start, window.end) else "창 밖"
+        # 조기 마감일(US 13:00)은 창 끝을 그날 마감으로 당긴다 — 장 밖 손절 주문이 거부되며 반복됨
+        end = window.end
+        if job.market == "US" and local.date() in us_early_closes(local.year):
+            end = min(end, close_hm(job.market, local.date()))
+        return None if in_window(local.time(), window.start, end) else "창 밖"
 
     return gate
 
