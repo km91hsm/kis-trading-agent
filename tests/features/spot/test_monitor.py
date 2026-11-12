@@ -999,3 +999,42 @@ def test_us_subdollar_stop_limit(price, expected):
     dec = monitor._stop_loss_decision("LOW", "US", q, Signal("stop_loss", q, {}))
     assert dec.limit_price == expected
     assert 0 < Decimal(str(dec.limit_price)) <= q
+
+
+def test_stop_price_of_decision_before_holding_is_not_applied_to_new_lot(conn, settings):
+    """청산 뒤 결정 없이 다시 보유하게 된 종목(수동 매수 등)에 옛 결정의 손절가(65000)를 쓰면
+    새 보유분이 첫 틱에 팔린다 — 보유 시작 전 결정의 손절가는 버리고 기본 −15% 만 본다.
+    (평단 70000·현재 63000: 59500 은 안 닿는다)"""
+    old = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, D - timedelta(days=30), "KR", "005930", "30_decision", {"data": old.model_dump()}
+    )
+    _filled_buy(conn, None, NOW.isoformat())  # 보유 시작 = 오늘, 결정 없음
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0
+    assert all(b.orders == [] for b in ctx.exec.brokers.values())
+    # 기본 손절선 아래로 내려가면 그대로 손절한다
+    ctx2 = _ctx(conn, settings, positions=[_pos(cur="59000")], price="59000")
+    assert monitor.monitor_once(ctx2, market="KR", today=D)["stop_loss_orders"] == 1
+
+
+def test_scalp_open_tickers_are_not_checked_by_spot_monitor(conn, settings):
+    """단타가 들고 있는 종목은 단타 청산 규칙이 맡는다 — 현물 손절·트리거 대상에서 뺀다."""
+
+    class _Scalp:
+        def open_tickers(self, state, market, today):
+            return {"005930"}
+
+    _old_decision(conn, stop_loss=65000.0)
+    accounts = _accounts("auto")
+    brokers = {
+        a.id: FakeBroker(to_broker_account(a), positions=[_pos(cur="63000")]) for a in accounts
+    }
+    ctx = _monitor_ctx(
+        settings, conn, accounts, brokers, FakeMarket(prices={"005930": Decimal("63000")}),
+        ports={"scalp": _Scalp()},
+    )  # fmt: skip
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0 and out["skipped_excluded"] == len(accounts)
+    assert all(b.orders == [] for b in brokers.values())

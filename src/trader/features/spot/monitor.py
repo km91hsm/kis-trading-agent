@@ -185,14 +185,20 @@ def _closes_if_needed(
 
 
 def _floor_data(
-    ctx: MonitorContext, account: Any, market: str, pos: Position, data: dict | None
+    ctx: MonitorContext, account: Any, market: str, pos: Position, latest: dict | None
 ) -> dict | None:
     """보유 묶음 시작일 이후 날짜의 결정들의 손절 바닥으로 손절선을 단조 유지한다(전체 검토
     L5·2-O1). 기준은 결정 날짜다(결정 id 순서가 아니다 — 과거 asof 결정을 나중에 적재해도 현재
-    보유분의 바닥을 올리지 않는다). 보유 기록이 없으면 바닥 없음."""
+    보유분의 바닥을 올리지 않는다). 보유 기록이 없으면 바닥 없음.
+
+    최신 결정이 보유 시작일 **이전** 날짜면 그 손절가는 지난 보유분의 것이다 — 버린다(청산 뒤
+    결정 없이 다시 보유한 종목이 옛 손절가로 첫 틱에 팔리지 않게). 손절은 기본 손절률로 본다."""
+    data = (latest or {}).get("data")
     since = xledger.held_since(ctx.exec.conn, account.id, [pos.ticker]).get(pos.ticker)
     if since is None:
         return data
+    if data and latest and date.fromisoformat(str(latest["date"])) < since:
+        data = {**data, "stop_loss": None}
     best = spot_ledger.max_stop_since(ctx.exec.conn, market, pos.ticker, None, since_date=since)
     return monotone_stop(data, best)
 
@@ -210,6 +216,9 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
     quotes: dict[str, Decimal | None] = {}
     pending: list[tuple[Any, Position, list[Signal], dict | None]] = []
     excluded = excluded_tickers(ex.settings, ctx.ports.get("regime"), market)
+    scalp = ctx.ports.get("scalp")
+    if scalp is not None:  # 단타 보유분은 단타 청산 규칙이 맡는다(현물 손절·트리거와 겹치지 않게)
+        excluded = excluded | frozenset(scalp.open_tickers(ex.state, market, today))
     for account in ex.accounts:
         broker = ex.brokers.get(account.id)
         if market not in account.markets or broker is None:
@@ -252,7 +261,7 @@ def _check_one(
         return
     result["checked"] += 1
     latest = spot_ledger.latest_decision(ex.conn, market, pos.ticker)
-    dec_data = _floor_data(ctx, account, market, pos, (latest or {}).get("data"))
+    dec_data = _floor_data(ctx, account, market, pos, latest)
     _, profile = horizon.of_decision(ex.settings.risk, dec_data)
     _warn_close_rule_unchecked(ctx, market, today, dec_data)
     signals = check_position(
