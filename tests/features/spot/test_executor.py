@@ -464,6 +464,18 @@ def test_paused_blocks_approve(ectx):
     assert executor.approve(ectx, aid)["ok"]
 
 
+def test_dry_run_context_does_not_execute_approval(ectx):
+    """dry-run 데몬에서 승인해도 주문이 나가지 않고 요청은 pending 으로 남는다."""
+    aid = _pending(ectx)
+    ectx.dry_run = True
+    r = executor.approve(ectx, aid)
+    assert r["ok"] is False and r["reason"] == "dry_run"
+    assert repo.get_approval(ectx.conn, aid)["status"] == "pending"
+    assert ectx.conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+    ectx.dry_run = False
+    assert executor.approve(ectx, aid)["ok"]
+
+
 def test_executor_passes_holiday_fn_to_rules(ectx):
     """보유 1거래일(10/8 매수) 인데 10/9 가 휴장이면 is_holiday 가 거래일 계산에 반영된다."""
     ectx.brokers["paper-main"].positions = [_pos()]

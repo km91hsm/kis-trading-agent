@@ -40,7 +40,7 @@ def telegram_body(deps: Any, job: Any = None) -> dict:
         ctx = CommandContext(
             conn=conn, settings=deps.settings, state=deps.state, now=deps.now,
             notifier=deps.notifier, features=list(deps.features), echo=logger.info,
-            ports=deps.ports,
+            ports=deps.ports, dry_run=bool(deps.dry_run),
         )  # fmt: skip
         return commands.poll_once(ctx, receiver)
     finally:

@@ -33,8 +33,9 @@ def _exec_ctx(ctx: CommandContext) -> executor.ExecContext | None:
     if port is None:
         return None
     return executor.exec_ctx_from(
-        ctx.settings, ctx.conn, port, ctx.notifier, ctx.now, ctx.state, ports=ctx.ports
-    )
+        ctx.settings, ctx.conn, port, ctx.notifier, ctx.now, ctx.state, ports=ctx.ports,
+        dry_run=ctx.dry_run,
+    )  # fmt: skip
 
 
 def _parse(arg: str | None) -> tuple[int, list[str]] | None:

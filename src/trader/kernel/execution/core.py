@@ -554,6 +554,11 @@ def approve(
     if policy is None:
         _expire(deps, approval_id)
         return _fail(approval_id, "no_account", "expired", f"계좌 {account_id} 가 설정에 없음")
+    if policy.dry_run:  # dry-run 데몬: 실주문 때 만든 요청이 남아 있어도 전송하지 않는다
+        return _fail(
+            approval_id, "dry_run", "pending",
+            "dry-run 실행 중이라 승인을 실행하지 않음 (요청은 pending 유지)",
+        )  # fmt: skip
     if policy.mode != "approve":  # 요청 뒤 off 로 내렸으면 승인해도 주문이 나가면 안 된다
         return _fail(
             approval_id, "mode", "pending",
