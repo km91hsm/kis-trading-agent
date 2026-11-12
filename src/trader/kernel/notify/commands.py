@@ -44,6 +44,7 @@ class CommandContext:
     actor: str | None = None  # 명령을 보낸 사람(제어 변경 기록용; poll_once 가 업데이트마다 채운다)
     # 발신자 신뢰 여부 — 읽기 허용(untrusted_ok) 명령이 인자에 따라 쓰기도 하면 스스로 거른다
     trusted: bool = True
+    dry_run: bool = False  # 데몬이 --dry-run 이면 True — 명령이 주문을 내는 경로가 본다
 
 
 def registry(features: list[Feature]) -> dict[str, TelegramCommand]:
