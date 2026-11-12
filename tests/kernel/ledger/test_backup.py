@@ -68,3 +68,18 @@ def test_backup_failure_removes_tmp(conn, project, monkeypatch):
     with pytest.raises(sqlite3.OperationalError):
         backup.backup(state=state, now=datetime(2026, 10, 27, tzinfo=UTC))
     assert not list(backup.backup_dir(state).glob("*.tmp"))
+
+
+def test_prune_keeps_only_last_backup_of_each_past_day(tmp_path):
+    """업데이트 설치 때마다 생기는 같은 날 백업은 마지막 1개만 남긴다. 오늘·어제 것은 되돌리기용
+    이라 전부 남긴다(파일 이름 날짜는 UTC — KST 오전의 "오늘" 백업은 어제 날짜로 적힌다)."""
+    today = date(2026, 11, 12)
+    names = [
+        "trader-20261110_081000.db", "trader-20261110_120000.db", "trader-20261110_171000.db",
+        "trader-20261111_081000.db", "trader-20261111_230000.db",
+        "trader-20261112_081000.db", "trader-20261112_120000.db",
+    ]  # fmt: skip
+    for n in names:
+        (tmp_path / n).write_bytes(b"x")
+    assert backup.prune(tmp_path, today=today) == 2
+    assert sorted(p.name for p in tmp_path.glob("trader-*.db")) == names[2:]

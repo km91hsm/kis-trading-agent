@@ -34,7 +34,7 @@
 - 책임: SQLite 연결(WAL, 쓰기 타임아웃 30초), 버전 마이그레이션, 커널 소유 원시(`control` 플래그·`runs`).
 - 공개면: `connect`·`init_schema`·`current_version`·`now_iso`, `Migration`·`KERNEL`·`check`, `control`(`get_flag`·`set_flag`·`delete_flag`), `runs`(`start`·`finish`), `LedgerError`.
 - 규약:
-  - 기본 DB 파일은 `state/trader.db`.
+  - 기본 DB 파일은 `state/trader.db`. 크고 빠르게 느는 관측 원본은 원장에 두지 않는다 — 시장 순위 원본은 같은 폴더의 `market_activity.db`(`features/quotes/activity_store.py`, 호출자는 원장 연결을 넘기고 저장소가 옆 파일을 연다)에 쌓고 일일 백업에서 빠진다.
   - 마이그레이션은 전역 버전 오름차순·추가만. `migrations.check` 는 위반 시 `LedgerError` 를 던진다(레지스트리 쪽 `contracts.check` 가 이를 메시지 목록으로 바꾼다).
   - `init_schema` 는 이미 최신이면 쓰기 잠금 없이 반환한다.
   - 저장 시각은 `now_iso()` 의 UTC ISO8601.
