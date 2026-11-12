@@ -254,6 +254,13 @@ class ScalpPort(Protocol):
         """오늘 단타가 들고 있는(`open` — 청산 대기 포함, 판정 대기 `pending` 제외) 종목 집합."""
         ...
 
+    def open_legs(
+        self, state: Path | None, market: str, today: date
+    ) -> dict[tuple[str, str], int]:
+        """단타가 든 수량 `{(계좌 id, 종목): 수량}`(체결 수량, 아직 모르면 요청 수량). 현물 감시가
+        그 계좌의 그 수량만큼만 손절 점검에서 뺀다."""
+        ...
+
 
 class MlPort(Protocol):
     """정량(ML) 모델 조회·보고·스냅샷 — 구현은 ml 기능이 맡는다."""

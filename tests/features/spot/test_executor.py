@@ -599,6 +599,21 @@ def test_approve_failure_before_send_is_not_left_approved(ectx, monkeypatch):
     assert ectx.brokers["paper-main"].orders == []
 
 
+def test_approve_failure_after_send_stays_approved_and_warns(ectx, monkeypatch):
+    """브로커로 보낸 뒤(실행 키에 sent 표시) 예상 밖 예외가 나면 주문은 KIS 에 있을 수 있다 —
+    승인을 "실패" 로 적으면 사람이 다시 주문한다. approved 로 두고 확인하라고 알린다."""
+    aid = _pending(ectx)
+
+    def boom(self, request):
+        raise TypeError("응답 해석 실패")
+
+    monkeypatch.setattr(FakeBroker, "place_order", boom)
+    with pytest.raises(TypeError):
+        executor.approve(ectx, aid)
+    assert repo.get_approval(ectx.conn, aid)["status"] == "approved"
+    assert any("미확인" in m for m in ectx.notifier.sent)
+
+
 def test_unknown_network_result_is_recorded_as_unknown_and_counts_as_live(ectx):
     """응답을 못 받은 주문(NETWORK_UNKNOWN)은 failed 가 아니라 unknown 으로 남겨
     중복 방지 조건이 살아 있는 주문으로 보게 한다 (KIS 에 접수됐을 수 있다)."""

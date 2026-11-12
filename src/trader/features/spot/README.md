@@ -68,9 +68,9 @@ CLI(`uv run trader spot --help` 로 확인):
 
 ## 손절 감시의 안전장치 (2026-11 전체 검토)
 
-- 응답 없는 주문(`unknown`, 주문번호 없음)은 체결 동기화 앞의 `fills.resolve_unknown` 이 KIS 당일 주문 목록(`broker.get_orders`, 미체결 포함)으로 확정한다. 낯선 주문 1건과 수량이 맞으면 주문번호를 붙여 `accepted`, 목록에 없고 `UNKNOWN_GRACE`(2분)가 지났으면 `failed`(미접수 확정 알림) — unknown 손절 SELL 이 마감까지 다음 손절을 막지 않게 한다. 후보가 여럿이거나 조회가 실패하면 그대로 둔다.
-- 손절 주문이 연속 `SL_REJECT_LIMIT`(3)번 거부되면 `SL_REJECT_COOLDOWN_MIN`(10분) 쉬고 그때 한 번만 알린다(control `sl_rejects:<계좌>:<시장>:<종목>:<현지 날짜>`).
-- 최신 결정이 보유 시작일 이전 날짜면 그 손절가는 쓰지 않는다(기본 `stop_loss_pct` 만). 단타가 들고 있는 종목(`ports["scalp"].open_tickers`)은 점검에서 뺀다.
+- 응답 없는 주문(`unknown`, 주문번호 없음)은 체결 동기화 앞의 `fills.resolve_unknown` 이 KIS 당일 주문 목록(`broker.get_orders`, 미체결 포함)으로 확정한다. 낯선 주문 1건과 수량이 맞으면 주문번호를 붙여 `accepted`. 목록에 없을 때 `failed`(미접수 확정 알림)로 닫는 것은 **손절 매도(`origin=stop`)뿐**이고, `UNKNOWN_GRACE`(2분) 뒤 두 번 연속 없어야 한다(첫 부재는 `message` 에 "미접수 의심" 만) — unknown 손절이 마감까지 다음 손절을 막지 않게 하되, 매수·판단 매도는 중복 주문을 KIS 가 막아 주지 않으므로 마감 만료까지 그대로 둔다. 후보가 여럿이거나 조회가 실패·잘리면 그대로 둔다.
+- 손절 주문이 연속 `SL_REJECT_LIMIT`(3)번 거부되면 `SL_REJECT_COOLDOWN_MIN`(10분) 쉬고 그때 한 번만 알린다(control `sl_rejects:<계좌>:<시장>:<종목>:<현지 날짜>`). 통신·게이트웨이 실패(`NETWORK`·`HTTP*`·`EGW*`)는 세지 않는다.
+- 최신 결정이 보유 시작일 이전 날짜면 그 손절가는 쓰지 않는다(기본 `stop_loss_pct` 만). 새 매수 체결이 아직 원장에 없어 보유 시작일을 모르면 지난 보유분이 닫힌 날(`last_flat_day`)과 비교한다. 단타가 든 수량(`ports["scalp"].open_legs`, 계좌·종목별)은 그 계좌 보유가 단타 수량 이하일 때만 점검에서 뺀다.
 - 시세·보유 조회 실패로 점검하지 못한 종목은 결과 `unchecked` 에 싣고, 연속 `BLIND_TICKS`(5)틱이면 알림 1회 + 운영 점검 `spot.monitor_blind.<시장>`(control `monitor_blind:<시장>`).
 - 승인 집행은 데몬의 dry-run 을 따른다(`ExecContext.dry_run` — 요청은 pending 유지).
 

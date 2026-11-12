@@ -224,7 +224,9 @@ class KisBroker:
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
             }
-            data = self._client.get_pages(path("DOM_CCLD"), "DOM_CCLD", params)
+            data = self._client.get_pages(
+                path("DOM_CCLD"), "DOM_CCLD", params, strict=not filled_only
+            )
             return _rows(data.get("output1"))
         seen_us: set[tuple[str, str, str]] = set()
         rows_us: list[dict] = []
@@ -250,6 +252,7 @@ class KisBroker:
                 params,
                 ctx_keys=("CTX_AREA_FK200", "CTX_AREA_NK200"),
                 output_key="output",
+                strict=not filled_only,  # 주문 목록은 잘리면 "없음" 으로 오판한다
             )
             for r in _rows(data.get("output")):
                 key = (

@@ -1019,25 +1019,108 @@ def test_stop_price_of_decision_before_holding_is_not_applied_to_new_lot(conn, s
     assert monitor.monitor_once(ctx2, market="KR", today=D)["stop_loss_orders"] == 1
 
 
-def test_scalp_open_tickers_are_not_checked_by_spot_monitor(conn, settings):
-    """단타가 들고 있는 종목은 단타 청산 규칙이 맡는다 — 현물 손절·트리거 대상에서 뺀다."""
+def test_scalp_legs_are_not_checked_by_spot_monitor_but_spot_holdings_are(conn, settings):
+    """단타가 든 수량만큼만 현물 점검에서 뺀다(계좌별). 같은 종목을 현물로도 든 계좌(보유가 단타
+    수량보다 많다)나 단타 다리가 없는 다른 계좌의 손절은 그대로 본다."""
 
     class _Scalp:
-        def open_tickers(self, state, market, today):
-            return {"005930"}
+        def __init__(self, legs):
+            self.legs = legs
+
+        def open_legs(self, state, market, today):
+            return self.legs
+
+    def run(legs, paper_qty):
+        accounts = [
+            make_account("paper-main", "paper", "auto", markets=["KR"]),
+            make_account("paper-two", "paper", "auto", markets=["KR"]),
+        ]
+        cash = {"KR": Cash(currency="KRW", available=Decimal("9000000"), total=Decimal("9000000"))}
+        brokers = {
+            "paper-main": FakeBroker(
+                to_broker_account(accounts[0]), positions=[_pos(qty=paper_qty)], cash=cash
+            ),
+            "paper-two": FakeBroker(to_broker_account(accounts[1]), positions=[_pos()], cash=cash),
+        }
+        ctx = _monitor_ctx(
+            settings, conn, accounts, brokers, FakeMarket(prices={"005930": Decimal("63000")}),
+            ports={"scalp": _Scalp(legs)},
+        )  # fmt: skip
+        out = monitor.monitor_once(ctx, market="KR", today=D)
+        return out, {k: len(b.orders) for k, b in brokers.items()}
 
     _old_decision(conn, stop_loss=65000.0)
-    accounts = _accounts("auto")
+    out, orders = run({("paper-main", "005930"): 10}, paper_qty=10)
+    assert out.get("skipped_excluded") == 1  # 단타 다리뿐인 계좌만 건너뛴다
+    assert orders == {"paper-main": 0, "paper-two": 1}
+
+
+def test_spot_holding_on_top_of_scalp_leg_keeps_its_stop(conn, settings):
+    class _Scalp:
+        def open_legs(self, state, market, today):
+            return {("paper-main", "005930"): 4}
+
+    _old_decision(conn, stop_loss=65000.0)
+    accounts = [make_account("paper-main", "paper", "auto", markets=["KR"])]
+    cash = {"KR": Cash(currency="KRW", available=Decimal("9000000"), total=Decimal("9000000"))}
     brokers = {
-        a.id: FakeBroker(to_broker_account(a), positions=[_pos(cur="63000")]) for a in accounts
+        "paper-main": FakeBroker(to_broker_account(accounts[0]), positions=[_pos()], cash=cash)
     }
     ctx = _monitor_ctx(
         settings, conn, accounts, brokers, FakeMarket(prices={"005930": Decimal("63000")}),
         ports={"scalp": _Scalp()},
     )  # fmt: skip
     out = monitor.monitor_once(ctx, market="KR", today=D)
-    assert out["stop_loss_orders"] == 0 and out["skipped_excluded"] == len(accounts)
-    assert all(b.orders == [] for b in brokers.values())
+    assert "skipped_excluded" not in out and out["stop_loss_orders"] == 1  # 보유 10 > 단타 4
+
+
+def test_old_stop_price_is_dropped_before_new_lot_fill_is_synced(conn, settings):
+    """지난 보유분이 체결로 닫혀 있고 새 매수는 아직 체결 동기화 전(접수만)이면 보유 시작일을 알 수
+    없다 — 그래도 최신 결정이 지난 보유분이 닫히기 전 날짜면 그 손절가는 지난 보유분의 것이다."""
+    old_day = D - timedelta(days=30)
+    old = Decision(**ok_decision(stop_loss=65000.0))
+    spot_ledger.ingest_checkpoint(
+        conn, old_day, "KR", "005930", "30_decision", {"data": old.model_dump()}
+    )
+    for side, days in (("BUY", 30), ("SELL", 20)):  # 지난 보유분: 30일 전 매수 → 20일 전 전량 매도
+        at = (NOW - timedelta(days=days)).isoformat()
+        oid = repo.insert_order(
+            conn, decision_id=None, account_id="paper-main", ticker="005930", market="KR",
+            side=side, qty=10, order_type="LIMIT", price=Decimal("70000"), status="filled",
+            order_no=f"P{days}", message=None, mode="auto", created_at=at,
+        )  # fmt: skip
+        repo.insert_fill(
+            conn, order_id=oid, account_id="paper-main", market="KR", ticker="005930", side=side,
+            qty=10, price=Decimal("70000"), filled_at=at, order_no=f"P{days}",
+        )  # fmt: skip
+    conn.commit()
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    out = monitor.monitor_once(ctx, market="KR", today=D)
+    assert out["stop_loss_orders"] == 0  # 기본 −15%(59500)는 안 닿는다
+
+
+class _FlakyBroker(FakeBroker):
+    """주문 서버가 흔들린다(전송 실패) — 종목의 문제가 아니다."""
+
+    def place_order(self, request):
+        self._record("place_order")
+        self.orders.append(request)
+        raise KisApiError("NETWORK", "연결 실패")
+
+
+def test_transport_failures_do_not_start_the_stop_cooldown(conn, settings):
+    """주문 서버 일시 장애(연결 실패·초당 한도)는 거부가 아니다 — 쉬지 않고 매 틱 다시 시도한다
+    (복구 직후 손절이 10분 늦어지면 안 된다)."""
+    _old_decision(conn, stop_loss=65000.0)
+    ctx = _ctx(conn, settings, positions=[_pos(cur="63000")], price="63000")
+    orig = ctx.exec.brokers["paper-main"]
+    b = _FlakyBroker(orig.account, positions=[_pos(cur="63000")], cash=orig.cash)
+    ctx.exec.brokers["paper-main"] = b
+    for i in range(5):
+        ctx.exec.now = lambda i=i: NOW + timedelta(minutes=i)
+        monitor.monitor_once(ctx, market="KR", today=D)
+    assert len(b.orders) == 5
+    assert not [m for m in ctx.exec.notifier.msgs if "손절 재시도 보류" in m]
 
 
 class _RejectingBroker(FakeBroker):
@@ -1089,7 +1172,9 @@ def test_unanswered_stop_loss_does_not_block_stops_for_the_rest_of_the_day(conn,
     ctx.exec.now = lambda: NOW + timedelta(minutes=1)  # 유예 안: 아직 막힌 채
     assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 0
     assert len(b.orders) == 1
-    ctx.exec.now = lambda: NOW + timedelta(minutes=3)
+    ctx.exec.now = lambda: NOW + timedelta(minutes=3)  # 유예 뒤 첫 부재: 의심만
+    assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 0
+    ctx.exec.now = lambda: NOW + timedelta(minutes=4)  # 다시 없으면 미접수 확정 → 재전송
     assert monitor.monitor_once(ctx, market="KR", today=D)["stop_loss_orders"] == 1
     assert len(b.orders) == 2
     st = [r[0] for r in conn.execute("SELECT status FROM orders WHERE side='SELL' ORDER BY id")]

@@ -34,6 +34,7 @@ STALE_QUERY_CAP = 10
 # 응답 없는 주문이 KIS 당일 주문 목록에 없을 때 "접수 안 됨" 으로 확정하기까지 기다리는 시간
 # (KIS 반영 지연을 미접수로 오판하지 않게)
 UNKNOWN_GRACE = timedelta(minutes=2)
+SUSPECT_PREFIX = "미접수 의심:"  # 유예 뒤 첫 부재 표시(orders.message) — 다음 조회에도 없으면 확정
 
 
 def _day_for(market: str, d: date | datetime) -> date:
@@ -113,14 +114,16 @@ def resolve_unknown(
     마감까지 다음 손절을 막는다. 같은 종목·방향의 **낯선 주문**(원장에 그 주문번호가 없는 주문)을
     후보로 본다:
     - 후보 1건·unknown 1건·수량 같음 → 주문번호를 붙여 accepted (이후 체결은 주문번호로 붙는다)
-    - 후보 없음·주문 뒤 `UNKNOWN_GRACE` 지남 → 접수 안 됨: failed (죽은 주문 — 실행 키는 다음
-      선점이 넘겨받는다) + 알림
+    - 후보 없음·주문 뒤 `UNKNOWN_GRACE` 지남·**손절 매도(origin=stop)** → 첫 번째는 의심으로만
+      적고, 다음 조회에도 없으면 접수 안 됨: failed (죽은 주문 — 실행 키는 다음 선점이
+      넘겨받는다) + 알림. 매수·판단 매도는 확정하지 않는다(중복 주문을 KIS 가 막아 주지 않는다)
     - 그 밖(후보 여럿·수량 다름·유예 안) → 그대로 둔다
     주문 목록 조회를 지원하지 않는 브로커·조회 실패는 아무것도 바꾸지 않는다."""
     out = {"accepted": 0, "failed": 0}
     lo, hi = xledger.day_bounds(day, market)
     unknown = conn.execute(
-        "SELECT id, ticker, side, qty, created_at FROM orders WHERE account_id=? AND market=? "
+        "SELECT id, ticker, side, qty, created_at, message, COALESCE(origin, 'llm') AS origin "
+        "FROM orders WHERE account_id=? AND market=? "
         "AND status='unknown' AND order_no IS NULL AND created_at >= ? AND created_at < ? "
         "ORDER BY id",
         (account_id, market, lo, hi),
@@ -167,13 +170,28 @@ def resolve_unknown(
         ):
             continue  # 어느 주문인지 가를 수 없다 — 체결이 오면 기존 모호 처리(`_flag_ambiguous`)
         for r in rows:
+            # 미접수 확정은 손절 매도만: failed 가 되면 실행 키가 넘어가 같은 주문이 다시 나갈 수
+            # 있다. 전량 손절은 중복이 나가도 KIS 주문가능수량이 막지만 매수·부분 매도는 막을 것이
+            # 없다 — 그런 주문은 예전처럼 마감 만료까지 살아 있는 주문으로 둔다
+            if r["side"] != "SELL" or r["origin"] != "stop":
+                continue
             if now - datetime.fromisoformat(r["created_at"]) < UNKNOWN_GRACE:
                 continue
-            conn.execute(
+            if not str(r["message"] or "").startswith(SUSPECT_PREFIX):
+                # 첫 부재는 의심으로만 적는다 — 목록 한 번의 누락·반영 지연으로 죽이지 않게
+                conn.execute(
+                    "UPDATE orders SET message=? WHERE id=? AND status='unknown'",
+                    (f"{SUSPECT_PREFIX} {now.isoformat()}", r["id"]),
+                )
+                conn.commit()
+                continue
+            cur = conn.execute(
                 "UPDATE orders SET status='failed', message=? WHERE id=? AND status='unknown'",
-                ("미접수 확정: KIS 당일 주문 목록에 없음", r["id"]),
+                ("미접수 확정: KIS 당일 주문 목록에 두 번 연속 없음", r["id"]),
             )
             conn.commit()
+            if cur.rowcount != 1:
+                continue
             out["failed"] += 1
             logger.warning(
                 "미확인 주문 미접수 확정 %s %s %s #%s", account_id, ticker, side, r["id"]

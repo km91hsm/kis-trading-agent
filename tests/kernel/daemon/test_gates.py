@@ -269,3 +269,11 @@ def test_monitor_gate_closes_at_us_early_close(project):
     assert run(deps, "US", "monitor") == {"skipped": "창 밖"}
     deps.now.t = datetime(2026, 11, 30, 19, 0, tzinfo=UTC)  # 평일 14:00 ET 는 창 안
     assert run(deps, "US", "monitor") == {"ran": 1}
+
+
+def test_monitor_gate_keeps_user_window_on_regular_days(project):
+    """창을 당기는 것은 US 조기 마감일뿐 — 평소에는 schedule 의 창 끝을 그대로 쓴다(KR 수능일처럼
+    마감이 늦는 날 사용자가 창을 늘릴 수 있게)."""
+    deps = make_deps(project, datetime(2026, 10, 8, 6, 45, tzinfo=UTC))  # 15:45 KST
+    deps.schedule.kr.monitor.end = "16:30"
+    assert run(deps, "KR", "monitor") == {"ran": 1}

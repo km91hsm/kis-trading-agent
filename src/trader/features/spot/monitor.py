@@ -200,6 +200,11 @@ def _floor_data(
     data = (latest or {}).get("data")
     since = xledger.held_since(ctx.exec.conn, account.id, [pos.ticker]).get(pos.ticker)
     if since is None:
+        # 새 매수의 체결이 아직 원장에 없으면 보유 시작일을 모른다. 그래도 최신 결정이 지난
+        # 보유분이 닫힌 날보다 앞이면 그 손절가는 지난 보유분의 것이다
+        flat = xledger.last_flat_day(ctx.exec.conn, account.id, pos.ticker)
+        if data and latest and flat and date.fromisoformat(str(latest["date"])) < flat:
+            data = {**data, "stop_loss": None}
         return data
     if data and latest and date.fromisoformat(str(latest["date"])) < since:
         data = {**data, "stop_loss": None}
@@ -220,9 +225,10 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
     quotes: dict[str, Decimal | None] = {}
     pending: list[tuple[Any, Position, list[Signal], dict | None]] = []
     excluded = excluded_tickers(ex.settings, ctx.ports.get("regime"), market)
+    # 단타가 든 수량은 단타 청산 규칙이 맡는다 — 그 계좌의 보유가 단타 수량 이하일 때만 뺀다
+    # (같은 종목을 현물로도 들었거나 다른 계좌가 든 것은 그대로 손절을 본다)
     scalp = ctx.ports.get("scalp")
-    if scalp is not None:  # 단타 보유분은 단타 청산 규칙이 맡는다(현물 손절·트리거와 겹치지 않게)
-        excluded = excluded | frozenset(scalp.open_tickers(ex.state, market, today))
+    scalp_legs = scalp.open_legs(ex.state, market, today) if scalp is not None else {}
     for account in ex.accounts:
         broker = ex.brokers.get(account.id)
         if market not in account.markets or broker is None:
@@ -234,7 +240,8 @@ def monitor_once(ctx: MonitorContext, *, market: str, today: date) -> dict:
             result.setdefault("unchecked", []).append(f"{account.id} 보유 조회 실패")
             continue
         for pos in positions:
-            if pos.ticker in excluded:
+            leg_qty = scalp_legs.get((account.id, pos.ticker), 0)
+            if pos.ticker in excluded or (leg_qty > 0 and pos.qty <= leg_qty):
                 # 헤지·현금 운용 ETF 는 국면 해제·현금 운용 규칙으로만 판다(손절·트리거 대상 아님)
                 result["skipped_excluded"] = result.get("skipped_excluded", 0) + 1
                 continue
@@ -582,6 +589,16 @@ def _cancel_open_buys(
     return done
 
 
+# 주문 서버·통신 쪽 실패(종목의 문제가 아니다): 연결 실패·HTTP 오류·KIS 게이트웨이(초당 한도·토큰)
+_TRANSPORT_CODES = ("NETWORK", "HTTP", "EGW")
+
+
+def _transport_failure(message: Any) -> bool:
+    """주문 결과 문구(`<msg_cd>: <msg1>`)가 통신·게이트웨이 실패인가 — 손절 쿨다운에 세지 않는다
+    (일시 장애가 풀린 직후 손절이 늦어지면 안 된다)."""
+    return str(message or "").startswith(_TRANSPORT_CODES)
+
+
 def _sell_now(
     ctx: MonitorContext,
     account: Any,
@@ -682,7 +699,12 @@ def _sell_now(
         if held:
             control.set_flag(ex.conn, rejects, {})
         return 1
-    if order and live and order.get("status") in ("rejected", "failed"):
+    if (
+        order
+        and live
+        and order.get("status") in ("rejected", "failed")
+        and not _transport_failure(order.get("message"))
+    ):
         # 거부·실패는 실행 키가 풀려 다음 틱에 또 나간다 — 연속 SL_REJECT_LIMIT 번이면 쉰다
         count = int(held.get("count") or 0) + 1
         nxt: dict[str, Any] = {"count": count}
