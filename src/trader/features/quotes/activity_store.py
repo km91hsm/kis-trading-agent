@@ -2,6 +2,7 @@
 
 관측 원본은 원장(`trader.db`)이 아니라 같은 폴더의 보관소 `market_activity.db` 에 쌓는다 — 하루
 수백 MB 씩 늘어 원장과 일일 백업을 키우던 것을 떼어 냈다(영구 보관, 수정·삭제 금지는 그대로).
+옛 원장에 남은 행은 데몬 기동 훅이 옮긴다(`activity_move`). 보관소는 일일 백업 대상이 아니다.
 호출자는 지금처럼 **원장 연결**을 넘기고, 여기서 그 파일 옆의 보관소를 연다. 파일이 없는 연결
 (메모리 DB)과 보관소 연결 자체는 그 연결을 그대로 쓴다."""
 
@@ -87,15 +88,20 @@ def archive(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         yield conn
         return
     target = archive_path(path)
+    key = str(target)
+    # 파일 유무는 연결 **전에** 본다(연결이 빈 파일을 만든다). 실행 중에 보관소를 옮기거나 지웠으면
+    # 스키마를 다시 만들고, 옛 파일의 배치 id 로 남은 이력 캐시도 버린다
+    with _ready_lock:
+        fresh = key not in _ready or not target.exists()
     out = db.connect(target)
     try:
-        key = str(target)
-        with _ready_lock:
-            fresh = key not in _ready or not target.exists()
         if fresh:
             ensure_schema(out)
             with _ready_lock:
                 _ready.add(key)
+            with _history_lock:
+                for k in [k for k in _history_cache if k[0] == key]:
+                    del _history_cache[k]
         yield out
     finally:
         out.close()
@@ -159,6 +165,7 @@ def _latest_row(conn: sqlite3.Connection, market: str, label: str, asof: datetim
 
 
 HISTORY_WINDOW = timedelta(minutes=14)
+HISTORY_CACHE_MAX = 60  # 시장당 메모리에 두는 배치 수 상한(30초 주기 14분 ≈ 28개)
 # (보관소 파일, 시장) → {배치 id: (수신 시각, 파싱한 payload)}. 배치는 append-only 라 한 번 파싱한
 # 결과를 그대로 다시 쓸 수 있다. 창 밖 배치는 조회 때 버려 14분치만 남는다.
 _history_cache: dict[tuple[str, str], dict[int, tuple[datetime, dict]]] = {}
@@ -196,7 +203,10 @@ def history(conn: sqlite3.Connection, market: str, *, asof: datetime) -> list:
             # 더 늦은 시점을 본 호출이 채운 항목을 지우지 않게 합친 뒤, 이번 창보다 오래된
             # 것만 버린다
             merged = {**_history_cache.get(key, {}), **cached}
-            _history_cache[key] = {
-                k: v for k, v in merged.items() if v[0].isoformat() >= floor
-            }
+            kept = {k: v for k, v in merged.items() if v[0].isoformat() >= floor}
+            # asof 가 과거로 내려가는 조회(백테스트)는 위 기준으로 아무것도 버리지 않는다 —
+            # 건수 상한으로 최신 것만 남긴다
+            for k in sorted(kept)[:-HISTORY_CACHE_MAX]:
+                del kept[k]
+            _history_cache[key] = kept
     return [cached[row[0]] for row in ids]
