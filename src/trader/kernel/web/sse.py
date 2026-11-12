@@ -52,7 +52,15 @@ def _q(deps: WebDeps, sql: str) -> str:
 
 
 # 화면이 읽지 않는 내부 커서·TTL 플래그(매 수집·60초마다 값이 바뀐다) — control 지문에서 뺀다
-CONTROL_CURSOR_LIKE = ("telegram_offset", "news_trigger_at:%", "ws_session_busy:%", "fx_cache:%")
+# `killswitch_obs:*` 는 잔고를 볼 때마다(5분·계좌마다) 바뀌는 킬스위치 내부 관측값이다 — 지문에
+# 넣으면 control 을 구독하는 화면 열댓 개가 그때마다 다시 읽는다
+CONTROL_CURSOR_LIKE = (
+    "telegram_offset",
+    "news_trigger_at:%",
+    "ws_session_busy:%",
+    "fx_cache:%",
+    "killswitch_obs:%",
+)
 _CONTROL_WHERE = " AND ".join(f"key NOT LIKE {p!r}" for p in CONTROL_CURSOR_LIKE)
 
 

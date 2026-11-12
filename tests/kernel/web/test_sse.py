@@ -119,3 +119,23 @@ def test_ping_carries_server_time(deps):
     body = _data(ev[1])
     assert body == {"server_time": "2026-11-02T01:02:03+00:00"}
     assert ev[1].endswith("\n\n")
+
+
+def test_control_fingerprint_ignores_killswitch_observation_flags(deps):
+    """킬스위치 내부 관측값(`killswitch_obs:*`)은 잔고를 볼 때마다 바뀐다 — 화면이 읽지 않으므로
+    control 지문을 바꾸지 않는다. 화면이 읽는 플래그(일시정지 등)는 그대로 지문에 든다."""
+    from trader.kernel.ledger import init_schema
+    from trader.kernel.ledger.control import set_flag
+    from trader.kernel.ledger.migrations import KERNEL
+    from trader.kernel.web import sse
+
+    conn = deps.conn_factory()
+    init_schema(conn, KERNEL)
+    base = sse._control_fp(deps)
+    set_flag(conn, "killswitch_obs:paper-main:KR", {"nav": "1000", "px": {}})
+    assert sse._control_fp(deps) == base
+    set_flag(conn, "killswitch_obs:paper-main:KR", {"nav": "1001", "px": {}})
+    assert sse._control_fp(deps) == base
+    set_flag(conn, "paused", True)
+    assert sse._control_fp(deps) != base
+    conn.close()

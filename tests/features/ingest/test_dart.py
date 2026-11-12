@@ -244,3 +244,47 @@ def test_market_disclosures_follows_total_page_up_to_cap(respx_mock, tmp_path):
     rows = c.market_disclosures(_date(2026, 10, 27))
     assert [r["rcept_no"] for r in rows] == ["1", "2", "3", "4", "5"]
     assert dart_mod.MAX_LIST_PAGES >= 10
+
+
+def test_annual_financials_are_cached_on_disk(dart, respx_mock, project):
+    """연간 재무제표는 1년에 한 번 바뀐다 — 일일 피처 스냅샷이 종목마다 매일 다시 받지 않게 파일로
+    캐시한다(30일). 새 클라이언트(다른 프로세스)도 캐시를 쓰고, 값은 Decimal 그대로 돌아온다."""
+    route = respx_mock.get(BASE + "/fnlttSinglAcntAll.json").mock(
+        return_value=httpx.Response(200, json=load("dart_fnltt.json"))
+    )
+    first = dart.financials("00126380", 2025)
+    assert dart.financials("00126380", 2025) == first and route.call_count == 1
+    other = DartClient("DART-KEY-SECRET", project / "state" / "cache", now=lambda: T0)
+    again = other.financials("00126380", 2025)
+    assert again == first and route.call_count == 1
+    assert isinstance(again["매출액"], Decimal) and again["_fs_div"] == "CFS"
+    assert dart.financials("00126380", 2024)  # 다른 연도는 따로 받는다
+    assert route.call_count == 2
+    from datetime import timedelta
+
+    late = DartClient(
+        "DART-KEY-SECRET", project / "state" / "cache", now=lambda: T0 + timedelta(days=31)
+    )
+    late.financials("00126380", 2025)  # 30일이 지나면 다시 받는다(정정 공시 반영)
+    assert route.call_count == 3
+
+
+def test_empty_financials_are_not_cached(dart, respx_mock):
+    """아직 공시 전이라 빈 결과는 캐시하지 않는다 — 공시되면 바로 잡혀야 한다."""
+    route = respx_mock.get(BASE + "/fnlttSinglAcntAll.json").mock(
+        return_value=httpx.Response(200, json={"status": "013", "message": "no data"})
+    )
+    assert dart.financials("00126380", 2025) == {}
+    assert dart.financials("00126380", 2025) == {}
+    assert route.call_count == 4  # CFS·OFS 두 번씩
+
+
+def test_close_closes_only_the_client_it_created(project):
+    own = DartClient("K", project / "state" / "cache")
+    own.close()
+    assert own._http.is_closed
+    shared = httpx.Client()
+    injected = DartClient("K", project / "state" / "cache", http=shared)
+    injected.close()
+    assert not shared.is_closed
+    shared.close()

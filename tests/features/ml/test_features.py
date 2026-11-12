@@ -357,6 +357,7 @@ def test_backfill_keeps_rows_when_chunk_write_fails_then_retries(project, monkey
         return real(df, state, **kw)
 
     monkeypatch.setattr(features, "write_rows", flaky)
+    monkeypatch.setattr(features, "BACKFILL_CHUNK", 10)
     tickers = [f"{i:06d}" for i in range(1, 12)]  # 11종목 → 10종목에서 1차 flush, 마지막에 2차
     n = features.backfill(
         market_client=FakeMarket(candles=5),
@@ -862,3 +863,45 @@ def test_zscore_keeps_or_fills_nan():
 def test_zscore_nullable_all_missing_does_not_crash():
     s = pd.Series([pd.NA, pd.NA], dtype="Float64")
     assert features.zscore(s, fill=0.0).tolist() == [0.0, 0.0]
+
+
+def test_write_rows_locks_per_day_file_not_for_the_whole_batch(project, monkeypatch):
+    """백필 묶음 하나가 날짜 파일 수백 개를 다시 쓰는 내내 락을 쥐면, 그동안 세션 도구의 스냅샷
+    쓰기가 120초 대기 끝에 실패한다 — 락은 날짜 파일 하나를 읽고-합치고-쓰는 동안만 쥔다."""
+    held = {"now": 0, "max": 0, "count": 0}
+    real = features._store_lock
+
+    class Spy:
+        def __init__(self, state):
+            self.inner = real(state)
+
+        def __enter__(self):
+            held["now"] += 1
+            held["count"] += 1
+            held["max"] = max(held["max"], held["now"])
+            return self.inner.__enter__()
+
+        def __exit__(self, *a):
+            held["now"] -= 1
+            return self.inner.__exit__(*a)
+
+    writes: list[int] = []
+    real_write = features._write_day_file
+
+    def spy_write(path, part, sectors, **kw):
+        writes.append(held["now"])
+        return real_write(path, part, sectors, **kw)
+
+    monkeypatch.setattr(features, "_store_lock", Spy)
+    monkeypatch.setattr(features, "_write_day_file", spy_write)
+    rows = features.history_rows(
+        ticker="005930", market="KR", candles=make_candles(3), ratios_by_year=None
+    )
+    assert rows["date"].nunique() == 3
+    features.write_rows(rows, derive=False)
+    assert held["count"] == 3 and writes == [1, 1, 1] and held["now"] == 0
+
+
+def test_backfill_chunk_keeps_rewrites_low():
+    """묶음이 작으면 날짜 파일 약 750개를 묶음 수만큼 다시 쓴다(10종목 묶음 × 250종목 = 25회)."""
+    assert features.BACKFILL_CHUNK >= 50

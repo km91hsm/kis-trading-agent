@@ -78,7 +78,7 @@ FEATURE_DTYPES: dict[str, str] = {
 def _coerce(df: pd.DataFrame) -> pd.DataFrame:
     # 없는 열(파생 열을 아직 안 계산한 행·옛 파일)은 NaN 으로 채운다
     out = df.reindex(columns=FEATURE_COLUMNS).copy()
-    out["date"] = out["date"].map(lambda x: pd.Timestamp(x).date())
+    out["date"] = pd.to_datetime(out["date"]).dt.date  # 행마다 Timestamp 를 만들지 않는다
     for col, dtype in FEATURE_DTYPES.items():
         out[col] = out[col].astype(dtype)
     return out
@@ -98,7 +98,10 @@ def zscore(s: pd.Series, *, fill: float | None = None) -> pd.Series:
     return z.fillna(fill) if fill is not None else z
 
 
-BACKFILL_CHUNK = 10  # 백필 때 날짜 파일을 다시 쓰는 단위(종목 수)
+# 백필 때 날짜 파일을 다시 쓰는 단위(종목 수). 묶음마다 날짜 파일 전부(3년 ≈ 750개)를 다시
+# 쓰므로 작으면 재작성이 묶음 수만큼 는다(10이면 250종목에 25회). 50종목 × 750행은 메모리에
+# 부담이 없고, 쓰기 전에 끊겨도 잃는 것은 그 묶음의 조회뿐이다
+BACKFILL_CHUNK = 50
 
 
 def _features_dir(state: Path | None) -> Path:
@@ -437,9 +440,11 @@ def write_rows(
         # 생산자(snapshot_row·history_rows)가 막는다
         raise ValueError(f"피처 행에 열이 없습니다: {missing}")
     df = _coerce(df)
-    with _store_lock(state):
-        for day, part in df.groupby("date", sort=True):
-            path = d / f"{pd.Timestamp(day).date().isoformat()}.parquet"
+    for day, part in df.groupby("date", sort=True):
+        path = d / f"{pd.Timestamp(day).date().isoformat()}.parquet"
+        # 락은 날짜 파일 하나를 읽고-합치고-쓰는 동안만 쥔다. 백필 묶음은 파일 수백 개를 다시
+        # 쓰는데, 그 내내 쥐면 다른 프로세스(세션 도구 스냅샷)가 대기 상한에 걸려 실패한다
+        with _store_lock(state):
             if path.exists():
                 # 이전 Phase 파일은 열이 적을 수 있다 (latest_rows 와 같은 reindex)
                 raw = read_part(path, strict=True)  # 읽기 실패는 올린다(덮어쓰기 금지)
@@ -448,7 +453,7 @@ def write_rows(
                     old = old[~old["ticker"].isin(part["ticker"])]
                     part = pd.concat([old, part], ignore_index=True)
             _write_day_file(path, part, sectors, derive=derive)
-            written.append(path)
+        written.append(path)
     return written
 
 
@@ -676,14 +681,24 @@ def _keep_observed(df: pd.DataFrame, state: Path | None, market: str, ticker: st
 
 
 def counts_from_inputs(
-    ticker: str, market: Market, asof: datetime, state: Path | None = None
+    ticker: str,
+    market: Market,
+    asof: datetime,
+    state: Path | None = None,
+    *,
+    day: date | None = None,
 ) -> tuple[int | None, int | None]:
-    """같은 KST 날짜의 00_inputs 에서 뉴스·커뮤니티 건수를 센다. 없으면 (None, None)."""
+    """운영일 폴더의 00_inputs 에서 뉴스·커뮤니티 건수를 센다. 없으면 (None, None).
+
+    `day` 는 피처 행의 날짜(마지막 완성 봉) — 그날의 수집 자료를 센다. 일일 스냅샷은 다음 날
+    새벽에 돌아서, 스냅샷 시각(asof)의 운영일로 찾으면 KR 은 아직 분석 전이라 늘 비었다. `day`
+    가 없으면 asof 의 운영일."""
     from trader.kernel.session.run_store import read_checkpoint, run_date_for
 
     base = state if state is not None else paths.state_dir()
     # US 분석은 ET 운영일 디렉터리에 있다 (KST 날짜로 찾으면 스냅샷 시각엔 아직 없어 늘 NaN)
-    d = base / "runs" / run_date_for(market, asof).isoformat() / market / ticker
+    run_day = day if day is not None else run_date_for(market, asof)
+    d = base / "runs" / run_day.isoformat() / market / ticker
     inputs = read_checkpoint(d, "00_inputs") if d.is_dir() else None
     if not inputs:
         return None, None
@@ -697,7 +712,11 @@ def counts_from_inputs(
                 return len(data[k])
         return None
 
-    news = _count(((inputs.get("news_macro") or {}).get("news")), "items", "articles", "news")
+    # 수집(`ingest.news.collect_news`)은 종목 뉴스를 `stock` 에 쓴다(`macro` 는 시장 공통이라 세지
+    # 않는다). 나머지 키는 옛 입력 파일 호환
+    news = _count(
+        ((inputs.get("news_macro") or {}).get("news")), "stock", "items", "articles", "news"
+    )
     posts = _count(((inputs.get("sentiment") or {}).get("community")), "posts")
     return news, posts
 
@@ -773,7 +792,9 @@ def snapshot(
                 news_count, community_count = None, None
                 progress(f"{market} {ticker}: 오늘 봉 미완성, {candles[-1].date} 완성 봉 행")
             else:
-                news_count, community_count = counts_from_inputs(ticker, market, asof, state)
+                news_count, community_count = counts_from_inputs(
+                    ticker, market, asof, state, day=candles[-1].date
+                )
             rows.append(
                 snapshot_row(
                     ticker=ticker,

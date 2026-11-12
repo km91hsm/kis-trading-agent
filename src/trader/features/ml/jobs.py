@@ -137,15 +137,23 @@ def features_action(deps, action: str, p: dict, progress) -> dict:
     markets = [p["market"]] if p.get("market") else list(deps.settings.markets)
     fn = features.backfill if action == "backfill" else features.snapshot
     kw = {"years": p["years"]} if action == "backfill" else {}
-    n = fn(
-        market_client=market_client,
-        dart=ingest_api.build_dart(deps.secrets),
-        edgar=ingest_api.build_edgar(ingest_api.load_sources(registry=deps.registry), deps.secrets),
-        universe=ingest_api.load_universe(),
-        markets=markets,  # type: ignore[arg-type]
-        progress=progress,
-        **kw,
-    )
+    dart = ingest_api.build_dart(deps.secrets)
+    edgar = ingest_api.build_edgar(ingest_api.load_sources(registry=deps.registry), deps.secrets)
+    try:
+        n = fn(
+            market_client=market_client,
+            dart=dart,
+            edgar=edgar,
+            universe=ingest_api.load_universe(),
+            markets=markets,  # type: ignore[arg-type]
+            progress=progress,
+            **kw,
+        )
+    finally:  # 잡마다 새로 만든 HTTP 연결을 닫는다(매일 도는 잡이라 쌓인다)
+        for client in (dart, edgar):
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
     return {"rows": int(n)}
 
 
@@ -213,6 +221,9 @@ FEATURES_SNAPSHOT = JobSpec(
     id="features_snapshot", kind="features_snapshot", trigger="cron", per_market=False,
     schedule_key="features_snapshot", interval_s=None, enabled=None, gate="none", heavy=True,
     misfire="idempotent", catch_up="direct", start_soon_s=0, body=features_snapshot_body,
+    # 06:30 KST 는 전날 장(KR 15:30·US 06:00 KST 마감)의 완성 봉을 적는 시각이다. 일·월 아침에는
+    # 새 봉이 없어 금요일 행을 다시 쓸 뿐이라(KIS 약 1,000건 낭비) 화~토만 돈다
+    days="tue-sat",
 )  # fmt: skip
 
 QUEUE_KINDS = (
