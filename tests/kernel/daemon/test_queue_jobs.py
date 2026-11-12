@@ -843,3 +843,29 @@ def test_start_closes_running_runs_left_by_dead_daemon(env, conn):
     assert [tuple(r) for r in rows] == [
         ("regime", "error", "데몬 재시작으로 중단"), ("scan", "ok", None),
     ]  # fmt: skip
+
+
+def test_cron_heavy_job_waits_until_startup_catch_up_finishes(env, monkeypatch):
+    """기동 따라잡기가 뒤에서 도는 동안 정규 cron 의 heavy 잡(그날의 스캔)이 먼저 돌면 놓친 국면
+    판정보다 앞선다 — 따라잡기가 끝날 때까지 기다린다. 따라잡기 스레드 자신은 기다리지 않는다."""
+    monkeypatch.setattr(qj, "CATCH_UP_POLL_S", 0.02)
+    q = env.deps.queue
+    q.catch_up_thread = -1  # 다른 스레드가 따라잡는 중
+    ran = threading.Event()
+    t = threading.Thread(target=lambda: qj.heavy(env.deps, lambda: ran.set()))
+    t.start()
+    assert not ran.wait(0.3)
+    q.catch_up_thread = None
+    assert ran.wait(5)
+    t.join(5)
+    q.catch_up_thread = threading.get_ident()  # 따라잡기 스레드 자신
+    assert qj.heavy(env.deps, lambda: "me") == "me"
+    q.catch_up_thread = None
+
+
+def test_catch_up_does_not_rerun_a_job_due_after_scheduler_start(project):
+    """스케줄러 시작 뒤 예정 시각이 된 잡은 정규 틱이 돈다 — 따라잡기가 또 돌리지 않는다."""
+    before = datetime(2026, 10, 6, 8, 5, tzinfo=UTC)  # 화 17:05 KST — 백업(17:10) 전
+    env = make_env(project, datetime(2026, 10, 6, 8, 11, tzinfo=UTC))  # 지금은 17:11
+    assert "backup" in qj.catch_up_missed(env.deps, env.jobs(), now=None)["missed"]
+    assert "backup" not in qj.catch_up_missed(env.deps, env.jobs(), now=before)["missed"]

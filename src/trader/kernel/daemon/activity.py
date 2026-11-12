@@ -14,6 +14,7 @@ _STOP_MESSAGES = (
     "데몬 종료 중",
     "종료 중",
     "JobCancelled: 종료 중",
+    "데몬 재시작으로 중단",  # 기동 때 닫은 이전 데몬의 실행 기록(`runs.close_running`)
 )
 
 

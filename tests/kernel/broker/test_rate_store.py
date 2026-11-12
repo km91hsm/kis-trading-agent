@@ -26,7 +26,7 @@ def test_two_limiters_share_one_window(tmp_path):
     b.acquire()
     assert slept == []
     b.acquire()  # 세 번째는 다른 리미터여도 창이 찰 때까지 기다린다
-    assert len(slept) == 1 and 0.9 < slept[0] <= RATE_WINDOW_S
+    assert len(slept) == 1 and slept[0] == pytest.approx(RATE_WINDOW_S, abs=0.05)
     clock["t"] += 2
     a.acquire()
     assert len(slept) == 1

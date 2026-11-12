@@ -234,9 +234,11 @@ class Daemon:
             )  # fmt: skip
             # 놓친 cron 따라잡기는 스케줄러가 뜬 뒤 풀 스레드에서 한 번 돈다. direct 잡(국면 판정
             # 등)은 몇 분씩 걸려, 기동 경로에서 기다리면 그동안 감시·하트비트·종료 신호 처리가 없다
+            # misfire_grace_time=None: 기동 부하로 1초(기본 유예) 넘게 늦어도 버리지 않는다
+            catch_up_at = deps.now()  # 스케줄러 시작 전 시각 — 이후 예정분은 정규 틱의 몫
             sched.add_job(
-                self._catch_up, id=CATCH_UP_JOB_ID, name=CATCH_UP_JOB_ID,
-                next_run_time=datetime.now(KST),
+                self._catch_up, args=[catch_up_at], id=CATCH_UP_JOB_ID, name=CATCH_UP_JOB_ID,
+                next_run_time=datetime.now(KST), misfire_grace_time=None,
             )  # fmt: skip
             self._hb.start(pid=os.getpid(), jobs=self._jobs)
             hb_started = True
@@ -261,13 +263,21 @@ class Daemon:
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
         return True
 
-    def _catch_up(self) -> None:
+    def _catch_up(self, at: datetime) -> None:
         from trader.kernel.daemon import queue_jobs as qj
 
+        q = self.deps.queue
+        # 따라잡기 동안 느린 레인은 새 요청을 꺼내지 않고(heavy_wanted), 다른 cron heavy 잡은
+        # 끝나기를 기다린다(catch_up_thread) — 이전의 "따라잡기 → 스케줄" 순서를 지킨다
+        q.heavy_wanted.enter()
+        q.catch_up_thread = threading.get_ident()
         try:
-            qj.catch_up_missed(self.deps, self._jobs)
+            qj.catch_up_missed(self.deps, self._jobs, now=at)
         except Exception as e:  # noqa: BLE001 - 따라잡기 실패가 데몬을 멈추지 않는다
             logger.warning("기동 따라잡기 실패: %s", e)
+        finally:
+            q.catch_up_thread = None
+            q.heavy_wanted.leave()
 
     def _sync_next(self, job_id: str) -> None:
         if self._scheduler is None or self._down:

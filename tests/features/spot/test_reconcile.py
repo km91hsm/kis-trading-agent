@@ -165,7 +165,7 @@ def test_reconcile_body_runs_all_accounts_for_market(project, conn, settings):
 def test_reconcile_declarations():
     r = spot_jobs.RECONCILE
     assert (r.id, r.kind, r.per_market, r.schedule_key, r.gate, r.catch_up) == (
-        "{market}_reconcile", "reconcile", True, "reconcile.{market}", "market", "queue",
+        "{market}_reconcile", "reconcile", True, "reconcile.{market}", "session", "queue",
     )  # fmt: skip
     assert (r.days, r.trigger, r.misfire) == ("mon-fri", "cron", "idempotent")
     b = spot_jobs.BALANCE_REFRESH
