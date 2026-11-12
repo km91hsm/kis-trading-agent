@@ -510,6 +510,14 @@ def _intent_of(a: dict, order: dict, opinion: dict | None) -> OrderIntent:
     )
 
 
+def _key_sent(deps: ExecDeps, key: str | None) -> bool:
+    """실행 키에 전송 표시(`sent_at`)가 있나 — 있으면 브로커 호출까지 갔다."""
+    if not key:
+        return False
+    row = deps.conn.execute("SELECT sent_at FROM exec_locks WHERE key=?", (key,)).fetchone()
+    return row is not None and row[0] is not None
+
+
 def approve(
     deps: ExecDeps,
     approval_id: int,
@@ -554,6 +562,11 @@ def approve(
     if policy is None:
         _expire(deps, approval_id)
         return _fail(approval_id, "no_account", "expired", f"계좌 {account_id} 가 설정에 없음")
+    if policy.dry_run:  # dry-run 데몬: 실주문 때 만든 요청이 남아 있어도 전송하지 않는다
+        return _fail(
+            approval_id, "dry_run", "pending",
+            "dry-run 실행 중이라 승인을 실행하지 않음 (요청은 pending 유지)",
+        )  # fmt: skip
     if policy.mode != "approve":  # 요청 뒤 off 로 내렸으면 승인해도 주문이 나가면 안 된다
         return _fail(
             approval_id, "mode", "pending",
@@ -642,6 +655,24 @@ def approve(
         result = transmit(deps, intent, run_dir=run_dir, mode="approve", broker=broker)
     except OrderBookkeepingError:  # 접수 뒤 기록 실패: approved 로 굳지 않게 failed 로 남긴다
         decide_approval(deps.conn, approval_id, "failed", expect="approved")
+        raise
+    except Exception as e:
+        # 그 밖의 예외: 브로커로 보내기 전(원장 잠금 등)이면 주문이 없다 → failed 로 남긴다(주문
+        # 없는 "승인됨" 은 알아챌 길이 없다). 보낸 뒤면 KIS 에 접수됐을 수 있다 → "실패" 로 적으면
+        # 사람이 다시 주문하므로 approved 로 두고 확인하라고 알린다. 실행 키는 어느 쪽도 풀지 않는다
+        try:
+            if _key_sent(deps, intent.idem_key):
+                notify_quietly(
+                    deps.notifier,
+                    messages.order_unknown(
+                        account=account_id, market=intent.market, label=shown, side=intent.side,
+                        qty=intent.qty, err=f"{type(e).__name__}: {e}",
+                    ),
+                )  # fmt: skip
+            else:
+                decide_approval(deps.conn, approval_id, "failed", expect="approved")
+        except Exception as inner:  # noqa: BLE001 - 원래 예외를 가리지 않는다
+            logger.error("승인 #%s 뒤처리 실패: %s", approval_id, inner)
         raise
     accepted = bool(result["result"]["accepted"])
     status = "approved"

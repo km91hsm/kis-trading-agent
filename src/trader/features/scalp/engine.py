@@ -204,11 +204,16 @@ def minutes(ctx: ScalpContext, market: str, c: dict) -> list[Candle]:
 
 
 def quote(ctx: ScalpContext, market: str, ticker: str, exchange: str | None) -> Decimal:
-    return (
+    """현재가. KIS 가 빈 값을 주면 파서가 0 으로 바꾸는데, 0 은 시세가 아니다 — 그대로 쓰면
+    수익률 −100% 로 손절이 나가므로 ValueError 로 올려 호출자가 그 종목을 건너뛰게 한다."""
+    price = (
         ctx.market_client.get_price_kr(ticker).price
         if market == "KR"
         else ctx.market_client.get_price_us(ticker, exchange).price
     )
+    if price <= 0:
+        raise ValueError(f"시세 0 (거래소 코드·종목 확인): {market} {ticker}")
+    return price
 
 
 def trade_block(ctx: ScalpContext, market: str, ticker: str) -> str | None:

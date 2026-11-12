@@ -258,3 +258,22 @@ def test_monitor_gate_ignores_paused_but_market_gate_skips(project):
     assert run(deps, "KR", "monitor") == {"skipped": "창 밖"}
     deps.now.t = datetime(2026, 10, 9, 3, 0, tzinfo=UTC)  # 휴장일
     assert run(deps, "KR", "monitor") == {"skipped": "휴장일"}
+
+
+def test_monitor_gate_closes_at_us_early_close(project):
+    """US 조기 마감일(추수감사절 다음 날 13:00 ET)에는 감시 창도 13:00 에 끝난다 — schedule 의
+    16:00 까지 돌면 장 밖 손절 주문이 거부되며 반복된다."""
+    deps = make_deps(project, datetime(2026, 11, 27, 17, 0, tzinfo=UTC))  # 12:00 ET
+    assert run(deps, "US", "monitor") == {"ran": 1}
+    deps.now.t = datetime(2026, 11, 27, 19, 0, tzinfo=UTC)  # 14:00 ET — 조기 마감 뒤
+    assert run(deps, "US", "monitor") == {"skipped": "창 밖"}
+    deps.now.t = datetime(2026, 11, 30, 19, 0, tzinfo=UTC)  # 평일 14:00 ET 는 창 안
+    assert run(deps, "US", "monitor") == {"ran": 1}
+
+
+def test_monitor_gate_keeps_user_window_on_regular_days(project):
+    """창을 당기는 것은 US 조기 마감일뿐 — 평소에는 schedule 의 창 끝을 그대로 쓴다(KR 수능일처럼
+    마감이 늦는 날 사용자가 창을 늘릴 수 있게)."""
+    deps = make_deps(project, datetime(2026, 10, 8, 6, 45, tzinfo=UTC))  # 15:45 KST
+    deps.schedule.kr.monitor.end = "16:30"
+    assert run(deps, "KR", "monitor") == {"ran": 1}

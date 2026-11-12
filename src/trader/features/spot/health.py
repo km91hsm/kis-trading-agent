@@ -11,6 +11,7 @@ from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
 
+from trader.features.spot.monitor import BLIND_FLAG, BLIND_TICKS
 from trader.kernel.config.market_hours import is_us_holiday
 from trader.kernel.config.time import MARKET_TZ
 from trader.kernel.daemon.heartbeat import read_status
@@ -88,6 +89,20 @@ def check(ctx: OpsContext) -> list[Item]:
                     f"{m} 체결 매칭 모호 — unknown 주문 후보가 둘 이상, 사용자 확인 필요",
                     link="/#orders-timeline",
                     extra=amb if isinstance(amb, dict) else {},
+                )
+            )
+        blind = get_flag(ctx.conn, BLIND_FLAG + m)
+        if isinstance(blind, dict) and int(blind.get("count") or 0) >= BLIND_TICKS:
+            what = [str(w) for w in blind.get("what") or []]
+            out.append(
+                Item(
+                    f"spot.monitor_blind.{m}",
+                    "warning",
+                    f"{m} 손절 감시 공백 — {', '.join(what[:3])} 점검 실패가 "
+                    f"{blind['count']}회 연속",
+                    link="/system",
+                    count=len(what),
+                    extra=blind,
                 )
             )
     for a in accounts:

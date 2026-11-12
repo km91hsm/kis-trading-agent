@@ -20,6 +20,7 @@ from trader.kernel.broker.models import (
     Market,
     OrderRequest,
     OrderResult,
+    OrderSeen,
     Position,
 )
 from trader.kernel.broker.ticks import is_on_tick
@@ -202,8 +203,9 @@ class KisBroker:
 
     # --- 체결 조회 (Phase 6 fills 동기화) ---------------------------------------------
 
-    def get_fills(self, market: Market, d: date) -> list[Fill]:
-        """해당 날짜의 체결 내역 (체결수량 0 행 제외). 시각은 KR=KST, US=ET 를 UTC 로 바꾼다."""
+    def _ccld_rows(self, market: Market, d: date, *, filled_only: bool) -> list[dict]:
+        """당일 주문·체결 조회의 원본 행. KR 은 `CCLD_DVSN`(01 체결만 / 00 전체)로 거르고, US 는
+        늘 전체를 받아 거래소 3곳 응답의 중복을 걷어 낸다."""
         self._check_market(market)
         ymd = d.strftime("%Y%m%d")
         if market == "KR":
@@ -214,7 +216,7 @@ class KisBroker:
                 "SLL_BUY_DVSN_CD": "00",
                 "INQR_DVSN": "00",
                 "PDNO": "",
-                "CCLD_DVSN": "01",
+                "CCLD_DVSN": "01" if filled_only else "00",
                 "ORD_GNO_BRNO": "",
                 "ODNO": "",
                 "INQR_DVSN_3": "00",
@@ -222,25 +224,10 @@ class KisBroker:
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
             }
-            data = self._client.get_pages(path("DOM_CCLD"), "DOM_CCLD", params)
-            out: list[Fill] = []
-            for r in _rows(data.get("output1")):
-                qty = _int(r.get("tot_ccld_qty"))
-                if qty <= 0:
-                    continue
-                out.append(
-                    Fill(
-                        order_no=str(r.get("odno") or ""),
-                        ticker=str(r.get("pdno") or ""),
-                        market="KR",
-                        side="SELL" if str(r.get("sll_buy_dvsn_cd")) == "01" else "BUY",
-                        qty=qty,
-                        price=_dec(r.get("avg_prvs")),
-                        filled_at=_local_dt(r.get("ord_dt"), r.get("ord_tmd"), KST),
-                    )
-                )
-            return out
-        out = []
+            data = self._client.get_pages(
+                path("DOM_CCLD"), "DOM_CCLD", params, strict=not filled_only
+            )
+            return _rows(data.get("output1"))
         seen_us: set[tuple[str, str, str]] = set()
         rows_us: list[dict] = []
         for code in US_EXCHANGE_CODES:
@@ -265,6 +252,7 @@ class KisBroker:
                 params,
                 ctx_keys=("CTX_AREA_FK200", "CTX_AREA_NK200"),
                 output_key="output",
+                strict=not filled_only,  # 주문 목록은 잘리면 "없음" 으로 오판한다
             )
             for r in _rows(data.get("output")):
                 key = (
@@ -276,19 +264,51 @@ class KisBroker:
                     continue
                 seen_us.add(key)
                 rows_us.append(r)
-        for r in rows_us:
-            qty = _int(r.get("ft_ccld_qty"))
+        return rows_us
+
+    def get_fills(self, market: Market, d: date) -> list[Fill]:
+        """해당 날짜의 체결 내역 (체결수량 0 행 제외). 시각은 KR=KST, US=ET 를 UTC 로 바꾼다."""
+        kr = market == "KR"
+        out: list[Fill] = []
+        for r in self._ccld_rows(market, d, filled_only=True):
+            qty = _int(r.get("tot_ccld_qty" if kr else "ft_ccld_qty"))
             if qty <= 0:
                 continue
             out.append(
                 Fill(
                     order_no=str(r.get("odno") or ""),
                     ticker=str(r.get("pdno") or ""),
-                    market="US",
+                    market=market,
                     side="SELL" if str(r.get("sll_buy_dvsn_cd")) == "01" else "BUY",
                     qty=qty,
-                    price=_dec(r.get("ft_ccld_unpr3")),
-                    filled_at=_local_dt(r.get("ord_dt"), r.get("ord_tmd"), MARKET_TZ["US"]),
+                    price=_dec(r.get("avg_prvs" if kr else "ft_ccld_unpr3")),
+                    filled_at=_local_dt(
+                        r.get("ord_dt"), r.get("ord_tmd"), KST if kr else MARKET_TZ["US"]
+                    ),
+                )
+            )
+        return out
+
+    def get_orders(self, market: Market, d: date) -> list[OrderSeen]:
+        """해당 날짜의 주문 전체(미체결 포함, 주문번호 없는 행 제외). 응답을 못 받은 주문이
+        접수됐는지 확정하는 데 쓴다(`spot.fills.resolve_unknown`)."""
+        kr = market == "KR"
+        out: list[OrderSeen] = []
+        for r in self._ccld_rows(market, d, filled_only=False):
+            order_no = str(r.get("odno") or "")
+            if not order_no:
+                continue
+            out.append(
+                OrderSeen(
+                    order_no=order_no,
+                    ticker=str(r.get("pdno") or ""),
+                    market=market,
+                    side="SELL" if str(r.get("sll_buy_dvsn_cd")) == "01" else "BUY",
+                    qty=_int(r.get("ord_qty" if kr else "ft_ord_qty")),
+                    filled_qty=_int(r.get("tot_ccld_qty" if kr else "ft_ccld_qty")),
+                    ordered_at=_local_dt(
+                        r.get("ord_dt"), r.get("ord_tmd"), KST if kr else MARKET_TZ["US"]
+                    ),
                 )
             )
         return out

@@ -22,6 +22,7 @@ from trader.kernel.broker.models import (
     OrderBook,
     OrderRequest,
     OrderResult,
+    OrderSeen,
     Position,
     Quote,
 )
@@ -181,12 +182,14 @@ class FakeBroker:
         cash: dict[Market, Cash] | None = None,
         fail: set[str] | None = None,
         fills: dict[tuple[Market, date], list[Fill]] | None = None,
+        seen_orders: dict[tuple[Market, date], list[OrderSeen]] | None = None,
     ) -> None:
         self.account = account
         self.positions = positions or []
         self.cash = cash or {}
         self.fail = fail or set()
         self.fills = fills or {}
+        self.seen_orders = seen_orders or {}  # 체결 없이 접수만 된 주문(체결분은 fills 에서 만든다)
         self.calls: list[str] = []
         self.orders: list[OrderRequest] = []
         self.cancelled: list[str] = []
@@ -214,6 +217,22 @@ class FakeBroker:
     def get_fills(self, market: Market, d: date) -> list[Fill]:
         self._record("get_fills")
         return list(self.fills.get((market, d), []))
+
+    def get_orders(self, market: Market, d: date) -> list[OrderSeen]:
+        """당일 주문 전체: `seen_orders` + 체결이 있는 주문(체결 조회와 어긋나지 않게)."""
+        self._record("get_orders")
+        out = list(self.seen_orders.get((market, d), []))
+        listed = {o.order_no for o in out}
+        for f in self.fills.get((market, d), []):
+            if f.order_no not in listed:
+                listed.add(f.order_no)
+                out.append(
+                    OrderSeen(
+                        order_no=f.order_no, ticker=f.ticker, market=f.market, side=f.side,
+                        qty=f.qty, filled_qty=f.qty, ordered_at=f.filled_at,
+                    )
+                )  # fmt: skip
+        return out
 
     def place_order(self, request: OrderRequest) -> OrderResult:
         self._record("place_order")

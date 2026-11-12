@@ -783,3 +783,23 @@ def test_gate_skip_alert_once_per_market_reason_day(project):
     env.tick("reeval")
     assert len(env.deps.notifier.msgs) == 1
     conn.close()
+
+
+def test_bootstrap_runs_cancel_hook_for_interrupted_and_expired_requests(env, conn):
+    """재기동으로 끊긴 요청·만료된 대기 요청도 kind 의 `on_cancel` 을 부른다 — 승인 집행 요청이
+    이렇게 사라지면 승인 선점(decided_channel)이 남아 다시 승인할 수 없게 묶인다. 다시 넣는
+    kind(restart_requeue)는 부르지 않는다."""
+    from dataclasses import replace
+
+    seen: list[tuple[str, dict]] = []
+    kinds = env.deps.queue.kinds
+    for k in ("train", "train2", "reeval_rr"):
+        kinds[k] = replace(kinds[k], on_cancel=lambda c, p, k=k: seen.append((k, p)))
+    old = NOW - timedelta(hours=7)
+    enqueue(env, conn, "train", {}, now=old)
+    jobq.claim_next(conn, now=old, kinds=["train"])  # 실행 중에 끊김
+    enqueue(env, conn, "train2", {}, now=old)  # 대기하다 만료
+    enqueue(env, conn, "reeval_rr", {"market": "KR"}, source="daemon")
+    jobq.claim_next(conn, now=NOW, kinds=["reeval_rr"])  # 끊겼지만 다시 넣는다
+    qj.bootstrap_queue(env.deps)
+    assert sorted(k for k, _ in seen) == ["train", "train2"]
