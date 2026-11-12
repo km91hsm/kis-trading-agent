@@ -479,6 +479,23 @@ def _first_buy_of_current_lot(
     return since if qty > 0 else None
 
 
+def last_flat_day(conn: sqlite3.Connection, account_id: str, ticker: str) -> date | None:
+    """체결 기록상 그 종목 보유가 마지막으로 0 이 된 날(시장 현지). 닫힌 적이 없으면 None.
+    그날보다 앞선 결정은 지난 보유분의 것이다(`held_since` 가 새 매수 체결을 아직 모를 때 쓴다)."""
+    rows = conn.execute(
+        "SELECT o.market, o.side, f.qty, f.filled_at FROM fills f JOIN orders o ON o.id=f.order_id "
+        "WHERE f.account_id=? AND o.ticker=? ORDER BY f.filled_at, f.id",
+        (account_id, ticker),
+    ).fetchall()
+    qty, flat = 0, None
+    for r in rows:
+        qty += int(r["qty"]) if r["side"] == "BUY" else -int(r["qty"])
+        if qty <= 0:
+            tz = MARKET_TZ.get(r["market"] or "", KST)  # type: ignore[call-overload]
+            qty, flat = 0, datetime.fromisoformat(r["filled_at"]).astimezone(tz).date()
+    return flat
+
+
 def held_since(
     conn: sqlite3.Connection, account_id: str, tickers: list[str] | None = None
 ) -> dict[str, date]:

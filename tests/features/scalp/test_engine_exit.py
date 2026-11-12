@@ -675,3 +675,22 @@ def test_all_switches_off_drops_pending_but_exits_still_run(
     assert after["pending"] == {} and "000660" in after["done"]
     assert conn.execute("SELECT COUNT(*) FROM orders WHERE side='BUY'").fetchone()[0] == buys
     assert [r["qty"] for r in _sells(conn)] == [49]  # 청산은 스위치와 무관하게 나간다
+
+
+def test_zero_quote_does_not_trigger_stop_exit(scalp_ctx, market, brokers, conn, project):
+    """KIS 가 빈 시세(→ 0)를 주면 −100% 로 계산돼 손절이 나가면 안 된다 — 그 틱은 건너뛴다."""
+    ctx = _ctx(scalp_ctx, market)
+    _enter(ctx, project)
+    b = brokers["paper-main"]
+    b.fills[("KR", D)] = [_fill("FAKE-1", "BUY", 49, "10000")]
+    b.positions = [_pos(49)]
+    market.prices[T] = Decimal("0")
+    _advance(ctx, 3)
+    engine.tick(ctx, market="KR", today=D)
+    assert _sells(conn) == []
+    assert _st(project)["open"][0]["status"] == "held"
+    # 정상 시세가 돌아오면 평소 규칙대로 판정한다
+    market.prices[T] = Decimal("9800")
+    _advance(ctx, 4)
+    engine.tick(ctx, market="KR", today=D)
+    assert [r["qty"] for r in _sells(conn)] == [49]
