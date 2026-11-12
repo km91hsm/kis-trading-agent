@@ -221,9 +221,6 @@ FEATURES_SNAPSHOT = JobSpec(
     id="features_snapshot", kind="features_snapshot", trigger="cron", per_market=False,
     schedule_key="features_snapshot", interval_s=None, enabled=None, gate="none", heavy=True,
     misfire="idempotent", catch_up="direct", start_soon_s=0, body=features_snapshot_body,
-    # 06:30 KST 는 전날 장(KR 15:30·US 06:00 KST 마감)의 완성 봉을 적는 시각이다. 일·월 아침에는
-    # 새 봉이 없어 금요일 행을 다시 쓸 뿐이라(KIS 약 1,000건 낭비) 화~토만 돈다
-    days="tue-sat",
 )  # fmt: skip
 
 QUEUE_KINDS = (

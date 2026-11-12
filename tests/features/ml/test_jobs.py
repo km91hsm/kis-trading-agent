@@ -90,8 +90,7 @@ def test_build_jobs_registers_ml_train_sat_and_universe_members(project, setting
     }  # fmt: skip
     assert str(got["ml_train"].trigger_kwargs["timezone"]) == "Asia/Seoul"
     assert got["universe_members"].cron == {"hour": 6, "minute": 40}
-    # 화~토 아침만(일·월에는 새 완성 봉이 없다)
-    assert got["features_snapshot"].cron == {"hour": 6, "minute": 30, "day_of_week": "tue-sat"}
+    assert got["features_snapshot"].cron == {"hour": 6, "minute": 30}  # 매일(day_of_week 없음)
     assert str(got["features_snapshot"].trigger_kwargs["timezone"]) == "Asia/Seoul"
     assert (got["ml_train"].spec.heavy, got["ml_train"].spec.catch_up) == (True, "none")
     assert (got["universe_members"].spec.heavy, got["universe_members"].spec.catch_up) == (
@@ -295,9 +294,3 @@ def test_features_action_passes_registry_as_keyword(project, settings, monkeypat
     deps = dataclasses.replace(deps, registry=reg)
     assert ml_jobs.features_action(deps, "snapshot", {}, lambda *_a, **_k: None) == {"rows": 1}
     assert seen == {"path": None, "registry": reg}
-
-
-def test_features_snapshot_runs_only_on_mornings_after_a_session():
-    """일·월 06:30 KST 에는 새 완성 봉이 없다(직전 장은 금요일) — 화~토 아침에만 돈다. 토요일은
-    미국 금요일 장(06:00 KST 마감)을 적어야 해서 포함한다."""
-    assert ml_jobs.FEATURES_SNAPSHOT.days == "tue-sat"

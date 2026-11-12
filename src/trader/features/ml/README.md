@@ -7,7 +7,7 @@
 - 피처 스토어(`state/features/<date>.parquet`, 키 (date, ticker), 한 날짜 한 파일, 쓰기는 멱등)와 학습 데이터셋(`dataset`: 적재·라벨·피처 열 선택·`close_table`)을 소유한다(`features.py`).
 - 모델(`models/quant.py` `QuantModel`, 백엔드 sklearn 기본·`lightgbm` 선택)·워크포워드 평가(`walkforward.py`)·학습(`train.py` `train_quant`, 승격 판정 `promotion_decision`)·튜닝(`tune.py` `tune_quant`)·레지스트리(`registry.py`).
 - `05_quant` 리포트(`quant_report.py`: `latest_row`·`build`·`signal_for`, 스키마는 커널 `session.schemas.QuantReport`, `role="quant"`).
-- 잡·큐(`jobs.py`): 잡 `ml_train`(주간 재학습, heavy)·`universe_members`(매일 06:40 KST 기록)·`features_snapshot`(화~토 06:30 KST 피처 스토어 스냅샷 — 일·월 아침에는 새 완성 봉이 없다, heavy), 큐 kind `features_backfill`·`features_snapshot`·`features_derive`·`ml_train`(전부 slow 레인), 훅 `daemon.bootstrap` → 시세 클라이언트가 있는데 피처 스토어가 비어 있으면 `features_backfill`(3년)+`ml_train` 을 큐에 넣는다(일일 스냅샷만 있어 날짜 파일이 200개 미만이어도 비었다고 봄, 백필이 24시간 안에 실패했으면 다시 넣지 않음, 어떤 오류도 올리지 않음).
+- 잡·큐(`jobs.py`): 잡 `ml_train`(주간 재학습, heavy)·`universe_members`(매일 06:40 KST 기록)·`features_snapshot`(매일 06:30 KST 피처 스토어 스냅샷, heavy), 큐 kind `features_backfill`·`features_snapshot`·`features_derive`·`ml_train`(전부 slow 레인), 훅 `daemon.bootstrap` → 시세 클라이언트가 있는데 피처 스토어가 비어 있으면 `features_backfill`(3년)+`ml_train` 을 큐에 넣는다(일일 스냅샷만 있어 날짜 파일이 200개 미만이어도 비었다고 봄, 백필이 24시간 안에 실패했으면 다시 넣지 않음, 어떤 오류도 올리지 않음).
 - 포트(`ports.py`): `ports["ml"]` = `MlPortImpl`(커널 `MlPort` — 피처 행·퀀트 리포트·피어 중앙값 `peer_medians`·모델 상태). 다른 기능은 `api.py` 만 import 한다.
 - CLI(`cli.py`, `uv run trader ml --help`): `ml train|tune|models|promote|demote`, `ml features snapshot|backfill|derive`.
 - 웹 자원(`routes.py`, 토큰 없음, `ml.api` 이름만 사용): `GET /features/latest?market=` → `{market, asof, columns, rows}`(종목별 최신 행 + `sectors.yaml` 섹터, NaN → null, 깨진 sectors.yaml 은 섹터만 비움), `GET /features/history?market=&ticker=&days=120`(5~1000, 유니버스에 없는 종목 404), `GET /ml/models` → `{models: [요약], active, note}`, `GET /ml/models/{version}`(`YYYYMMDD_HHMMSS` 아니면 400, 없으면 404) → 메타 전체. SSE 키 없음. 메뉴 `data/features "지표·모델"`. 스펙 §2.5 는 `/ml/*` 를 analytics 아래에 묶었으나 경로는 `/ml/models` 그대로다(자원 대응은 `tests/kernel/web/test_endpoint_map.py` 의 별칭표). `api.ticker_history` 를 공개면에 더했다.
@@ -29,7 +29,7 @@
 - `_features_dir` 는 읽기 경로에서도 `state/features` 디렉터리를 만든다(옛 결함 보존, Ruling P2).
 - `promote` 는 다른 버전을 내리지 않는다(옛 동작). 승격 버전이 여럿이면 `latest` 가 가장 최근 것을 쓴다. 정리는 `trader ml demote <version>` 으로 사람이 한다.
 - `ml.yaml` 의 `rl_sizer`·`calibration` 절은 설정만 있고 소비자가 없다(M8). RL 사이저(`ml/rl/*`·`rl_shadow`·`rl_train` kind·`trader rl`)도 M8.
-- 피처 스토어 일일 스냅샷은 `features_snapshot` cron(06:30 KST, 화~토)이 한다 — M8 의 reflect `snapshot_fn` 이 가져가기 전까지(`MlPortImpl.snapshot` 은 포트 구성이 모자라면 RuntimeError).
+- 피처 스토어 일일 스냅샷은 `features_snapshot` cron(06:30 KST, 매일)이 한다 — M8 의 reflect `snapshot_fn` 이 가져가기 전까지(`MlPortImpl.snapshot` 은 포트 구성이 모자라면 RuntimeError).
 - `registry.promote`/`demote` 는 벽시계 시각을 도장으로 찍는다(옛 결함 보존, Ruling P2).
 - 옛 최상위 `trader features …` 는 `trader ml features …` 가 되었다.
 - 스케줄 키 모양: `schedule.yaml ml_train: {time: "10:00", days: sat, tz: null}`(옛 `ml_train_time`/요일 평면 키 아님), `features_snapshot: "06:30"`·`universe_members: "06:40"`(문자열, KST).

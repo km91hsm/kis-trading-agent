@@ -224,7 +224,8 @@ class DartClient:
                 "fetched_at": self._now().isoformat(),
                 "accounts": {k: v if k.startswith("_") else str(v) for k, v in out.items()},
             }
-            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            # 프로세스·스레드마다 다른 임시 이름(수집 절이 병렬로 같은 키를 쓸 수 있다)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
             tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
             tmp.replace(path)
         except OSError as e:  # 캐시를 못 써도 조회 결과는 돌려준다
