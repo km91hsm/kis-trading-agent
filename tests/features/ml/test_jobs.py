@@ -196,7 +196,7 @@ def test_features_snapshot_body_calls_snapshot_action(project, settings, monkeyp
 
     monkeypatch.setattr(ml_jobs, "features_action", fake_action)
     deps = _deps(project, settings, client=object())
-    assert ml_jobs.features_snapshot_body(deps, None) == {"rows": 7}
+    assert ml_jobs.features_snapshot_body(deps, None)["rows"] == 7
     assert calls == [("snapshot", {})]
 
 
@@ -213,7 +213,7 @@ def test_features_snapshot_body_covers_all_markets(project, settings, monkeypatc
     monkeypatch.setattr(ingest_api, "load_sources", lambda *a, **kw: None)
     monkeypatch.setattr(ingest_api, "load_universe", lambda: "uni")
     deps = _deps(project, settings, client=object())
-    assert ml_jobs.features_snapshot_body(deps, None) == {"rows": 3}
+    assert ml_jobs.features_snapshot_body(deps, None)["rows"] == 3
     assert seen["markets"] == list(deps.settings.markets)
 
 
@@ -294,3 +294,24 @@ def test_features_action_passes_registry_as_keyword(project, settings, monkeypat
     deps = dataclasses.replace(deps, registry=reg)
     assert ml_jobs.features_action(deps, "snapshot", {}, lambda *_a, **_k: None) == {"rows": 1}
     assert seen == {"path": None, "registry": reg}
+
+
+def test_bootstrap_defers_backfill_while_a_market_is_open(project, settings):
+    """백필은 KIS 호출 약 2,000건 — 장중에 돌면 손절 감시와 같은 초당 한도를 나눠 쓴다.
+    장이 열려 있으면 넣지 않고 미룬다(다음 일일 스냅샷 뒤에 다시 본다)."""
+    open_kr = datetime(2026, 10, 8, 3, 0, tzinfo=UTC)  # 목 12:00 KST — 한국장 중
+    deps = _deps(project, settings, client=object(), now=open_kr)
+    r = ml_jobs.bootstrap(deps=deps, point="daemon.bootstrap")
+    assert r == {"queued": [], "deferred": "KR 장중"}
+    closed = datetime(2026, 10, 8, 8, 0, tzinfo=UTC)  # 17:00 KST — 두 시장 모두 닫힘
+    deps = _deps(project, settings, client=object(), now=closed)
+    assert ml_jobs.bootstrap(deps=deps)["queued"] == ["features_backfill", "ml_train"]
+
+
+def test_daily_snapshot_retries_deferred_bootstrap(project, settings, monkeypatch):
+    """장중 기동으로 미룬 백필은 장이 닫힌 일일 스냅샷(06:30 KST) 뒤에 다시 넣는다."""
+    monkeypatch.setattr(ml_jobs, "features_action", lambda *a, **k: {"rows": 3})
+    at = datetime(2026, 10, 8, 21, 30, tzinfo=UTC)  # 금 06:30 KST
+    deps = _deps(project, settings, client=object(), now=at)
+    out = ml_jobs.features_snapshot_body(deps, None)
+    assert out == {"rows": 3, "bootstrap": ["features_backfill", "ml_train"]}

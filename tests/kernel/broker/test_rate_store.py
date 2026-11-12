@@ -2,7 +2,7 @@
 
 import pytest
 
-from trader.kernel.broker.client import RateLimitBusy
+from trader.kernel.broker.client import RATE_WINDOW_S, RateLimitBusy
 from trader.kernel.broker.rate_store import SharedRateLimiter
 
 
@@ -25,8 +25,8 @@ def test_two_limiters_share_one_window(tmp_path):
     a.acquire()
     b.acquire()
     assert slept == []
-    b.acquire()  # 세 번째는 다른 리미터여도 1초 창이 찰 때까지 기다린다
-    assert len(slept) == 1 and 0.9 < slept[0] <= 1.0
+    b.acquire()  # 세 번째는 다른 리미터여도 창이 찰 때까지 기다린다
+    assert len(slept) == 1 and 0.9 < slept[0] <= RATE_WINDOW_S
     clock["t"] += 2
     a.acquire()
     assert len(slept) == 1

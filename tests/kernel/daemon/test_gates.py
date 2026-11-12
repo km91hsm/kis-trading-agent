@@ -258,3 +258,22 @@ def test_monitor_gate_ignores_paused_but_market_gate_skips(project):
     assert run(deps, "KR", "monitor") == {"skipped": "창 밖"}
     deps.now.t = datetime(2026, 10, 9, 3, 0, tzinfo=UTC)  # 휴장일
     assert run(deps, "KR", "monitor") == {"skipped": "휴장일"}
+
+
+def test_session_gate_skips_closed_days_but_not_paused(project):
+    """조회만 하는 잡(야간 대사)용 게이트: 주말·휴장은 쉬지만 일시정지는 보지 않는다 — 일시정지
+    중에도 위험 청산은 나가므로 원장·잔고 불일치 탐지가 빠지면 안 된다."""
+    deps = make_deps(project, datetime(2026, 10, 8, 3, 0, tzinfo=UTC))  # 목 12:00 KST
+    conn = deps.conn_factory()
+    set_flag(conn, "paused", True)
+    conn.close()
+    assert run(deps, "KR", "market") == {"skipped": "일시정지"}
+    assert run(deps, "KR", "session") == {"ran": 1}
+    deps.now.t = datetime(2026, 10, 9, 3, 0, tzinfo=UTC)  # 휴장일
+    assert run(deps, "KR", "session") == {"skipped": "휴장일"}
+
+
+def test_reconcile_job_uses_session_gate():
+    from trader.features.spot.jobs import RECONCILE
+
+    assert RECONCILE.gate == "session"

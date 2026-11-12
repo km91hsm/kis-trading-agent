@@ -783,3 +783,63 @@ def test_gate_skip_alert_once_per_market_reason_day(project):
     env.tick("reeval")
     assert len(env.deps.notifier.msgs) == 1
     conn.close()
+
+
+def test_start_does_not_wait_for_direct_catch_up(project):
+    """기동 때 놓친 direct 잡(국면 판정처럼 몇 분 걸릴 수 있다)을 기다리느라 스케줄러·하트비트
+    시작이 밀리면 그동안 손절 감시가 없다 — 따라잡기는 스케줄러가 뜬 뒤 뒤에서 돈다."""
+    env = make_env(project, datetime(2026, 10, 6, 9, 0, tzinfo=UTC))  # 화 18:00 KST: 17:10 지남
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(ctx, job):
+        entered.set()
+        release.wait(10)
+        env.order.append("backup-done")
+        return {}
+
+    feature = Feature(
+        id="synthetic", tier="lane",
+        jobs=(spec(id="backup", kind="backup", schedule_key="backup", misfire="idempotent",
+                   catch_up="direct", body=slow),),
+    )  # fmt: skip
+    d = Daemon([feature], env.deps)
+    started: list[bool] = []
+    t = threading.Thread(target=lambda: started.append(d.start(install_signals=False)))
+    t.start()
+    try:
+        t.join(5)
+        assert not t.is_alive() and started == [True], "start() 가 따라잡기를 기다리고 있다"
+        assert entered.wait(5)  # 따라잡기는 뒤에서 시작됐다
+        assert env.order == []  # 아직 끝나지 않았는데 start() 는 돌아왔다
+        assert (env.deps.state / "daemon_heartbeat.json").is_file()
+    finally:
+        release.set()
+        t.join(10)
+        d.shutdown(wait=True)
+    assert env.order == ["backup-done"]
+
+
+def test_start_closes_running_runs_left_by_dead_daemon(env, conn):
+    """데몬이 비정상 종료되면 cron 실행 기록(`runs`)이 running 으로 영구히 남는다 — 잠금을 잡은
+    새 데몬이 기동 때 error 로 닫는다(끝난 기록은 건드리지 않는다)."""
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, status) VALUES ('regime','KR',?,'running')",
+        ((NOW - timedelta(minutes=5)).isoformat(),),
+    )
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, finished_at, status) "
+        "VALUES ('scan','KR',?,?,'ok')",
+        (NOW.isoformat(), NOW.isoformat()),
+    )
+    conn.commit()
+    d = Daemon([env.feature], env.deps)
+    try:
+        assert d.start(install_signals=False) is True
+    finally:
+        d.shutdown(wait=True)
+    rows = conn.execute(
+        "SELECT kind, status, error FROM runs WHERE kind IN ('regime','scan') ORDER BY id"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("regime", "error", "데몬 재시작으로 중단"), ("scan", "ok", None),
+    ]  # fmt: skip

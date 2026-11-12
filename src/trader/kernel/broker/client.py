@@ -28,6 +28,9 @@ class RateLimitBusy(KisApiError):
 
 
 RATE_PER_SEC: dict[Env, int] = {"real": 20, "paper": 2}
+# 리미터 창. 딱 1초로 한도를 꽉 채우면 창 경계가 KIS 서버 집계와 어긋나 EGW00201 재시도가 상시
+# 난다 — 조금 길게 잡아 약 13% 여유를 둔다(프로세스 안·프로세스 간 리미터 공용)
+RATE_WINDOW_S = 1.15
 # 초당 거래건수 초과: EGW00201 은 HTTP 200·500 양쪽으로 온다(실기 확인), EGW00215 는 계좌 원장 한도
 RETRY_CODES = frozenset({"EGW00201", "EGW00215"})
 TOKEN_ERROR_CODES = frozenset({"EGW00123", "EGW00121"})  # 만료·유효하지 않은 토큰
@@ -46,7 +49,7 @@ _SENT_BUT_NO_RESPONSE = (
 
 
 class RateLimiter:
-    """1초 슬라이딩 윈도 안의 호출 수를 rate_per_s 이하로 제한한다."""
+    """`RATE_WINDOW_S` 슬라이딩 윈도 안의 호출 수를 rate_per_s 이하로 제한한다."""
 
     def __init__(
         self,
@@ -83,12 +86,12 @@ class RateLimiter:
         try:
             while True:
                 now = self._clock()
-                while self._calls and now - self._calls[0] >= 1.0:
+                while self._calls and now - self._calls[0] >= RATE_WINDOW_S:
                     self._calls.popleft()
                 if len(self._calls) < self._rate:
                     self._calls.append(now)
                     return
-                wait = max(1.0 - (now - self._calls[0]), 0.001)
+                wait = max(RATE_WINDOW_S - (now - self._calls[0]), 0.001)
                 if limit is not None and waited + wait > limit:
                     raise RateLimitBusy(limit)
                 waited += wait
