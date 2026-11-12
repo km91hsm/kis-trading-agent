@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler import events as aps_events
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -29,11 +30,14 @@ from trader.kernel.notify import messages
 from trader.kernel.registry import hooks as hooks_mod
 from trader.kernel.registry.types import Feature
 from trader.kernel.session import calls
+from trader.kernel.session import scope as session_scope
 
 logger = logging.getLogger("trader.daemon")
 
 HEARTBEAT_JOB_ID = "daemon_heartbeat"
 HEARTBEAT_INTERVAL_S = 30
+CATCH_UP_JOB_ID = "startup_catch_up"
+POOL_SPARE = 4  # 하트비트·기동 따라잡기·여유
 
 
 @dataclass(frozen=True)
@@ -188,7 +192,13 @@ class Daemon:
             logger.error(other_root_message(owner))
             self._lock.release()
             return False
-        sched = BackgroundScheduler(timezone=KST)
+        # 잡마다 max_instances=1 이라 동시에 도는 수는 잡 수를 넘지 않는다 — 풀을 그만큼 잡아
+        # 몇 분~1시간짜리 LLM 잡이 여럿 돌아도 60초 손절 감시·하트비트가 스레드를 못 얻는 일이
+        # 없게 한다(기본 풀 10개는 잡 50여 개에 모자랐다). 스레드는 필요할 때만 만들어진다.
+        sched = BackgroundScheduler(
+            timezone=KST,
+            executors={"default": ThreadPoolExecutor(len(self._jobs) + POOL_SPARE)},
+        )
         hb_started = False
         try:
             # 잠금을 잡은 뒤에만: 둘째 데몬이 실행 중인 데몬의 running 행을 닫으면 안 된다
@@ -196,15 +206,15 @@ class Daemon:
             # 만료된 queued 를 먼저 정리한 뒤 훅이 enqueue 해야 중복으로 빠지지 않는다
             hooks_mod.run(deps.hooks, "daemon.bootstrap", deps=deps)
             conn = deps.conn_factory()
+            session_scope.purge_stale(deps.state)  # 강제 종료로 남은 세션 범위 파일
             try:  # 재기동 전에 남은 running 세션 행(1시간 초과)을 error 로 닫는다
                 calls.close_stale(conn, now=deps.now())
+                n = runs.close_running(conn, reason="데몬 재시작으로 중단")
+                if n:
+                    logger.info("이전 데몬이 남긴 running 실행 기록 %d건을 닫음", n)
             finally:
                 conn.close()
             deps.queue.heartbeat = self._hb
-            try:
-                qj.catch_up_missed(deps, self._jobs)
-            except Exception as e:  # noqa: BLE001 - 따라잡기 실패가 기동을 막지 않는다
-                logger.warning("기동 따라잡기 실패: %s", e)
             _quiet_scheduler()
             for job in self._jobs:
                 extra: dict[str, Any] = {}
@@ -223,6 +233,14 @@ class Daemon:
             sched.add_job(
                 self._hb.beat, IntervalTrigger(seconds=HEARTBEAT_INTERVAL_S, timezone=KST),
                 id=HEARTBEAT_JOB_ID, name=HEARTBEAT_JOB_ID, max_instances=1, coalesce=True,
+            )  # fmt: skip
+            # 놓친 cron 따라잡기는 스케줄러가 뜬 뒤 풀 스레드에서 한 번 돈다. direct 잡(국면 판정
+            # 등)은 몇 분씩 걸려, 기동 경로에서 기다리면 그동안 감시·하트비트·종료 신호 처리가 없다
+            # misfire_grace_time=None: 기동 부하로 1초(기본 유예) 넘게 늦어도 버리지 않는다
+            catch_up_at = deps.now()  # 스케줄러 시작 전 시각 — 이후 예정분은 정규 틱의 몫
+            sched.add_job(
+                self._catch_up, args=[catch_up_at], id=CATCH_UP_JOB_ID, name=CATCH_UP_JOB_ID,
+                next_run_time=datetime.now(KST), misfire_grace_time=None,
             )  # fmt: skip
             self._hb.start(pid=os.getpid(), jobs=self._jobs)
             hb_started = True
@@ -246,6 +264,22 @@ class Daemon:
             raise
         logger.info("데몬 시작: 잡 %d개", len(self._jobs))
         return True
+
+    def _catch_up(self, at: datetime) -> None:
+        from trader.kernel.daemon import queue_jobs as qj
+
+        q = self.deps.queue
+        # 따라잡기 동안 느린 레인은 새 요청을 꺼내지 않고(heavy_wanted), 다른 cron heavy 잡은
+        # 끝나기를 기다린다(catch_up_thread) — 이전의 "따라잡기 → 스케줄" 순서를 지킨다
+        q.heavy_wanted.enter()
+        q.catch_up_thread = threading.get_ident()
+        try:
+            qj.catch_up_missed(self.deps, self._jobs, now=at)
+        except Exception as e:  # noqa: BLE001 - 따라잡기 실패가 데몬을 멈추지 않는다
+            logger.warning("기동 따라잡기 실패: %s", e)
+        finally:
+            q.catch_up_thread = None
+            q.heavy_wanted.leave()
 
     def _sync_next(self, job_id: str) -> None:
         if self._scheduler is None or self._down:

@@ -785,6 +785,92 @@ def test_gate_skip_alert_once_per_market_reason_day(project):
     conn.close()
 
 
+def test_start_does_not_wait_for_direct_catch_up(project):
+    """기동 때 놓친 direct 잡(국면 판정처럼 몇 분 걸릴 수 있다)을 기다리느라 스케줄러·하트비트
+    시작이 밀리면 그동안 손절 감시가 없다 — 따라잡기는 스케줄러가 뜬 뒤 뒤에서 돈다."""
+    env = make_env(project, datetime(2026, 10, 6, 9, 0, tzinfo=UTC))  # 화 18:00 KST: 17:10 지남
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(ctx, job):
+        entered.set()
+        release.wait(10)
+        env.order.append("backup-done")
+        return {}
+
+    feature = Feature(
+        id="synthetic", tier="lane",
+        jobs=(spec(id="backup", kind="backup", schedule_key="backup", misfire="idempotent",
+                   catch_up="direct", body=slow),),
+    )  # fmt: skip
+    d = Daemon([feature], env.deps)
+    started: list[bool] = []
+    t = threading.Thread(target=lambda: started.append(d.start(install_signals=False)))
+    t.start()
+    try:
+        t.join(5)
+        assert not t.is_alive() and started == [True], "start() 가 따라잡기를 기다리고 있다"
+        assert entered.wait(5)  # 따라잡기는 뒤에서 시작됐다
+        assert env.order == []  # 아직 끝나지 않았는데 start() 는 돌아왔다
+        assert (env.deps.state / "daemon_heartbeat.json").is_file()
+    finally:
+        release.set()
+        t.join(10)
+        d.shutdown(wait=True)
+    assert env.order == ["backup-done"]
+
+
+def test_start_closes_running_runs_left_by_dead_daemon(env, conn):
+    """데몬이 비정상 종료되면 cron 실행 기록(`runs`)이 running 으로 영구히 남는다 — 잠금을 잡은
+    새 데몬이 기동 때 error 로 닫는다(끝난 기록은 건드리지 않는다)."""
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, status) VALUES ('regime','KR',?,'running')",
+        ((NOW - timedelta(minutes=5)).isoformat(),),
+    )
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, finished_at, status) "
+        "VALUES ('scan','KR',?,?,'ok')",
+        (NOW.isoformat(), NOW.isoformat()),
+    )
+    conn.commit()
+    d = Daemon([env.feature], env.deps)
+    try:
+        assert d.start(install_signals=False) is True
+    finally:
+        d.shutdown(wait=True)
+    rows = conn.execute(
+        "SELECT kind, status, error FROM runs WHERE kind IN ('regime','scan') ORDER BY id"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("regime", "error", "데몬 재시작으로 중단"), ("scan", "ok", None),
+    ]  # fmt: skip
+
+
+def test_cron_heavy_job_waits_until_startup_catch_up_finishes(env, monkeypatch):
+    """기동 따라잡기가 뒤에서 도는 동안 정규 cron 의 heavy 잡(그날의 스캔)이 먼저 돌면 놓친 국면
+    판정보다 앞선다 — 따라잡기가 끝날 때까지 기다린다. 따라잡기 스레드 자신은 기다리지 않는다."""
+    monkeypatch.setattr(qj, "CATCH_UP_POLL_S", 0.02)
+    q = env.deps.queue
+    q.catch_up_thread = -1  # 다른 스레드가 따라잡는 중
+    ran = threading.Event()
+    t = threading.Thread(target=lambda: qj.heavy(env.deps, lambda: ran.set()))
+    t.start()
+    assert not ran.wait(0.3)
+    q.catch_up_thread = None
+    assert ran.wait(5)
+    t.join(5)
+    q.catch_up_thread = threading.get_ident()  # 따라잡기 스레드 자신
+    assert qj.heavy(env.deps, lambda: "me") == "me"
+    q.catch_up_thread = None
+
+
+def test_catch_up_does_not_rerun_a_job_due_after_scheduler_start(project):
+    """스케줄러 시작 뒤 예정 시각이 된 잡은 정규 틱이 돈다 — 따라잡기가 또 돌리지 않는다."""
+    before = datetime(2026, 10, 6, 8, 5, tzinfo=UTC)  # 화 17:05 KST — 백업(17:10) 전
+    env = make_env(project, datetime(2026, 10, 6, 8, 11, tzinfo=UTC))  # 지금은 17:11
+    assert "backup" in qj.catch_up_missed(env.deps, env.jobs(), now=None)["missed"]
+    assert "backup" not in qj.catch_up_missed(env.deps, env.jobs(), now=before)["missed"]
+
+
 def test_bootstrap_runs_cancel_hook_for_interrupted_and_expired_requests(env, conn):
     """재기동으로 끊긴 요청·만료된 대기 요청도 kind 의 `on_cancel` 을 부른다 — 승인 집행 요청이
     이렇게 사라지면 승인 선점(decided_channel)이 남아 다시 승인할 수 없게 묶인다. 다시 넣는

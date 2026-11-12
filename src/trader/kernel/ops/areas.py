@@ -21,6 +21,8 @@ from trader.kernel.session.run_store import run_date_for
 
 LLM_CAP_WATCH = 0.8
 DAY = timedelta(hours=24)
+# 가장 긴 정상 잡(스캔 분석)이 1시간 남짓 — 그 몇 배를 넘겨 running 이면 멈춘 것으로 본다
+STUCK_AFTER = timedelta(hours=3)
 
 
 def check_jobs(ctx: OpsContext) -> list[Item]:
@@ -49,6 +51,18 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
                 count=len(missed),
             )
         )
+    stuck = _stuck_running(ctx)
+    if stuck:
+        out.append(
+            Item(
+                "jobs.stuck",
+                "warning",
+                f"{STUCK_AFTER // timedelta(hours=1)}시간 넘게 실행 중인 채 멈춘 작업 "
+                f"{len(stuck)}건: {', '.join(stuck[:4])}",
+                link="/system#jobs",
+                count=len(stuck),
+            )
+        )
     counts = recent_errors(ctx.conn, ctx.now)
     n = counts["total"]
     if n:
@@ -64,6 +78,28 @@ def check_jobs(ctx: OpsContext) -> list[Item]:
                 count=n,
             )
         )
+    return out
+
+
+def _stuck_running(ctx: OpsContext) -> list[str]:
+    """`STUCK_AFTER` 넘게 running 인 cron 실행(`runs`)·큐 요청(`job_requests`)의 kind 목록.
+    하트비트는 별도 잡이 이어 가므로 잡 하나가 멈춰도 `jobs.stale` 로는 잡히지 않는다."""
+    before = (ctx.now - STUCK_AFTER).isoformat()
+    out = [
+        f"{r[0]}{' ' + r[1] if r[1] else ''}"
+        for r in ctx.conn.execute(
+            "SELECT kind, market FROM runs WHERE status='running' AND started_at < ? ORDER BY id",
+            (before,),
+        )
+    ]
+    out += [
+        f"{r[0]}#{r[1]}"
+        for r in ctx.conn.execute(
+            "SELECT kind, id FROM job_requests WHERE status='running' AND started_at < ? "
+            "ORDER BY id",
+            (before,),
+        )
+    ]
     return out
 
 

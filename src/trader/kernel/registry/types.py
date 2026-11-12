@@ -35,7 +35,7 @@ class JobSpec:
     schedule_key: str | None
     interval_s: int | None
     enabled: Callable[[Any], bool] | None
-    gate: Literal["market", "monitor", "none"]
+    gate: Literal["market", "monitor", "session", "none"]
     heavy: bool
     misfire: Literal["scan", "idempotent", "default"]
     catch_up: Literal["queue", "direct", "notify", "none"]
@@ -130,6 +130,10 @@ class SessionKind:
     retry_guard: bool = False
     # (ctx, spec) -> [(checkpoint directory, feature research contract)].
     research_targets: Callable[..., list[tuple[Path, ResearchSpec]]] | None = None
+    # 이 세션이 부를 수 있는 `trader tool` 최상위 명령 이름. 러너가 세션 범위 파일에 적고 도구
+    # 진입점이 강제한다(`kernel/session/scope.py`). None 은 제한 없음 — 기능이 선언하는 세션은
+    # 반드시 적는다(계약 검사)
+    tools: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

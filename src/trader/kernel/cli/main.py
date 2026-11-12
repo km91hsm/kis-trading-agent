@@ -190,7 +190,11 @@ def web(
     if host not in LOOPBACK_HOSTS:
         logger.warning("웹 서버를 루프백 밖(%s)에 바인드합니다 — tailscale serve 를 쓰세요", host)
     try:
-        uvicorn.run(create_app(build_web_deps(b)), host=host, port=port, log_config=None)
+        # proxy_headers=False: X-Forwarded-For 로 요청 상대 주소를 바꿀 수 없게(`app` 과 같다)
+        uvicorn.run(
+            create_app(build_web_deps(b)), host=host, port=port, log_config=None,
+            proxy_headers=False,
+        )  # fmt: skip
     finally:
         b.conn.close()
 

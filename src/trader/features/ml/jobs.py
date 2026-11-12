@@ -20,7 +20,7 @@ from trader.features.ml.messages import ml_trained
 from trader.features.ml.settings import load_ml
 from trader.features.ml.train import train_quant
 from trader.features.regime import api as regime_api
-from trader.kernel.config import Market
+from trader.kernel.config import Market, market_hours
 from trader.kernel.daemon import queue as jobq
 from trader.kernel.daemon.queue_jobs import enqueue_from_job
 from trader.kernel.execution import ledger as xledger
@@ -159,7 +159,11 @@ def features_action(deps, action: str, p: dict, progress) -> dict:
 
 def features_snapshot_body(deps, job=None) -> dict:
     """일일 피처 스토어 스냅샷(전 시장). 큐 kind 와 같은 `features_action`."""
-    return features_action(deps, "snapshot", {}, lambda *_a, **_k: None)
+    out = features_action(deps, "snapshot", {}, lambda *_a, **_k: None)
+    queued = bootstrap(deps=deps).get("queued")  # 장중 기동으로 미룬 백필을 여기서 다시 본다
+    if queued:
+        out = {**out, "bootstrap": queued}
+    return out
 
 
 def features_request_for(action: str):
@@ -182,6 +186,11 @@ def bootstrap(*, deps, **_) -> dict:
             or features.day_count(deps.state) >= BOOTSTRAP_MIN_DAYS
         ):
             return {"queued": queued}
+        # 백필은 KIS 호출 약 2,000건이라 장중에는 넣지 않는다(손절 감시와 초당 한도를 나눠 쓴다).
+        # 미룬 것은 장이 닫힌 일일 스냅샷 뒤에 다시 본다(`features_snapshot_body`)
+        open_markets = [m for m in deps.settings.markets if market_hours.is_open(m, deps.now())]
+        if open_markets:
+            return {"queued": queued, "deferred": f"{'·'.join(open_markets)} 장중"}
         conn = deps.conn_factory()
         try:
             last = jobq.latest_by(conn, "features_backfill", source="daemon")

@@ -55,6 +55,9 @@ class Inputs:
         return {}
 
 
+_GATES = dict.fromkeys(("market", "monitor", "session"), lambda job: None)
+
+
 @pytest.fixture(autouse=True)
 def _fake_claude(monkeypatch):
     """외부 FAKE_CLAUDE 값과 무관하게 같은 결과가 나오도록 FAKE 모드를 고정한다."""
@@ -354,7 +357,7 @@ def test_build_jobs_registers_scan_analyze_cron(project, settings):
     schedule = load("schedule", build_registry(discover()), path=project / "config" / "x.yaml")
     out = daemon_jobs.build(
         [FEATURE], schedule=schedule, settings=settings, markets=["KR", "US"],
-        ctx=SimpleNamespace(gates={"market": lambda job: None, "monitor": lambda job: None}),
+        ctx=SimpleNamespace(gates=_GATES),
     )  # fmt: skip
     got = {j.id: j for j in out if j.id.endswith("scan_analyze")}
     assert set(got) == {"kr_scan_analyze", "us_scan_analyze"}
@@ -373,7 +376,7 @@ def test_build_jobs_registers_scan_analyze_cron(project, settings):
         j.id: j
         for j in daemon_jobs.build(
             [REGIME], schedule=schedule, settings=settings, markets=["KR", "US"],
-            ctx=SimpleNamespace(gates={"market": lambda job: None, "monitor": lambda job: None}),
+            ctx=SimpleNamespace(gates=_GATES),
         )  # fmt: skip
     }
     assert (reg["kr_regime"].cron["hour"], reg["kr_regime"].cron["minute"]) == (7, 25)

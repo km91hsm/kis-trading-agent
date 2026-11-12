@@ -20,7 +20,7 @@ from trader.kernel.registry.types import Feature
 from trader.kernel.session.migrations import RESEARCH, RESEARCH_FAILOVER, SESSION
 
 # 다른 기능에서 import 할 수 있는 유일한 공개면.
-GATE_NAMES = ("market", "monitor")
+GATE_NAMES = ("market", "monitor", "session")
 PUBLIC_MODULE = "api"
 # 커널 중 기능 패키지를 동적으로 import 하는 유일한 파일.
 KERNEL_EXEMPT = Path("registry") / "discover.py"
@@ -91,6 +91,17 @@ def check(features: list[Feature], roots: Sequence[Path] | None = None) -> list[
         for a in f.health_areas
         if a.key in RESERVED_AREA_KEYS
     ]
+    tool_names = {t.name for f in features for t in f.tools}
+    for f in features:
+        for k in f.session_kinds:
+            if k.tools is None:
+                msgs.append(f"기능 {f.id} 세션 {k.kind}: 허용 도구(tools)를 선언해야 합니다")
+                continue
+            msgs += [
+                f"기능 {f.id} 세션 {k.kind}: 등록되지 않은 도구 {name}"
+                for name in k.tools
+                if name not in tool_names
+            ]
     try:
         check_migrations(all_migrations(features))
     except LedgerError as exc:

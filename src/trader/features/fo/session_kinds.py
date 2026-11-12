@@ -38,7 +38,11 @@ FO_TRADER = AgentDef("fo-trader", _DIR / "fo-trader.md", FoDecisionEnvelope)
 FO_ORCHESTRATOR = AgentDef("fo-orchestrator", _ORCH_MD)
 AGENTS = (FO_TRADER, FO_ORCHESTRATOR)
 
+# 이 기능의 세션이 부를 수 있는 `trader tool` 명령(도구 진입점이 강제한다)
+TOOLS = ("fo", "submit-fo-decision")
+
 FO = SessionKind(
+    tools=TOOLS,
     kind="fo",
     research_targets=lambda ctx, spec: [(market_dir(spec.date, spec.market, ctx.state), RESEARCH)],
     agents=FO_AGENTS,
@@ -54,6 +58,7 @@ FO = SessionKind(
 )
 
 FO_RESUME = SessionKind(
+    tools=TOOLS,
     kind="fo_resume",
     agents=FO_AGENTS,
     prompt_section="fo_resume",

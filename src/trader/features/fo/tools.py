@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import sqlite3
 import sys
@@ -49,7 +48,7 @@ from trader.kernel.notify.boot import boot_notifier
 from trader.kernel.notify.telegram import Notifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import research_policy, tooling
+from trader.kernel.session import research_policy, scope, tooling
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -149,7 +148,7 @@ def _fo_exec_ctx(boot: Any, *, notifier: Notifier, dry_run: bool) -> FoExecConte
 def tool_ctx(boot: Any) -> FoToolContext:
     """부트 결과(`ports=True`)로 FoToolContext 를 만든다. `TRADER_DRY_RUN` 이 없거나 "1" 이면
     dry_run(주문 없음) — LLM 이 플래그를 빠뜨려도 주문이 나가지 않는다."""
-    dry_run = os.environ.get("TRADER_DRY_RUN", "1") != "0"
+    dry_run = scope.dry_run()
     notifier = boot_notifier(boot)
     return FoToolContext(
         settings=boot.settings,
@@ -904,7 +903,7 @@ def _fo_tool_run(fn: Callable[..., dict], *, market: str, **kwargs: Any) -> None
             if conn is not None:
                 conn.close()
 
-    run_tool(go)
+    run_tool(go, args={"market": market, **kwargs})
 
 
 @fo_tool_app.command("bundle")

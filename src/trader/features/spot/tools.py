@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 import re
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -31,7 +30,15 @@ from trader.kernel.execution import ledger as exec_ledger
 from trader.kernel.notify import NullNotifier
 from trader.kernel.platform import paths
 from trader.kernel.registry.types import StageRule
-from trader.kernel.session import calls, input_receipts, research_policy, runner, tooling, usage
+from trader.kernel.session import (
+    calls,
+    input_receipts,
+    research_policy,
+    runner,
+    scope,
+    tooling,
+    usage,
+)
 from trader.kernel.session.run_store import checkpoint_payload as _wrap
 from trader.kernel.session.run_store import (
     list_checkpoints,
@@ -188,7 +195,7 @@ def tool_ctx(boot: Any) -> ToolContext:
         state=paths.state_dir(),
         ports=boot.ports,
         notifier=executor.boot_notifier(boot),
-        dry_run=os.environ.get("TRADER_DRY_RUN", "1") != "0",
+        dry_run=scope.dry_run(),
     )
 
 

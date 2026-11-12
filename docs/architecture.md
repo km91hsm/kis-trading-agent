@@ -34,7 +34,7 @@
 - 책임: SQLite 연결(WAL, 쓰기 타임아웃 30초), 버전 마이그레이션, 커널 소유 원시(`control` 플래그·`runs`).
 - 공개면: `connect`·`init_schema`·`current_version`·`now_iso`, `Migration`·`KERNEL`·`check`, `control`(`get_flag`·`set_flag`·`delete_flag`), `runs`(`start`·`finish`), `LedgerError`.
 - 규약:
-  - 기본 DB 파일은 `state/trader.db`.
+  - 기본 DB 파일은 `state/trader.db`. 크고 빠르게 느는 관측 원본은 원장에 두지 않는다 — 시장 순위 원본은 같은 폴더의 `market_activity.db`(`features/quotes/activity_store.py`, 호출자는 원장 연결을 넘기고 저장소가 옆 파일을 연다)에 쌓고 일일 백업에서 빠진다.
   - 마이그레이션은 전역 버전 오름차순·추가만. `migrations.check` 는 위반 시 `LedgerError` 를 던진다(레지스트리 쪽 `contracts.check` 가 이를 메시지 목록으로 바꾼다).
   - `init_schema` 는 이미 최신이면 쓰기 잠금 없이 반환한다.
   - 저장 시각은 `now_iso()` 의 UTC ISO8601.
@@ -63,6 +63,7 @@
   - 일일 세션 상한 초과는 `PipelineError`. 모든 단계 파일은 `run_store` 함수로만 읽고 쓴다.
   - 마이그레이션 `SESSION` 은 `ledger.migrations.KERNEL` 이 아니라 `contracts.KERNEL_MODULES` 로 합쳐진다(`KERNEL` 만 쓰는 커널 테스트가 깨지지 않게).
   - M10: `tooling`(도구 공용 `schema_error`·`validate_payload`·`summarize_turns`, regime·fo 가 공유)·`fake`(`fake_call`·`ensure_ok`·`FakeSessionError`·`fake_report`·`fake_turn` — spot·regime·scan·evaluation·fo 가 공유). fo 의 세션 종류 `fo`·`fo_resume`(`SessionKind`, `extra_cap_key=None`)는 일일 상한을 커널이 모르는 설정(`fo.session_cap`)에 두기 위해 fo `session.run` 이 세션 앞에서 오늘 `runs.kind='fo'` 건수를 검사한다(원자적 예약 없음). `usage.RESUME_KINDS` 에 `fo_resume` 이 들어 80% 감속에서도 보유 재평가는 통과한다. 세션 상한 초과는 fo 에서만 `session.run` 밖으로 `PipelineError` 가 나가고 잡·큐 본문이 `skipped` 로 바꾼다.
+- 세션 범위(`session/scope.py`): 러너가 세션마다 `state/sessions/<session_id>.json`(종류·허용 도구 `SessionKind.tools`·dry-run·배정 종목)을 쓰고 env `TRADER_SESSION_ID` 로 가리킨다. `trader tool` 진입점(`cli/tool_cmd.py`)이 그 파일로 하위 명령을 거르고, 도구의 dry-run 은 `scope.dry_run()` 으로만 정한다 — 실제 주문은 `TRADER_DRY_RUN=0` 이고 범위 파일도 dry-run 이 아닐 때만(러너 밖 호출은 항상 dry-run). 기능의 도구 실행 헬퍼는 받은 인자를 `run_tool(go, args=…)` 로 넘겨 `ticker`·`market`·`date` 가 세션 범위 밖이면 본문을 돌리지 않는다(제출뿐 아니라 수집·체크포인트 쓰기에도 걸린다). 세션이 끝나면 파일을 지워 끝난 세션의 id 로는 도구를 부를 수 없고, 강제 종료로 남은 파일은 데몬 기동 때 지운다. 세션 종류를 더하면 `tools` 를 반드시 선언한다(`contracts.check`).
 - 테스트: `tests/kernel/session/`
 
 ## execution

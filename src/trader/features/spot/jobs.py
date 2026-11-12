@@ -246,7 +246,7 @@ BALANCE_REFRESH = JobSpec(
 
 RECONCILE = JobSpec(
     id="{market}_reconcile", kind="reconcile", trigger="cron", per_market=True,
-    schedule_key="reconcile.{market}", interval_s=None, enabled=None, gate="market", heavy=False,
+    schedule_key="reconcile.{market}", interval_s=None, enabled=None, gate="session", heavy=False,
     misfire="idempotent", catch_up="queue", start_soon_s=0, body=reconcile_body, days="mon-fri",
 )  # fmt: skip
 
