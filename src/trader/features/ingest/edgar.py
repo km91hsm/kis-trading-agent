@@ -72,9 +72,16 @@ class EdgarClient:
         quiet_httpx()
         self._headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"}
         self._cache_dir = cache_dir
+        self._owns_http = http is None  # 직접 만든 연결만 닫는다
         self._http = http or httpx.Client(timeout=15)
         self._now = now
         self._tickers: dict[str, Any] | None = None
+
+    def close(self) -> None:
+        """직접 만든 HTTP 연결을 닫는다(주입받은 것은 건드리지 않는다). 잡마다 새 클라이언트를
+        만드는 호출처가 끝에 부른다."""
+        if self._owns_http:
+            self._http.close()
 
     def _get(self, url: str) -> Any:
         resp = self._http.get(url, headers=self._headers)

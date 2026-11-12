@@ -137,15 +137,23 @@ def features_action(deps, action: str, p: dict, progress) -> dict:
     markets = [p["market"]] if p.get("market") else list(deps.settings.markets)
     fn = features.backfill if action == "backfill" else features.snapshot
     kw = {"years": p["years"]} if action == "backfill" else {}
-    n = fn(
-        market_client=market_client,
-        dart=ingest_api.build_dart(deps.secrets),
-        edgar=ingest_api.build_edgar(ingest_api.load_sources(registry=deps.registry), deps.secrets),
-        universe=ingest_api.load_universe(),
-        markets=markets,  # type: ignore[arg-type]
-        progress=progress,
-        **kw,
-    )
+    dart = ingest_api.build_dart(deps.secrets)
+    edgar = ingest_api.build_edgar(ingest_api.load_sources(registry=deps.registry), deps.secrets)
+    try:
+        n = fn(
+            market_client=market_client,
+            dart=dart,
+            edgar=edgar,
+            universe=ingest_api.load_universe(),
+            markets=markets,  # type: ignore[arg-type]
+            progress=progress,
+            **kw,
+        )
+    finally:  # 잡마다 새로 만든 HTTP 연결을 닫는다(매일 도는 잡이라 쌓인다)
+        for client in (dart, edgar):
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
     return {"rows": int(n)}
 
 

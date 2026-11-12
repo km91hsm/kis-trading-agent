@@ -15,6 +15,7 @@
 ## 규약
 
 - 피처 파일 쓰기는 `_store_lock`(파일 락) 아래 임시 파일 → 원자 교체이고, 같은 (date, ticker) 행은 덮어써서 멱등이다. 읽기는 락 없이 부분 읽기(`latest_rows(asof)`: asof 이하 최신 행만).
+- 뉴스·커뮤니티 건수(`news_count`·`community_count`)는 행의 날짜(마지막 완성 봉)의 운영일 폴더 `00_inputs` 에서 센다(`counts_from_inputs(day=)`). 뉴스는 수집이 쓰는 `news.data.stock`(종목 뉴스)만 센다. 백필은 `BACKFILL_CHUNK`(50)종목씩 묶어 쓰고, 락은 날짜 파일 하나를 쓰는 동안만 쥔다. DART 연간 재무는 `state/cache/dart_fin/` 에 30일 캐시한다.
 - 룩어헤드 방지(PIT): 재무비율은 Y 값을 Y+1 년 4월 1일부터 쓰고, 과거 asof 스냅샷은 `MAX_PAST` 를 넘으면 거부한다. 학습 라벨 엠바고(워크포워드가 마지막 학습일을 test 시작 `horizon_days + embargo_days + 1` 거래일 앞으로 당긴다)를 두며, 유니버스는 그날 구성원 이력(`universe_members`)으로 거른다(`ml.train.pit.strict` 면 기록 전 과거 행을 아예 뺀다, `liquidity_top_n` 으로 유동성 상위만).
 - 승격 기준(`promotion_decision`): 공통 — 평가 폴드가 있고 모든 폴드의 up 예측 ≥ `min_up_predictions`("전부 중립" 모델 차단). `promote_metric=accuracy` 면 합산 정확도 > 기준선(최빈 라벨)·≥ `promote_min_accuracy`·알파 > `min_alpha`, `alpha`(scan 랭커용) 면 상위 N 평균 알파 ≥ `min_alpha`·알파 양인 폴드 비율 ≥ `promote_min_positive_folds`. `min_alpha` 는 시장별(`promote_min_alpha_by_market`) 값이 우선. 기준을 통과한 학습만 자동 승격하고, 아니면 저장만 한다.
 - `ml tune` 은 리포트만 낸다: dev 폴드(마지막 폴드 제외)로 하이퍼파라미터를 고르고 홀드아웃을 보고한다. 설정·레지스트리를 바꾸지 않는다(적용은 사람이 `ml.yaml` 수정).

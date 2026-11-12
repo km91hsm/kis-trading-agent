@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 import threading
 import xml.etree.ElementTree as ET
@@ -27,6 +28,7 @@ logger = logging.getLogger("trader.sources")
 
 BASE = "https://opendart.fss.or.kr/api"
 CACHE_DAYS = 7
+FIN_CACHE_DAYS = 30  # 재무제표 캐시 수명(정정 공시는 이 안에 반영)
 MAP_FAIL_BACKOFF = timedelta(minutes=10)  # corpCode 받기 실패 뒤 재요청 간격
 ANNUAL = "11011"
 RATIO_KEYS = ("매출성장률", "영업이익률", "ROE", "부채비율", "PER", "PBR", "PSR")
@@ -77,11 +79,18 @@ class DartClient:
         quiet_httpx()
         self._key = api_key
         self._cache_dir = cache_dir
+        self._owns_http = http is None  # 직접 만든 연결만 닫는다
         self._http = http or httpx.Client(timeout=15)
         self._now = now
         self._corp_map: dict[str, dict[str, str]] | None = None
         self._map_lock = threading.Lock()  # 수집 절이 병렬로 돌 때 고유번호 맵을 한 번만 받는다
         self._map_failed_at: datetime | None = None  # 실패 뒤 MAP_FAIL_BACKOFF 동안 재요청 안 함
+
+    def close(self) -> None:
+        """직접 만든 HTTP 연결을 닫는다(주입받은 것은 건드리지 않는다). 잡마다 새 클라이언트를
+        만드는 호출처가 끝에 부른다."""
+        if self._owns_http:
+            self._http.close()
 
     # --- 공통 ---------------------------------------------------------------
 
@@ -183,7 +192,48 @@ class DartClient:
         self, corp_code: str, year: int, reprt_code: str = ANNUAL, fs_div: str = "CFS"
     ) -> dict[str, Any]:
         """주요 계정 (공통 키 + `_전기`). 연결(CFS)이 없으면 개별(OFS)로 1회 재조회하고
-        `_fs_div` 에 어느 쪽인지 표시한다. 둘 다 없으면 빈 dict."""
+        `_fs_div` 에 어느 쪽인지 표시한다. 둘 다 없으면 빈 dict.
+
+        결과는 `FIN_CACHE_DAYS` 동안 파일로 캐시한다 — 재무제표는 보고서당 한 번 나오는데 일일
+        피처 스냅샷이 종목마다 매일 다시 받았다. 빈 결과(공시 전)는 캐시하지 않는다."""
+        cache = self._cache_dir / "dart_fin" / f"{corp_code}_{year}_{reprt_code}_{fs_div}.json"
+        hit = self._read_fin_cache(cache)
+        if hit is not None:
+            return hit
+        out = self._fetch_financials(corp_code, year, reprt_code, fs_div)
+        if out:
+            self._write_fin_cache(cache, out)
+        return out
+
+    def _read_fin_cache(self, path: Path) -> dict[str, Any] | None:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            fetched = datetime.fromisoformat(raw["fetched_at"])
+            if self._now() - fetched > timedelta(days=FIN_CACHE_DAYS):
+                return None
+            return {
+                k: v if k.startswith("_") else Decimal(v) for k, v in raw["accounts"].items()
+            }
+        except (OSError, ValueError, KeyError, TypeError, ArithmeticError):
+            return None  # 없거나 깨진 캐시는 다시 받는다
+
+    def _write_fin_cache(self, path: Path, out: dict[str, Any]) -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            body = {
+                "fetched_at": self._now().isoformat(),
+                "accounts": {k: v if k.startswith("_") else str(v) for k, v in out.items()},
+            }
+            # 프로세스·스레드마다 다른 임시 이름(수집 절이 병렬로 같은 키를 쓸 수 있다)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as e:  # 캐시를 못 써도 조회 결과는 돌려준다
+            logger.warning("DART 재무 캐시 쓰기 실패: %s", type(e).__name__)
+
+    def _fetch_financials(
+        self, corp_code: str, year: int, reprt_code: str, fs_div: str
+    ) -> dict[str, Any]:
         data = self._get_json(
             "fnlttSinglAcntAll.json",
             corp_code=corp_code,
@@ -208,7 +258,7 @@ class DartClient:
                 if prev is not None:
                     out[f"{key}_전기"] = prev
         if not out and fs_div == "CFS":
-            return self.financials(corp_code, year, reprt_code, fs_div="OFS")
+            return self._fetch_financials(corp_code, year, reprt_code, "OFS")
         if out:
             out["_fs_div"] = fs_div
         return out
