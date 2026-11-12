@@ -253,7 +253,7 @@ def test_disabled_skips(ctx, conn):
 
 def test_daemon_registers_friday_rebalance_cron(project, settings):
     schedule = load("schedule", build_registry(discover()), path=project / "config" / "x.yaml")
-    ctx = SimpleNamespace(gates={"market": None, "monitor": None})
+    ctx = SimpleNamespace(gates={"market": None, "monitor": None, "session": None})
 
     def built(s):
         out = daemon_jobs.build(

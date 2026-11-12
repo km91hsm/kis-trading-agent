@@ -35,7 +35,7 @@ class JobSpec:
     schedule_key: str | None
     interval_s: int | None
     enabled: Callable[[Any], bool] | None
-    gate: Literal["market", "monitor", "none"]
+    gate: Literal["market", "monitor", "session", "none"]
     heavy: bool
     misfire: Literal["scan", "idempotent", "default"]
     catch_up: Literal["queue", "direct", "notify", "none"]

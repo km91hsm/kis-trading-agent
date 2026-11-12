@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from trader.kernel.broker.client import RateLimiter
+from trader.kernel.broker.client import RATE_WINDOW_S, RateLimiter
 from trader.kernel.broker.errors import KisApiError
 
 REAL = "https://openapi.koreainvestment.com:9443"
@@ -236,8 +236,8 @@ def test_rate_limiter_max_wait_raises_busy_instead_of_sleeping():
         lim.acquire()
     assert slept == []  # 상한을 넘기는 대기는 시작도 하지 않는다
     with lim.max_wait(2.0):
-        lim.acquire()  # 1초 대기는 상한 안
-    assert len(slept) == 1 and slept[0] <= 1.0
+        lim.acquire()  # 창 하나만큼의 대기는 상한 안
+    assert len(slept) == 1 and slept[0] <= RATE_WINDOW_S
     lim.acquire()  # 상한 밖(기본)에서는 평소처럼 기다린다
     assert len(slept) == 2
 
@@ -369,3 +369,23 @@ def test_order_or_cancel_transport_timeout_is_never_retried(
         paper_client.post("/synthetic-order", tr_name, {})
     assert exc.value.msg_cd == "NETWORK_UNKNOWN"
     assert route.call_count == 1 and slept == []
+
+
+def test_rate_limiter_keeps_headroom_under_the_kis_limit():
+    """KIS 한도를 꽉 채워 쓰면 1초 창 경계가 서버 집계와 어긋나 초당 한도 오류가 상시 났다(일주일
+    약 5,000건) — 창을 1초보다 조금 길게 잡아 여유를 둔다(모의 2건/초처럼 건수를 줄일 수 없는
+    한도에도 통한다)."""
+    assert 1.1 <= RATE_WINDOW_S <= 1.25
+    now = [0.0]
+    slept: list[float] = []
+
+    def sleep(s):
+        slept.append(s)
+        now[0] += s
+
+    rl = RateLimiter(2, clock=lambda: now[0], sleep=sleep)
+    rl.acquire()
+    rl.acquire()
+    now[0] = 1.02  # 1초는 지났지만 창(RATE_WINDOW_S)은 아직
+    rl.acquire()
+    assert slept and abs(now[0] - RATE_WINDOW_S) < 1e-6

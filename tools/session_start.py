@@ -12,10 +12,12 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 MAX_CHARS = 10_000
 MAX_TODOS = 10
+STALE_AFTER_S = 3600
 SECTIONS = ("운영 점검", "데몬")
 _OPEN = re.compile(r"^\s*- \[ \]\s*(.*)$")
 _CUT = "\n…(10 000자 상한으로 잘림)"
@@ -59,6 +61,22 @@ def _open_todos(text: str, limit: int) -> list[str]:
     return items
 
 
+def _stale_note(root: Path) -> str:
+    """STATUS.md 가 `STALE_AFTER_S` 보다 오래됐으면 경고 한 줄. 이 파일은 `trader status` 를 돌릴
+    때만 갱신되므로, 묵은 "데몬 실행 중" 을 지금 상태로 읽지 않게 한다."""
+    try:
+        age = time.time() - (root / "state" / "STATUS.md").stat().st_mtime
+    except OSError:
+        return ""
+    if age < STALE_AFTER_S:
+        return ""
+    ago = f"{int(age // 86400)}일" if age >= 86400 else f"{int(age // 3600)}시간"
+    return (
+        f"> 주의: {ago} 전에 만든 지난 상태입니다 — 데몬·점검 내용이 지금과 다를 수 있어요. "
+        "`uv run trader status` 로 갱신하세요.\n\n"
+    )
+
+
 def main(root: Path | None = None) -> str:
     """세션 컨텍스트 문자열(≤ MAX_CHARS). STATUS 절을 먼저 자르고 TODO 는 지킨다."""
     root = root or _root()
@@ -67,7 +85,7 @@ def main(root: Path | None = None) -> str:
         head = "# 시스템 상태\n\n`state/STATUS.md` 가 없습니다. `uv run trader status` 로 만드세요."
     else:
         blocks = _sections(status, SECTIONS)
-        head = "# 시스템 상태 (state/STATUS.md 발췌)\n\n" + (
+        head = "# 시스템 상태 (state/STATUS.md 발췌)\n\n" + _stale_note(root) + (
             "\n\n".join(blocks) if blocks else "(운영 점검·데몬 절 없음)"
         )
     todos = _open_todos(_read(root / "docs" / "TODO.md") or "", MAX_TODOS)

@@ -194,3 +194,29 @@ def test_orders_stale_today_after_close(conn, make_ctx):
     assert got["orders.stale"].count == 1
     before = NOW - timedelta(hours=3)  # 14:30 KST, 마감 전
     assert "orders.stale" not in _keys(areas.check_orders(make_ctx(ports=ports, now=before)))
+
+
+def test_jobs_area_flags_runs_and_requests_stuck_in_running(conn, make_ctx):
+    """실행 중인 채 오래 멈춘 잡·큐 요청은 하트비트로는 안 보인다(다른 잡이 박동을 이어 간다) —
+    3시간 넘게 running 이면 올린다. 정상 범위(가장 긴 스캔이 1시간 남짓)는 올리지 않는다."""
+    ctx = make_ctx()
+    old = (ctx.now - timedelta(hours=4)).isoformat()
+    fresh = (ctx.now - timedelta(minutes=50)).isoformat()
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, status) VALUES ('regime','KR',?,'running')",
+        (old,),
+    )
+    conn.execute(
+        "INSERT INTO runs(kind, market, started_at, status) VALUES ('scan','KR',?,'running')",
+        (fresh,),
+    )
+    conn.execute(
+        "INSERT INTO job_requests(kind, params, status, priority, source, requested_at, "
+        "started_at) VALUES ('analyze','{}','running',5,'web',?,?)",
+        (old, old),
+    )
+    conn.commit()
+    by = {i.key: i for i in areas.check_jobs(ctx)}
+    stuck = by["jobs.stuck"]
+    assert stuck.level == "warning" and stuck.count == 2
+    assert "regime" in stuck.text and "analyze" in stuck.text and "scan" not in stuck.text

@@ -89,6 +89,9 @@ class QueueState:
     heavy_wanted: HeavyWanted = field(default_factory=HeavyWanted)
     heavy_owner: int | None = None
     heartbeat: Any = None
+    # 기동 따라잡기를 도는 스레드 id(없으면 None). 따라잡기가 끝날 때까지 다른 스레드의 cron heavy
+    # 잡은 기다린다 — 놓친 국면 판정보다 그날의 스캔이 먼저 도는 순서 역전을 막는다
+    catch_up_thread: int | None = None
     # 게이트로 버린 자동 요청 알림을 이미 보낸 (시장, 운영일, 사유) — 하루 1번
     gate_alerted: set[tuple] = field(default_factory=set)
     gate_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -107,6 +110,9 @@ def _send(deps: Any, text: str) -> None:
 # --- heavy 락 -------------------------------------------------------------------------
 
 
+CATCH_UP_POLL_S = 0.5
+
+
 def heavy(deps: Any, fn: Callable[[], Any], *, cron: bool = True) -> Any:
     """무거운 잡은 한 번에 하나. cron 은 기다리되 `heavy_wanted` 를 세워 큐 잡이 양보하게 하고,
     HEAVY_WAIT_NOTIFY_S 넘게 기다리면 알림 1건을 보낸다. 기다리는 중 종료 신호면 건너뛴다."""
@@ -116,6 +122,10 @@ def heavy(deps: Any, fn: Callable[[], Any], *, cron: bool = True) -> Any:
     waited = 0.0
     notified = False
     try:
+        # 기동 따라잡기가 도는 동안 다른 cron heavy 잡은 줄을 서지 않고 기다린다(순서 보장)
+        while q.catch_up_thread not in (None, threading.get_ident()):
+            if deps.stop_event.wait(CATCH_UP_POLL_S):
+                return {"skipped": "종료 중"}
         while not q.heavy_lock.acquire(timeout=HEAVY_POLL_S):
             waited += HEAVY_POLL_S
             if deps.stop_event.is_set():
@@ -506,7 +516,9 @@ def misfire_grace_for(spec: JobSpec) -> int:
 
 def _market_skip(deps: Any, job: ScheduledJob) -> str | None:
     """시장 잡이 오늘 쉬는 사유(일시정지·주말·휴장). 게이트가 없으면 정규장 유무만 본다."""
-    gate = (deps.gates or {}).get("market")
+    # 잡이 고른 게이트로 본다(조회 전용 `session` 게이트 잡은 일시정지에도 따라잡는다)
+    name = job.spec.gate if job.spec.gate in ("market", "session") else "market"
+    gate = (deps.gates or {}).get(name) or (deps.gates or {}).get("market")
     if gate is not None:
         return gate(job)
     market = job.market
@@ -570,11 +582,16 @@ def _last_fire(job: ScheduledJob, now: datetime) -> datetime | None:
     return last
 
 
-def catch_up_missed(deps: Any, jobs: Iterable[ScheduledJob]) -> dict:
+def catch_up_missed(
+    deps: Any, jobs: Iterable[ScheduledJob], *, now: datetime | None = None
+) -> dict:
     """기동 때: 데몬이 꺼져 있던 동안 오늘 예정 시각이 지난 cron 잡 중 끝까지 돈(`ok`) runs 기록이
     없는 것을 놓친 것으로 본다(APScheduler 는 새로 등록한 잡의 지난 시각에 MISSED 를 내지 않는다).
-    지난 운영일 예정분은 끌어오지 않는다. 알림은 한 건으로 묶는다."""
-    now = deps.now()
+    지난 운영일 예정분은 끌어오지 않는다. 알림은 한 건으로 묶는다.
+
+    `now` 는 스케줄러 시작 **전**에 잡은 시각을 받는다 — 따라잡기가 스케줄러 뒤에서 돌므로, 그
+    사이 예정 시각이 된 잡을 정규 틱과 따라잡기가 둘 다 돌지 않게."""
+    now = now or deps.now()
     jobs = [j for j in jobs if j.spec.trigger == "cron" and j.spec.catch_up != "none"]
     missed: list[ScheduledJob] = []
     conn = deps.conn_factory()
