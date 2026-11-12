@@ -17,6 +17,7 @@ import logging
 import sqlite3
 from typing import Any
 
+from trader.features.quotes.migrations import VACUUM_FLAG
 from trader.kernel.config import KST
 from trader.kernel.ledger import control
 from trader.kernel.ledger.db import now_iso
@@ -206,6 +207,27 @@ def market_activity_body(deps: Any, job: Any = None) -> dict:
         finally:
             conn.close()
     return out
+
+
+def reclaim_ledger(*, deps, **_) -> dict:
+    """기동 훅: 순위 관측을 보관소로 옮긴 원장(마이그레이션 21)의 빈 공간을 한 번 회수한다.
+    VACUUM 은 원장을 통째로 다시 쓰므로 스케줄러가 돌기 전인 기동 때만 한다. 실패하면(다른
+    프로세스가 쓰는 중 등) 예약을 남겨 다음 기동에 다시 한다. 어떤 오류도 올리지 않는다."""
+    conn = deps.conn_factory()
+    try:
+        if not control.get_flag(conn, VACUUM_FLAG):
+            return {"vacuumed": False}
+        conn.commit()
+        conn.execute("VACUUM")
+        conn.execute("DELETE FROM control WHERE key=?", (VACUUM_FLAG,))
+        conn.commit()
+        logger.info("원장 빈 공간 회수 완료(순위 관측 분리 뒤)")
+        return {"vacuumed": True}
+    except Exception as e:  # noqa: BLE001 - 회수 실패가 기동을 막지 않는다
+        logger.warning("원장 빈 공간 회수 실패(다음 기동에 다시): %s", e)
+        return {"vacuumed": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        conn.close()
 
 
 MARKET_ACTIVITY = JobSpec(
