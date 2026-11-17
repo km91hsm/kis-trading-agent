@@ -56,7 +56,7 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
         if (!active()) break;
         const view = scheduler.next(Date.now(), lane);
         if (!view) continue;
-        let job, saved = false, failed = true, authBlocked = false, stage = 'begin';
+        let job, detailBlocked, saved = false, failed = true, authBlocked = false, stage = 'begin';
         try {
             job = await request('api_begin', { stream: view.stream });
             if (!active()) return;
@@ -83,6 +83,12 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
                     stage = 'detail';
                     const detail = await fetchJob(child);
                     if (!active()) return;
+                    if (view.stream === 'news_all' && [401, 403, 429].includes(detail?.status)) {
+                        // 이미 받은 목록을 보존하고, 상세·다른 스트림 요청은 여기서 멈춘다.
+                        detailBlocked = detail;
+                        authBlocked = detail.status !== 429;
+                        break;
+                    }
                     if (await blocked(detail)) { authBlocked = detail?.status !== 429; return; }
                     if (!detail || detail.error) throw Error(detail?.error || 'api_detail_unverified');
                     details.push(detail);
@@ -93,6 +99,7 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
             saved = true;
             if (!active()) return;
             failed = false;
+            if (detailBlocked) return;
             for (const item of (result.pdf_items || []).slice(0, 1)) {
                 stage = 'pdf';
                 if (!active()) return;
@@ -110,7 +117,9 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
         } finally {
             // Cancel only this exact job. Errors do not replace the last good capture.
             if (job && !saved && active()) try { await request('api_cancel', { stream: view.stream, job_id: job.job_id, ...(authBlocked ? { reason: 'verification_required' } : {}) }); } catch { }
-            if (active()) {
+            if (detailBlocked && active()) await blocked(detailBlocked);
+            // 접근 확인은 호스트 단위로 관리한다. 목록 저장 전의 차단으로 재시도 간격을 늘리지 않는다.
+            if (active() && (!authBlocked || saved)) {
                 scheduler.done(view, Date.now(), failed);
                 await store({ collectionSchedule: scheduler.snapshot() });
             }

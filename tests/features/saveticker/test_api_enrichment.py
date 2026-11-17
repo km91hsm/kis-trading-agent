@@ -355,3 +355,20 @@ def test_enrich_rejection_is_recorded_as_failed_attempt(tmp_path):
         "news_all"
     ]
     assert row["last_error"] == "api_detail_unverified" and row["last_success_at"] is None
+
+
+def test_prepared_news_list_is_saved_without_details(tmp_path):
+    client = native.NativeSession(tmp_path)
+    job = send(client, "api_begin", stream="news_all")
+    base = response(job["request"]["url"], {"news_list": [{"id": "one", "title": "One"}]})
+    context = {"stream": "news_all", "job_id": job["job_id"], "response": base}
+    prepared = send(client, "api_prepare", **context)
+    assert prepared["ok"] and len(prepared["requests"]) == 1
+
+    saved = send(client, "api_snapshot", **context, details=[])
+
+    assert saved["ok"] and saved["count"] == 1
+    snapshot = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
+    assert snapshot["status"] == "partial"
+    assert snapshot["items"][0]["title"] == "One"
+    assert snapshot["items"][0]["detail_status"] != "ok"
