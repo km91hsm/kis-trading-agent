@@ -137,3 +137,43 @@ test('only the documented challenged-response header becomes a fixed non-secret 
  for(const header of ['challenge','other']){const r=new Response('<html>synthetic</html>',{status:403,headers:{'content-type':'text/html','cf-mitigated':header,'set-cookie':'must-not-project'}});Object.defineProperty(r,'url',{value:URL_NEWS});const c=await content(r);const out=await c.send();assert.equal(out.security,header==='challenge'?'cloudflare_challenge':undefined);assert.ok(!JSON.stringify(out).includes('must-not-project'));}
 });
 test('API cycle forwards only response classification to the whole-host guard',async()=>{let cause;const response={status:403,security:'cloudflare_challenge'};const r=runner(response,{deps:{blockHost:async x=>{cause=x?.security}}});await r.run();assert.equal(cause,'cloudflare_challenge');assert.ok(!r.calls.some(x=>x.type==='api_snapshot'));});
+
+test('news list survives a verification barrier or rate limit on an optional detail', async () => {
+ for (const status of [403, 429]) {
+  const list = {status:200,url:URL_NEWS,content_type:'application/json',data:{news_list:[{id:'one',title:'One'}]}};
+  const child = {request:{...descriptor,kind:'news_detail'}};
+  const calls = [];
+  const r = runner(list, {deps:{
+   request: async (type, body) => {
+    calls.push(type);
+    if (type === 'api_begin') return {request:descriptor};
+    if (type === 'api_prepare') return {requests:[child,child]};
+    if (type === 'api_snapshot') {
+     assert.deepEqual(body.response,list);
+     assert.deepEqual(body.details,[]);
+    }
+    return {count:1};
+   },
+   blockHost: async () => calls.push('block'),
+   chrome:{tabs:{
+    query: async () => [{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],
+    sendMessage: async (_id,m) => {
+     calls.push(m.job.request.kind);
+     return m.job.request.kind === 'news' ? list : {status,retry_after:'120'};
+    }
+   }}
+  }});
+  await r.run();
+  assert.deepEqual(calls, ['api_begin','news','api_prepare','news_detail','api_snapshot',...(status === 403 ? ['block'] : [])]);
+  assert.deepEqual(r.done.map(([, , failed]) => failed),[false]);
+  if (status === 429) assert.ok(r.state.apiCooldownUntil >= Date.now()+119000);
+ }
+});
+
+test('verification block on the news list does not add per-stream retry backoff', async () => {
+ const r = runner({status:403});
+ await r.run();
+ assert.ok(r.isBlocked());
+ assert.equal(r.calls.find(call => call.type === 'api_cancel')?.reason, 'verification_required');
+ assert.equal(r.done.length, 0);
+});
