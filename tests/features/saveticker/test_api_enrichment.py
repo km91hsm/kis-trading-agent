@@ -1,8 +1,10 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from trader.features.saveticker import api_contract, native
+from trader.features.saveticker import api_contract, jsonfeed, native
+from trader.features.saveticker.models import Capture
 
 
 def send(client, kind, **kwargs):
@@ -106,6 +108,39 @@ def test_news_detail_is_native_issued_correlated_and_saved(tmp_path):
     job = send(client, "api_begin", stream="news_all")
     prepared = send(client, "api_prepare", stream="news_all", job_id=job["job_id"], response=base)
     assert prepared["requests"] == [], "cached complete body is not fetched every cycle"
+
+
+def test_news_uses_current_article_ids_to_reuse_cached_body(tmp_path, monkeypatch):
+    client = native.NativeSession(tmp_path)
+    job = send(client, "api_begin", stream="news_all")
+    row = {"id": "news_one", "title": "One", "source": "save-pick"}
+    base = response(job["request"]["url"], {"news_list": [row]})
+    pending = jsonfeed.news_item(row)
+    full = pending.model_copy(update={"body": "Cached body", "detail_status": "ok"})
+    observed = datetime.now(UTC) - timedelta(minutes=1)
+    for article in (full, pending):
+        client.store.save(
+            Capture(
+                stream="news_all",
+                page_url="https://www.saveticker.com/news",
+                observed_at=observed,
+                items=[article],
+            )
+        )
+        observed += timedelta(seconds=1)
+
+    def reject_global_query(**kwargs):
+        pytest.fail("뉴스 수집 준비와 저장은 전체 수집 이력을 조회하면 안 됩니다")
+
+    monkeypatch.setattr(client.store, "query", reject_global_query)
+    context = {"stream": "news_all", "job_id": job["job_id"], "response": base}
+
+    prepared = send(client, "api_prepare", **context)
+    assert prepared["ok"] and prepared["requests"] == []
+    saved = send(client, "api_snapshot", **context, details=[])
+    assert saved["ok"] and saved["count"] == 1
+    snapshot = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
+    assert snapshot["items"][0]["body"] == "Cached body"
 
 
 def test_prepared_base_cannot_be_swapped(tmp_path):
@@ -372,3 +407,80 @@ def test_prepared_news_list_is_saved_without_details(tmp_path):
     assert snapshot["status"] == "partial"
     assert snapshot["items"][0]["title"] == "One"
     assert snapshot["items"][0]["detail_status"] != "ok"
+
+
+def test_repeated_title_with_new_publication_gets_its_own_detail(tmp_path):
+    client = native.NativeSession(tmp_path)
+    older = datetime.now(UTC) - timedelta(hours=2)
+    newer = older + timedelta(hours=1)
+    row = {"id": "event_1", "title": "합성 정기 속보", "created_at": older.isoformat()}
+    old = jsonfeed.news_item({**row, "content": "이전 발표 본문"}, detail=True)
+    client.store.save(Capture(stream="news_all", page_url="https://www.saveticker.com/news",
+                              observed_at=older, items=[old]))
+    job = send(client, "api_begin", stream="news_all")
+    current = {**row, "id": "event_2", "created_at": newer.isoformat()}
+    base = response(job["request"]["url"], {"news_list": [current]})
+    context = {"stream": "news_all", "job_id": job["job_id"], "response": base}
+    prepared = send(client, "api_prepare", **context)
+    assert [r["source_id"] for r in prepared["requests"]] == ["event_2"]
+    assert send(client, "api_snapshot", **context, details=[])["ok"]
+    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text())
+    assert latest["items"][0]["body"] == ""
+    assert datetime.fromisoformat(latest["items"][0]["published_at"]) == newer
+    assert latest["items"][0]["id"] != old.id
+
+
+def test_distinct_source_ids_keep_their_bodies_links_and_ledger_rows(tmp_path):
+    from contextlib import closing
+
+    from trader.features.ingest.saveticker_ingest import ingest_news
+    from trader.kernel.ledger import db
+    from trader.kernel.registry import discover
+    from trader.kernel.registry.contracts import all_migrations
+
+    client = native.NativeSession(tmp_path)
+    first = {"id": "first", "title": "합성 속보", "source": "합성 매체",
+             "created_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat()}
+    second = {**first, "id": "second",
+              "created_at": (datetime.now(UTC) - timedelta(minutes=20)).isoformat()}
+    old = jsonfeed.news_item(first)
+    client.store.save(Capture(stream="news_all", page_url="https://www.saveticker.com/news",
+                              observed_at=datetime.now(UTC), items=[old]))
+    job = send(client, "api_begin", stream="news_all")
+    base = response(job["request"]["url"], {"news_list": [first, second]})
+    context = {"stream": "news_all", "job_id": job["job_id"], "response": base}
+    children = send(client, "api_prepare", **context)["requests"]
+    assert len(children) == 2
+    details = [response(child["request"]["url"], {**row, "content": body})
+               for child, row, body in zip(children, (first, second), ("첫 본문", "둘째 본문"),
+                                            strict=True)]
+    del details[1]["data"]["created_at"]
+    forged = {**details[1], "data": {**details[1]["data"], "source": "다른 매체"}}
+    rejected = send(client, "api_snapshot", **context, details=[forged])
+    assert rejected["error"] == "api_detail_unverified"
+    assert send(client, "api_snapshot", **context, details=details)["ok"]
+    path = tmp_path / "data/latest/news_all.json"
+    one, two = json.loads(path.read_text(encoding="utf-8"))["items"]
+    assert one["id"] == old.id and one["id"] != two["id"]
+    assert (one["body"], two["body"]) == ("첫 본문", "둘째 본문")
+    assert datetime.fromisoformat(two["published_at"]) == datetime.fromisoformat(
+        second["created_at"]
+    )
+
+    client = native.NativeSession(tmp_path)
+    job = send(client, "api_begin", stream="news_all")
+    renamed = response(job["request"]["url"], {"news_list": [
+        {**second, "title": "고쳐 쓴 둘째 제목"}, {**first, "title": "고쳐 쓴 첫 제목"}]})
+    assert send(client, "api_snapshot", stream="news_all", job_id=job["job_id"],
+                response=renamed)["ok"]
+    renamed_items = json.loads(path.read_text(encoding="utf-8"))["items"]
+    assert [(r["id"], r["body"]) for r in renamed_items] == [
+        (two["id"], "둘째 본문"), (old.id, "첫 본문")]
+    with closing(db.connect(tmp_path / "ledger.db")) as conn:
+        db.init_schema(conn, all_migrations(discover()))
+        ingest_news(conn, tmp_path)
+        rows = conn.execute("SELECT url, summary FROM news_items WHERE market='KR'").fetchall()
+    assert {tuple(row) for row in rows} == {
+        ("https://www.saveticker.com/news#" + old.id, "첫 본문"),
+        ("https://www.saveticker.com/news#" + two["id"], "둘째 본문"),
+    }

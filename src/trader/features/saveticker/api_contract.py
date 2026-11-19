@@ -12,6 +12,8 @@ from trader.features.saveticker.models import Item
 
 ORIGIN = "https://www.saveticker.com"
 MAX_BYTES = 2 * 1024 * 1024
+NEWS_PAGE_SIZE = 20
+MAX_NEWS_PAGE = 100
 INDEX_SYMBOLS = ("QQQ", "SPY", "DIA", "IWM", "SOXX")
 # 확장에 돌려주는 고정 오류 코드(확장 `api-runner.js` 의 `API_ERRORS` 와 같은 집합 — 테스트가 고정).
 # 응답 거절 `ValueError` 의 메시지가 이 집합이면 그 코드를 그대로 쓴다.
@@ -24,14 +26,18 @@ API_ERRORS = frozenset(
 )
 
 
-def descriptor(view, *, group_id=None):
+def descriptor(view, *, group_id=None, news_page=1):
     stream = view["stream"]
+    if type(news_page) is not int or not 1 <= news_page <= MAX_NEWS_PAGE:
+        return None
+    if news_page != 1 and stream != "news_all":
+        return None
     if stream == "news_all":
         path, query, kind = (
             "/api/news/list",
             {
-                "page": 1,
-                "page_size": 20,
+                "page": news_page,
+                "page_size": NEWS_PAGE_SIZE,
                 "sort": "created_at_desc",
                 "label_group": 1,
                 "label_name": 1,
@@ -94,8 +100,8 @@ def _rows(data, key, limit):
     return rows
 
 
-def parse_snapshot(view, response, *, group_id=None):
-    expected = descriptor(view, group_id=group_id)
+def parse_snapshot(view, response, *, group_id=None, news_page=1):
+    expected = descriptor(view, group_id=group_id, news_page=news_page)
     data = validate_response(expected, response)
     kind = expected["kind"]
     key = {
@@ -109,7 +115,9 @@ def parse_snapshot(view, response, *, group_id=None):
     rows = _rows(data, key, 500 if kind == "calendar" else 50)
     if kind in {"news", "reports"}:
         # Unverified empty first pages must never erase a prior valid snapshot.
-        if not rows and (type(data.get("total_count")) is not int or data["total_count"] != 0):
+        if not rows and news_page == 1 and (
+            type(data.get("total_count")) is not int or data["total_count"] != 0
+        ):
             raise ValueError("api_shape_unverified")
         if "total_count" in data and (
             type(data["total_count"]) is not int or data["total_count"] < len(rows)
@@ -164,8 +172,25 @@ def parse_snapshot(view, response, *, group_id=None):
             )
         return result
     if kind == "news":
+        if news_page > 1 and not {"page", "page_size", "total_count"}.issubset(data):
+            raise ValueError("api_shape_unverified")
+        for field, expected_value in (("page", news_page), ("page_size", NEWS_PAGE_SIZE)):
+            if field in data and (type(data[field]) is not int or data[field] != expected_value):
+                raise ValueError("api_shape_unverified")
+        if len(rows) > NEWS_PAGE_SIZE:
+            raise ValueError("api_shape_unverified")
+        if "total_count" in data:
+            offset = (news_page - 1) * NEWS_PAGE_SIZE
+            total = data.get("total_count")
+            if len(rows) != min(NEWS_PAGE_SIZE, max(0, total - offset)):
+                raise ValueError("api_shape_unverified")
         if any(
-            not x.get("id") or not isinstance(x.get("title"), str) or not x["title"] for x in rows
+            type(x.get("id")) not in (int, str)
+            or not x["id"]
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(x["id"]))
+            or not isinstance(x.get("title"), str)
+            or not x["title"]
+            for x in rows
         ):
             raise ValueError("api_shape_unverified")
         return jsonfeed.extract(data, "news_all")

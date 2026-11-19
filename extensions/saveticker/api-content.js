@@ -23,13 +23,15 @@
             const u = new URL(r.url);
             if (u.origin !== ORIGIN || u.username || u.password || u.hash) return false;
             const fixed = {
-                news: '/api/news/list?page=1&page_size=20&sort=created_at_desc&label_group=1&label_name=1',
                 reports: '/api/report/list?page=1&page_size=20',
                 groups: '/api/stocks/api/v1/watchlist/groups',
                 top5: '/api/stocks/api/v1/community/feed/ticker-rankings?limit=5',
                 index: '/api/stocks/api/v1/market-panel'
             };
             if (Object.hasOwn(fixed, r.kind)) return u.href === ORIGIN + fixed[r.kind];
+            if (r.kind === 'news') {
+                return u.pathname === '/api/news/list' && /^\?page=(?:[1-9]\d?|100)&page_size=20&sort=created_at_desc&label_group=1&label_name=1$/.test(u.search);
+            }
             if (r.kind === 'news_detail' || r.kind === 'report_detail') {
                 const report = r.kind === 'report_detail';
                 return u.pathname === (report ? '/api/report/detail' : '/api/news/detail') && (report ? /^\?id=\d{1,20}$/ : /^\?id=[A-Za-z0-9_-]{1,128}$/).test(u.search);

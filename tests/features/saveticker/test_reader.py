@@ -38,6 +38,7 @@ def test_published_at_and_markets():
     assert saveticker.published_at_of({"displayed_time": "2시간 전"}) is None
     assert saveticker.markets_of({"tickers": []}) == ["KR", "US"]
     assert saveticker.markets_of({"tickers": ["005930"]}) == ["KR"]
+    assert saveticker.markets_of({"tickers": ["005930.KR", "0256C0.KR"]}) == ["KR"]
     assert saveticker.markets_of({"tickers": ["GSK"]}) == ["US"]
     assert saveticker.markets_of({"tickers": ["005930", "AAPL"]}) == ["KR", "US"]
 

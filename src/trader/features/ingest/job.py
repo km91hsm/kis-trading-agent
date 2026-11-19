@@ -4,18 +4,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from trader.features.ingest import news_store
-from trader.features.ingest.saveticker_ingest import ingest_news
+from trader.features.ingest.saveticker_ingest import ingest_news, restore_kr_news
 from trader.features.ingest.settings import load_sources
 from trader.features.ingest.universe import load_universe
-from trader.features.saveticker.api import load_cfg, resolve_dir
-from trader.kernel.config import Market
+from trader.features.saveticker.api import JSONL_DAYS, load_cfg, resolve_dir
+from trader.kernel.config import KST, Market
 from trader.kernel.config.secrets import Secrets
+from trader.kernel.ledger import control
 from trader.kernel.registry import hooks
 from trader.kernel.registry.types import JobSpec, QueueKind
 
@@ -76,14 +78,31 @@ def _collect(ctx: Any, markets: list[str]) -> dict:
             except Exception as e:  # noqa: BLE001 - 시장 단위 격리
                 logger.warning("news_collect %s 실패: %s", m, e)
                 out[m] = _err(e)
+        asof = ctx.now()
+        since = asof - timedelta(days=cfg.news.store_retention_days)
+        try:
+            out["saveticker_kr_restored"] = restore_kr_news(conn, since=since, asof=asof)
+        except Exception as e:  # noqa: BLE001 - 이전 원장 보정 실패도 새 기사 적재와 격리
+            logger.warning("세이브티커 과거 KR 기사 보정 실패: %s", e)
+            out["saveticker_kr_restored"] = _err(e)
         try:
             root = resolve_dir(load_cfg(registry=ctx.registry).dir)
             if root is None:
                 out["saveticker"] = {"skipped": "saveticker_dir 미설정"}
             else:
+                stamp_key = "ingest.saveticker_archive"
+                previous = control.get_flag(conn, stamp_key) or {}
+                start = since
+                if previous.get("root") == str(root):
+                    start = max(since, datetime.fromisoformat(previous["at"]))
+                # 폴더명은 UTC 수신일이고 리더의 기준일은 KST다. 양 끝 날짜를 모두 읽는다.
+                days = (asof.astimezone(KST).date() - start.astimezone(UTC).date()).days + 1
                 out["saveticker"] = ingest_news(
-                    conn, root, now=ctx.now, names_by_market=names_by_market
+                    conn, root, now=lambda: asof, names_by_market=names_by_market,
+                    days=max(JSONL_DAYS, days),
                 )
+                if "skipped" not in out["saveticker"]:
+                    control.set_flag(conn, stamp_key, {"root": str(root), "at": asof.isoformat()})
         except Exception as e:  # noqa: BLE001
             logger.warning("news_collect saveticker 실패: %s", e)
             out["saveticker"] = _err(e)
@@ -97,6 +116,29 @@ def _collect(ctx: Any, markets: list[str]) -> dict:
         return out
     finally:
         conn.close()
+
+
+def saveticker_news_sync(ctx: Any, job: Any) -> dict:
+    """일반 뉴스 수집 사이에 로컬 수집기가 확인한 새 기사를 원장에 반영한다."""
+    if ctx.stop_event.is_set() or not load_sources(registry=ctx.registry).news.enabled:
+        return {"skipped": "뉴스 동기화 중지"}
+    cfg = load_cfg(registry=ctx.registry)
+    root = resolve_dir(cfg.dir)
+    if not cfg.collect or root is None:
+        return {"skipped": "세이브티커 수집 대기"}
+    universe = load_universe()
+    names = {m: news_store.universe_names(universe, {}, m) for m in ctx.markets}
+    # 연속 실행의 경계를 겹쳐 읽는다. 장시간 중단분과 미완성 기사는 정기 적재가 보완한다.
+    since = ctx.now() - timedelta(seconds=2 * job.interval_s)
+    with closing(ctx.conn_factory()) as conn:
+        return ingest_news(conn, root, now=ctx.now, names_by_market=names, completed_since=since)
+
+
+SAVETICKER_SYNC = JobSpec(
+    id="saveticker_news_sync", kind="saveticker_news_sync", trigger="interval", per_market=False,
+    schedule_key="news_collect.saveticker_interval_s", interval_s=60, enabled=None, gate="none",
+    heavy=False, misfire="default", catch_up="none", start_soon_s=5, body=saveticker_news_sync,
+)  # fmt: skip
 
 
 JOB = JobSpec(
