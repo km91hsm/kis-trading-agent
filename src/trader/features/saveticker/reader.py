@@ -23,13 +23,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from trader.features.saveticker.dom import identity
 from trader.features.saveticker.paths import DEFAULT_DIR as DEFAULT_DIR  # 재노출
 from trader.features.saveticker.paths import resolve_dir as resolve_dir  # 재노출
+from trader.features.saveticker.settings import load_cfg
 from trader.kernel.config import KST
+from trader.kernel.config.errors import ConfigError
 
 logger = logging.getLogger("trader.features.saveticker")
 
@@ -43,7 +49,7 @@ CALENDAR_AHEAD_DAYS = 7
 # 일정이라 오래된 관측도 쓸모가 있어 2주
 STALE_AFTER = timedelta(hours=1)
 STALE_AFTER_BY_PREFIX = (("calendar_", timedelta(days=14)), ("news_reports", timedelta(days=1)))
-_KR_CODE = re.compile(r"^\d{6}$")
+_KR_CODE = re.compile(r"[0-9]{6}|[A-Z0-9]{6}\.KR")
 _DISPLAYED = re.compile(r"^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{1,2}):(\d{2})$")
 
 
@@ -81,19 +87,29 @@ def published_at_of(item: dict) -> str | None:
     return iso.isoformat() if iso else None
 
 
+def kr_ticker_code(ticker: str) -> str | None:
+    """세이브티커 국내 종목 태그를 조회용 코드로 바꾼다."""
+    symbol = ticker.strip().upper()
+    return symbol.removesuffix(".KR") if _KR_CODE.fullmatch(symbol) else None
+
+
+def tickers_by_market(item: dict) -> dict[str, list[str]]:
+    """원문 티커를 시장별 조회 코드로 바꾼다. 티커 없는 거시·속보는 두 시장에 싣는다."""
+    codes: dict[str, set[str]] = {"KR": set(), "US": set()}
+    for value in item.get("tickers") or []:
+        ticker = str(value or "").strip().upper()
+        if not ticker:
+            continue
+        if kr_code := kr_ticker_code(ticker):
+            codes["KR"].add(kr_code)
+        else:
+            codes["US"].add(ticker)
+    return {m: sorted(ts) for m, ts in codes.items() if ts} or {"KR": [], "US": []}
+
+
 def markets_of(item: dict) -> list[str]:
-    """티커가 전부 6자리 숫자면 KR, 영문 심볼이 있으면 US, 티커가 없으면 둘 다(거시·속보)."""
-    tickers = [str(t).strip() for t in item.get("tickers") or [] if str(t).strip()]
-    if not tickers:
-        return ["KR", "US"]
-    kr = [t for t in tickers if _KR_CODE.match(t)]
-    us = [t for t in tickers if not _KR_CODE.match(t)]
-    out = []
-    if kr:
-        out.append("KR")
-    if us:
-        out.append("US")
-    return out
+    """기사가 다루는 시장을 KR·US 순으로 돌려준다."""
+    return list(tickers_by_market(item))
 
 
 def report_excerpt(root: Path, item: dict, limit: int = REPORT_EXCERPT_CHARS) -> str | None:
@@ -158,6 +174,110 @@ def read_news_items(root: Path, *, today: date, days: int = JSONL_DAYS) -> list[
                     "_stream": row.get("stream"),
                 }
     return list(latest.values())
+
+
+def read_completed_news(root: Path, *, since: datetime, asof: datetime) -> list[dict]:
+    """수신 시각 범위에서 본문이 확인된 기사와 제목 전용 속보를 읽는다."""
+    path = root / "data" / "feed.sqlite3"
+    if not path.is_file():
+        return []
+    bounds = (since.astimezone(UTC).isoformat(), asof.astimezone(UTC).isoformat())
+    latest = {}
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
+        for stamp, payload in db.execute(
+            "SELECT received_at, payload FROM revisions WHERE stream='news_all' "
+            "AND received_at BETWEEN ? AND ? AND json_extract(payload,'$.detail_status')='ok' "
+            "ORDER BY received_at, seq",
+            bounds,
+        ):
+            item = json.loads(payload)
+            latest[item["id"]] = {**item, "_stream": "news_all", "_received_at": stamp}
+    return list(latest.values())
+
+
+def _feed_rows(sql: str, params: tuple) -> list[tuple]:
+    try:
+        root = resolve_dir(load_cfg().dir)
+        if root is None or not (path := root / "data" / "feed.sqlite3").is_file():
+            return []
+        uri = path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as db:
+            return db.execute(sql, params).fetchall()
+    except (OSError, sqlite3.Error, ConfigError):
+        return []  # 수집 DB가 없거나 읽을 수 없어도 개별 기사 제목을 표시한다.
+
+
+def read_group_headlines(items: list[dict], *, asof: datetime) -> dict[int, str]:
+    """목록에 있는 기사별로 마지막 관측에 기록된 묶음 제목을 조회한다."""
+    wanted = []
+    item_ids = []
+    for row in items:
+        if row["query"] != "news_all" or not row["source"].startswith("saveticker:"):
+            continue
+        publisher = row["source"].removeprefix("saveticker:")
+        try:
+            link = urlsplit(row["url"])
+            if (
+                link.scheme not in {"http", "https"}
+                or not link.hostname
+                or link.username
+                or link.password
+            ):
+                continue
+            synthetic = (
+                link.hostname in {"saveticker.com", "www.saveticker.com"}
+                and link.path.rstrip("/") == "/news"
+                and not link.query
+                and link.fragment
+            )
+        except ValueError:
+            continue
+        item_ids.append(link.fragment if synthetic else identity("news", publisher, row["title"]))
+        wanted.append((row, publisher, None if synthetic else row["url"]))
+    if not item_ids:
+        return {}
+    cutoff = asof.astimezone(UTC)
+    rows = _feed_rows(
+        """SELECT w.key, json_extract(r.payload,'$.group_headline'),
+                  COALESCE(NULLIF(json_extract(r.payload,'$.publisher'), ''),
+                           NULLIF(json_extract(r.payload,'$.source_group'), ''), 'saveticker'),
+                  json_extract(r.payload,'$.published_at'),
+                  json_extract(r.payload,'$.displayed_time'), json_extract(r.payload,'$.source_url')
+           FROM json_each(?) AS w JOIN revisions AS r ON r.seq=(
+               SELECT seq FROM revisions
+               WHERE stream='news_all' AND item_id=w.value AND received_at<=?
+               ORDER BY received_at DESC, seq DESC LIMIT 1
+           ) WHERE json_extract(r.payload,'$.kind')='news'
+               AND json_type(r.payload,'$.group_headline')='text'""",
+        (json.dumps(item_ids), cutoff.isoformat()),
+    )
+    headlines = {}
+    for index, headline, issuer, published, displayed, url in rows:
+        row, publisher, source_url = wanted[index]
+        if publisher != issuer.strip() or (source_url and url and source_url != url):
+            continue
+        observed_pub = _parse_dt(
+            published_at_of({"published_at": published, "displayed_time": displayed})
+        )
+        expected_pub = _parse_dt(row["published_at"])
+        if (expected_pub and expected_pub != observed_pub) or (
+            observed_pub and observed_pub > cutoff
+        ):
+            continue
+        if headline.strip():
+            headlines[row["id"]] = headline.strip()
+    return headlines
+
+
+def news_revision(*, asof: datetime) -> int:
+    """묶음 제목만 바뀌어도 뉴스 목록이 새로 읽도록 수집 리비전을 돌려준다."""
+    rows = _feed_rows(
+        "SELECT seq FROM revisions INDEXED BY revisions_news_received "
+        "WHERE stream='news_all' AND received_at<=? "
+        "ORDER BY received_at DESC, seq DESC LIMIT 1",
+        (asof.astimezone(UTC).isoformat(),),
+    )
+    return rows[0][0] if rows else 0
 
 
 # --- 스냅샷(세션 입력) -------------------------------------------------------------------

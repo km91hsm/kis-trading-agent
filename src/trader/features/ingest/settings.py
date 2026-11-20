@@ -113,6 +113,7 @@ class NewsCollectSchedule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     interval_s: int = Field(default=1800, ge=1)
+    saveticker_interval_s: int = Field(default=60, ge=10)
 
 
 class SourcesConfig(BaseModel):

@@ -2,7 +2,7 @@
 
 from trader.features.ingest.cli import ingest_app
 from trader.features.ingest.health import AREA as HEALTH
-from trader.features.ingest.job import JOB, QUEUE_KINDS
+from trader.features.ingest.job import JOB, QUEUE_KINDS, SAVETICKER_SYNC
 from trader.features.ingest.migrations import MIGRATIONS
 from trader.features.ingest.ports import PORT
 from trader.features.ingest.routes import ROUTERS, SSE_KEYS
@@ -15,7 +15,7 @@ FEATURE = Feature(
     tier="service",
     sections=(*SECTIONS, SCHEDULE_SECTION, *UNIVERSE_SECTIONS, *SECTOR_SECTIONS),
     migrations=MIGRATIONS,
-    jobs=(JOB,),
+    jobs=(JOB, SAVETICKER_SYNC),
     queue_kinds=QUEUE_KINDS,
     cli=ingest_app,
     ports=(PORT,),

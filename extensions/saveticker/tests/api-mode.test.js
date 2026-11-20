@@ -20,6 +20,18 @@ test('isolated API content uses browser auth and projects only collection data',
  const r=jsonResponse({news_list:[{id:'1',title:'news',author_secret:'never',content:'body'}]});Object.defineProperty(r,'url',{value:URL_NEWS});
  const c=await content(r); const out=await c.send(); assert.equal(out.status,200);assert.equal(out.data.news_list[0].title,'news');assert.equal(out.data.news_list[0].author_secret,undefined);assert.equal(c.calls(),1);
 });
+test('news list forwards only the verified group headline beside the article title', async () => {
+ const grouped = {id:'story', title:'개별 기사', news_group_id:7,
+  group_summary:{headline:'묶음 대표 제목', is_ai_headline:true, member_count:5,
+   representative_news_id:null, name:'비공개 이름', content:'비공개 내용'}};
+ const r=jsonResponse({news_list:[grouped, {...grouped, news_group_id:'7'}]});
+ Object.defineProperty(r, 'url', {value:URL_NEWS});
+ const out=await (await content(r)).send();
+ const rows=JSON.parse(JSON.stringify(out.data.news_list));
+ assert.deepEqual(rows[0], {id:'story', title:'개별 기사', news_group_id:7,
+  group_summary:{headline:'묶음 대표 제목'}});
+ assert.equal(rows[1].group_summary, undefined);
+});
 test('foreign sender, unknown URL, stopped and wrong owner do not fetch',async()=>{
  const c=await content(jsonResponse({}));assert.equal(await c.send({}, {id:'other'}),null);
  assert.equal((await c.send({token:'wrong'})).error,'api_denied');
@@ -176,4 +188,131 @@ test('verification block on the news list does not add per-stream retry backoff'
  assert.ok(r.isBlocked());
  assert.equal(r.calls.find(call => call.type === 'api_cancel')?.reason, 'verification_required');
  assert.equal(r.done.length, 0);
+});
+
+test('content accepts only bounded ordinary news-list pages', async () => {
+ for (const [page, valid] of [['2',true],['100',true],['101',false],['02',false],['2&page=1',false]]) {
+  const url = URL_NEWS.replace('page=1', 'page=' + page);
+  const response = jsonResponse({page:2, news_list:[]});
+  Object.defineProperty(response, 'url', {value:url});
+  const c = await content(response);
+  const out = await c.send({job:{job_id:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString(),request:{...descriptor,url}}});
+  assert.equal(c.calls(), valid ? 1 : 0);
+  assert.equal(valid ? out.status : out.error, valid ? 200 : 'api_contract_unverified');
+ }
+});
+
+test('page failures keep the saved head and finish or block before any later page request', async () => {
+ for (const status of [403,429,500]) {
+  const events = [];
+  const r = runner(undefined, {deps:{
+   request: async (type, body) => {
+    events.push(type + ':' + body.stream);
+    if(type==='api_begin') return {job_id:'b'.repeat(32),request:descriptor};
+    if(type==='api_prepare') return {requests:[]};
+    if(type==='api_snapshot' && body.stream==='news_all')
+     return {count:20,next_page:{job_id:'b'.repeat(32),request:{...descriptor,url:URL_NEWS.replace('page=1','page=2')}}};
+    return {count:1};
+   },
+   chrome:{tabs:{
+    query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],
+    sendMessage:async(_id,m)=>{const page=new URL(m.job.request.url).searchParams.get('page');
+     events.push('fetch:'+page);
+     return page==='2' ? {status,error:'api_response_unverified',retry_after:'120'} : {status:200};
+    }
+   }}
+  }});
+  await r.run();
+  assert.ok(events.indexOf('fetch:2') > events.indexOf('api_snapshot:news_all'));
+  assert.equal(r.done[0][2],false);
+  if(status!==500) assert.ok(!events.some(e=>e==='api_begin:calendar_2026-10'));
+  if(status===403) assert.ok(r.isBlocked());
+  if(status===429) assert.ok(r.state.apiCooldownUntil>=Date.now()+119000);
+ }
+});
+
+test('ordinary optional news-detail transport failure keeps the first page', async () => {
+ let saved;
+ const r=runner(undefined,{deps:{
+  request:async(type,body)=>{
+   if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor};
+   if(type==='api_prepare')return {requests:[{request:{kind:'news_detail'}}]};
+   if(type==='api_snapshot'&&body.stream==='news_all')saved=body;
+   return {count:1};
+  },
+  chrome:{tabs:{
+   query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],
+   sendMessage:async(_id,m)=>{
+    if(m.job.request.kind==='news_detail')throw Error('synthetic disconnect');
+    return {status:200,data:{news_list:[{id:'demo',title:'합성 기사'}]}};
+   }
+  }}
+ }});
+ await r.run();
+ assert.equal(saved?.response.data.news_list[0].id,'demo');
+ assert.deepEqual(saved.details,[]);
+ assert.equal(r.done[0][2],false);
+});
+
+test('stop while an optional detail disconnects cancels pending collection', async () => {
+ let active = true, saved = false;
+ const r=runner(undefined,{deps:{
+  active:()=>active,
+  request:async type=>{
+   if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor};
+   if(type==='api_prepare')return {requests:[{request:{kind:'news_detail'}}]};
+   if(type==='api_snapshot')saved=true;
+   return {};
+  },
+  chrome:{tabs:{
+   query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],
+   sendMessage:async(_id,m)=>{
+    if(m.job.request.kind==='news_detail'){ active=false; throw Error('stopped'); }
+    return {status:200};
+   }
+  }}
+ }});
+ await r.run();
+ assert.equal(saved,false);
+});
+
+test('rate limit before saving the list uses the host deadline only', async () => {
+ const r = runner({status:429,retry_after:'120'});
+ await r.run();
+ assert.deepEqual(r.done,[]);
+ assert.ok(r.state.apiCooldownUntil>=Date.now()+119000);
+});
+
+test('ordinary detail errors allow gap pages and retain a detail diagnostic', async () => {
+ for (const failure of [404,500,'disconnect','invalid-enrichment']) {
+  const fetched=[];
+  const second={job_id:'b'.repeat(32), request:{...descriptor,url:URL_NEWS.replace('page=1','page=2')}};
+  const r=runner(undefined,{deps:{
+   request:async(type,body)=>{
+    if(type==='api_begin')return {job_id:'b'.repeat(32),request:descriptor};
+    if(type==='api_prepare')return {requests:[{request:{kind:'news_detail'}}]};
+    if(type==='api_snapshot' && body.stream==='news_all') {
+     if(failure==='invalid-enrichment' && body.details.length)throw Error('api_detail_unverified');
+     return {count:20,next_page:body.news_pages ? second : null};
+    }
+    return {count:1};
+   },
+   chrome:{tabs:{
+    query:async()=>[{id:1,url:'https://www.saveticker.com/news#trader-saveticker-api='+TOKEN}],
+    sendMessage:async(_id,m)=>{
+     if(m.job.request.kind==='news_detail') {
+      if(failure==='disconnect') throw Error('synthetic disconnect');
+      if(typeof failure==='number')return {status:failure,error:'api_response_unverified'};
+      return {status:200};
+     }
+     fetched.push(m.job.request.url);
+     return {status:200};
+    }
+   }}
+  }});
+  await r.run();
+  assert.ok(fetched.includes(second.request.url), String(failure));
+  assert.equal(r.done[0][2],false);
+  assert.equal(r.state.lane_error_stage_news,'detail');
+ }
 });

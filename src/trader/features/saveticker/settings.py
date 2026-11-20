@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,8 +24,13 @@ class SaveTickerCfg(BaseModel):
 SECTION = Section("sources", "saveticker", SaveTickerCfg, SaveTickerCfg)
 
 
+@cache
+def _default_registry() -> SectionRegistry:
+    return build_registry(discover())
+
+
 def load_cfg(path: Path | None = None, *, registry: SectionRegistry | None = None) -> SaveTickerCfg:
     """sources.yaml 의 saveticker 섹션. 파일이 없으면 기본값(섹션 default), 잘못된 내용은
     ConfigError."""
-    reg = registry or build_registry(discover())
+    reg = registry or _default_registry()
     return memo_load("sources", reg, path).saveticker  # type: ignore[attr-defined]

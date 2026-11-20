@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 
 from trader.features.saveticker import dom, jsonfeed
 from trader.features.saveticker.api_jobs import ApiError, BrowserApiSession
-from trader.features.saveticker.models import Capture, Item, ViewInfo
+from trader.features.saveticker.models import Capture, ViewInfo
 from trader.features.saveticker.reports import save_pdf
 from trader.features.saveticker.store import Store, atomic_json
 from trader.features.saveticker.views import View, build_views, lane_for
@@ -396,6 +396,7 @@ class NativeSession:
         if kind in {
             "api_begin",
             "api_prepare",
+            "api_news_page",
             "api_snapshot",
             "api_cancel",
             "api_context_begin",
@@ -554,22 +555,7 @@ class NativeSession:
                 ]
             items = [x for x in items if x.kind in {"news", "quote", "event", "report"}]
             if view["stream"] == "news_all":
-                previous = {}
-                for row in self.store.query(asof=_now(), limit=10000):
-                    old = row["item"]
-                    if old.get("detail_status") == "ok" and old.get("body"):
-                        previous.setdefault(old["id"], Item.model_validate(old))
-                items = [
-                    item.model_copy(
-                        update={
-                            key: getattr(previous[item.id], key)
-                            for key in ("body", "published_at", "detail_status")
-                        }
-                    )
-                    if item.id in previous and not item.body
-                    else item
-                    for item in items
-                ]
+                items = self.store.reuse_news_details(items, asof=_now())
             if view["stream"] == "news_reports":
                 items = [self._cached_report(x) for x in items]
         capture = Capture(

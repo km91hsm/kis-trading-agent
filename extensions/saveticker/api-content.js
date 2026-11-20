@@ -23,13 +23,15 @@
             const u = new URL(r.url);
             if (u.origin !== ORIGIN || u.username || u.password || u.hash) return false;
             const fixed = {
-                news: '/api/news/list?page=1&page_size=20&sort=created_at_desc&label_group=1&label_name=1',
                 reports: '/api/report/list?page=1&page_size=20',
                 groups: '/api/stocks/api/v1/watchlist/groups',
                 top5: '/api/stocks/api/v1/community/feed/ticker-rankings?limit=5',
                 index: '/api/stocks/api/v1/market-panel'
             };
             if (Object.hasOwn(fixed, r.kind)) return u.href === ORIGIN + fixed[r.kind];
+            if (r.kind === 'news') {
+                return u.pathname === '/api/news/list' && /^\?page=(?:[1-9]\d?|100)&page_size=20&sort=created_at_desc&label_group=1&label_name=1$/.test(u.search);
+            }
             if (r.kind === 'news_detail' || r.kind === 'report_detail') {
                 const report = r.kind === 'report_detail';
                 return u.pathname === (report ? '/api/report/detail' : '/api/news/detail') && (report ? /^\?id=\d{1,20}$/ : /^\?id=[A-Za-z0-9_-]{1,128}$/).test(u.search);
@@ -185,7 +187,18 @@
                     if (!Array.isArray(data.groups) || data.groups.length > 128 || data.groups.some(g => !g || typeof g !== 'object')) return { error: 'api_context_unverified' };
                     return { url: r.url, status: 200, content_type: type, data: { groups: data.groups.map(g => ({ groupId: g.groupId, isDefault: g.isDefault })) } };
                 }
-                return { url: r.url, status: r.status, content_type: type, data: project(data) };
+                const projected = project(data);
+                if (job.request.kind === 'news' && Array.isArray(projected.news_list)) {
+                    projected.news_list.forEach((row, index) => {
+                        const source = data.news_list[index];
+                        const headline = source?.group_summary?.headline;
+                        if (!Number.isSafeInteger(source?.news_group_id) || source.news_group_id <= 0 ||
+                            typeof headline !== 'string' || !headline.trim()) return;
+                        row.news_group_id = source.news_group_id;
+                        row.group_summary = { headline: headline.trim().slice(0, 200000) };
+                    });
+                }
+                return { url: r.url, status: r.status, content_type: type, data: projected };
             } finally { clearTimeout(timer); if (pending === own) pending = null; }
         })().then(reply).catch(() => reply({ error: 'api_request_failed' }));
         return true;

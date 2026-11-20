@@ -107,6 +107,56 @@ def test_news_body_ingests_saveticker_folder(project, monkeypatch):
     assert job.news_collect(deps, job.JOB)["saveticker"]["inserted"] == 0
 
 
+def test_news_collect_restores_retained_korean_tags_from_the_original_us_row(project, monkeypatch):
+    monkeypatch.setattr(news_store, "collect", lambda *a, **k: {"inserted": 0})
+    deps = _deps(project)
+    received = NOW - timedelta(days=8)
+    published = received - timedelta(hours=3)
+    url = "https://example.org/synthetic/10"
+    original = {
+        "title": "합성 과거 기사",
+        "summary": "당시 저장한 본문",
+        "published_at": published.isoformat(),
+        "received_at": received.isoformat(),
+        "tickers": ["0256C0.KR", "005930.KR", "USX", "USY"],
+        "url": url,
+    }
+    c = deps.conn_factory()
+    try:
+        for source, query, article_url in (
+            ("saveticker:local", "news_all", url),
+            ("google_rss", "news_all", "https://example.org/other"),
+            ("saveticker:local", "unknown", "https://example.org/unknown"),
+        ):
+            news_store.insert_items(
+                c,
+                [{**original, "url": article_url}],
+                market="US",
+                source=source,
+                query=query,
+                lang="ko",
+                names={},
+                extra_tickers=True,
+            )
+        us_id = c.execute("SELECT id FROM news_items WHERE url=?", (url,)).fetchone()[0]
+        for expected_inserts in (1, 0):
+            result = job.news_collect(deps, job.JOB)
+            assert result["saveticker_kr_restored"] == expected_inserts
+            rows = news_store.recent(c, "KR", asof=received, ticker="0256C0")
+            assert [(r["url"], r["tickers"]) for r in rows] == [(url, ["005930", "0256C0"])]
+            assert (rows[0]["source"], rows[0]["query"]) == ("saveticker:local", "news_all")
+            for field in ("title", "summary", "published_at", "received_at"):
+                assert rows[0][field] == original[field]
+            assert not news_store.recent(c, "KR", asof=received - timedelta(seconds=1))
+            us = news_store.recent(c, "US", asof=received, ticker="USX")
+            assert [(r["id"], r["tickers"]) for r in us if r["url"] == url] == [
+                (us_id, ["USX", "USY"])
+            ]
+            assert news_store.count(c, "KR") == 1
+    finally:
+        c.close()
+
+
 def test_news_body_isolates_market_failure(project, respx_mock, monkeypatch):
     respx_mock.get(url__startswith=GOOGLE).mock(
         return_value=httpx.Response(200, content=load_bytes("news_google.xml"))
@@ -216,3 +266,76 @@ def test_news_collect_request_intersects_configured_markets(project, monkeypatch
     assert job.news_collect_request(deps, {"market": "KR"}, lambda _t: None) == {"markets": ["KR"]}
     assert job.news_collect_request(deps, {}, lambda _t: None) == {"markets": ["KR"]}
     assert calls == [["KR"], ["KR"]]
+
+
+def test_saveticker_sync_reads_completed_local_articles_before_the_next_full_collection(project):
+    from trader.features.saveticker.models import Capture, Item
+    from trader.features.saveticker.store import Store
+
+    deps = _deps(project)
+    store = Store(project / "state/external/saveticker/data")
+
+    def save(at, items):
+        store.save(
+            Capture(
+                stream="news_all",
+                page_url="https://www.saveticker.com/news",
+                observed_at=at,
+                items=items,
+            )
+        )
+
+    pending = Item(id="one", title="합성 기사", detail_status="pending")
+    complete = pending.model_copy(update={"body": "확인된 본문", "detail_status": "ok"})
+    save(NOW - timedelta(seconds=30), [pending])
+    save(NOW, [complete, Item(id="two", title="합성 속보", detail_status="ok")])
+    save(NOW + timedelta(seconds=1), [Item(id="future", title="미래 기사", detail_status="ok")])
+    built = {
+        j.id: j
+        for j in jobs_mod.build(
+            [FEATURE],
+            schedule=deps.schedule,
+            settings=deps.settings,
+            markets=deps.markets,
+            ctx=deps,
+        )
+    }
+    assert "saveticker_news_sync" in built
+    sync = built["saveticker_news_sync"]
+    assert sync.interval_s == 60
+    assert sync.spec.body(deps, sync)["inserted"] == 4
+    assert sync.spec.body(deps, sync)["inserted"] == 0
+    c = deps.conn_factory()
+    try:
+        rows = news_store.recent(c, "KR", asof=NOW, source="saveticker")
+        assert {r["title"]: r["summary"] for r in rows} == {
+            "합성 기사": "확인된 본문",
+            "합성 속보": "",
+        }
+        assert all(r["received_at"] == NOW.isoformat() for r in rows)
+    finally:
+        c.close()
+
+
+def test_news_collect_replays_retained_archive_after_week_offline(project, monkeypatch):
+    import json
+
+    day = NOW - timedelta(days=6)
+    deps = _deps(project, now=day - timedelta(days=1))
+    monkeypatch.setattr(news_store, "collect", lambda *a, **kw: {})
+    root = project / "state/external/saveticker/data"
+    root.mkdir(parents=True)
+    job.news_collect(deps, job.JOB)
+    folder = root / day.date().isoformat()
+    folder.mkdir()
+    row = {
+        "stream": "news_all",
+        "revision": 1,
+        "received_at": day.isoformat(),
+        "item": {"id": "archived", "title": "중단 동안 수집한 기사", "tickers": ["QQQ"]},
+    }
+    (folder / "news.jsonl").write_text(json.dumps(row), encoding="utf-8")
+    deps = _deps(project, now=NOW)
+    result = job.news_collect(deps, job.JOB)
+    assert result["saveticker"]["inserted"] == 1
+    assert job.news_collect(deps, job.JOB)["saveticker"]["inserted"] == 0

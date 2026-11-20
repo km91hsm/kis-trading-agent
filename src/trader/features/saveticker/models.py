@@ -32,6 +32,7 @@ class Item(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=256)
     title: str = ""
+    group_headline: str | None = None
     body: str = ""
     author: str = ""
     publisher: str = ""

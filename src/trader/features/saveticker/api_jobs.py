@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 from trader.features.saveticker import api_contract, jsonfeed
-from trader.features.saveticker.models import Capture, Item, ViewInfo
+from trader.features.saveticker.models import Capture, ViewInfo
 
 
 class ApiError(Exception):
@@ -32,6 +32,11 @@ def request(path, query, kind, *, max_bytes=api_contract.MAX_BYTES):
         "kind": kind,
         "max_bytes": max_bytes,
     }
+
+
+def news_source_ids(response):
+    # 구버전 캡처의 제목·매체 해시와 원문 ID의 이름 공간을 구분한다.
+    return {"source:" + str(r["id"]) for r in response["data"]["news_list"]}
 
 
 def digest(response):
@@ -140,6 +145,8 @@ class BrowserApiSession:
         if kind == "api_cancel":
             del self.owner._jobs[lane]
             blocked = message.get("reason") == "verification_required"
+            if "news_page" in job and not blocked:
+                return {"type": "cancelled"}
             self.owner._heartbeat(
                 "waiting_verification" if blocked else "paused",
                 "verification_required" if blocked else "collection_error",
@@ -147,15 +154,23 @@ class BrowserApiSession:
             )
             return {"type": "cancelled"}
         try:
+            if "news_page" in job or kind == "api_news_page":
+                if "news_page" not in job or kind != "api_news_page":
+                    fail("invalid_job")
+                return self.news_page(job, lane, message.get("response"))
             items = api_contract.parse_snapshot(
                 view, message.get("response"), group_id=self.group_id
             )
+            if "base_hash" in job and digest(message["response"]) != job["base_hash"]:
+                raise ValueError("api_response_unverified")
+            if view["stream"] == "news_all":
+                items = self.owner.store.identify_api_news(
+                    items, message["response"]["data"]["news_list"]
+                )
             if kind == "api_prepare":
                 return self.prepare(job, message["response"], items)
             if kind != "api_snapshot":
                 fail("invalid_message")
-            if "base_hash" in job and digest(message["response"]) != job["base_hash"]:
-                raise ValueError("api_response_unverified")
             try:
                 items, pdf_items = self.enrich(job, message.get("details", []), items)
             except ApiError as exc:
@@ -171,22 +186,7 @@ class BrowserApiSession:
             self.owner.store.record_failure(view["stream"], at=now(), error=code)
             fail(code)
         if view["stream"] == "news_all":
-            previous = {
-                r["item"]["id"]: Item.model_validate(r["item"])
-                for r in self.owner.store.query(asof=now(), limit=10000)
-                if r["item"].get("body") and r["item"].get("detail_status") == "ok"
-            }
-            items = [
-                i.model_copy(
-                    update={
-                        k: getattr(previous[i.id], k)
-                        for k in ("body", "detail_status", "published_at")
-                    }
-                )
-                if i.id in previous and not i.body
-                else i
-                for i in items
-            ]
+            items = self.owner.store.reuse_news_details(items, asof=now())
         if view["stream"] == "news_reports":
             items = [self.owner._cached_report(i) for i in items]
         capture = Capture(
@@ -205,10 +205,51 @@ class BrowserApiSession:
             ),
             target_interval_s=view["interval_s"],
         )
-        result = self.owner.store.save(capture)
-        del self.owner._jobs[lane]
+        # 명시적으로 지원하는 확장만 후속 작업을 보유한다. 기존 확장은 첫 쪽 저장으로 종료한다.
+        news_pages = message.get("news_pages")
+        track_news = view["stream"] == "news_all" and type(news_pages) is bool
+        sources = news_source_ids(message["response"]) if track_news else set()
+        result = self.owner.store.save(
+            capture,
+            news_pages=news_pages if track_news else None,
+            source_ids=sources,
+            total_news=message["response"]["data"].get("total_count"),
+        )
+        page = result.pop("news_page", None)
+        if page is not None:
+            job.update(head=capture, head_sources=sources, news_page=page, pages_left=2)
+            result["next_page"] = self.page_request(job)
+        else:
+            del self.owner._jobs[lane]
         self.owner._heartbeat("collecting", "partial", lane)
         return {"type": "saved", **result, "pdf_items": pdf_items}
+
+    @staticmethod
+    def page_request(job):
+        return {
+            "job_id": job["job_id"],
+            "expires_at": job["expires_at"].isoformat(),
+            "request": api_contract.descriptor(job["view"], news_page=job["news_page"]),
+        }
+
+    def news_page(self, job, lane, response):
+        page = job["news_page"]
+        items = api_contract.parse_snapshot(job["view"], response, news_page=page)
+        items = self.owner.store.identify_api_news(items, response["data"]["news_list"])
+        head = job["head"]
+        next_page = self.owner.store.save_news_page(
+            head.model_copy(update={"observed_at": now(), "items": items}),
+            page=page,
+            total_news=response["data"].get("total_count"),
+            more_this_cycle=job["pages_left"] > 1,
+            source_ids=news_source_ids(response),
+            head_ids=job["head_sources"],
+        )
+        if next_page is None:
+            del self.owner._jobs[lane]
+            return {"type": "saved"}
+        job.update(news_page=next_page, pages_left=job["pages_left"] - 1)
+        return {"type": "saved", "next_page": self.page_request(job)}
 
     def prepare(self, job, response, items):
         if job["view"]["stream"] not in {"news_all", "news_reports"}:
@@ -216,22 +257,14 @@ class BrowserApiSession:
         if "base_hash" in job:
             fail("api_already_prepared")
         reports = job["view"]["stream"] == "news_reports"
-        previous = (
-            {r["item"]["id"]: r["item"] for r in self.owner.store.query(asof=now(), limit=10000)}
-            if not reports
-            else {}
-        )
+        previous = {} if reports else self.owner.store.cached_news_details(items, asof=now())
         rows = response["data"]["reports" if reports else "news_list"]
         children = []
         for row, item in zip(rows, items, strict=True):
             if reports:
                 if self.owner._cached_report(item).attachment:
                     continue
-            elif (
-                item.detail_status == "ok"
-                or previous.get(item.id, {}).get("detail_status") == "ok"
-                and previous[item.id].get("body")
-            ):
+            elif item.detail_status == "ok" or item.id in previous:
                 continue
             source = str(row["id"])
             if not re.fullmatch(r"\d{1,20}" if reports else r"[A-Za-z0-9_-]{1,128}", source):
@@ -276,9 +309,19 @@ class BrowserApiSession:
                 if str(data.get("id")) != child["source_id"]:
                     fail("api_detail_unverified")
                 enriched = jsonfeed.news_item(data, detail=True)
-                if enriched.id != item.id or enriched.detail_status != "ok":
+                if (
+                    enriched.title != item.title
+                    or enriched.publisher != item.publisher
+                    or enriched.detail_status != "ok"
+                ):
                     fail("api_detail_unverified")
-                updates[item.id] = enriched
+                updates[item.id] = enriched.model_copy(
+                    update={
+                        "id": item.id,
+                        "group_headline": item.group_headline,
+                        "published_at": item.published_at or enriched.published_at,
+                    }
+                )
             else:
                 report = data.get("report")
                 if (

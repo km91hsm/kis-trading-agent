@@ -56,21 +56,16 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
         if (!active()) break;
         const view = scheduler.next(Date.now(), lane);
         if (!view) continue;
-        let job, detailBlocked, saved = false, failed = true, authBlocked = false, stage = 'begin';
+        let job, hostBarrier, detailError, pendingPage, saved = false, failed = true, authBlocked = false, stage = 'begin';
         try {
             job = await request('api_begin', { stream: view.stream });
             if (!active()) return;
             stage = 'fetch';
             const response = await fetchJob(job);
             if (!active()) return;
-            if (response?.status === 401 || response?.status === 403) {
-                authBlocked = true;
-                await blockHost(response);
-                return;
-            }
-            if (response?.status === 429) {
-                // Persist before job cleanup so stop/disconnect cannot lose it.
-                await store({ apiCooldownUntil: retryDeadline(response.retry_after), connection: '요청 제한 · 서버 대기 시간 적용' });
+            if ([401, 403, 429].includes(response?.status)) {
+                hostBarrier = response;
+                authBlocked = response.status !== 429;
                 return;
             }
             if (!response || response.error) throw Error(response?.error || 'api_content_unavailable');
@@ -81,25 +76,64 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
                 if (!active()) return;
                 for (const child of (prepared.requests || []).slice(0, 2)) {
                     stage = 'detail';
-                    const detail = await fetchJob(child);
+                    let detail;
+                    try {
+                        detail = await fetchJob(child);
+                    } catch (error) {
+                        if (view.stream !== 'news_all') throw error;
+                        detailError = error;
+                        break;
+                    }
                     if (!active()) return;
                     if (view.stream === 'news_all' && [401, 403, 429].includes(detail?.status)) {
                         // 이미 받은 목록을 보존하고, 상세·다른 스트림 요청은 여기서 멈춘다.
-                        detailBlocked = detail;
+                        hostBarrier = detail;
                         authBlocked = detail.status !== 429;
                         break;
                     }
                     if (await blocked(detail)) { authBlocked = detail?.status !== 429; return; }
-                    if (!detail || detail.error) throw Error(detail?.error || 'api_detail_unverified');
+                    if (!detail || detail.error) {
+                        const error = Error(detail?.error || 'api_detail_unverified');
+                        if (view.stream !== 'news_all') throw error;
+                        detailError = error;
+                        break;
+                    }
                     details.push(detail);
                 }
             }
+            if (!active()) return;
             stage = 'snapshot';
-            const result = await request('api_snapshot', { stream: view.stream, job_id: job.job_id, response, details });
+            const snapshot = { stream: view.stream, job_id: job.job_id, response, details };
+            if (view.stream === 'news_all') snapshot.news_pages = !hostBarrier;
+            let result;
+            try {
+                result = await request('api_snapshot', snapshot);
+            } catch (error) {
+                if (!active() || view.stream !== 'news_all' || !details.length ||
+                    !['api_detail_unverified', 'api_shape_unverified', 'api_response_unverified', 'snapshot_too_large'].includes(error?.message)) throw error;
+                detailError = error;
+                result = await request('api_snapshot', { ...snapshot, details: [] });
+            }
             saved = true;
             if (!active()) return;
             failed = false;
-            if (detailBlocked) return;
+            if (hostBarrier) return;
+            pendingPage = result.next_page;
+            for (let fetched = 0; pendingPage && fetched < 2; fetched++) {
+                stage = 'news_page';
+                const page = await fetchJob(pendingPage);
+                if (!active()) return;
+                if ([401, 403, 429].includes(page?.status)) {
+                    hostBarrier = page;
+                    authBlocked = page.status !== 429;
+                    return;
+                }
+                if (!page || page.error || page.status !== 200) throw Error(page?.error || 'api_response_unverified');
+                const ack = await request('api_news_page', { stream: view.stream, job_id: job.job_id, response: page });
+                if (!active()) return;
+                pendingPage = ack.next_page;
+            }
+            if (detailError) { stage = 'detail'; throw detailError; }
             for (const item of (result.pdf_items || []).slice(0, 1)) {
                 stage = 'pdf';
                 if (!active()) return;
@@ -110,16 +144,16 @@ export async function apiCycle({ chrome, token, scheduler, active, request, stor
             Object.assign(health, recordHealth(health, Date.now()));
             await store({ connection: '연결됨 · API 수집 중', ...health, ['lane_' + lane]: 'API 부분 수집 · ' + (result.count || 0) + '개', ['lane_error_' + lane]: null, ['lane_error_stage_' + lane]: null, ...(result.count > 0 ? { lastCollected: Date.now() } : {}), apiCoverage: 'API 부분 수집 · 서버 응답 기준 검증' });
         } catch (error) {
-            failed = true;
+            failed = !(saved && (stage === 'news_page' || stage === 'detail'));
             if (!active()) return;
             const unsupported = error?.message === 'api_contract_unverified';
-            await store({ ['lane_' + lane]: unsupported ? 'API 요청 조건 미확인 · 대기' : 'API 수집 오류 · 다음 주기 대기', ['lane_error_' + lane]: apiErrorCode(error), ['lane_error_stage_' + lane]: stage });
+            await store({ ['lane_' + lane]: saved && view.stream === 'news_all' ? '뉴스 첫 쪽 저장 · 추가 수집 오류' : unsupported ? 'API 요청 조건 미확인 · 대기' : 'API 수집 오류 · 다음 주기 대기', ['lane_error_' + lane]: apiErrorCode(error), ['lane_error_stage_' + lane]: stage });
         } finally {
             // Cancel only this exact job. Errors do not replace the last good capture.
-            if (job && !saved && active()) try { await request('api_cancel', { stream: view.stream, job_id: job.job_id, ...(authBlocked ? { reason: 'verification_required' } : {}) }); } catch { }
-            if (detailBlocked && active()) await blocked(detailBlocked);
+            if (hostBarrier && active()) await blocked(hostBarrier);
+            if (job && (!saved || pendingPage) && active()) try { await request('api_cancel', { stream: view.stream, job_id: job.job_id, ...(authBlocked ? { reason: 'verification_required' } : {}) }); } catch { }
             // 접근 확인은 호스트 단위로 관리한다. 목록 저장 전의 차단으로 재시도 간격을 늘리지 않는다.
-            if (active() && (!authBlocked || saved)) {
+            if (active() && ((!authBlocked && !hostBarrier) || saved)) {
                 scheduler.done(view, Date.now(), failed);
                 await store({ collectionSchedule: scheduler.snapshot() });
             }

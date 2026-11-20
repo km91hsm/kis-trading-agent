@@ -3,7 +3,7 @@ import { recoverRecheck } from './recheck.js';
 import { beginHtmlTrial, htmlTrialStep, htmlTrialTerminal, HTML_TRIAL_MS } from './html-refresh.js';
 import { apiCycle, abortApi, apiErrorCode } from './api-runner.js';
 import { LANES, Scheduler, laneFor, marker, ownedLane, safePage, PdfPair } from './core.js';
-const WORKER_VERSION = '1.5.1';
+const WORKER_VERSION = '1.5.2';
 const scheduler = new Scheduler(), pdf = new PdfPair(), reportAttempts = new Map();
 let limits = { max_scrolls: 2, max_details: 2, max_reports: 2 };
 let port = null, requests = new Map(), seq = 0, enabled = false, token = '', ticking = null, retryAt = 0, failures = 0, planAt = 0, epoch = 0, nextTimer = null, presentRequested = false;
