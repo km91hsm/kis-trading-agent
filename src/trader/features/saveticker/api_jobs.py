@@ -318,6 +318,7 @@ class BrowserApiSession:
                 updates[item.id] = enriched.model_copy(
                     update={
                         "id": item.id,
+                        "group_headline": item.group_headline,
                         "published_at": item.published_at or enriched.published_at,
                     }
                 )

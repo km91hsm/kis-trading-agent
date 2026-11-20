@@ -409,6 +409,39 @@ def test_prepared_news_list_is_saved_without_details(tmp_path):
     assert snapshot["items"][0]["detail_status"] != "ok"
 
 
+def test_list_group_headline_survives_detail_and_does_not_replace_article_title(tmp_path):
+    client = native.NativeSession(tmp_path)
+    job = send(client, "api_begin", stream="news_all")
+    row = {"id": "synthetic", "title": "개별 기사 제목", "source": "합성 매체"}
+    grouped = {
+        **row, "news_group_id": 7,
+        "group_summary": {"headline": "묶음 대표 제목", "is_ai_headline": True, "member_count": 5},
+    }
+    base = response(job["request"]["url"], {"news_list": [grouped]})
+    context = {"stream": "news_all", "job_id": job["job_id"], "response": base}
+    child, = send(client, "api_prepare", **context)["requests"]
+    detail = response(child["request"]["url"], {**row, "content": "개별 기사 본문"})
+    assert send(client, "api_snapshot", **context, details=[detail])["ok"]
+    path = tmp_path / "data/latest/news_all.json"
+    item, = json.loads(path.read_text(encoding="utf-8"))["items"]
+    assert (item.get("group_headline"), item["title"], item["body"]) == (
+        "묶음 대표 제목", "개별 기사 제목", "개별 기사 본문",
+    )
+    stored = client.store.query(asof=datetime.now(UTC))
+    assert stored[0]["item"]["group_headline"] == "묶음 대표 제목"
+
+
+@pytest.mark.parametrize(("group_id", "summary"), [
+    (False, {"headline": "제목"}), (0, {"headline": "제목"}), ("7", {"headline": "제목"}),
+    (7, "제목"), (7, {"headline": {"title": "제목"}}), (7, {"headline": "  "}),
+])
+def test_invalid_group_headline_falls_back_to_individual_article(group_id, summary):
+    item = jsonfeed.news_item({
+        "id": "single", "title": "개별 제목", "news_group_id": group_id, "group_summary": summary,
+    })
+    assert item.title == "개별 제목" and item.group_headline is None
+
+
 def test_repeated_title_with_new_publication_gets_its_own_detail(tmp_path):
     client = native.NativeSession(tmp_path)
     older = datetime.now(UTC) - timedelta(hours=2)
@@ -424,7 +457,7 @@ def test_repeated_title_with_new_publication_gets_its_own_detail(tmp_path):
     prepared = send(client, "api_prepare", **context)
     assert [r["source_id"] for r in prepared["requests"]] == ["event_2"]
     assert send(client, "api_snapshot", **context, details=[])["ok"]
-    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text())
+    latest = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
     assert latest["items"][0]["body"] == ""
     assert datetime.fromisoformat(latest["items"][0]["published_at"]) == newer
     assert latest["items"][0]["id"] != old.id

@@ -7,9 +7,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from tests.features.conftest import AUTH, web_client
-from trader.features.ingest import manual_inputs, news_store
+from trader.features.ingest import manual_inputs, news_store, saveticker_ingest
 from trader.features.ingest.feature import FEATURE
+from trader.features.saveticker.dom import identity
+from trader.features.saveticker.models import Capture, Item
+from trader.features.saveticker.store import Store
 from trader.kernel.ledger import db
 
 NOW = datetime(2026, 10, 9, 6, 0, tzinfo=UTC)
@@ -72,6 +77,85 @@ def test_news_rows_keep_tickers_and_store_fields(project):
     assert "is_catalyst" not in item  # 라벨은 scan `/news/labels` 가 낸다
 
 
+@pytest.mark.parametrize("fast", [False, True])
+def test_news_list_uses_observed_group_headlines_without_changing_article(project, fast):
+    origin = NOW - timedelta(minutes=4)
+    clock = [origin]
+    client = web_client(project, [FEATURE], now=lambda: clock[0])
+    root = project / "state" / "external" / "saveticker"
+    store = Store(root / "data")
+    title = "합성 개별 속보"
+    issuer = "합성 통신"
+    item = Item(
+        id="legacy-not-hex" if fast else identity("news", issuer, title),
+        source_url=None if fast else "https://example.test/story#external",
+        kind="news",
+        title=title,
+        publisher=issuer,
+        tickers=["005930"],
+        published_at=origin,
+        detail_status="ok",
+        body="합성 본문",
+    )
+    grouped = item.model_copy(
+        update={
+            "id": "other",
+            "source_url": None,
+            "title": "두 번째 개별 기사",
+            "group_headline": "첫 묶음",
+        }
+    )
+
+    def save(at, story):
+        store.save(
+            Capture(
+                stream="news_all",
+                page_url="https://www.saveticker.com/news",
+                observed_at=at,
+                items=[story, grouped],
+            )
+        )
+
+    def listed():
+        return client.get("/api/news?market=KR&ticker=005930").json()["items"]
+
+    save(origin, item)
+    conn = db.connect(project / "state" / "trader.db")
+    try:
+        kwargs = {"completed_since": origin} if fast else {}
+        assert (
+            saveticker_ingest.ingest_news(conn, root, now=lambda: origin, **kwargs)["inserted"] == 2
+        )
+        originals = news_store.recent(conn, "KR", asof=origin)
+        original = next(r for r in originals if r["title"] == title)
+        other = next(r for r in originals if r["title"] != title)
+        assert listed() == [{**r, "title": "첫 묶음"} if r == other else r for r in originals]
+        before = FEATURE.sse_keys[0].probe(client.app.state.deps)
+        for minute, headline in (
+            (1, "묶음 첫 제목"),
+            (2, "동일 시각 첫 관측"),
+            (2, "바뀐 묶음 제목"),
+            (3, None),
+        ):
+            at = origin + timedelta(minutes=minute)
+            save(at, item.model_copy(update={"group_headline": headline}))
+        assert saveticker_ingest.ingest_news(conn, root, now=lambda: NOW, **kwargs)["inserted"] == 0
+        for minute, expected in (
+            (0, title),
+            (1, "묶음 첫 제목"),
+            (2, "바뀐 묶음 제목"),
+            (3, title),
+        ):
+            clock[0] = origin + timedelta(minutes=minute)
+            result = {r["id"]: r for r in listed()}
+            assert result[original["id"]] == {**original, "title": expected}
+        assert FEATURE.sse_keys[0].probe(client.app.state.deps) != before
+        assert news_store.recent(conn, "KR", asof=NOW) == originals
+        assert news_store.count(conn, "KR") == 2
+    finally:
+        conn.close()
+
+
 def test_news_events_lists_disclosures_with_severity(project):
     c = _client(project)
     _seed(project)
@@ -81,6 +165,101 @@ def test_news_events_lists_disclosures_with_severity(project):
     ]
     assert r["market"] == "KR" and r["asof"] == NOW.isoformat()
     assert c.get("/api/news/events?market=JP").status_code == 400
+
+
+def test_news_list_keeps_ledger_title_if_capture_is_unavailable_or_different(project):
+    client = _client(project)
+    root = project / "state" / "external" / "saveticker" / "data"
+    individual = "원장의 개별 속보"
+    conn = db.connect(project / "state" / "trader.db")
+    try:
+        news_store.insert_items(
+            conn,
+            [
+                {
+                    "url": "https://www.saveticker.com/news#same",
+                    "title": individual,
+                    "published_at": NOW.isoformat(),
+                    "received_at": NOW.isoformat(),
+                }
+            ],
+            market="KR",
+            source="saveticker:원장 출처",
+            query="news_all",
+            lang="ko",
+            names={},
+        )
+    finally:
+        conn.close()
+
+    def title():
+        return client.get("/api/news?market=KR").json()["items"][0]["title"]
+
+    assert title() == individual
+    store = Store(root)
+    story = Item(
+        id="same",
+        kind="news",
+        title=individual,
+        group_headline="다른 묶음",
+        publisher="다른 출처",
+        published_at=NOW,
+    )
+    store.save(
+        Capture(
+            stream="news_all",
+            page_url="https://www.saveticker.com/news",
+            observed_at=NOW,
+            items=[
+                story.model_copy(update={"publisher": "원장 출처", "group_headline": "이전 묶음"})
+            ],
+        )
+    )
+    assert title() == "이전 묶음"
+    for item in (
+        story,
+        story.model_copy(
+            update={"publisher": "원장 출처", "published_at": NOW - timedelta(minutes=1)}
+        ),
+    ):
+        store.save(
+            Capture(
+                stream="news_all",
+                page_url="https://www.saveticker.com/news",
+                observed_at=NOW,
+                items=[item],
+            )
+        )
+        assert title() == individual
+    # 같은 발행처·개별 제목·시각의 HTML 기사도 실제 원문 주소가 다르면 다른 기사다.
+    external_url = "https://example.test/article/one"
+    conn = db.connect(project / "state" / "trader.db")
+    try:
+        conn.execute(
+            "UPDATE news_items SET url=?, url_hash=? WHERE query='news_all'",
+            (external_url, news_store.url_hash(external_url, "KR")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    foreign = story.model_copy(
+        update={
+            "id": identity("news", "원장 출처", individual),
+            "publisher": "원장 출처",
+            "source_url": "https://example.test/article/two",
+        }
+    )
+    store.save(
+        Capture(
+            stream="news_all",
+            page_url="https://www.saveticker.com/news",
+            observed_at=NOW,
+            items=[foreign],
+        )
+    )
+    assert title() == individual
+    (root / "feed.sqlite3").write_bytes(b"invalid fixture")
+    assert title() == individual
 
 
 def test_manual_inputs_requires_token_and_validates(project):

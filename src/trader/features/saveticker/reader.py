@@ -28,10 +28,14 @@ from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from trader.features.saveticker.dom import identity
 from trader.features.saveticker.paths import DEFAULT_DIR as DEFAULT_DIR  # 재노출
 from trader.features.saveticker.paths import resolve_dir as resolve_dir  # 재노출
+from trader.features.saveticker.settings import load_cfg
 from trader.kernel.config import KST
+from trader.kernel.config.errors import ConfigError
 
 logger = logging.getLogger("trader.features.saveticker")
 
@@ -189,6 +193,91 @@ def read_completed_news(root: Path, *, since: datetime, asof: datetime) -> list[
             item = json.loads(payload)
             latest[item["id"]] = {**item, "_stream": "news_all", "_received_at": stamp}
     return list(latest.values())
+
+
+def _feed_rows(sql: str, params: tuple) -> list[tuple]:
+    try:
+        root = resolve_dir(load_cfg().dir)
+        if root is None or not (path := root / "data" / "feed.sqlite3").is_file():
+            return []
+        uri = path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as db:
+            return db.execute(sql, params).fetchall()
+    except (OSError, sqlite3.Error, ConfigError):
+        return []  # 수집 DB가 없거나 읽을 수 없어도 개별 기사 제목을 표시한다.
+
+
+def read_group_headlines(items: list[dict], *, asof: datetime) -> dict[int, str]:
+    """목록에 있는 기사별로 마지막 관측에 기록된 묶음 제목을 조회한다."""
+    wanted = []
+    item_ids = []
+    for row in items:
+        if row["query"] != "news_all" or not row["source"].startswith("saveticker:"):
+            continue
+        publisher = row["source"].removeprefix("saveticker:")
+        try:
+            link = urlsplit(row["url"])
+            if (
+                link.scheme not in {"http", "https"}
+                or not link.hostname
+                or link.username
+                or link.password
+            ):
+                continue
+            synthetic = (
+                link.hostname in {"saveticker.com", "www.saveticker.com"}
+                and link.path.rstrip("/") == "/news"
+                and not link.query
+                and link.fragment
+            )
+        except ValueError:
+            continue
+        item_ids.append(link.fragment if synthetic else identity("news", publisher, row["title"]))
+        wanted.append((row, publisher, None if synthetic else row["url"]))
+    if not item_ids:
+        return {}
+    cutoff = asof.astimezone(UTC)
+    rows = _feed_rows(
+        """SELECT w.key, json_extract(r.payload,'$.group_headline'),
+                  COALESCE(NULLIF(json_extract(r.payload,'$.publisher'), ''),
+                           NULLIF(json_extract(r.payload,'$.source_group'), ''), 'saveticker'),
+                  json_extract(r.payload,'$.published_at'),
+                  json_extract(r.payload,'$.displayed_time'), json_extract(r.payload,'$.source_url')
+           FROM json_each(?) AS w JOIN revisions AS r ON r.seq=(
+               SELECT seq FROM revisions
+               WHERE stream='news_all' AND item_id=w.value AND received_at<=?
+               ORDER BY received_at DESC, seq DESC LIMIT 1
+           ) WHERE json_extract(r.payload,'$.kind')='news'
+               AND json_type(r.payload,'$.group_headline')='text'""",
+        (json.dumps(item_ids), cutoff.isoformat()),
+    )
+    headlines = {}
+    for index, headline, issuer, published, displayed, url in rows:
+        row, publisher, source_url = wanted[index]
+        if publisher != issuer.strip() or (source_url and url and source_url != url):
+            continue
+        observed_pub = _parse_dt(
+            published_at_of({"published_at": published, "displayed_time": displayed})
+        )
+        expected_pub = _parse_dt(row["published_at"])
+        if (expected_pub and expected_pub != observed_pub) or (
+            observed_pub and observed_pub > cutoff
+        ):
+            continue
+        if headline.strip():
+            headlines[row["id"]] = headline.strip()
+    return headlines
+
+
+def news_revision(*, asof: datetime) -> int:
+    """묶음 제목만 바뀌어도 뉴스 목록이 새로 읽도록 수집 리비전을 돌려준다."""
+    rows = _feed_rows(
+        "SELECT seq FROM revisions INDEXED BY revisions_news_received "
+        "WHERE stream='news_all' AND received_at<=? "
+        "ORDER BY received_at DESC, seq DESC LIMIT 1",
+        (asof.astimezone(UTC).isoformat(),),
+    )
+    return rows[0][0] if rows else 0
 
 
 # --- 스냅샷(세션 입력) -------------------------------------------------------------------

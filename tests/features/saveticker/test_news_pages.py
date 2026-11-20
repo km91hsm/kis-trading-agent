@@ -58,7 +58,8 @@ def test_gap_continues_after_restart_and_preserves_front_page(tmp_path):
     snapshot = json.loads((tmp_path / "data/latest/news_all.json").read_text(encoding="utf-8"))
     assert [i["title"] for i in snapshot["items"]] == [i["title"] for i in current]
     path = next((tmp_path / "data").glob("*/news.jsonl"))
-    items = [json.loads(line)["item"]["title"] for line in path.read_text().splitlines()]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    items = [json.loads(line)["item"]["title"] for line in lines]
     assert len(items) == len(set(items)) == 100
 
 
@@ -148,6 +149,57 @@ def test_repeated_title_does_not_bridge_distinct_server_news_ids(tmp_path):
     assert page(client, child, 2, middle).get("next_page")
 
 
+def test_backfill_adds_newly_observed_group_headline_to_known_article(tmp_path):
+    client = native.NativeSession(tmp_path)
+    original = rows(20)
+    original[0]["is_headline_only"] = True
+    assert head(client, original)["ok"]
+    child = head(client, rows(100))["next_page"]
+    past = rows(39)
+    past[-1].update(news_group_id=7, group_summary={"headline": "묶음 대표 제목"})
+    assert page(client, child, 2, past)["ok"]
+    path = next((tmp_path / "data").glob("*/news.jsonl"))
+    revisions = [json.loads(line)["item"] for line in path.read_text(encoding="utf-8").splitlines()]
+    current = [r for r in revisions if r["title"] == "합성 기사 20"][-1]
+    assert current.get("group_headline") == "묶음 대표 제목"
+    assert current["detail_status"] == "ok"
+
+
+def test_backfill_records_group_removal_once_at_observation_without_losing_body(
+    tmp_path, monkeypatch
+):
+    from trader.features.saveticker import jsonfeed
+    from trader.features.saveticker.models import Capture
+
+    stamp = datetime(2026, 11, 20, tzinfo=UTC)
+    monkeypatch.setattr(api_jobs, "now", lambda: stamp)
+    client = native.NativeSession(tmp_path)
+    row = rows(20, size=1)[0]
+    item = jsonfeed.news_item({**row, "content": "개별 기사 본문"}, detail=True)
+    item = item.model_copy(update={"group_headline": "예전 묶음 제목"})
+    client.store.save(Capture(stream="news_all", page_url="https://www.saveticker.com/news",
+                              observed_at=stamp, items=[item]))
+    for next_head in (100, 140):
+        stamp += timedelta(minutes=10)
+        child = head(client, rows(next_head))["next_page"]
+        assert page(client, child, 2, rows(39))["ok"]
+
+    path = next((tmp_path / "data").glob("*/news.jsonl"))
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    history = [r for r in records if r["item"]["id"] == item.id]
+    assert [(r["item"].get("group_headline"), r["item"]["body"]) for r in history] == [
+        ("예전 묶음 제목", "개별 기사 본문"), (None, "개별 기사 본문"),
+    ]
+    removed_at = stamp - timedelta(minutes=10)
+    assert datetime.fromisoformat(history[1]["received_at"]) == removed_at
+    observations = ((removed_at - timedelta(seconds=1), "예전 묶음 제목"), (removed_at, None))
+    for asof, expected in observations:
+        observed = next(
+            r["item"] for r in client.store.query(asof=asof) if r["item"]["id"] == item.id
+        )
+        assert observed.get("group_headline") == expected
+
+
 def test_legacy_news_head_uses_its_title_identity_for_first_gap(tmp_path):
     client = native.NativeSession(tmp_path)
     job = call(client, "api_begin")
@@ -180,5 +232,6 @@ def test_boundary_is_rechecked_when_deletion_shifts_next_unseen_item(tmp_path):
     fourth = page(client, boundary, 3, rows(59), total_count=199)["next_page"]
     assert page(client, fourth, 4, rows(39), total_count=199)["ok"]
     path = next((tmp_path / "data").glob("*/news.jsonl"))
-    titles = {json.loads(line)["item"]["title"] for line in path.read_text().splitlines()}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    titles = {json.loads(line)["item"]["title"] for line in lines}
     assert "합성 기사 40" in titles

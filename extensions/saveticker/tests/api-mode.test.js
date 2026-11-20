@@ -20,6 +20,18 @@ test('isolated API content uses browser auth and projects only collection data',
  const r=jsonResponse({news_list:[{id:'1',title:'news',author_secret:'never',content:'body'}]});Object.defineProperty(r,'url',{value:URL_NEWS});
  const c=await content(r); const out=await c.send(); assert.equal(out.status,200);assert.equal(out.data.news_list[0].title,'news');assert.equal(out.data.news_list[0].author_secret,undefined);assert.equal(c.calls(),1);
 });
+test('news list forwards only the verified group headline beside the article title', async () => {
+ const grouped = {id:'story', title:'개별 기사', news_group_id:7,
+  group_summary:{headline:'묶음 대표 제목', is_ai_headline:true, member_count:5,
+   representative_news_id:null, name:'비공개 이름', content:'비공개 내용'}};
+ const r=jsonResponse({news_list:[grouped, {...grouped, news_group_id:'7'}]});
+ Object.defineProperty(r, 'url', {value:URL_NEWS});
+ const out=await (await content(r)).send();
+ const rows=JSON.parse(JSON.stringify(out.data.news_list));
+ assert.deepEqual(rows[0], {id:'story', title:'개별 기사', news_group_id:7,
+  group_summary:{headline:'묶음 대표 제목'}});
+ assert.equal(rows[1].group_summary, undefined);
+});
 test('foreign sender, unknown URL, stopped and wrong owner do not fetch',async()=>{
  const c=await content(jsonResponse({}));assert.equal(await c.send({}, {id:'other'}),null);
  assert.equal((await c.send({token:'wrong'})).error,'api_denied');

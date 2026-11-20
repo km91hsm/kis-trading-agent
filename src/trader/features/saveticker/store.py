@@ -22,9 +22,10 @@ _VOLATILE = ("displayed_time",)
 _NEWS_VOLATILE = ("views", "likes", "comment_count")
 
 
-def _stable(stream: str, item: dict) -> dict:
+def _item_digest(stream: str, item: dict) -> str:
     drop = _VOLATILE + (_NEWS_VOLATILE if stream.startswith("news_") else ())
-    return {k: v for k, v in item.items() if k not in drop}
+    stable = {k: v for k, v in item.items() if k not in drop}
+    return hashlib.sha256(_json(stable).encode()).hexdigest()
 
 
 _GOOD = (
@@ -87,6 +88,8 @@ class Store:
                     ON revisions(stream, item_id, seq);
                 CREATE INDEX IF NOT EXISTS revisions_news_received
                     ON revisions(received_at, seq) WHERE stream='news_all';
+                CREATE INDEX IF NOT EXISTS revisions_news_item_received
+                    ON revisions(item_id, received_at, seq) WHERE stream='news_all';
                 CREATE TABLE IF NOT EXISTS legacy_news_ids (
                     source_id TEXT PRIMARY KEY, item_id TEXT NOT NULL UNIQUE
                 );
@@ -130,6 +133,9 @@ class Store:
         data = capture.model_dump(mode="json")
         data["observed_at"] = capture.observed_at.isoformat()
         for item in data["items"]:
+            if item["group_headline"] is None:
+                # 구버전과 같은 항목의 디지스트를 유지한다.
+                del item["group_headline"]
             for key in ("published_at", "scheduled_at"):
                 if item.get(key):
                     item[key] = datetime.fromisoformat(item[key]).astimezone(UTC).isoformat()
@@ -139,15 +145,30 @@ class Store:
     def _write_revisions(db, data, *, only_new=False):
         changed = 0
         for item in data["items"]:
-            stable = _stable(data["stream"], item)
-            digest = hashlib.sha256(_json(stable).encode()).hexdigest()
             prior = db.execute(
-                "SELECT digest FROM revisions WHERE stream=? AND item_id=? "
+                "SELECT seq,digest FROM revisions WHERE stream=? AND item_id=? "
                 "ORDER BY seq DESC LIMIT 1",
                 (data["stream"], item["id"]),
             ).fetchone()
-            if prior and (only_new or prior[0] == digest):
+            digest = _item_digest(data["stream"], item)
+            if prior and prior["digest"] == digest:
                 continue
+            if prior and only_new:
+                headline = item.get("group_headline")
+                # 과거 목록의 상세는 생략된다. 묶음 제목이 달라진 경우만 기존 본문을 읽는다.
+                previous = db.execute(
+                    "SELECT payload FROM revisions WHERE seq=? "
+                    "AND json_extract(payload,'$.group_headline') IS NOT ?",
+                    (prior["seq"], headline),
+                ).fetchone()
+                if not previous:
+                    continue
+                item = json.loads(previous["payload"])
+                if headline is None:
+                    item.pop("group_headline", None)
+                else:
+                    item["group_headline"] = headline
+                digest = _item_digest(data["stream"], item)
             db.execute(
                 "INSERT INTO revisions(stream,item_id,received_at,digest,payload,view) "
                 "VALUES (?,?,?,?,?,?)",

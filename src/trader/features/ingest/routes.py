@@ -1,7 +1,8 @@
 """ingest 웹 자원: 시장 뉴스 저장소·공시 조회(토큰 없음)와 '읽은 기사 붙여 넣기'(토큰).
 
-- `GET /news?market=&hours=48&limit=100[&ticker=]` → `news_store.recent` 행 그대로
+- `GET /news?market=&hours=48&limit=100[&ticker=]` → `news_store.recent`의 목록 행
   (`id, market, source, query, title, url, published_at, received_at, summary, lang, tickers[]`).
+  세이브티커 묶음 기사는 그 시점에 확인된 대표 제목을 표시한다.
   촉매·테마 라벨은 scan 소유라 scan 의 `GET /news/labels?ids=` 가 따로 낸다(프런트가 합친다).
 - `GET /news/events?market=&hours=72&limit=100` → 공시(`query='disclosure'`, severity 포함).
 - `GET /news/manual?market=`·`POST /news/manual {market, text, url?}` → 시장 공통 수동 입력
@@ -19,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from trader.features.ingest import macro_view, manual_inputs, news_store
+from trader.features.saveticker.api import news_revision, read_group_headlines
 from trader.kernel.registry.types import SseKey
 from trader.kernel.web.auth import require_same_origin, require_token
 
@@ -61,6 +63,10 @@ def list_news(
             conn, m, asof=now, hours=hours, limit=limit, ticker=ticker, source=source
         )
         total = news_store.count(conn, m)
+    headlines = read_group_headlines(items, asof=now)
+    for item in items:
+        if item["id"] in headlines:
+            item["title"] = headlines[item["id"]]
     return {"market": m, "hours": hours, "total": total, "asof": now.isoformat(), "items": items}
 
 
@@ -125,10 +131,10 @@ def manual_add(request: Request, body: ManualBody) -> dict:
 
 
 def _news_fp(deps: Any) -> str:
-    """뉴스 저장소 건수·최대 id."""
+    """뉴스 저장소 건수·최대 ID와 세이브티커 목록의 마지막 관측 리비전."""
     with closing(deps.conn_factory()) as conn:
         row = conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM news_items").fetchone()
-    return f"{row[0]}:{row[1]}"
+    return f"{row[0]}:{row[1]}:{news_revision(asof=deps.now())}"
 
 
 SSE_KEYS = (SseKey("news", _news_fp),)

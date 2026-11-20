@@ -58,6 +58,13 @@ def scalar(value):
 def news_item(row, *, detail=False):
     translated = (row.get("translations") or {}).get("translated", {}).get("ko_KR", {})
     title = translated.get("title") or row.get("title", "")
+    group_id = row.get("news_group_id")
+    group = row.get("group_summary")
+    group_headline = None
+    if not detail and type(group_id) is int and group_id > 0 and isinstance(group, dict):
+        value = group.get("headline")
+        if isinstance(value, str):
+            group_headline = value.strip() or None
     publisher = row.get("source") or row.get("channel") or ""
     if isinstance(publisher, dict):
         publisher = publisher.get("name", "")
@@ -77,6 +84,7 @@ def news_item(row, *, detail=False):
     return Item(
         id=identity("news", publisher, title),
         title=title,
+        group_headline=group_headline,
         publisher=str(publisher),
         source_group={"Reuters": "로이터", "로이터": "로이터", "파이낸셜주스": "속보"}.get(
             str(publisher), str(publisher) or None

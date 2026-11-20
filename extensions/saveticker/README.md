@@ -115,7 +115,7 @@ Chrome의 다운로드 기본 폴더가 일반 `Downloads`여야 Native 호스�
 
 ## 1.5.2 뉴스 수집 중단 뒤 목록 연결
 
-「전체 · 최신순」에서 확인한 목록 요청은 `GET /api/news/list?page=2&page_size=20&sort=created_at_desc&label_group=1&label_name=1`입니다. 응답의 `page`, `page_size`, `total_count`와 뉴스 행 수를 대조합니다.
+「전체 · 최신순」에서 확인한 목록 요청은 `GET /api/news/list?page=2&page_size=20&sort=created_at_desc&label_group=1&label_name=1`입니다. 응답의 `page`, `page_size`, `total_count`와 뉴스 행 수를 대조합니다. 묶음 속보는 목록의 대표 제목(`group_summary.headline`)과 원문 기사 제목을 함께 보존합니다.
 
 뉴스 첫 쪽을 저장할 때 직전 유효 목록과 겹치는 기사가 없고 20건이 모두 차 있으면 2쪽부터 이어 읽습니다. 이전 목록과 연결되거나 마지막 쪽에 닿으면 멈춥니다. 첫 설치와 평소 겹치는 목록에서는 추가 요청이 없습니다. 공백이 크면 한 수집 주기에 최대 2쪽씩 진행하고, 다음 쪽과 연결할 기사 식별자를 로컬 수집 DB에 저장합니다. 업데이트 이후의 목록은 사이트 기사 ID로 비교하고, 이전 버전의 마지막 목록은 기존 매체·제목 식별자로 연결합니다. 주기 사이의 기사 삭제에 대비해 직전 쪽을 한 번 겹쳐 읽습니다. 진행 중에 새 첫 쪽이 다시 단절되면 2쪽부터 확인합니다.
 

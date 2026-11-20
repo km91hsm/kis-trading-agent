@@ -187,7 +187,18 @@
                     if (!Array.isArray(data.groups) || data.groups.length > 128 || data.groups.some(g => !g || typeof g !== 'object')) return { error: 'api_context_unverified' };
                     return { url: r.url, status: 200, content_type: type, data: { groups: data.groups.map(g => ({ groupId: g.groupId, isDefault: g.isDefault })) } };
                 }
-                return { url: r.url, status: r.status, content_type: type, data: project(data) };
+                const projected = project(data);
+                if (job.request.kind === 'news' && Array.isArray(projected.news_list)) {
+                    projected.news_list.forEach((row, index) => {
+                        const source = data.news_list[index];
+                        const headline = source?.group_summary?.headline;
+                        if (!Number.isSafeInteger(source?.news_group_id) || source.news_group_id <= 0 ||
+                            typeof headline !== 'string' || !headline.trim()) return;
+                        row.news_group_id = source.news_group_id;
+                        row.group_summary = { headline: headline.trim().slice(0, 200000) };
+                    });
+                }
+                return { url: r.url, status: r.status, content_type: type, data: projected };
             } finally { clearTimeout(timer); if (pending === own) pending = null; }
         })().then(reply).catch(() => reply({ error: 'api_request_failed' }));
         return true;
